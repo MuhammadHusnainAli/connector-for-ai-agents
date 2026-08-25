@@ -1,6 +1,6 @@
 # connector-for-ai-agents
 
-A self-contained **connector + connection manager** for Python: 957 API
+A self-contained **connector + connection manager** for Python: 1586 API
 connectors with their logos, the exact auth fields each one needs, and the logic
 to turn filled-in fields into a working, verified connection. Sync and async.
 
@@ -40,7 +40,7 @@ uv sync --extra dev          # or: pip install -e ".[dev]"
 ```
 
 Build the artefacts with `uv build` (or `python -m build`) — they land in `dist/`
-as a wheel and an sdist, each carrying the connector definitions and all 962 logos.
+as a wheel and an sdist, each carrying the connector definitions and all 1591 logos.
 
 Then, in any application:
 
@@ -86,7 +86,7 @@ from connector_manager import ConnectorManager
 
 manager = ConnectorManager()
 
-len(manager)                       # 957
+len(manager)                       # 1586
 manager.categories()               # ['accounting', 'ats', 'banking', 'crm', ...]
 manager.auth_modes()               # {'OAUTH2': 342, 'API_KEY': 310, 'OAUTH2_CC': 107, ...}
 
@@ -103,11 +103,11 @@ external OAuth flow), `limit`, `offset`.
 
 ### Pagination
 
-957 connectors is too many to hand a UI at once, so listings paginate. Ask for a
+1586 connectors is too many to hand a UI at once, so listings paginate. Ask for a
 page by number (or by raw `offset`) and you get back a `ConnectorPage` carrying
 the items **and** the numbers a picker needs — including `total`, which counts
 every match *before* paging, so you never need a second call to render
-"showing 21–40 of 957".
+"showing 21–40 of 1586".
 
 ```python
 page = manager.paginate_connectors(page=2, page_size=20, category="crm")
@@ -130,7 +130,7 @@ For an HTTP API or an agent tool, serialise the whole thing in one step:
 
 ```python
 manager.paginate_connectors(page=2, page_size=20).to_dict()
-# {"items": [{...}, ...], "pagination": {"total": 957, "page": 2, "pages": 48,
+# {"items": [{...}, ...], "pagination": {"total": 1586, "page": 2, "pages": 80,
 #  "has_next": true, "next_offset": 40, "first_index": 21, "last_index": 40, ...}}
 ```
 
@@ -267,7 +267,7 @@ Installing the package also installs a `connectors` command (identical to
 
 ```bash
 connectors list --search hubspot
-connectors list --page 2 --page-size 20          # showing 21-40 of 957 · page 2/48
+connectors list --page 2 --page-size 20          # showing 21-40 of 1586 · page 2/80
 connectors list --offset 40 --page-size 20       # same page, addressed by offset
 connectors list --all --page-size 200            # page through everything
 connectors show 1password-users        # every field it needs
@@ -294,7 +294,7 @@ value (all `key=value`).
 | `verification.py` | `CredentialVerifier`, `VerificationResult` | runs `proxy.verification` to prove credentials work |
 | `validation.py` | — | field validation (required, pattern, enum, format, `visible_when`) |
 | `interpolation.py` | — | the `${…}` template engine (`base64`, `sha256Hex`, `hmacSha1Hex`, `fingerprint`, `now`, `\|\|`) |
-| `data/` | — | `connectors.yaml` + 962 SVG logos |
+| `data/` | — | `connectors.yaml` + 1591 SVG logos |
 
 ### Extending
 

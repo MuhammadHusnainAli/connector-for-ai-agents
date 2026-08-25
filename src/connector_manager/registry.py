@@ -135,7 +135,7 @@ class ConnectorRegistry:
     """Read-only catalogue of every connector shipped with the package.
 
     >>> registry = ConnectorRegistry()
-    >>> len(registry) > 900
+    >>> len(registry) > 1500
     True
     >>> registry.get("slack").display_name
     'Slack'

@@ -288,7 +288,7 @@ class ConnectorManager(BaseConnectorManager):
     """Synchronous catalogue + connection manager.
 
     >>> manager = ConnectorManager()
-    >>> len(manager.list_connectors()) > 900
+    >>> len(manager.list_connectors()) > 1500
     True
     >>> manager.get_auth_schema("affinity-v2").auth_mode
     <AuthMode.API_KEY: 'API_KEY'>
