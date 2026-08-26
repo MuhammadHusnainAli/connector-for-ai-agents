@@ -1,0 +1,199 @@
+# Connector definitions: JWT auth.
+#
+# Auth mode, credential/config fields, api base url and verification endpoint
+# for each connector, sorted by connector id. One file per auth mode; the
+# registry loads every *.yaml under this directory and merges them.
+#
+# Machine-generated grouping -- run `python scripts/split_connectors.py` after
+# changing an `auth_mode` so the entry lands in the right file.
+apple-app-store:
+  auth_mode: JWT
+  categories:
+  - e-commerce
+  connection_config:
+    scope:
+      description: Restricts the token to specific API requests.
+      example: GET /v1/apps
+      optional: true
+      title: Scope
+      type: string
+  credentials:
+    issuerId:
+      description: Your App Store Connect Issuer ID.
+      title: Issuer ID
+      type: string
+    privateKey:
+      description: Your App Store Connect private key.
+      secret: true
+      title: Private Key
+      type: string
+    privateKeyId:
+      description: Your App Store Connect Key ID.
+      title: Key ID
+      type: string
+  display_name: Apple App Store
+  proxy:
+    base_url: https://api.appstoreconnect.apple.com
+  signature:
+    protocol: EC
+  token:
+    expires_in_ms: 900000
+    header:
+      alg: ES256
+      kid: ${credentials.privateKeyId}
+      typ: JWT
+    payload:
+      aud: appstoreconnect-v1
+      iss: ${credentials.issuerId}
+      scope:
+      - ${connectionConfig.scope}
+    signing_key: ${credentials.privateKey}
+ghost-admin:
+  auth_mode: JWT
+  categories:
+  - dev-tools
+  - design
+  - cms
+  connection_config:
+    adminDomain:
+      description: The domain of your Ghost Admin which can be different from your main domain
+      example: mock.ghost.io
+      order: 1
+      pattern: ^([a-z0-9_-]+\.|)(ghost\.io|[a-z0-9_-]+\.[a-z]{2,})$
+      title: Ghost Admin Domain
+      type: string
+    version:
+      description: The version of the Ghost Admin API to use
+      example: v3.0
+      order: 2
+      pattern: ^v\d+\.\d+$
+      title: API Version
+      type: string
+  credentials:
+    privateKey:
+      description: The private key for your Ghost account
+      example: 1234567890abcdef12345678:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890
+      pattern: ^[a-fA-F0-9]{24}:[a-fA-F0-9]{64}$
+      title: API Key
+      type: string
+  display_name: Ghost (Admin API)
+  proxy:
+    base_url: https://${connectionConfig.adminDomain}/ghost/api/admin/
+    headers:
+      accept: application/json
+      accept-version: ${connectionConfig.version}
+      authorization: Ghost ${accessToken}
+    verification:
+      endpoints:
+      - /users
+      headers:
+        content-type: application/json
+      method: GET
+  signature:
+    protocol: HMAC
+  token:
+    expires_in_ms: 300000
+    header:
+      alg: HS256
+      kid: ${credentials.privateKey.id}
+    payload:
+      aud: /admin/
+    signing_key: ${credentials.privateKey.secret}
+heymarket:
+  auth_mode: JWT
+  categories:
+  - communication
+  - marketing
+  credentials:
+    apiSecretId:
+      description: Your Heymarket API Secret ID.
+      example: a0ee0000-0000-4000-8000-00000000abcd
+      format: uuid
+      title: API Secret ID
+      type: string
+    apiSecretKey:
+      description: Your Heymarket API Secret Key.
+      example: Aa0***Cc2***Ee4***Gg6***Ii8***Kk0
+      pattern: ^[A-Za-z0-9]+$
+      secret: true
+      title: API Secret Key
+      type: string
+  display_name: Heymarket
+  proxy:
+    base_url: https://api.heymarket.com
+    headers:
+      accept: application/json
+      authorization: Bearer ${accessToken}
+    verification:
+      endpoints:
+      - /v1/team
+      headers:
+        accept: application/json
+      method: GET
+  signature:
+    hmac_secret_encoding: utf8
+    protocol: HMAC
+  token:
+    expires_in_ms: 300000
+    header:
+      alg: HS256
+      typ: JWT
+    payload:
+      iss: ${credentials.apiSecretId}
+    signing_key: ${credentials.apiSecretId}||${credentials.apiSecretKey}
+snowflake-jwt:
+  auth_mode: JWT
+  categories:
+  - dev-tools
+  connection_config:
+    subdomain:
+      description: The subdomain for your Snowflake instance
+      example: KXOPMLU-RE00572
+      order: 1
+      title: Subdomain
+      type: string
+  credentials:
+    accountIdentifier:
+      description: The unique identifier for your Snowflake account.
+      example: KXOPMLU-RE00572
+      title: Account Identifier
+      type: string
+    privateKey:
+      description: The private key associated with your Snowflake account for JWT authentication
+      example: '-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA\n-----END PRIVATE KEY-----'
+      pattern: ^-----BEGIN PRIVATE KEY-----\s*([A-Za-z0-9+/=\s]+)\s*-----END PRIVATE KEY-----$
+      secret: true
+      title: Private Key
+      type: string
+    userName:
+      description: The username for your Snowflake account used for authentication
+      example: MYUSER
+      title: User Name
+      type: string
+  display_name: Snowflake (JWT)
+  proxy:
+    base_url: https://${connectionConfig.subdomain}.snowflakecomputing.com
+    headers:
+      accept: application/json
+      authorization: Bearer ${accessToken}
+      x-snowflake-authorization-token-type: KEYPAIR_JWT
+    verification:
+      data:
+        statement: SELECT CURRENT_TIMESTAMP
+      endpoints:
+      - /api/v2/statements
+      headers:
+        content-type: application/json
+        x-snowflake-authorization-token-type: KEYPAIR_JWT
+      method: POST
+  signature:
+    protocol: RSA
+  token:
+    expires_in_ms: 3600000
+    header:
+      alg: RS256
+      typ: JWT
+    payload:
+      iss: ${credentials.accountIdentifier}.${credentials.userName}.${fingerprint(${credentials.privateKey})}
+      sub: ${credentials.accountIdentifier}.${credentials.userName}
+    signing_key: ${credentials.privateKey}

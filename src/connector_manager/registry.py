@@ -32,6 +32,11 @@ def _data_dir() -> Path:
 
 
 DATA_DIR = _data_dir()
+#: Connector definitions, one YAML file per auth mode (``api-key.yaml``,
+#: ``oauth2.yaml``, ...). Every ``*.yaml`` under here is loaded and merged, so
+#: a bucket can be sharded further without touching this module.
+CONNECTORS_DIR = DATA_DIR / "connectors"
+#: The pre-0.1.3 single-file catalogue, still read when the directory is absent.
 CONNECTORS_FILE = DATA_DIR / "connectors.yaml"
 ICONS_DIR = DATA_DIR / "icons"
 
@@ -146,12 +151,20 @@ class ConnectorRegistry:
         connectors_file: str | Path | None = None,
         icons_dir: str | Path | None = None,
     ) -> None:
-        self.connectors_file = Path(connectors_file or CONNECTORS_FILE)
+        # Accepts either a directory of per-auth-mode files (the bundled layout)
+        # or a single YAML file, which is what callers passing a custom
+        # catalogue -- and the pre-0.1.3 bundle -- have.
+        self.connectors_path = Path(connectors_file) if connectors_file else _default_source()
         self.icons_dir = Path(icons_dir or ICONS_DIR)
-        self._raw: dict[str, dict[str, Any]] = _load_definitions(self.connectors_file)
+        self._raw: dict[str, dict[str, Any]] = _load_definitions(self.connectors_path)
         self._connectors: dict[str, Connector] = {
             key: self._build_connector(key, entry) for key, entry in self._raw.items()
         }
+
+    @property
+    def connectors_file(self) -> Path:
+        """Deprecated alias of :attr:`connectors_path`, which may be a directory."""
+        return self.connectors_path
 
     # -- catalogue ---------------------------------------------------------
 
@@ -405,18 +418,64 @@ def _page_bounds(page: int, page_size: int, offset: int | None) -> tuple[int, in
     return page, page_size, offset
 
 
-def _load_definitions(path: Path) -> dict[str, dict[str, Any]]:
-    with path.open("r", encoding="utf-8") as handle:
-        entries: dict[str, dict[str, Any]] = yaml.safe_load(handle) or {}
+def _default_source() -> Path:
+    """The bundled catalogue: the per-auth-mode directory, else the legacy file."""
+    return CONNECTORS_DIR if CONNECTORS_DIR.is_dir() else CONNECTORS_FILE
 
-    # Resolve aliases by shallow-merging the alias entry over its target.
-    for key, entry in list(entries.items()):
-        if isinstance(entry, dict) and "alias" in entry:
-            target = entries.get(entry["alias"])
-            if isinstance(target, dict):
-                overrides = {k: v for k, v in entry.items() if k != "alias"}
-                entries[key] = {**target, **overrides, "alias": entry["alias"]}
-    return entries
+
+def _catalogue_files(path: Path) -> list[Path]:
+    """Every YAML file making up the catalogue at ``path``.
+
+    ``rglob`` rather than ``glob`` so a bucket that outgrows one file can be
+    split into a subdirectory later without a loader change. Sorting keeps the
+    merge order deterministic across filesystems.
+    """
+    if path.is_dir():
+        return sorted(path.rglob("*.yaml"))
+    return [path]
+
+
+def _load_definitions(path: Path) -> dict[str, dict[str, Any]]:
+    entries: dict[str, dict[str, Any]] = {}
+    for file in _catalogue_files(path):
+        with file.open("r", encoding="utf-8") as handle:
+            chunk = yaml.safe_load(handle) or {}
+        for key, entry in chunk.items():
+            if key in entries:
+                # Two files claiming the same id would make the winner depend on
+                # filename order, so refuse rather than silently pick one.
+                raise ValueError(f"duplicate connector id {key!r} in {file}")
+            entries[key] = entry
+    return _resolve_aliases(entries)
+
+
+def _resolve_aliases(entries: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Shallow-merge each alias entry over its target, following alias chains.
+
+    A target may itself be an alias, and after the split the two can live in
+    different files, so resolution is recursive and memoised instead of a single
+    pass in file order.
+    """
+    resolved: dict[str, dict[str, Any]] = {}
+
+    def resolve(key: str, pending: frozenset[str]) -> Any:
+        if key in resolved:
+            return resolved[key]
+        entry = entries[key]
+        alias = entry.get("alias") if isinstance(entry, dict) else None
+        # A dangling or cyclic alias leaves the entry as written rather than
+        # blowing up the whole catalogue over one bad row.
+        if alias is None or alias not in entries or alias in pending:
+            return entry
+        target = resolve(str(alias), pending | {key})
+        if not isinstance(target, dict):
+            return entry
+        overrides = {k: v for k, v in entry.items() if k != "alias"}
+        merged = {**target, **overrides, "alias": alias}
+        resolved[key] = merged
+        return merged
+
+    return {key: resolve(key, frozenset()) for key in entries}
 
 
 def _fields(spec: Any, group: FieldGroup) -> list[AuthField]:

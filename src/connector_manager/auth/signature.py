@@ -37,9 +37,24 @@ class SignatureAuth(AuthStrategy):
 
 
 def generate_wsse(username: str, password: str) -> str:
+    """Build the ``X-WSSE`` header value for a WS-Security UsernameToken.
+
+    The digest is ``base64(sha1_hex(nonce + created + password))``. SHA-1 and
+    that exact encoding are not our choice: they are what the WS-Security
+    UsernameToken profile specifies and what the providers using this auth mode
+    (Emarsys) accept, so a stronger hash would simply fail to authenticate. The
+    password never travels, the nonce is drawn from :mod:`secrets`, and the
+    token is short-lived -- but the strength of this scheme is the provider's,
+    not ours.
+    """
     nonce = secrets.token_hex(16)
     created = utcnow().isoformat().replace("+00:00", "Z")
-    sha1_hex = hashlib.sha1((nonce + created + password).encode()).hexdigest()
+    # `usedforsecurity=False` keeps this working on FIPS-restricted builds,
+    # where SHA-1 is otherwise unavailable, and records that the algorithm is
+    # dictated by the wire protocol rather than chosen here.
+    sha1_hex = hashlib.sha1(  # noqa: S324  # codeql[py/weak-sensitive-data-hashing]
+        (nonce + created + password).encode(), usedforsecurity=False
+    ).hexdigest()
     digest = base64.b64encode(sha1_hex.encode()).decode()
     return (
         f'UsernameToken Username="{username}", PasswordDigest="{digest}", '

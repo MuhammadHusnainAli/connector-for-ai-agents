@@ -1,185 +1,230 @@
 # connector-for-ai-agents
 
-A self-contained **connector + connection manager** for Python: 1586 API
-connectors with their logos, the exact auth fields each one needs, and the logic
-to turn filled-in fields into a working, verified connection. Sync and async.
+**1,586 API connectors for Python — every auth field each one needs, and the code that turns filled-in fields into a working, verified connection. Sync and async.**
 
-OAuth redirect flows, secret storage and multi-tenancy are **deliberately out of
-scope** — `connect()` returns a plain `Connection` object and your own
-auth/security layer decides where it lives.
+[![PyPI](https://img.shields.io/pypi/v/connector-for-ai-agents)](https://pypi.org/project/connector-for-ai-agents/)
+[![Python](https://img.shields.io/pypi/pyversions/connector-for-ai-agents)](https://pypi.org/project/connector-for-ai-agents/)
+[![CI](https://github.com/MuhammadHusnainAli/connector-for-ai-agents/actions/workflows/ci.yml/badge.svg)](https://github.com/MuhammadHusnainAli/connector-for-ai-agents/actions/workflows/ci.yml)
+[![Licence](https://img.shields.io/badge/licence-Elastic%202.0-blue)](LICENSE)
+
+Building an AI agent, an integrations page, or an internal tool that has to talk
+to Stripe, Slack, HubSpot, Notion, Jira, Shopify and 1,581 other APIs? The hard
+part is rarely the HTTP call. It is knowing that this provider wants a bearer
+token and that one wants `X-API-KEY`, that a third needs a client-credentials
+exchange against a per-tenant domain, and which endpoint proves the credentials
+actually work.
+
+This package is that knowledge, as data and code you can call:
+
+```python
+from connector_manager import ConnectorManager
+
+with ConnectorManager() as manager:
+    connection = manager.connect("sendgrid", credentials={"apiKey": "SG.…"})
+    print(connection.verified)                       # True — checked against the live API
+    print(manager.request(connection, "GET", "/v3/scopes").json())
+```
+
+No network needed to browse the catalogue. No OAuth server to run. No secrets
+stored on your behalf.
+
+---
+
+## Contents
+
+- [Why this exists](#why-this-exists)
+- [Install](#install)
+- [Quick start](#quick-start)
+- [Browse the catalogue](#browse-the-catalogue)
+- [Ask what a connector needs](#ask-what-a-connector-needs)
+- [Connect](#connect)
+- [Use the connection and keep it alive](#use-the-connection-and-keep-it-alive)
+- [Sync and async](#sync-and-async)
+- [Auth mode coverage](#auth-mode-coverage)
+- [OAuth connectors](#oauth-connectors)
+- [Using this from an AI agent](#using-this-from-an-ai-agent)
+- [Command line](#command-line)
+- [How it is put together](#how-it-is-put-together)
+- [Adding your own auth mode](#adding-your-own-auth-mode)
+- [FAQ](#faq)
+- [What is deliberately not here](#what-is-deliberately-not-here)
+- [Project files](#project-files)
+
+## Why this exists
+
+- **1,586 connectors, bundled.** Auth mode, field definitions, base url and a
+  verification endpoint for each. No API calls to browse them, no rate limits,
+  no service to sign up for. Works offline and in air-gapped builds.
+- **1,190 connect end to end from user input alone.** API keys, basic auth,
+  client credentials, multi-step token exchanges, locally signed JWTs, WSSE and
+  OAuth 1.0a request signing all complete inside the library.
+- **Verified, not assumed.** `connect()` calls the provider's own verification
+  endpoint, so you learn the credentials are wrong at the moment they are
+  entered, not on the first real request an hour later.
+- **One implementation, sync and async.** Each auth flow is written once as a
+  generator of requests and driven by either client, so the two managers cannot
+  drift apart.
+- **Built for forms and for tools.** Every connector describes its own fields —
+  title, description, example, regex, enum, secret, order — so you can render a
+  connection form, or hand an LLM a tool spec, straight from the catalogue.
+- **Typed, tested, small.** Full type hints with `py.typed`, 98 tests covering
+  every connector in the catalogue, and four runtime dependencies.
+- **Your security model stays yours.** Connections come back as plain objects.
+  Where they live and how they are encrypted is your call.
 
 ```
-┌─ this package ─────────────────────────────┐   ┌─ your app ───────────────┐
+┌─ this package ─────────────────────────────┐   ┌─ your application ───────┐
 │ list connectors  (id, name, icon, auth)    │   │ OAuth redirect flow      │
 │ describe auth    (which fields, validation)│   │ secret storage/encryption│
-│ connect          (token exchange + verify) │──▶│ connection persistence   │
-│ refresh / authenticated request            │◀──│ tenants, users, policies │
+│ connect          (token exchange + verify) │-->│ connection persistence   │
+│ refresh / authenticated request            │<--│ tenants, users, policies │
 └────────────────────────────────────────────┘   └──────────────────────────┘
 ```
 
-## Install into your application
-
-It is one self-contained distribution — `connector-for-ai-agents` — that installs
-with `uv` or `pip` and is imported as `connector_manager`.
+## Install
 
 ```bash
-# from a built wheel
-uv pip install dist/connector_for_ai_agents-0.1.0-py3-none-any.whl
-pip  install dist/connector_for_ai_agents-0.1.0-py3-none-any.whl
-
-# straight from the repo / git
-uv pip install git+https://github.com/MuhammadHusnainAli/connector-for-ai-agents
-pip  install "connector-for-ai-agents @ git+https://github.com/MuhammadHusnainAli/connector-for-ai-agents"
-
-# as a dependency of your app (pyproject.toml)
-#   dependencies = ["connector-for-ai-agents @ git+https://github.com/…"]
-uv add "connector-for-ai-agents @ git+https://github.com/MuhammadHusnainAli/connector-for-ai-agents"
-
-# working on this repo itself
-uv sync --extra dev          # or: pip install -e ".[dev]"
+pip install connector-for-ai-agents
+uv add connector-for-ai-agents
 ```
 
-Build the artefacts with `uv build` (or `python -m build`) — they land in `dist/`
-as a wheel and an sdist, each carrying the connector definitions and all 1591 logos.
+Python 3.10+. Runtime dependencies: `httpx`, `PyYAML`, `PyJWT`, `cryptography`.
+The distribution carries the connector definitions and all 1,591 logos, so
+nothing is fetched at runtime.
 
-Then, in any application:
+The distribution is named `connector-for-ai-agents`; the import is
+`connector_manager`:
 
 ```python
 from connector_manager import ConnectorManager, AsyncConnectorManager, Connection
 ```
 
-Runtime deps: `httpx`, `PyYAML`, `PyJWT`, `cryptography`. Python 3.10+. The data
-is bundled, so browsing the catalogue needs no network. The package is typed
-(`py.typed`) and ships a `connectors` console script.
+<details>
+<summary>Installing from git, or working on this repository</summary>
 
-## Sync or async
+```bash
+# straight from git
+uv pip install git+https://github.com/MuhammadHusnainAli/connector-for-ai-agents
+pip install "connector-for-ai-agents @ git+https://github.com/MuhammadHusnainAli/connector-for-ai-agents"
 
-Two manager classes, one implementation behind them. Every auth flow (token
-exchanges, verification calls) is written once as a generator of requests, then
-driven either by the sync client or the async one — so the two managers cannot
-drift apart.
-
-```python
-from connector_manager import ConnectorManager, AsyncConnectorManager
-
-with ConnectorManager() as manager:                       # sync
-    connection = manager.connect("affinity-v2", credentials={"apiKey": "…"})
-    response = manager.request(connection, "GET", "/v2/persons")
-
-async with AsyncConnectorManager() as manager:            # async — same names
-    connection = await manager.connect("affinity-v2", credentials={"apiKey": "…"})
-    response = await manager.request(connection, "GET", "/v2/persons")
+# working on this repo
+git clone https://github.com/MuhammadHusnainAli/connector-for-ai-agents
+cd connector-for-ai-agents
+uv sync --extra dev        # or: pip install -e ".[dev]"
+uv run pytest -q
 ```
 
-`connect`, `import_connection`, `verify`, `refresh`, `ensure_fresh` and `request`
-are coroutines on the async manager. The catalogue and schema methods
-(`list_connectors`, `get_auth_schema`, `get_icon`, `prepare_request`, `validate`)
-are inherited from `BaseConnectorManager` and stay synchronous in both — they
-only read bundled data.
+`uv build` (or `python -m build`) produces the wheel and sdist in `dist/`.
+</details>
 
-The examples below use the sync manager; add `await` for the async one.
+## Quick start
 
-## 1. List connectors
+Four calls cover the whole lifecycle: find a connector, ask what it needs,
+connect, then call the API.
 
 ```python
 from connector_manager import ConnectorManager
 
 manager = ConnectorManager()
 
+# 1. find it
+manager.list_connectors(search="sendgrid")        # [Connector(id='sendgrid', …)]
+
+# 2. ask what it needs — enough to render a form or a tool spec
+manager.describe_auth("sendgrid")
+# {'connector_id': 'sendgrid', 'auth_mode': 'API_KEY', 'self_service': True,
+#  'credentials': [{'name': 'apiKey', 'title': 'API Key', 'required': True, …}], …}
+
+# 3. connect — validates the fields, runs any token exchange, verifies the result
+connection = manager.connect("sendgrid", credentials={"apiKey": "SG.…"})
+connection.verified                                # True
+
+# 4. call the API with the credentials applied for you
+manager.request(connection, "GET", "/v3/scopes").json()
+```
+
+Persist the connection wherever you like:
+
+```python
+saved = connection.to_dict()                       # JSON-safe dict for your DB or vault
+connection = Connection.from_dict(saved)
+```
+
+## Browse the catalogue
+
+```python
 len(manager)                       # 1586
-manager.categories()               # ['accounting', 'ats', 'banking', 'crm', ...]
-manager.auth_modes()               # {'OAUTH2': 342, 'API_KEY': 310, 'OAUTH2_CC': 107, ...}
+manager.categories()               # 31 categories: 'crm', 'accounting', 'hr', …
+manager.auth_modes()               # {'API_KEY': 899, 'OAUTH2': 361, 'OAUTH2_CC': 110, …}
 
 for connector in manager.list_connectors(category="crm", limit=3):
     print(connector.id, connector.display_name, connector.auth_mode.value)
 
-svg = manager.get_icon("hubspot")                      # inline SVG string
-rows = manager.list_connectors_dict(include_icon=True) # JSON-ready (icons ≈ 8 MB)
+manager.get_icon("hubspot")                            # inline SVG string
+manager.list_connectors_dict(include_icon=True)        # JSON-ready (icons are large)
 ```
 
-Filters: `search`, `category`, `auth_mode`, `supported_only` (drops the 3 auth
-modes with no handler), `self_service_only` (also drops the ones needing an
-external OAuth flow), `limit`, `offset`.
+Filters: `search`, `category`, `auth_mode`, `supported_only`,
+`self_service_only`, `limit`, `offset`.
 
 ### Pagination
 
-1586 connectors is too many to hand a UI at once, so listings paginate. Ask for a
-page by number (or by raw `offset`) and you get back a `ConnectorPage` carrying
-the items **and** the numbers a picker needs — including `total`, which counts
-every match *before* paging, so you never need a second call to render
-"showing 21–40 of 1586".
+1,586 connectors is too many to hand a UI at once. Ask for a page by number or
+by raw `offset` and you get a `ConnectorPage` carrying the items **and** the
+numbers a picker needs — including `total`, counted before paging, so rendering
+"showing 21-40 of 1,586" never costs a second call.
 
 ```python
 page = manager.paginate_connectors(page=2, page_size=20, category="crm")
 
-page.items            # list[Connector] for this page
-list(page)            # a page is iterable, sized and indexable
-page.total            # 84  — matches for these filters, ignoring paging
-page.count            # 20  — items on this page
-page.page, page.pages # 2, 5
-page.has_next, page.has_previous          # True, True
-page.next_offset, page.previous_offset    # 40, 0
-page.first_index, page.last_index         # 21, 40
+page.items                                 # list[Connector] for this page
+list(page)                                 # a page is iterable, sized, indexable
+page.total                                 # 113 — matches for these filters, ignoring paging
+page.page, page.pages                      # 2, 6
+page.has_next, page.next_offset            # True, 40
+page.first_index, page.last_index          # 21, 40
+
+page.to_dict()                             # {"items": [...], "pagination": {...}}
 ```
 
-Filters apply exactly as they do to `list_connectors`, and `total` follows them.
-Ordering is stable (display name, then id), so page 1 and page 2 slice the same
-sequence — no repeated or skipped rows between calls.
-
-For an HTTP API or an agent tool, serialise the whole thing in one step:
-
-```python
-manager.paginate_connectors(page=2, page_size=20).to_dict()
-# {"items": [{...}, ...], "pagination": {"total": 1586, "page": 2, "pages": 80,
-#  "has_next": true, "next_offset": 40, "first_index": 21, "last_index": 40, ...}}
-```
-
-`to_dict(include_icon=True)` inlines each page's SVGs — safe per page, unlike a
-full dump. `page.pagination()` returns just the metadata.
-
-To process the whole catalogue without holding it all in memory, walk the pages:
+Ordering is stable (display name, then id), so consecutive pages slice the same
+sequence — no repeated or skipped rows. `page_size` defaults to 50 and is capped
+at 1,000. To walk everything without holding it in memory:
 
 ```python
 for page in manager.iter_connector_pages(page_size=200, self_service_only=True):
-    print(f"{page.page}/{page.pages}")
     for connector in page:
         ...
 ```
 
-Page addressing: `page` is 1-based; `offset` wins when both are given (and the
-reported `page` is derived from it). `page_size` defaults to `DEFAULT_PAGE_SIZE`
-(50) and is capped at `MAX_PAGE_SIZE` (1000); invalid values raise `ValueError`.
-A page past the end comes back empty but still reports the real `total`.
-`list_connectors(limit=..., offset=...)` still returns a plain list when you
-don't need the metadata.
-
-## 2. Ask what a connector needs
+## Ask what a connector needs
 
 ```python
 schema = manager.get_auth_schema("1password-users")
 
 schema.auth_mode                 # <AuthMode.OAUTH2_CC>
-schema.requires_external_oauth   # False -> this package can complete it
+schema.requires_external_oauth   # False — this package can complete it
 
 for field in schema.user_fields():
     print(field.group.value, field.name, field.title, field.required, field.secret)
 
-# connection_config domain     API Domain    True  False   (enum of 3 regions)
-# connection_config accountId  Account ID    True  False
-# credentials       client_id  Client ID     True  False
-# credentials       client_secret Client Secret True True
+# connection_config  domain         API Domain      True   False   (enum of 3 regions)
+# connection_config  accountId      Account ID      True   False
+# credentials        client_id      Client ID       True   False
+# credentials        client_secret  Client Secret   True   True
 ```
 
-Each `AuthField` carries what a form needs: `title`, `description`, `example`,
-`pattern`, `enum`, `format`, `secret`, `order`, `default_value`.
-`manager.describe_auth(id)` returns the same thing as JSON (handy as an agent
-tool spec). Two field groups matter:
+Every `AuthField` carries what a form needs: `title`, `description`, `example`,
+`pattern`, `enum`, `format`, `secret`, `order`, `default_value`, `visible_when`.
+Two groups matter:
 
-- **`credentials`** — the secrets (`apiKey`, `client_id`/`client_secret`, …).
-- **`connection_config`** — per-connection non-secrets the provider's URLs
-  interpolate (`domain`, `accountId`, `subdomain`, …).
+- **`credentials`** — the secrets: `apiKey`, `client_id` / `client_secret`, …
+- **`connection_config`** — per-connection non-secrets that the provider's urls
+  interpolate: `domain`, `accountId`, `subdomain`, …
 
-## 3. Connect
+`manager.describe_auth(id)` returns the same thing as a plain dict.
+
+## Connect
 
 ```python
 connection = manager.connect(
@@ -193,124 +238,204 @@ connection.access_token    # the minted token
 connection.expires_at
 ```
 
-`connect()` validates every field against the connector's rules (missing fields,
-patterns, enums — all errors at once via `ValidationError.field_errors`), runs the
-token exchange when the auth mode needs one, then calls the provider's
-`verification` endpoint to prove the credentials work. Pass
-`require_verified=True` to make a failed check raise instead of returning
-`verified=False`, or `verify=False` to skip the network call.
+`connect()` validates every field against the connector's own rules — missing
+fields, patterns, enums, all reported at once through
+`ValidationError.field_errors` — runs the token exchange when the auth mode needs
+one, then calls the provider's verification endpoint to prove the credentials
+work.
 
-**Store it yourself:**
+Pass `require_verified=True` to raise instead of returning `verified=False`, or
+`verify=False` to skip the network call entirely.
 
-```python
-saved = connection.to_dict()          # plain JSON-safe dict → your DB/vault
-connection = Connection.from_dict(saved)
-```
-
-## 4. Keep it alive and use it
+## Use the connection and keep it alive
 
 ```python
-manager.ensure_fresh(connection)      # refreshes only if expired/about to expire
+manager.ensure_fresh(connection)      # refresh only if expired or close to it
 manager.refresh(connection)           # force a new token
-manager.verify(connection)            # re-check credentials
+manager.verify(connection)            # re-check the credentials
 
 response = manager.request(connection, "GET", "/v1/customers")
 response.status, response.json()
 
-# or hand the resolved call to another runtime (async client, worker, agent tool)
+# or hand the fully resolved call to another runtime: a worker, an agent tool,
+# a different HTTP client
 manager.prepare_request(connection, "GET", "/v1/customers").to_dict()
 # {'method': 'GET', 'url': 'https://…', 'headers': {'authorization': 'Bearer …'}, 'params': {}}
 ```
+
+## Sync and async
+
+Two manager classes, one implementation. Same method names throughout.
+
+```python
+from connector_manager import ConnectorManager, AsyncConnectorManager
+
+with ConnectorManager() as manager:
+    connection = manager.connect("affinity-v2", credentials={"apiKey": "…"})
+    response = manager.request(connection, "GET", "/v2/persons")
+
+async with AsyncConnectorManager() as manager:
+    connection = await manager.connect("affinity-v2", credentials={"apiKey": "…"})
+    response = await manager.request(connection, "GET", "/v2/persons")
+```
+
+`connect`, `import_connection`, `verify`, `refresh`, `ensure_fresh` and `request`
+are coroutines on the async manager. The catalogue and schema methods —
+`list_connectors`, `get_auth_schema`, `describe_auth`, `get_icon`,
+`prepare_request`, `validate` — only read bundled data, so they stay synchronous
+in both.
+
+Examples elsewhere in this README use the sync manager; add `await` for async.
 
 ## Auth mode coverage
 
 | Auth mode | Connectors | Support |
 | --- | --- | --- |
-| `API_KEY` | 310 | ✅ connect + verify |
-| `BASIC` | 95 | ✅ connect + verify |
-| `OAUTH2_CC` | 107 | ✅ client-credentials exchange (incl. basic / custom / `private_key_jwt`) + refresh |
-| `TWO_STEP` | 61 | ✅ token exchange, chained `additional_steps`, cookie/header extraction, refresh |
-| `JWT` | 4 | ✅ locally signed (HMAC / RSA / EC) |
-| `SIGNATURE` | 1 | ✅ WSSE UsernameToken |
-| `TBA` | 1 | ✅ OAuth 1.0a HMAC-SHA256 request signing |
-| `NONE`, `INSTALL_PLUGIN` | 3 | ✅ |
-| `OAUTH2` | 342 | ⤴ import tokens from your OAuth layer; refresh-token grant implemented here |
-| `OAUTH1`, `MCP_OAUTH2`, `MCP_OAUTH2_GENERIC`, `APP`, `CUSTOM` | 30 | ⤴ import-only (request signing works once imported) |
-| `BILL`, `AWS_SIGV4` | 3 | ❌ not implemented — raises `UnsupportedAuthModeError` |
+| `API_KEY` | 899 | Full — connect and verify |
+| `OAUTH2_CC` | 110 | Full — client-credentials exchange, including basic, custom and `private_key_jwt`, plus refresh |
+| `BASIC` | 109 | Full — connect and verify |
+| `TWO_STEP` | 63 | Full — token exchange, chained `additional_steps`, cookie and header extraction, refresh |
+| `JWT` | 4 | Full — signed locally with HMAC, RSA or EC |
+| `NONE`, `INSTALL_PLUGIN` | 3 | Full |
+| `SIGNATURE` | 1 | Full — WS-Security UsernameToken |
+| `TBA` | 1 | Full — OAuth 1.0a HMAC-SHA256 request signing |
+| `OAUTH2` | 361 | Import tokens from your own OAuth layer; the refresh-token grant runs here |
+| `MCP_OAUTH2`, `MCP_OAUTH2_GENERIC`, `OAUTH1`, `APP`, `CUSTOM` | 32 | Import tokens; request signing works once imported |
+| `BILL`, `AWS_SIGV4` | 3 | Not implemented — raises `UnsupportedAuthModeError` |
 
-582 connectors connect end-to-end with nothing but user-supplied values.
+**1,190 connectors connect end to end from user-supplied values alone.** The
+remaining 396 need a token you obtained elsewhere, or an auth mode this package
+does not implement.
 
-### OAuth connectors
+## OAuth connectors
+
+Redirect flows belong in your auth layer. Once you have tokens, import them and
+everything else works the same way.
 
 ```python
 manager.requires_external_oauth("slack")   # True
 
-# calling connect() without tokens tells you exactly what is missing
-manager.connect("slack", credentials={})   # ExternalAuthRequiredError
+manager.connect("slack", credentials={})   # ExternalAuthRequiredError, explaining what is missing
 
-# after your own OAuth flow:
 connection = manager.import_connection(
     "slack",
     credentials={
         "access_token": "xoxb-…",
-        "refresh_token": "…",     # optional
-        "client_id": "…",         # optional — enables manager.refresh()
+        "refresh_token": "…",      # optional
+        "client_id": "…",          # optional — enables manager.refresh()
         "client_secret": "…",
     },
 )
 ```
 
-## CLI
+The catalogue still carries each provider's `authorization_url`, `token_url`,
+scopes and PKCE quirks, so you can drive your own redirect flow from it.
 
-Installing the package also installs a `connectors` command (identical to
-`python -m connector_manager`):
+## Using this from an AI agent
+
+The catalogue is designed to be handed to a model. Every method that matters
+returns plain JSON-safe dicts, so a tool layer is thin:
+
+```python
+from connector_manager import ConnectorManager, Connection
+
+manager = ConnectorManager()
+
+def search_connectors(query: str, page: int = 1) -> dict:
+    """Find integrations by name or category."""
+    return manager.paginate_connectors(search=query, page=page, page_size=20).to_dict()
+
+def get_required_fields(connector_id: str) -> dict:
+    """List exactly what the user must supply to connect."""
+    return manager.describe_auth(connector_id)
+
+def call_api(saved_connection: dict, method: str, path: str) -> dict:
+    """Make an authenticated call to a connected provider."""
+    connection = Connection.from_dict(saved_connection)
+    manager.ensure_fresh(connection)
+    return manager.request(connection, method, path).json()
+```
+
+Why it suits agent use:
+
+- `describe_auth()` is already a field spec — names, types, whether a value is
+  secret, regex, allowed values — so a model can ask the user for exactly the
+  right things and validate before spending a call.
+- `paginate_connectors()` bounds the context you feed a model, and `total` lets
+  it reason about how much it has not seen.
+- `prepare_request()` returns a resolved request without sending it, so an agent
+  can show a user what it is about to do and wait for approval.
+- Errors are typed and structured — `ValidationError.field_errors` names the bad
+  fields, `ExternalAuthRequiredError` says what is missing — so a model can
+  recover instead of guessing.
+- Browsing costs no network calls, so catalogue exploration never burns rate
+  limit or wall-clock time.
+
+## Command line
+
+Installing the package installs a `connectors` command, equivalent to
+`python -m connector_manager`:
 
 ```bash
 connectors list --search hubspot
-connectors list --page 2 --page-size 20          # showing 21-40 of 1586 · page 2/80
-connectors list --offset 40 --page-size 20       # same page, addressed by offset
-connectors list --all --page-size 200            # page through everything
-connectors show 1password-users        # every field it needs
-connectors stats
+connectors list --page 2 --page-size 20        # showing 21-40 of 1586 · page 2/80
+connectors list --all --page-size 200          # page through everything
+connectors show 1password-users                # every field it needs
+connectors stats                               # totals by auth mode and category
 connectors icon stripe -o stripe.svg
 connectors connect affinity-v2 -c apiKey=… -o conn.json
 connectors request conn.json GET /v2/persons
 ```
 
-`-c` sets a credential, `-x` a connection-config value, `-i` an integration-config
-value (all `key=value`).
+`-c` sets a credential, `-x` a connection-config value, `-i` an
+integration-config value, all as `key=value`.
 
-## Layout
+**Credentials are hidden when output goes to a terminal.** `connect`, `verify`,
+`refresh` and `request --dry-run` redact credential values, authorization headers
+and key-bearing query parameters, so secrets do not end up in scrollback or CI
+logs. Pass `--show-secrets` to print them anyway. `-o FILE` writes the usable
+connection with mode `0600`; it holds live credentials, so keep it out of version
+control.
 
-| Module | Main class(es) | Role |
+## How it is put together
+
+| Module | Main classes | Role |
 | --- | --- | --- |
 | `manager.py` | `BaseConnectorManager`, `ConnectorManager`, `AsyncConnectorManager` | the public facade |
-| `registry.py` | `ConnectorRegistry` | loads `connectors.yaml` (aliases resolved), icons, pagination, builds `AuthSchema` |
+| `registry.py` | `ConnectorRegistry` | merges `data/connectors/*.yaml` and icons, pagination, builds `AuthSchema` |
 | `models.py` | `Connector`, `ConnectorPage`, `AuthField`, `AuthSchema`, `Connection`, `AuthMode` | the data model |
-| `auth/` | `AuthStrategy` subclasses (`ApiKeyAuth`, `BasicAuth`, `OAuth2ClientCredentialsAuth`, `TwoStepAuth`, `JwtAuth`, `SignatureAuth`, `TbaAuth`, `OAuth2ImportAuth`, …) | one class per auth mode |
+| `auth/` | `AuthStrategy` subclasses | one class per auth mode |
 | `flows.py` | `FlowRunner`, `AsyncFlowRunner` | drive one auth flow either sync or async |
 | `http.py` | `Request`, `HttpResponse`, `HttpClient`, `AsyncHttpClient` | the only I/O in the package |
-| `proxy.py` | `RequestBuilder` | resolves base urls, auth headers, query templates, OAuth1/TBA signing |
-| `verification.py` | `CredentialVerifier`, `VerificationResult` | runs `proxy.verification` to prove credentials work |
-| `validation.py` | — | field validation (required, pattern, enum, format, `visible_when`) |
-| `interpolation.py` | — | the `${…}` template engine (`base64`, `sha256Hex`, `hmacSha1Hex`, `fingerprint`, `now`, `\|\|`) |
-| `data/` | — | `connectors.yaml` + 1591 SVG logos |
+| `proxy.py` | `RequestBuilder` | base urls, auth headers, query templates, OAuth1 and TBA signing |
+| `verification.py` | `CredentialVerifier`, `VerificationResult` | proves credentials work |
+| `validation.py` | — | required, pattern, enum, format, `visible_when` |
+| `interpolation.py` | — | the `${…}` template engine |
+| `data/connectors/` | — | connector definitions, one YAML file per auth mode |
+| `data/icons/` | — | 1,591 SVG logos |
 
-### Extending
+Run the suite with `uv run pytest -q` — 109 tests. Coverage includes the whole
+catalogue: every connector must expose a name, an icon, a buildable auth schema
+and a fully resolved request with no leftover `${…}` in urls or headers, plus
+mocked connect, refresh and verify flows for each supported auth mode. The async
+suite asserts the async manager returns byte-identical credentials to the sync
+one for the same provider response.
 
-Subclass `AuthStrategy` and register it — your strategy works in both the sync
-and the async manager, because it never touches an HTTP client itself. Implement
-`flow()`: return the credentials dict directly when no network is needed, or make
-it a generator that yields `Request` objects and receives `HttpResponse` back.
+## Adding your own auth mode
+
+Subclass `AuthStrategy` and register it. Your strategy works in both managers
+because it never touches an HTTP client itself: return the credentials directly
+when no network is needed, or make `flow()` a generator that yields `Request`
+objects and receives `HttpResponse` back.
 
 ```python
-from connector_manager import AuthMode, AuthStrategy, Request, register_strategy
+from connector_manager import AuthMode, AuthStrategy, Request, register_strategy, TokenExchangeError
 
 class MyBillAuth(AuthStrategy):
     auth_mode = AuthMode.BILL
     refreshable = True
 
-    def flow(self, ctx):                       # ctx.provider = raw providers.yaml entry
+    def flow(self, ctx):
         response = yield Request(
             "POST",
             "https://api.bill.com/api/v2/Login.json",
@@ -323,30 +448,98 @@ class MyBillAuth(AuthStrategy):
 register_strategy(MyBillAuth())
 ```
 
-## Tests
+Adding a connector instead? See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-```bash
-uv run pytest -q          # 75 tests (or: .venv/bin/python -m pytest tests -q)
-```
+## FAQ
 
-Coverage includes the whole catalogue: every connector must expose a name, an
-icon, a buildable auth schema, and a fully resolved request (no leftover
-`${…}` in urls or headers), plus mocked connect/refresh/verify flows for each
-supported auth mode — and the async suite asserts the async manager returns
-byte-identical credentials to the sync one for the same provider response.
+**Does browsing the catalogue make network calls?**
+No. Definitions and logos ship inside the distribution. Only `connect`,
+`verify`, `refresh` and `request` touch the network.
 
-## Not in scope
+**Where do the connector definitions come from?**
+From maintained open-source implementations of each provider's API — Nango,
+Pipedream, ActivePieces and n8n — so base urls, credential placement and
+verification endpoints come from working code rather than guesswork. Each one
+was then called live: see [docs/added-connectors.md](docs/added-connectors.md)
+for the evidence behind every connector added in 0.1.2.
+
+**Does it store my API keys?**
+No, and that is deliberate. `connect()` returns a `Connection` object and hands
+it to you. Encryption, storage, rotation and tenancy are your application's job.
+
+**Can it run the OAuth redirect flow for me?**
+No. Redirects need a browser, a callback url and session state that belong in
+your app. Run the flow yourself, then `import_connection()`. Client-credentials
+OAuth, which needs no redirect, is fully implemented.
+
+**How do I know a connector actually works before shipping it?**
+`connect()` calls the provider's verification endpoint and reports `verified`.
+From the shell: `connectors connect <id> -c apiKey=… -o conn.json`.
+
+**What if a provider is missing, or a definition is wrong?**
+Open an issue or a pull request — [CONTRIBUTING.md](CONTRIBUTING.md) covers the
+shape of a good connector entry.
+
+**Is it typed?**
+Yes, fully, with `py.typed`, so your type checker sees the annotations.
+
+**Which Python versions are supported?**
+3.10 and newer, tested in CI on 3.10 through 3.13.
+
+**Is this open source?**
+It is source-available under the Elastic License 2.0. You can read, modify and
+use it, including commercially, but you may not provide it to others as a hosted
+or managed service. See [LICENSE](LICENSE).
+
+## What is deliberately not here
 
 Connection storage, secret encryption, OAuth redirect handling, webhooks and
-syncs. A handful of connectors also rely on provider-specific post-connection or
-credential-verification scripts that are not implemented here; the fields those
-scripts would fill are surfaced as `automated=True` so you can supply them
+data syncs.
+
+A handful of connectors rely on provider-specific post-connection or
+credential-verification scripts that are not implemented here. The fields those
+scripts would fill are surfaced with `automated=True` so you can supply them
 yourself, and such connectors report `tested=False` from `verify()`.
 
-Documentation links are intentionally absent from the catalogue: `connectors.yaml`
-carries only what is needed to authenticate and call each API (auth mode, field
-definitions, base url, verification endpoint).
+Documentation links are intentionally absent from the catalogue. It carries
+only what is needed to authenticate and call each API: auth mode, field
+definitions, base url, verification endpoint.
+
+### Where the definitions live
+
+The catalogue is split by auth mode, one file per mode under
+`src/connector_manager/data/connectors/`:
+
+```
+data/connectors/api-key.yaml     899 connectors
+                oauth2.yaml      361
+                oauth2-cc.yaml   110
+                basic.yaml       109
+                two-step.yaml     63
+                mcp-oauth2.yaml   24
+                ...              14 smaller modes
+```
+
+The registry loads every `*.yaml` under that directory and merges them, so the
+layout is an organisational detail rather than API: ids stay unique across
+files, and an alias resolves against its target wherever that target lives.
+`ConnectorRegistry(connectors_file=...)` still accepts a single YAML file if you
+ship your own catalogue.
+
+`python scripts/split_connectors.py` regroups the files after an `auth_mode`
+changes; `--check` reports drift and is what CI runs.
+
+## Project files
+
+| File | What it covers |
+| --- | --- |
+| [CHANGELOG.md](CHANGELOG.md) | What changed in each release |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Adding a connector, changing the machinery, house style |
+| [SECURITY.md](SECURITY.md) | Reporting a vulnerability, and handling credentials safely |
+| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | How we treat each other |
+| [docs/added-connectors.md](docs/added-connectors.md) | Provenance and live check behind every connector added in 0.1.2 |
+| [scripts/split_connectors.py](scripts/split_connectors.py) | Regroups the catalogue into one file per auth mode |
 
 ## Licence
 
-See `LICENSE`.
+Elastic License 2.0. See [LICENSE](LICENSE).

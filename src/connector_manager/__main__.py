@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import sys
 from pathlib import Path
 from typing import Any, Sequence
@@ -18,6 +20,63 @@ from .errors import ConnectorError
 from .manager import ConnectorManager
 from .models import Connection, ConnectorPage
 from .registry import DEFAULT_PAGE_SIZE
+
+#: Stand-in printed in place of a secret.
+REDACTED = "<redacted>"
+
+#: Key words that mark a value as authenticating. Matched per word, so
+#: ``apiKey`` and ``x-auth-token`` hit while ``monkey`` and ``keyboard`` do not.
+_SECRET_WORDS = frozenset(
+    {
+        "auth", "authorization", "bearer", "cookie", "credential", "credentials",
+        "hash", "key", "passphrase", "passwd", "password", "salt", "secret",
+        "session", "sig", "signature", "token",
+    }
+)
+
+#: Bookkeeping fields inside ``credentials`` that carry no secret, so a redacted
+#: connection still shows what kind of credential it holds and when it expires.
+_PUBLIC_CREDENTIAL_KEYS = frozenset(
+    {"type", "expires_at", "expires_in", "token_type", "scope", "scopes", "created_at"}
+)
+
+#: Names that read as secret-ish but only ever describe an auth scheme.
+_PUBLIC_KEYS = frozenset({"auth_mode", "authmode", "auth_type", "authtype", "token_type"})
+
+
+def _words(key: str) -> list[str]:
+    return [w for w in re.split(r"[^a-z0-9]+", re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", key).lower()) if w]
+
+
+def _is_secret_key(key: str) -> bool:
+    if key.lower() in _PUBLIC_KEYS:
+        return False
+    return bool(_SECRET_WORDS.intersection(_words(key)))
+
+
+def _redact(value: Any, *, in_credentials: bool = False) -> Any:
+    """Copy ``value`` with every authenticating field replaced by :data:`REDACTED`.
+
+    Inside a ``credentials`` block everything is a secret unless it is known
+    bookkeeping; elsewhere a field is judged by its name, which is what catches
+    the ``authorization`` header and an ``api_key`` query parameter.
+    """
+    if isinstance(value, dict):
+        out: dict[Any, Any] = {}
+        for key, item in value.items():
+            name = str(key)
+            if name == "credentials" and isinstance(item, dict):
+                out[key] = _redact(item, in_credentials=True)
+            elif in_credentials and name not in _PUBLIC_CREDENTIAL_KEYS:
+                out[key] = REDACTED if item not in (None, {}, []) else item
+            elif _is_secret_key(name):
+                out[key] = REDACTED if item not in (None, {}, []) else item
+            else:
+                out[key] = _redact(item, in_credentials=in_credentials)
+        return out
+    if isinstance(value, list):
+        return [_redact(item, in_credentials=in_credentials) for item in value]
+    return value
 
 
 def _kv(pairs: Sequence[str] | None) -> dict[str, str]:
@@ -30,21 +89,42 @@ def _kv(pairs: Sequence[str] | None) -> dict[str, str]:
     return out
 
 
-def _dump(value: Any) -> None:
-    print(json.dumps(value, indent=2, default=str))
+def _dump(value: Any, *, redact: bool = False) -> None:
+    print(json.dumps(_redact(value) if redact else value, indent=2, default=str))
 
 
 def _load_connection(path: str) -> Connection:
     return Connection.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
 
 
-def _save_connection(connection: Connection, path: str | None) -> None:
+def _write_private_json(path: Path, payload: Any) -> None:
+    """Write JSON that only the current user can read.
+
+    A connection file holds live credentials, so it is created 0600 and an
+    existing file is tightened to 0600 before anything is written to it.
+    """
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, indent=2, default=str))
+    try:
+        os.chmod(path, 0o600)
+    except OSError:  # pragma: no cover - filesystems without POSIX modes
+        pass
+
+
+def _save_connection(connection: Connection, path: str | None, *, show_secrets: bool = False) -> None:
     payload = connection.to_dict()
     if path:
-        Path(path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        print(f"connection written to {path}", file=sys.stderr)
-    else:
-        _dump(payload)
+        _write_private_json(Path(path), payload)
+        print(f"connection written to {path} (holds credentials; mode 0600)", file=sys.stderr)
+        return
+    _dump(payload, redact=not show_secrets)
+    if not show_secrets:
+        print(
+            "credentials hidden -- write the usable connection with -o FILE, "
+            "or pass --show-secrets to print them",
+            file=sys.stderr,
+        )
 
 
 def _listing_row(connector) -> str:
@@ -68,6 +148,14 @@ def _page_footer(page: ConnectorPage) -> str:
     if page.has_next:
         parts.append(f"next: --offset {page.next_offset}")
     return "\n" + " · ".join(parts)
+
+
+def _add_show_secrets(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--show-secrets",
+        action="store_true",
+        help="print credentials instead of hiding them (they are hidden by default)",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -109,6 +197,7 @@ def build_parser() -> argparse.ArgumentParser:
     connect.add_argument("-i", "--integration-config", action="append", metavar="KEY=VALUE")
     connect.add_argument("--no-verify", action="store_true")
     connect.add_argument("-o", "--output", help="write the connection JSON here")
+    _add_show_secrets(connect)
 
     for name, help_text in (
         ("verify", "re-run verification for a stored connection"),
@@ -117,6 +206,7 @@ def build_parser() -> argparse.ArgumentParser:
         action = sub.add_parser(name, help=help_text)
         action.add_argument("connection_file")
         action.add_argument("-o", "--output")
+        _add_show_secrets(action)
 
     request = sub.add_parser("request", help="make an authenticated API call")
     request.add_argument("connection_file")
@@ -125,6 +215,7 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("-q", "--param", action="append", metavar="KEY=VALUE")
     request.add_argument("-d", "--data", help="JSON request body")
     request.add_argument("--dry-run", action="store_true", help="print the prepared request only")
+    _add_show_secrets(request)
 
     return parser
 
@@ -224,7 +315,7 @@ def _run(manager: ConnectorManager, args: argparse.Namespace) -> int:
             integration_config=_kv(args.integration_config),
             verify=not args.no_verify,
         )
-        _save_connection(connection, args.output)
+        _save_connection(connection, args.output, show_secrets=args.show_secrets)
         return 0 if (connection.verified or args.no_verify) else 2
 
     if args.command in ("verify", "refresh"):
@@ -235,20 +326,25 @@ def _run(manager: ConnectorManager, args: argparse.Namespace) -> int:
             connection.metadata["verification"] = result.to_dict()
             _dump(result.to_dict())
             if args.output:
-                _save_connection(connection, args.output)
+                _save_connection(connection, args.output, show_secrets=args.show_secrets)
             return 0 if result.verified else 2
         manager.refresh(connection)
-        _save_connection(connection, args.output or args.connection_file)
+        _save_connection(
+            connection, args.output or args.connection_file, show_secrets=args.show_secrets
+        )
         return 0
 
     if args.command == "request":
         connection = _load_connection(args.connection_file)
         body = json.loads(args.data) if args.data else None
         if args.dry_run:
+            # The prepared request carries the authorization header and any
+            # key-bearing query parameter, so hide them unless asked.
             _dump(
                 manager.prepare_request(
                     connection, args.method, args.endpoint, params=_kv(args.param), body=body
-                ).to_dict()
+                ).to_dict(),
+                redact=not args.show_secrets,
             )
             return 0
         response = manager.request(
