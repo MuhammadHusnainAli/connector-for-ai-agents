@@ -1,0 +1,2638 @@
+# Connector definitions: OAUTH2_CC auth.
+#
+# Auth mode, credential/config fields, api base url and verification endpoint
+# for each connector, sorted by connector id. One file per auth mode; the
+# registry loads every *.yaml under this directory and merges them.
+#
+# Machine-generated grouping -- run `python scripts/split_connectors.py` after
+# changing an `auth_mode` so the entry lands in the right file.
+1password-users:
+  auth_mode: OAUTH2_CC
+  categories:
+  - iam
+  connection_config:
+    accountId:
+      description: Your 1Password account ID.
+      example: XLQMR47VZPBKJHSGWNCYFDE3T9
+      order: 2
+      pattern: ^[A-Z0-9]{26}$
+      title: Account ID
+      type: string
+    domain:
+      description: The regional API domain for your 1Password account.
+      enum:
+      - api.1password.com
+      - api.1password.ca
+      - api.1password.eu
+      order: 1
+      title: API Domain
+      type: string
+  credentials:
+    client_id:
+      description: Your 1Password OAuth application Client ID.
+      example: 5ab87915-2deb-429c-a1e2-8b0495900f45
+      format: uuid
+      title: Client ID
+      type: string
+    client_secret:
+      description: Your 1Password OAuth application Client Secret.
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: 1Password (Users API)
+  proxy:
+    base_url: https://${connectionConfig.domain}/v1beta1/accounts/${connectionConfig.accountId}
+  token_params:
+    grant_type: client_credentials
+  token_request_auth_method: basic
+  token_url: https://${connectionConfig.domain}/v1beta1/users/oauth2/token
+8x8:
+  auth_mode: OAUTH2_CC
+  categories:
+  - communication
+  credentials:
+    client_id:
+      description: Your 8x8 API Client ID from the Admin Console
+      title: Client ID
+      type: string
+    client_secret:
+      description: Your 8x8 API Client Secret from the Admin Console
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: 8x8
+  proxy:
+    base_url: https://api.8x8.com
+  token_params:
+    grant_type: client_credentials
+  token_request_auth_method: basic
+  token_url: https://api.8x8.com/oauth/v2/token
+acumatica:
+  auth_mode: OAUTH2_CC
+  categories:
+  - erp
+  - accounting
+  connection_config:
+    instanceUrl:
+      description: The hostname of your Acumatica ERP instance.
+      example: mycompany.acumatica.com
+      order: 1
+      pattern: ^[A-Za-z0-9.-]+(?::\d+)?(?:/[A-Za-z0-9._-]+)*$
+      prefix: https://
+      title: Instance URL
+      type: string
+    password:
+      description: The password for the specified Acumatica ERP username.
+      order: 3
+      secret: true
+      title: Password
+      type: string
+    username:
+      description: The username of an Acumatica ERP user.
+      order: 2
+      title: Username
+      type: string
+  credentials:
+    client_id:
+      description: The client ID assigned to your application, including the tenant suffix.
+      example: 88358B02-A48D-A50E-F710-39C1636C30F6@MyTenant
+      title: Client ID
+      type: string
+    client_secret:
+      description: The client secret created for your application in Acumatica ERP.
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: Acumatica
+  proxy:
+    base_url: https://${connectionConfig.instanceUrl}
+  token_params:
+    grant_type: password
+    password: ${connectionConfig.password}
+    username: ${connectionConfig.username}
+  token_url: https://${connectionConfig.instanceUrl}/identity/connect/token
+adobe-umapi:
+  auth_mode: OAUTH2_CC
+  categories:
+  - other
+  connection_config:
+    clientId:
+      automated: true
+      description: ''
+      title: ''
+      type: string
+  display_name: UMAPI (Adobe User Management API)
+  post_connection_script: adobeUmapiPostConnection
+  proxy:
+    base_url: https://usermanagement.adobe.io
+    headers:
+      x-api-key: ${connectionConfig.clientId}
+    retry:
+      after:
+      - retry-after
+  scope_separator: ','
+  token_params:
+    grant_type: client_credentials
+  token_url: https://ims-na1.adobelogin.com/ims/token/v2
+adoxx-cc:
+  auth_mode: OAUTH2_CC
+  categories:
+  - dev-tools
+  connection_config:
+    baseUrl:
+      description: The base URL of your ADOXX instance, including the product/version path segment.
+      example: yourcompany.com:8000/ADOXX
+      order: 1
+      prefix: https://
+      title: Base URL
+      type: string
+  display_name: ADOXX (Client Credentials)
+  proxy:
+    base_url: https://${connectionConfig.baseUrl}/rest
+  token_params:
+    grant_type: client_credentials
+  token_request_auth_method: basic
+  token_url: https://${connectionConfig.baseUrl}/oauth2/token
+adp:
+  auth_mode: OAUTH2_CC
+  categories:
+  - hr
+  credentials:
+    client_certificate:
+      description: The public certificate (in PEM format) used for Mutual TLS (mTLS) authentication.
+      example: '-----BEGIN CERTIFICATE-----\\nMIIDdzCCAl+gAwIBAgIEUzZrZDANBgkqhkiG9w0BAQsFADBv\\n...\\n-----END CERTIFICATE-----'
+      pattern: ^-----BEGIN CERTIFICATE-----\s*([A-Za-z0-9+/=\s]+)\s*-----END CERTIFICATE-----$
+      secret: true
+      title: Client Public Certificate
+      type: string
+    client_private_key:
+      description: The private key (in PEM format) associated with the client certificate,
+      example: '-----BEGIN PRIVATE KEY-----\\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC...\\n-----END PRIVATE KEY-----'
+      pattern: ^-----BEGIN PRIVATE KEY-----\s*([A-Za-z0-9+/=\s]+)\s*-----END PRIVATE KEY-----$
+      secret: true
+      title: Client Private Key
+      type: string
+  display_name: ADP
+  proxy:
+    base_url: https://api.adp.com
+  require_client_certificate: true
+  token_params:
+    grant_type: client_credentials
+  token_url: https://accounts.adp.com/auth/oauth/v2/token
+adp-lyric:
+  alias: adp
+  categories:
+  - hr
+  display_name: ADP Lyric
+adp-run:
+  alias: adp
+  categories:
+  - hr
+  display_name: RUN Powered by ADP
+adp-workforce-now:
+  alias: adp
+  categories:
+  - hr
+  display_name: ADP Workforce Now
+adp-workforce-now-next-gen:
+  alias: adp
+  categories:
+  - hr
+  display_name: ADP Workforce Now Next Generation
+agentcard:
+  auth_mode: OAUTH2_CC
+  categories:
+  - payment
+  credentials:
+    client_id:
+      description: The OAuth client ID from the Credentials page of your Agentcard dashboard
+      example: 1c9f3b1e-8f2a-4d0e-9b7a-2f6d8c4e5a10
+      pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+      title: Client ID
+      type: string
+    client_secret:
+      description: The OAuth client secret from the Credentials page of your Agentcard dashboard
+      example: acs_9hK3mQx1TZr8wBn5vLpD2cYfS7aJ4eG6uNtM0iRoXqWd8kFz
+      pattern: ^acs_[A-Za-z0-9_-]{48}$
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: Agentcard
+  proxy:
+    base_url: https://api.agentcard.sh
+  token_params:
+    grant_type: client_credentials
+  token_url: https://api.agentcard.sh/api/v2/oauth/token
+agiloft-cc:
+  auth_mode: OAUTH2_CC
+  body_format: form
+  categories:
+  - productivity
+  connection_config:
+    hostname:
+      description: The hostname of your Agiloft instance.
+      example: example.agiloft.com
+      format: hostname
+      order: 1
+      prefix: https://
+      title: Hostname
+      type: string
+  credentials:
+    client_id:
+      description: The Client ID from your Agiloft API application settings.
+      title: Client ID
+      type: string
+    client_secret:
+      description: The Client Secret from your Agiloft API application settings.
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: Agiloft (Client Credentials)
+  proxy:
+    base_url: https://${connectionConfig.hostname}
+  token_params:
+    grant_type: client_credentials
+  token_url: https://${connectionConfig.hostname}/ewws/otoken
+athenahealth:
+  auth_mode: OAUTH2_CC
+  categories:
+  - other
+  connection_config:
+    practiceId:
+      description: The ID of your athenahealth practice.
+      doc_section: '#step-3-find-your-practice-id'
+      example: '195900'
+      order: 2
+      pattern: ^[0-9]+$
+      title: Practice ID
+      type: string
+    subdomain:
+      description: The athenahealth environment to connect to.
+      doc_section: '#step-2-choose-your-environment'
+      enum:
+      - api
+      - api.preview
+      order: 1
+      title: API Environment
+      type: string
+  credentials:
+    client_id:
+      description: The client ID for your registered athenahealth app.
+      doc_section: '#step-4-connect-your-athenahealth-account'
+      title: Client ID
+      type: string
+    client_secret:
+      description: The client secret for your registered athenahealth app.
+      doc_section: '#step-4-connect-your-athenahealth-account'
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: athenahealth
+  docs: https://nango.dev/docs/api-integrations/athenahealth
+  docs_connect: https://nango.dev/docs/api-integrations/athenahealth/connect
+  proxy:
+    base_url: https://${connectionConfig.subdomain}.platform.athenahealth.com
+    connection_config:
+      practiceId: ${connectionConfig.practiceId}
+  scope_separator: ' '
+  token_params:
+    grant_type: client_credentials
+  token_request_auth_method: basic
+  token_url: https://${connectionConfig.subdomain}.platform.athenahealth.com/oauth2/v1/token
+atlassian-service-account-oauth2:
+  auth_mode: OAUTH2_CC
+  categories:
+  - dev-tools
+  connection_config:
+    subdomain:
+      description: The subdomain of your Attlassian account
+      example: subdomain
+      optional: true
+      pattern: ^[a-zA-Z0-9.-]+$
+      prefix: https://
+      suffix: .atlassian.net
+      title: Subdomain
+      type: string
+  credentials:
+    client_id:
+      description: The OAuth 2.0 client ID from your service account credential
+      title: Client ID
+      type: string
+    client_secret:
+      description: The OAuth 2.0 client secret from your service account credential
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: Atlassian Service Account (OAuth 2.0)
+  post_connection_script: atlassianServicAccountPostConnection
+  proxy:
+    base_url: https://api.atlassian.com
+    connection_config:
+      subdomain: ${connectionConfig.subdomain}
+    retry:
+      at:
+      - x-ratelimit-reset
+  token_params:
+    grant_type: client_credentials
+  token_url: https://auth.atlassian.com/oauth/token
+auth0-cc:
+  auth_mode: OAUTH2_CC
+  body_format: json
+  categories:
+  - iam
+  connection_config:
+    audience:
+      description: The audience for the token
+      example: https://api.example.com/foobar
+      title: Audience
+      type: string
+    hostname:
+      description: Your Auth0 host name
+      format: hostname
+      prefix: https://
+      title: HostName
+      type: string
+    organization:
+      description: The organization name you want the request to be associated with
+      example: example
+      optional: true
+      title: Organization
+      type: string
+  display_name: Auth0 (Client Credentials)
+  proxy:
+    base_url: https://${connectionConfig.hostname}
+  token_params:
+    audience: ${connectionConfig.audience}
+    grant_type: client_credentials
+    organization: ${connectionConfig.organization}
+  token_url: https://${connectionConfig.hostname}/oauth/token
+availity:
+  auth_mode: OAUTH2_CC
+  categories:
+  - other
+  credentials:
+    client_id:
+      description: Your application API Key
+      title: API Key
+      type: string
+    client_secret:
+      description: Your application Secret
+      secret: true
+      title: Secret
+      type: string
+  display_name: Availity
+  proxy:
+    base_url: https://api.availity.com
+  token_params:
+    grant_type: client_credentials
+  token_url: https://api.availity.com/v1/token
+bigchange:
+  auth_mode: OAUTH2_CC
+  categories:
+  - productivity
+  connection_config:
+    customer_id:
+      description: Your numeric BigChange Customer ID.
+      example: '5690'
+      pattern: ^[0-9]+$
+      title: BigChange Customer ID
+      type: string
+  credentials:
+    client_id:
+      description: Your BigChange Partner API client_id.
+      title: Client ID
+      type: string
+    client_secret:
+      description: Your BigChange Partner API client_secret.
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: BigChange
+  proxy:
+    base_url: https://api.bigchange.com
+    headers:
+      customer-id: ${connectionConfig.customer_id}
+  token_params:
+    grant_type: client_credentials
+  token_url: https://api.bigchange.com/auth/tokens
+bliro:
+  auth_mode: OAUTH2_CC
+  body_format: json
+  categories:
+  - communication
+  credentials:
+    client_id:
+      description: Your Bliro client application Client ID.
+      title: Client ID
+      type: string
+    client_secret:
+      description: Your Bliro client application Client Secret.
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: Bliro
+  proxy:
+    base_url: https://api.bliro.io
+  token_params:
+    audience: https://api.bliro.io
+    grant_type: client_credentials
+  token_url: https://accounts.bliro.io/oauth/token
+brightcrowd:
+  auth_mode: OAUTH2_CC
+  categories:
+  - social
+  display_name: BrightCrowd
+  proxy:
+    base_url: https://api.brightcrowd.com/partner
+    paginate:
+      cursor_name_in_request: pageToken
+      cursor_path_in_response: nextPageToken
+      type: cursor
+  token_params:
+    grant_type: client_credentials
+  token_request_auth_method: basic
+  token_url: https://bcb-staging.auth.us-east-1.amazoncognito.com/oauth2/token
+certn-partner:
+  auth_mode: OAUTH2_CC
+  categories:
+  - legal
+  display_name: Certn Partner
+  proxy:
+    base_url: https://api.certn.co
+    headers:
+      authorization: Bearer ${apiKey}
+    paginate:
+      limit_name_in_request: limit
+      offset_name_in_request: page
+      response_path: data
+      type: offset
+    verification:
+      endpoints:
+      - /api/v2/teams
+      headers:
+        content-type: application/json
+      method: GET
+chartboost:
+  auth_mode: OAUTH2_CC
+  body_format: json
+  categories:
+  - marketing
+  - gaming
+  credentials:
+    client_id:
+      description: Your Chartboost API client_id.
+      doc_section: '#step-1-obtain-your-api-credentials'
+      example: a3f8c1d9b2e47a5c6f0b8d1e3a9c2f
+      pattern: ^[a-f0-9]+$
+      title: Client ID
+      type: string
+    client_secret:
+      description: Your Chartboost API client_secret.
+      doc_section: '#step-1-obtain-your-api-credentials'
+      example: a1b2c3d4e5f6********************************************9c8d7e6f
+      pattern: ^[a-f0-9]+$
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: Chartboost
+  docs: https://nango.dev/docs/api-integrations/chartboost
+  docs_connect: https://nango.dev/docs/api-integrations/chartboost/connect
+  proxy:
+    base_url: https://api.chartboost.com
+  token_params:
+    audience: https://public.api.gateway.chartboost.com
+    grant_type: client_credentials
+  token_url: https://api.chartboost.com/v5/oauth/token
+checkout-com:
+  auth_mode: OAUTH2_CC
+  categories:
+  - payment
+  display_name: Checkout.com
+  proxy:
+    base_url: https://api.checkout.com
+    headers:
+      accept: application/json
+      content-type: application/json
+  token_params:
+    grant_type: client_credentials
+  token_request_auth_method: basic
+  token_url: https://access.checkout.com/connect/token
+checkout-com-sandbox:
+  auth_mode: OAUTH2_CC
+  categories:
+  - payment
+  display_name: Checkout.com (Sandbox)
+  proxy:
+    base_url: https://api.sandbox.checkout.com
+    headers:
+      accept: application/json
+      content-type: application/json
+  token_params:
+    grant_type: client_credentials
+  token_request_auth_method: basic
+  token_url: https://access.sandbox.checkout.com/connect/token
+cloudentity:
+  auth_mode: OAUTH2_CC
+  categories:
+  - iam
+  connection_config:
+    regionID:
+      description: The region ID of your Cloudentity account
+      title: Region ID
+      type: string
+    tenantID:
+      description: The tenant ID of your Cloudentity account
+      title: Tenant ID
+      type: string
+    workspaceID:
+      description: The workspace ID of your Cloudentity account
+      title: Workspace ID
+      type: string
+  display_name: Cloudentity
+  proxy:
+    base_url: https://${connectionConfig.tenantID}.${connectionConfig.regionID}.authz.cloudentity.io/${connectionConfig.tenantID}/${connectionConfig.workspaceID}
+  scope_separator: ' '
+  token_params:
+    grant_type: client_credentials
+  token_url: https://${connectionConfig.tenantID}.${connectionConfig.regionID}.authz.cloudentity.io/${connectionConfig.tenantID}/${connectionConfig.workspaceID}/oauth2/token
+commercetools:
+  auth_mode: OAUTH2_CC
+  categories:
+  - e-commerce
+  connection_config:
+    cloudProvider:
+      description: Cloud provider used to host your Commercetools project (e.g., 'gcp' or 'aws').
+      enum:
+      - gcp
+      - aws
+      title: Cloud Provider
+      type: string
+    projectKey:
+      description: The project key of your Commercetools account
+      example: demo-project-slug
+      pattern: ^[a-zA-Z0-9-_]+$
+      title: Project Key
+      type: string
+    region:
+      description: The region of your Commercetools account. Use the full region identifier (e.g., 'us-central1' for GCP or 'us-east-2' for AWS).
+      example: us-central1
+      pattern: ^[a-z]+-[a-z0-9-]+$
+      title: Region
+      type: string
+  display_name: Commercetools
+  proxy:
+    base_url: https://api.${connectionConfig.region}.${connectionConfig.cloudProvider}.commercetools.com/${connectionConfig.projectKey}
+    headers:
+      authorization: Bearer ${accessToken}
+  scope_separator: ' '
+  token_params:
+    grant_type: client_credentials
+  token_request_auth_method: basic
+  token_url: https://auth.${connectionConfig.region}.${connectionConfig.cloudProvider}.commercetools.com/oauth/token
+conductorone:
+  auth_mode: OAUTH2_CC
+  categories:
+  - productivity
+  connection_config:
+    hostname:
+      description: The hostname extracted from your Client ID
+      example: acme.conductor.one
+      format: hostname
+      order: 1
+      title: Hostname
+      type: string
+  credentials:
+    client_id:
+      description: Your ConductorOne Client ID
+      example: strange-hydra-68836@acme.conductor.one/pcc
+      title: Client ID
+      type: string
+    client_secret:
+      description: Your ConductorOne Client Secret
+      example: secret-token:conductorone.com:v1:eyJrdHkiOiJPS1AiLCJjcnYiOiJFZDI1NTE5IiwieCI6IkMySEx5Y0d6eUhfZDQwcjJvejZoNkpqdndvRVFBZ0FTRVc2eDB6emh6Y2MiLCJkIjoiLTgzVkxXUVUtZVhQY0ZCWVhDb2NpU29XVmhrYnRXUm9zdkZUZ3JqcXNVbyJ9
+      title: Client Secret
+      type: string
+  display_name: ConductorOne
+  proxy:
+    base_url: https://${connectionConfig.hostname}/api
+  token_params:
+    grant_type: client_credentials
+  token_url: https://${connectionConfig.hostname}/auth/v1/token
+connectwise-rmm:
+  auth_mode: OAUTH2_CC
+  body_format: json
+  categories:
+  - support
+  connection_config:
+    subdomain:
+      description: The ConnectWise RMM OpenAPI subdomain for your region.
+      enum:
+      - itsupport247.net
+      - euplatform.connectwise.com
+      - auplatform.connectwise.com
+      title: API Subdomain
+      type: string
+  credentials:
+    client_id:
+      description: Your ConnectWise RMM OAuth client ID
+      example: '6500023'
+      pattern: ^[A-Za-z0-9._-]+$
+      title: Client ID
+      type: string
+    client_secret:
+      description: Your ConnectWise RMM OAuth client secret
+      pattern: ^[A-Za-z0-9._~+/=-]{8,}$
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: ConnectWise RMM
+  proxy:
+    base_url: https://openapi.service.${connectionConfig.subdomain}
+  scope_separator: ' '
+  token_params:
+    grant_type: client_credentials
+  token_url: https://openapi.service.${connectionConfig.subdomain}/v1/token
+coupa-compass:
+  auth_mode: OAUTH2_CC
+  categories:
+  - payment
+  - invoicing
+  connection_config:
+    instanceDomain:
+      description: The domain of your Coupa Compass account
+      format: hostname
+      prefix: https://
+      title: Instance Domain
+      type: string
+  display_name: Coupa Compass
+  proxy:
+    base_url: https://${connectionConfig.instanceDomain}
+  scope_separator: ' '
+  token_params:
+    grant_type: client_credentials
+  token_url: https://${connectionConfig.instanceDomain}/oauth2/token
+crowdstrike:
+  auth_mode: OAUTH2_CC
+  categories:
+  - dev-tools
+  connection_config:
+    baseUrl:
+      description: The CrowdStrike API base URL for your cloud environment
+      example: api.crowdstrike.com
+      order: 1
+      pattern: ^api(?:\.[a-z0-9-]+)*\.crowdstrike\.(?:com|mil)$
+      prefix: https://
+      title: Base URL
+      type: string
+  display_name: CrowdStrike
+  proxy:
+    base_url: https://${connectionConfig.baseUrl}
+    retry:
+      after:
+      - x-ratelimit-retryafter
+  token_params:
+    grant_type: client_credentials
+  token_url: https://${connectionConfig.baseUrl}/oauth2/token
+databricks-account:
+  auth_mode: OAUTH2_CC
+  categories:
+  - analytics
+  connection_config:
+    accountId:
+      description: The ID to your account
+      example: 123e4567-e89b-12d3-a456-426614174000
+      format: uuid
+      title: Account ID
+      type: string
+  display_name: Databricks (Account Level)
+  proxy:
+    base_url: https://accounts.cloud.databricks.com/api/2.0/accounts/${connectionConfig.accountId}
+  token_params:
+    grant_type: client_credentials
+  token_url: https://accounts.cloud.databricks.com/oidc/accounts/${connectionConfig.accountId}/v1/token
+databricks-workspace:
+  auth_mode: OAUTH2_CC
+  categories:
+  - analytics
+  connection_config:
+    databricksInstance:
+      description: The instance to your databricks deployment
+      example: dbc-a1b2345c-d6e7.cloud.databricks.com
+      pattern: ^[a-z0-9_-]+(\.[a-z0-9_-]+)*$
+      title: Databricks Instance
+      type: string
+  display_name: Databricks (Workspace Level)
+  proxy:
+    base_url: https://${connectionConfig.databricksInstance}/api/2.0/
+  token_params:
+    grant_type: client_credentials
+  token_url: https://${connectionConfig.databricksInstance}/oidc/v1/token
+domo:
+  auth_mode: OAUTH2_CC
+  categories:
+  - productivity
+  - other
+  credentials:
+    client_id:
+      description: The Client ID of your API client
+      example: 123e4567-e89b-12d3-a456-426614174000
+      format: uuid
+      title: Your Client ID
+      type: string
+    client_secret:
+      description: The Client secret of your API client
+      example: a14e6b49******************************768ece
+      pattern: ^[a-fA-F0-9]{64}$
+      secret: true
+      title: Your Client Secret
+      type: string
+  display_name: Domo
+  proxy:
+    base_url: https://api.domo.com
+  scope_separator: ','
+  token_params:
+    grant_type: client_credentials
+  token_request_auth_method: basic
+  token_url: https://api.domo.com/oauth/token
+dope-security:
+  auth_mode: OAUTH2_CC
+  body_format: json
+  categories:
+  - dev-tools
+  credentials:
+    client_id:
+      description: Your Flightdeck API Client ID from the dope console.
+      example: c7d53292******************b560e2
+      pattern: ^[a-f0-9]{32}$
+      title: Client ID
+      type: string
+    client_secret:
+      description: Your Flightdeck API Client Secret from the dope console.
+      example: 7SBGztUm*****************************jfYlMM
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: dope.security
+  proxy:
+    base_url: https://api.flightdeck.dope.security
+  token_params:
+    grant_type: client_credentials
+  token_url: https://api.flightdeck.dope.security/v1/partner/oauth/token
+dynatrace-oauth:
+  auth_mode: OAUTH2_CC
+  categories:
+  - analytics
+  - dev-tools
+  connection_config:
+    accountUuid:
+      description: Your Dynatrace account UUID.
+      example: 9a8b7c6d-1234-5678-abcd-ef0123456789
+      format: uuid
+      order: 1
+      title: Account UUID
+      type: string
+  credentials:
+    client_id:
+      description: Your Dynatrace OAuth client ID.
+      example: dt0s03.****************
+      title: Client ID
+      type: string
+    client_secret:
+      description: Your Dynatrace OAuth client secret.
+      example: dt0s03.5NJ******.GYWJPBF******************
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: Dynatrace (OAuth)
+  proxy:
+    base_url: https://api.dynatrace.com
+  scope_separator: ' '
+  token_params:
+    grant_type: client_credentials
+    resource: urn:dtaccount:${connectionConfig.accountUuid}
+  token_url: https://sso.dynatrace.com/sso/oauth2/token
+emarsys-oauth:
+  auth_mode: OAUTH2_CC
+  categories:
+  - marketing
+  display_name: Emarsys (OAuth)
+  proxy:
+    base_url: https://api.emarsys.net
+    retry:
+      at:
+      - x-ratelimit-reset
+  token_params:
+    grant_type: client_credentials
+  token_request_auth_method: basic
+  token_url: https://auth.emarsys.net/oauth2/token
+firefish:
+  auth_mode: OAUTH2_CC
+  categories:
+  - crm
+  display_name: Firefish
+  proxy:
+    base_url: https://api.firefishsoftware.com
+  scope_separator: ' '
+  token_params:
+    grant_type: client_credentials
+  token_url: https://api.firefishsoftware.com/authorization/token
+fiserv:
+  auth_mode: OAUTH2_CC
+  categories:
+  - banking
+  - payment
+  connection_config:
+    hostUrl:
+      description: The domain of your Fiserv account
+      format: hostname
+      prefix: https://
+      title: Domain
+      type: string
+  display_name: Fiserv (OAuth)
+  expires_in_unit: milliseconds
+  proxy:
+    base_url: https://${connectionConfig.hostUrl}
+  token_params:
+    grant_type: client_credentials
+  token_request_auth_method: basic
+  token_url: https://cert.api.fiservapps.com/fts-apim/oauth2/v2
+gainsight-cc:
+  auth_mode: OAUTH2_CC
+  categories:
+  - support
+  - crm
+  connection_config:
+    region:
+      description: The region of your Gainsight account
+      example: eu-west-1
+      pattern: ^[a-z]{2}-[a-z]+-[1-9]$
+      title: Region
+      type: string
+  display_name: Gainsight CC
+  proxy:
+    base_url: https://api2-${connectionConfig.region}.insided.com
+  scope_separator: ' '
+  token_params:
+    grant_type: client_credentials
+  token_url: https://api2-${connectionConfig.region}.insided.com/oauth2/token
+gebruder-weiss:
+  auth_mode: OAUTH2_CC
+  authorization_url: https://my.api.gw-world.com/authorize
+  categories:
+  - erp
+  display_name: Gebrüder Weiss
+  proxy:
+    base_url: https://my.api.gw-world.com
+    headers:
+      accept-language: en-US
+  scope_separator: ' '
+  token_params:
+    grant_type: client_credentials
+  token_request_auth_method: basic
+  token_url: https://my.api.gw-world.com/token
+grammarly:
+  auth_mode: OAUTH2_CC
+  categories:
+  - productivity
+  display_name: Grammarly
+  proxy:
+    base_url: https://api.grammarly.com/ecosystem/api
+    verification:
+      endpoints:
+      - /v2/analytics/users
+      headers:
+        content-type: application/json
+      method: GET
+  scope_separator: ','
+  token_params:
+    grant_type: client_credentials
+  token_url: https://auth.grammarly.com/v4/api/oauth2/token
+greenhouse-harvest-oauth2-cc:
+  auth_mode: OAUTH2_CC
+  body_format: json
+  categories:
+  - ats
+  connection_config:
+    sub:
+      description: The optional ID of the user to act on-behalf-of.
+      example: '4212952002'
+      optional: true
+      pattern: ^[0-9]+$
+      title: User ID
+      type: string
+  credentials:
+    client_id:
+      description: Your Greenhouse client ID for authentication
+      title: Client ID
+      type: string
+    client_secret:
+      description: Your Greenhouse client secret for authentication
+      title: Client Secret
+      type: string
+  display_name: Greenhouse Harvest (Client Credentials V3)
+  proxy:
+    base_url: https://harvest.greenhouse.io
+    retry:
+      at:
+      - x-ratelimit-reset
+  token_params:
+    sub: ${connectionConfig.sub}
+  token_request_auth_method: basic
+  token_url: https://auth.greenhouse.io/token?grant_type=client_credentials
+halo-psa:
+  auth_mode: OAUTH2_CC
+  categories:
+  - support
+  - ticketing
+  connection_config:
+    hostname:
+      description: Your Halo PSA hostname.
+      example: example.halopsa.com
+      format: hostname
+      order: 1
+      prefix: https://
+      title: Hostname
+      type: string
+  credentials:
+    client_id:
+      description: Your Halo PSA API application Client ID
+      title: Client ID
+      type: string
+    client_secret:
+      description: Your Halo PSA API application Client Secret
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: Halo PSA
+  proxy:
+    base_url: https://${connectionConfig.hostname}/api
+  scope_separator: ' '
+  token_params:
+    grant_type: client_credentials
+  token_request_auth_method: basic
+  token_url: https://${connectionConfig.hostname}/auth/token
+immybot:
+  auth_mode: OAUTH2_CC
+  body_format: form
+  categories:
+  - dev-tools
+  - support
+  connection_config:
+    instanceSubdomain:
+      description: The first segment of your ImmyBot instance URL.
+      example: acme
+      order: 2
+      pattern: ^[a-z0-9][a-z0-9-]*[a-z0-9]$
+      prefix: https://
+      suffix: .immy.bot
+      title: ImmyBot Instance Subdomain
+      type: string
+    tenantId:
+      description: The Azure tenant ID that owns the ImmyBot app registration.
+      example: 00000000-0000-0000-0000-000000000000
+      format: uuid
+      order: 1
+      title: Microsoft Entra Tenant ID
+      type: string
+  credentials:
+    client_id:
+      description: The Application client ID from the Microsoft Entra app registration.
+      example: 00000000-0000-0000-0000-000000000000
+      format: uuid
+      title: Client ID
+      type: string
+    client_secret:
+      description: The client secret value from the Microsoft Entra app registration.
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: ImmyBot
+  proxy:
+    base_url: https://${connectionConfig.instanceSubdomain}.immy.bot
+    headers:
+      accept: application/json
+  token_params:
+    grant_type: client_credentials
+    scope: https://${connectionConfig.instanceSubdomain}.immy.bot/.default
+  token_url: https://login.microsoftonline.com/${connectionConfig.tenantId}/oauth2/v2.0/token
+ingenious-build:
+  auth_mode: OAUTH2_CC
+  body_format: json
+  categories:
+  - erp
+  - accounting
+  connection_config:
+    subdomain:
+      description: The subdomain of your INGENIOUS.BUILD account
+      example: domain
+      order: 1
+      pattern: ^[a-z0-9_-]+$
+      prefix: https://
+      suffix: .ingenious.build
+      title: INGENIOUS.BUILD Domain
+      type: string
+  credentials:
+    client_id:
+      description: The Client ID of your OAuth Application.
+      example: 6a6b88**************719a
+      pattern: ^[a-f0-9]{24}$
+      title: Client ID
+      type: string
+    client_secret:
+      description: The Client Secret of your OAuth Application.
+      example: Grt1********************************tL5Z
+      pattern: ^[A-Za-z0-9]{40}$
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: INGENIOUS.BUILD
+  proxy:
+    base_url: https://${connectionConfig.subdomain}.ingenious.build
+  token_params:
+    grant_type: client_credentials
+  token_url: https://${connectionConfig.subdomain}.ingenious.build/api/v2/pub/oauth/token
+ironclad-cc:
+  auth_mode: OAUTH2_CC
+  categories:
+  - legal
+  connection_config:
+    subdomain:
+      description: Your Ironclad environment subdomain.
+      enum:
+      - na1
+      - demo
+      - eu1
+      order: 1
+      title: Subdomain
+      type: string
+    userEmail:
+      description: The email of the Ironclad user on whose behalf API requests are made.
+      example: user@yourcompany.com
+      format: email
+      order: 2
+      title: User Email
+      type: string
+  display_name: Ironclad (Client Credentials)
+  proxy:
+    base_url: https://${connectionConfig.subdomain}.ironcladapp.com
+    headers:
+      x-as-user-email: ${connectionConfig.userEmail}
+  scope_separator: ' '
+  token_params:
+    grant_type: client_credentials
+  token_url: https://${connectionConfig.subdomain}.ironcladapp.com/oauth/token
+jamf:
+  auth_mode: OAUTH2_CC
+  categories:
+  - other
+  connection_config:
+    instance:
+      description: Your Jamf Pro instance
+      example: example
+      order: 1
+      prefix: https://
+      suffix: .jamfcloud.com
+      title: Jamf Pro Instance
+      type: string
+  display_name: Jamf Pro (Client Credentials)
+  proxy:
+    base_url: https://${connectionConfig.instance}.jamfcloud.com
+  scope_separator: ' '
+  token_params:
+    grant_type: client_credentials
+  token_url: https://${connectionConfig.instance}.jamfcloud.com/api/v1/oauth/token
+kno-commerce:
+  auth_mode: OAUTH2_CC
+  body_format: query
+  categories:
+  - e-commerce
+  credentials:
+    client_id:
+      description: Your Kno Commerce API client ID
+      title: Client ID
+      type: string
+    client_secret:
+      description: Your Kno Commerce API client secret
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: Kno Commerce
+  proxy:
+    base_url: https://app-api.knocommerce.com
+  token_params:
+    grant_type: client_credentials
+  token_request_auth_method: basic
+  token_url: https://app-api.knocommerce.com/api/oauth2/token
+listrak:
+  auth_mode: OAUTH2_CC
+  categories:
+  - marketing
+  credentials:
+    client_id:
+      description: Your Listrak API Client ID
+      title: Client ID
+      type: string
+    client_secret:
+      description: Your Listrak API Client Secret
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: Listrak
+  proxy:
+    base_url: https://api.listrak.com/email
+  token_params:
+    grant_type: client_credentials
+  token_url: https://auth.listrak.com/oauth2/token
+malwarebytes:
+  auth_mode: OAUTH2_CC
+  categories:
+  - other
+  connection_config:
+    accountId:
+      description: Your Nebula account id
+      example: 9256034b-7967-4253-a5d9-260663e4fa4f
+      order: 1
+      pattern: '[\da-fA-F]{8}-?[\da-fA-F]{4}-?[\da-fA-F]{4}-?[\da-fA-F]{4}-?[\da-fA-F]{12}$'
+      title: Account Id
+      type: string
+  display_name: Malwarebytes
+  proxy:
+    base_url: https://api.malwarebytes.com
+    headers:
+      accountid: ${connectionConfig.accountId}
+  scope_separator: ' '
+  token_params:
+    grant_type: client_credentials
+  token_request_auth_method: basic
+  token_url: https://api.malwarebytes.com/oauth2/token
+marketo:
+  auth_mode: OAUTH2_CC
+  categories:
+  - marketing
+  connection_config:
+    endpointURL:
+      description: The domain of your Marketo account
+      example: xxx.mktorest.com
+      format: hostname
+      order: 1
+      prefix: https://
+      suffix: /
+      title: Domain
+      type: string
+    identityURL:
+      description: The identity URL of your Marketo account
+      example: xxx.mktorest.com
+      format: hostname
+      order: 2
+      prefix: https://
+      suffix: /identity/oauth/token
+      title: Identity URL
+      type: string
+  display_name: Marketo
+  proxy:
+    base_url: https://${connectionConfig.endpointURL}
+  token_params:
+    grant_type: client_credentials
+  token_url: https://${connectionConfig.identityURL}/identity/oauth/token
+medallia:
+  auth_mode: OAUTH2_CC
+  categories:
+  - crm
+  - support
+  - surveys
+  connection_config:
+    apiHostUrl:
+      description: The base API endpoint (gateway URL) for your Medallia account
+      example: fo-acme.apis.medallia.eu
+      format: hostname
+      order: 3
+      prefix: https://
+      title: API Host URL
+      type: string
+    gatewayUrl:
+      default_value: ''
+      description: ''
+      hidden: true
+      title: ''
+      type: string
+    reportingInstance:
+      description: The base domain for your Medallia instance
+      example: instance.medallia.com
+      format: hostname
+      order: 1
+      prefix: https://
+      suffix: /oauth
+      title: Domain
+      type: string
+    tenantName:
+      description: The tenant name of your Medallia account
+      example: acme
+      order: 2
+      title: Tenant Name
+      type: string
+  display_name: Medallia
+  proxy:
+    base_url: https://${connectionConfig.apiHostUrl} || https://${connectionConfig.gatewayUrl}.apis.medallia.com
+    retry:
+      after:
+      - x-ratelimit-reset
+  token_params:
+    grant_type: client_credentials
+  token_request_auth_method: basic
+  token_url: https://${connectionConfig.reportingInstance}/oauth/${connectionConfig.tenantName}/token
+microsoft-business-central:
+  auth_mode: OAUTH2_CC
+  categories:
+  - erp
+  connection_config:
+    environmentName:
+      description: The environment name to your organization
+      example: production
+      order: 2
+      pattern: ^[a-zA-Z0-9-_]+$
+      title: Enrivonment Name
+      type: string
+    tenantId:
+      description: The unique identifier for your organization that uses Microsoft services
+      example: a1b2c3d4-e5f6-47a8-9b0c-d1234567890f
+      format: uuid
+      order: 1
+      title: Tenant ID
+      type: string
+  display_name: Microsoft Business Central
+  proxy:
+    base_url: https://api.businesscentral.dynamics.com/v2.0/${connectionConfig.tenantId}/${connectionConfig.environmentName}
+  token_params:
+    grant_type: client_credentials
+  token_url: https://login.microsoftonline.com/${connectionConfig.tenantId}/oauth2/v2.0/token
+microsoft-dynamics-365-finance-and-operations-cc:
+  auth_mode: OAUTH2_CC
+  categories:
+  - erp
+  connection_config:
+    environmentUrl:
+      description: The domain of your Finance and Operations environment.
+      example: mycompany.operations.dynamics.com
+      format: hostname
+      order: 2
+      prefix: https://
+      title: Environment URL
+      type: string
+    tenantId:
+      description: The unique identifier for your organization that uses the Finance and Operations Microsoft services.
+      example: a1b2c3d4-e5f6-47a8-9b0c-d1234567890f
+      format: uuid
+      order: 1
+      title: Tenant ID
+      type: string
+  display_name: Microsoft Dynamics 365 Finance and Operations (Client Credentials)
+  proxy:
+    base_url: https://${connectionConfig.environmentUrl}
+  token_params:
+    grant_type: client_credentials
+    scope: https://${connectionConfig.environmentUrl}/.default
+  token_url: https://login.microsoftonline.com/${connectionConfig.tenantId}/oauth2/v2.0/token
+microsoft-excel-oauth2-cc:
+  alias: microsoft-oauth2-cc
+  categories:
+  - productivity
+  - analytics
+  display_name: Microsoft Excel (Client Credentials)
+  webhook_routing_script: ''
+microsoft-intune:
+  alias: microsoft-oauth2-cc
+  categories:
+  - dev-tools
+  display_name: Microsoft Intune
+microsoft-oauth2-cc:
+  auth_mode: OAUTH2_CC
+  categories:
+  - communication
+  - dev-tools
+  - productivity
+  connection_config:
+    tenantId:
+      description: The unique identifier for your organization that uses Microsoft services
+      example: a1b2c3d4-e5f6-47a8-9b0c-d1234567890f
+      format: uuid
+      order: 1
+      title: Tenant ID
+      type: string
+  display_name: Microsoft (Client Credentials)
+  proxy:
+    base_url: https://graph.microsoft.com
+  token_params:
+    grant_type: client_credentials
+  token_url: https://login.microsoftonline.com/${connectionConfig.tenantId}/oauth2/v2.0/token
+  webhook_allowed_query_params:
+  - validationToken
+  webhook_routing_script: microsoftClientCredentialsWebhookRouting
+  webhook_user_defined_secret: true
+microsoft-power-bi-oauth2-cc:
+  alias: microsoft-oauth2-cc
+  categories:
+  - productivity
+  display_name: Microsoft Power BI (Client Credentials)
+  proxy:
+    base_url: https://api.powerbi.com
+  webhook_routing_script: ''
+microsoft-powerpoint-oauth2-cc:
+  alias: microsoft-oauth2-cc
+  categories:
+  - productivity
+  display_name: Microsoft PowerPoint (Client Credentials)
+  webhook_routing_script: ''
+microsoft-word-oauth2-cc:
+  alias: microsoft-oauth2-cc
+  categories:
+  - productivity
+  display_name: Microsoft Word (Client Credentials)
+  webhook_routing_script: ''
+mimecast:
+  auth_mode: OAUTH2_CC
+  body_format: form
+  categories:
+  - communication
+  display_name: Mimecast
+  proxy:
+    base_url: https://api.services.mimecast.com
+  token_params:
+    grant_type: client_credentials
+  token_url: https://api.services.mimecast.com/oauth/token
+nerdio:
+  auth_mode: OAUTH2_CC
+  categories:
+  - other
+  connection_config:
+    hostname:
+      description: The hostname of your Nerdio Manager instance
+      example: web-admin-portal-3e3a4zfp4peo4.azurewebsites.net
+      format: hostname
+      order: 1
+      title: Nerdio Instance URL
+      type: string
+    scope:
+      description: The Application ID URI scope
+      example: api://g0cb288e-ff16-1861-9393-50219a19453c/.default
+      order: 3
+      title: API Scope
+      type: string
+    tenantId:
+      description: Your Azure Active Directory Tenant ID
+      example: a1b2c3d4-e5f6-47a8-9b0c-d1234567890f
+      format: uuid
+      order: 2
+      title: Azure Tenant ID
+      type: string
+  credentials:
+    client_id:
+      description: The Application (client) ID from your Azure App Registration
+      example: a1b2c3d4-e5f6-47a8-9b0c-d1234567890f
+      format: uuid
+      title: Client ID
+      type: string
+    client_secret:
+      description: The client secret from your Azure App Registration
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: Nerdio
+  proxy:
+    base_url: https://${connectionConfig.hostname}/rest-api
+  token_params:
+    grant_type: client_credentials
+    scope: ${connectionConfig.scope}
+  token_url: https://login.microsoftonline.com/${connectionConfig.tenantId}/oauth2/v2.0/token
+nexthink:
+  auth_mode: OAUTH2_CC
+  categories:
+  - analytics
+  connection_config:
+    instance:
+      description: The name of your Nexthink instance.
+      example: acme
+      order: 1
+      title: Instance Name
+      type: string
+    region:
+      description: Your Nexthink region
+      example: eu
+      order: 2
+      pattern: ^(us|eu|pac|meta)$
+      title: Region
+      type: string
+  credentials:
+    client_id:
+      description: Your Nexthink API Client ID.
+      title: Client ID
+      type: string
+    client_secret:
+      description: Your Nexthink API Client Secret.
+      secret: true
+      title: Client Secret
+      type: string
+  default_scopes:
+  - service:integration
+  display_name: Nexthink
+  proxy:
+    base_url: https://${connectionConfig.instance}.api.${connectionConfig.region}.nexthink.cloud
+  token_params:
+    grant_type: client_credentials
+  token_request_auth_method: basic
+  token_url: https://${connectionConfig.instance}-login.${connectionConfig.region}.nexthink.cloud/oauth2/default/v1/token
+ninjaone-rmm:
+  auth_mode: OAUTH2_CC
+  categories:
+  - support
+  connection_config:
+    instance:
+      description: The hostname of the NinjaOne instance hosting your tenant.
+      enum:
+      - app.ninjarmm.com
+      - us2.ninjarmm.com
+      - eu.ninjarmm.com
+      - ca.ninjarmm.com
+      - oc.ninjarmm.com
+      format: hostname
+      order: 1
+      title: Instance
+      type: string
+  credentials:
+    client_id:
+      description: Your NinjaOne RMM OAuth Client ID
+      example: KTmhkNf1_dZZVPmIQTK_lH2DCNJ
+      pattern: ^[A-Za-z0-9_/+-]{10,}$
+      title: Client ID
+      type: string
+    client_secret:
+      description: Your NinjaOne RMM OAuth Client Secret
+      example: Ilfs4crKIU1t-5bde-2OMBsB9v3LGmfg82XJO7_q9TtgTnfNRmK
+      pattern: ^[A-Za-z0-9_/+-]{10,}$
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: NinjaOne RMM
+  proxy:
+    base_url: https://${connectionConfig.instance} || https://app.ninjarmm.com
+  scope_separator: ' '
+  token_params:
+    grant_type: client_credentials
+  token_url: https://${connectionConfig.instance}/ws/oauth/token || https://app.ninjarmm.com/ws/oauth/token
+okta-cc:
+  auth_mode: OAUTH2_CC
+  categories:
+  - dev-tools
+  - iam
+  connection_config:
+    hostname:
+      description: The full hostname of your Okta account
+      example: dev-12345678.okta.com
+      format: hostname
+      prefix: https://
+      title: Okta Domain
+      type: string
+    oauth_scopes:
+      description: Space-separated list of Okta Management API scopes (e.g. okta.users.read okta.users.manage). Must be granted under Okta API Scopes on your application.
+      example: okta.users.read okta.users.manage okta.groups.read
+      title: Scopes
+      type: string
+    subdomain:
+      description: ''
+      hidden: true
+      title: ''
+      type: string
+  credentials:
+    client_id:
+      description: The Client ID of your Okta API Services application
+      title: Client ID
+      type: string
+    client_private_key:
+      description: The private JWK JSON (including kid, kty, n, e, d, p, q, dp, dq, qi) whose public key is registered in your Okta API Services application
+      secret: true
+      title: Private Key (JWK)
+      type: string
+  display_name: Okta (Client Credentials)
+  proxy:
+    base_url: https://${connectionConfig.hostname} || https://${connectionConfig.subdomain}.okta.com
+    paginate:
+      limit_name_in_request: limit
+      link_rel_in_response_header: next
+      type: link
+    retry:
+      at:
+      - x-rate-limit-reset
+  token_params:
+    grant_type: client_credentials
+  token_request_auth_method: private_key_jwt
+  token_url: https://${connectionConfig.hostname}/oauth2/v1/token || https://${connectionConfig.subdomain}.okta.com/oauth2/v1/token
+onelogin:
+  auth_mode: OAUTH2_CC
+  categories:
+  - dev-tools
+  - iam
+  connection_config:
+    subdomain:
+      description: Your OneLogin subdomain
+      example: acme
+      order: 1
+      prefix: https://
+      suffix: .onelogin.com
+      title: Subdomain
+      type: string
+  display_name: OneLogin
+  pre_connection_deletion_script: oneloginPreConnectionDeletion
+  proxy:
+    base_url: https://${connectionConfig.subdomain}.onelogin.com
+  token_params:
+    grant_type: client_credentials
+  token_url: https://${connectionConfig.subdomain}.onelogin.com/auth/oauth2/v2/token
+optum-real:
+  auth_mode: OAUTH2_CC
+  categories:
+  - other
+  connection_config:
+    domain:
+      description: The Optum Real API environment to connect to.
+      enum:
+      - sandbox-apigw.optum.com
+      - apigw.optum.com
+      format: hostname
+      order: 1
+      title: Environment
+      type: string
+  credentials:
+    client_id:
+      description: The Client ID issued via the Optum AI Marketplace for this environment.
+      example: f2aba07d-270c-42ba-8811-01af5f63d458
+      format: uuid
+      title: Client ID
+      type: string
+    client_secret:
+      description: The Client Secret issued via the Optum AI Marketplace for this environment.
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: Optum Real
+  proxy:
+    base_url: https://${connectionConfig.domain}
+  token_params:
+    grant_type: client_credentials
+  token_url: https://${connectionConfig.domain}/apip/auth/sntl/v1/token
+oracle-cloud-identity:
+  auth_mode: OAUTH2_CC
+  categories:
+  - dev-tools
+  - iam
+  connection_config:
+    serviceInstance:
+      description: Your Oracle Identity Cloud Service instance identifier
+      example: idcs-1234567890abcdef1234567890abcdef
+      order: 1
+      pattern: ^idcs-[a-f0-9]{32}$
+      prefix: https://
+      suffix: .identity.oraclecloud.com
+      title: IDCS Service Instance
+      type: string
+  display_name: Oracle Cloud Identity
+  proxy:
+    base_url: https://${connectionConfig.serviceInstance}.identity.oraclecloud.com
+  scope_separator: ' '
+  token_params:
+    grant_type: client_credentials
+  token_request_auth_method: basic
+  token_url: https://${connectionConfig.serviceInstance}.identity.oraclecloud.com/oauth2/v1/token
+ory:
+  auth_mode: OAUTH2_CC
+  categories:
+  - iam
+  connection_config:
+    projectSlug:
+      description: The project slug of your Ory project
+      title: Project Slug
+      type: string
+  display_name: Ory
+  proxy:
+    base_url: https://${connectionConfig.projectSlug}.projects.oryapis.com
+  scope_separator: ' '
+  token_params:
+    grant_type: client_credentials
+  token_url: https://${connectionConfig.projectSlug}.projects.oryapis.com/oauth2/token
+pax8:
+  auth_mode: OAUTH2_CC
+  body_format: json
+  categories:
+  - other
+  connection_config:
+    audience:
+      automated: true
+      description: ''
+      title: ''
+      type: string
+  display_name: Pax8
+  proxy:
+    base_url: https://api.pax8.com
+  token_params:
+    audience: ${connectionConfig.audience} || https://api.pax8.com
+    grant_type: client_credentials
+  token_url: https://api.pax8.com/v1/token
+paychex:
+  auth_mode: OAUTH2_CC
+  categories:
+  - hr
+  credentials:
+    client_id:
+      description: A unique identifier for your application on Paychex
+      title: API Key
+      type: string
+    client_secret:
+      description: A confidential key used to authenticate the identity of application (client)
+      title: Client Secret
+      type: string
+  display_name: Paychex
+  proxy:
+    base_url: https://api.paychex.com
+  token_params:
+    grant_type: client_credentials
+  token_url: https://api.paychex.com/auth/oauth/v2/token
+paylocity:
+  auth_mode: OAUTH2_CC
+  categories:
+  - hr
+  connection_config:
+    companyId:
+      description: The company ID of your Paylocity account
+      example: S2222
+      order: 2
+      pattern: ^[a-zA-Z0-9]+$
+      title: Company ID
+      type: string
+    environment:
+      description: Your Paylocity Weblink environment.
+      enum:
+      - dc1demogw
+      - api
+      order: 1
+      title: Paylocity Environment
+      type: string
+  display_name: Paylocity (Weblink)
+  proxy:
+    base_url: https://${connectionConfig.environment}.paylocity.com
+    connection_config:
+      companyId: ${connectionConfig.companyId}
+  token_params:
+    grant_type: client_credentials
+  token_url: https://${connectionConfig.environment}.paylocity.com/IdentityServer/connect/token
+paylocity-nextgen:
+  auth_mode: OAUTH2_CC
+  categories:
+  - hr
+  connection_config:
+    companyId:
+      description: The company ID of your Paylocity account
+      example: S2222
+      order: 2
+      pattern: ^[a-zA-Z0-9]+$
+      title: Company ID
+      type: string
+    environment:
+      description: Your Paylocity NextGen environment.
+      enum:
+      - dc1prodgwext
+      - dc1demogwext
+      order: 1
+      title: Environment
+      type: string
+  display_name: Paylocity (NextGen)
+  proxy:
+    base_url: https://${connectionConfig.environment}.paylocity.com
+    connection_config:
+      companyId: ${connectionConfig.companyId}
+  token_params:
+    grant_type: client_credentials
+  token_url: https://${connectionConfig.environment}.paylocity.com/public/security/v1/token
+pendo-oauth:
+  auth_mode: OAUTH2_CC
+  body_format: form
+  categories:
+  - analytics
+  credentials:
+    client_id:
+      description: Your Pendo OAuth client ID
+      title: Client ID
+      type: string
+    client_secret:
+      description: Your Pendo OAuth client secret
+      secret: true
+      title: Client Secret
+      type: string
+  default_scopes:
+  - read:me
+  display_name: Pendo (OAuth)
+  proxy:
+    base_url: https://app.pendo.io
+  token_params:
+    grant_type: client_credentials
+  token_url: https://app.pendo.io/oauth/v1/token
+personio:
+  auth_mode: OAUTH2_CC
+  body_format: json
+  categories:
+  - hr
+  connection_config:
+    appId:
+      description: The app ID of your Personio account
+      title: App ID
+      type: string
+    partnerId:
+      description: The partner ID of your Personio account
+      title: Partner ID
+      type: string
+  display_name: Personio (v1)
+  proxy:
+    base_url: https://api.personio.de/v1
+    headers:
+      x-personio-app-id: ${connectionConfig.appId}
+      x-personio-partner-id: ${connectionConfig.partnerId}
+  token_url: https://api.personio.de/v1/auth
+personio-v2:
+  auth_mode: OAUTH2_CC
+  categories:
+  - hr
+  display_name: Personio (v2)
+  proxy:
+    base_url: https://api.personio.de/v2
+    headers:
+      content-type: application/x-www-form-urlencoded
+  scope_separator: ' '
+  token_params:
+    grant_type: client_credentials
+  token_url: https://api.personio.de/v2/auth/token
+pingboard:
+  auth_mode: OAUTH2_CC
+  categories:
+  - productivity
+  display_name: Pingboard
+  proxy:
+    base_url: https://app.pingboard.com/api/v2
+  scope_separator: ' '
+  token_params:
+    grant_type: client_credentials
+  token_url: https://app.pingboard.com/oauth/token
+pingone-cc:
+  auth_mode: OAUTH2_CC
+  categories:
+  - dev-tools
+  - iam
+  connection_config:
+    environmentId:
+      description: The environment ID for your PingOne account
+      example: f2aba07d-270c-42ba-8811-01af5f63d458
+      format: uuid
+      order: 1
+      title: Environment ID
+      type: string
+    tld:
+      description: The top level domain for your PingOne account.
+      enum:
+      - com
+      - ca
+      - eu
+      - com.au
+      - sg
+      - asia
+      order: 2
+      title: Top Level Domain
+      type: string
+  display_name: PingOne (Client Credentials)
+  proxy:
+    base_url: https://api.pingone.${connectionConfig.tld}
+    retry:
+      after:
+      - retry-after
+  scope_separator: ' '
+  token_params:
+    grant_type: client_credentials
+  token_url: https://auth.pingone.${connectionConfig.tld}/${connectionConfig.environmentId}/as/token
+pipedream-oauth2-cc:
+  auth_mode: OAUTH2_CC
+  categories:
+  - dev-tools
+  - productivity
+  display_name: Pipedream (Client Credentials)
+  proxy:
+    base_url: https://api.pipedream.com
+  token_params:
+    grant_type: client_credentials
+  token_url: https://api.pipedream.com/v1/oauth/token
+revivn:
+  auth_mode: OAUTH2_CC
+  categories:
+  - other
+  credentials:
+    client_id:
+      description: Your Revivn OAuth2 client ID.
+      title: Client ID
+      type: string
+    client_secret:
+      description: Your Revivn OAuth2 client secret.
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: Revivn
+  proxy:
+    base_url: https://api.revivn.dev
+  token_params:
+    grant_type: client_credentials
+  token_url: https://api.revivn.dev/oauth/token
+roller:
+  auth_mode: OAUTH2_CC
+  body_format: json
+  categories:
+  - ticketing
+  credentials:
+    client_id:
+      description: Roller client ID
+      title: Client ID
+      type: string
+    client_secret:
+      description: Roller client secret
+      title: Client Secret
+      type: string
+  display_name: Roller
+  proxy:
+    base_url: https://api.roller.app
+  token_url: https://api.roller.app/token
+rydoo:
+  auth_mode: OAUTH2_CC
+  categories:
+  - accounting
+  credentials:
+    client_id:
+      description: Your Rydoo Client ID.
+      title: Client ID
+      type: string
+    client_secret:
+      description: Your Rydoo Client Secret.
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: Rydoo
+  proxy:
+    base_url: https://api.rydoo.com
+  token_params:
+    grant_type: client_credentials
+  token_request_auth_method: basic
+  token_url: https://accounts.rydoo.com/connect/token
+salesforce-cc:
+  auth_mode: OAUTH2_CC
+  categories:
+  - crm
+  connection_config:
+    hostname:
+      description: The hostname to your Salesforce instance
+      example: acme.my.salesforce.com
+      pattern: ^(?!(?:.*\.)?[Ll][Ii][Gg][Hh][Tt][Nn][Ii][Nn][Gg]\.([Ff][Oo][Rr][Cc][Ee]|[Ss][Aa][Ll][Ee][Ss][Ff][Oo][Rr][Cc][Ee])\.[Cc][Oo][Mm]$)[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$
+      prefix: https://
+      title: Hostname
+      type: string
+    instance_url:
+      automated: true
+      description: ''
+      title: ''
+      type: string
+  display_name: Salesforce (Client Credentials)
+  proxy:
+    base_url: ${connectionConfig.instance_url}
+  token_expires_in_ms: 0
+  token_params:
+    grant_type: client_credentials
+  token_response_metadata:
+  - instance_url
+  token_url: https://${connectionConfig.hostname}/services/oauth2/token
+sap-ariba:
+  auth_mode: OAUTH2_CC
+  body_format: form
+  categories:
+  - erp
+  connection_config:
+    anid:
+      description: Your SAP Ariba Network ID.
+      example: AN01234567890
+      order: 3
+      pattern: ^AN[0-9]+$
+      title: Ariba Network ID (ANID)
+      type: string
+    apiKey:
+      description: Your SAP Ariba application's API Key.
+      order: 2
+      secret: true
+      title: Application Key (API Key)
+      type: string
+    subdomain:
+      default_value: api
+      description: Your SAP Ariba API subdomain.
+      enum:
+      - api
+      - api-eu
+      - api.au.cloud
+      example: api-eu
+      order: 1
+      title: Subdomain
+      type: string
+  display_name: SAP Ariba
+  proxy:
+    base_url: https://open${connectionConfig.subdomain}.ariba.com
+    headers:
+      apikey: ${connectionConfig.apiKey}
+      x-ariba-network-id: ${connectionConfig.anid}
+    retry:
+      after:
+      - retry-after
+  token_params:
+    grant_type: openapi_2lo
+  token_request_auth_method: basic
+  token_url: https://${connectionConfig.subdomain}.ariba.com/v2/oauth/token
+sap-concur:
+  auth_mode: OAUTH2_CC
+  categories:
+  - erp
+  connection_config:
+    companyRequestToken:
+      description: The request token generated for the company
+      title: Company Request Token
+      type: string
+    companyUUID:
+      description: The unique identifier for your SAP Concur company
+      title: Company UUID
+      type: string
+    region:
+      description: The SAP Concur Data Center region (e.g., `us`, `eu`, `cn`)
+      example: us
+      title: Region
+      type: string
+  display_name: SAP Concur
+  proxy:
+    base_url: https://${connectionConfig.region}.api.concursolutions.com
+  scope_separator: ' '
+  token_params:
+    grant_type: client_credentials
+  token_url: https://${connectionConfig.region}.api.concursolutions.com/oauth2/v0/token
+sap-odata-oauth2-cc:
+  auth_mode: OAUTH2_CC
+  categories:
+  - erp
+  - popular
+  connection_config:
+    apiServer:
+      description: The API base URL of the SAP S/4HANA cloud API service you want to connect to
+      example: eu10.cfapps.eu10.hana.ondemand.com
+      format: hostname
+      order: 3
+      pattern: ^[A-Za-z0-9.-]+(?::\d+(?:/[-A-Za-z0-9.]*)*)?$
+      prefix: https://
+      title: API Server
+      type: string
+    region:
+      description: The region where your SAP S/4HANA cloud instance is hosted
+      example: eu10
+      order: 2
+      title: Region
+      type: string
+    subdomain:
+      description: The subdomain where your SAP S/4HANA cloud instance is hosted
+      example: acme
+      order: 1
+      pattern: ^[a-z0-9_-]+$
+      prefix: https://
+      suffix: /hana.ondemand.com
+      title: Subdomain
+      type: string
+  display_name: SAP S/4HANA Cloud (Client Credentials)
+  proxy:
+    base_url: https://${connectionConfig.apiServer}
+  scope_separator: ','
+  token_params:
+    grant_type: client_credentials
+  token_request_auth_method: basic
+  token_url: https://${connectionConfig.subdomain}.authentication.${connectionConfig.region}.hana.ondemand.com/oauth/token
+sedna:
+  auth_mode: OAUTH2_CC
+  categories:
+  - communication
+  connection_config:
+    tenant:
+      description: The tenant name to your sedna account
+      title: Tenant
+      type: string
+  display_name: Sedna (OAuth)
+  proxy:
+    base_url: https://${connectionConfig.tenant}.sednanetwork.com/platform
+  scope_separator: ','
+  token_params:
+    grant_type: client_credentials
+  token_url: https://${connectionConfig.tenant}.sednanetwork.com/platform/oauth/token
+sellsy-oauth2-cc:
+  auth_mode: OAUTH2_CC
+  categories:
+  - invoicing
+  - accounting
+  - crm
+  credentials:
+    client_id:
+      description: Your Client ID
+      title: Client ID
+      type: string
+    client_secret:
+      description: Your Secret shopper
+      title: Secret shopper
+      type: string
+  display_name: Sellsy (Client Credentials)
+  post_connection_script: sellsyPostConnection
+  proxy:
+    base_url: https://api.sellsy.com
+  token_params:
+    grant_type: client_credentials
+  token_url: https://login.sellsy.com/oauth2/access-tokens
+  webhook_routing_script: sellsyWebhookRouting
+  webhook_user_defined_secret: true
+servicenow-oauth2-cc:
+  auth_mode: OAUTH2_CC
+  categories:
+  - productivity
+  - ticketing
+  connection_config:
+    hostname:
+      description: The full hostname of your ServiceNow instance
+      example: dev12345.service-now.com
+      format: hostname
+      prefix: https://
+      title: ServiceNow Domain
+      type: string
+    subdomain:
+      description: ''
+      hidden: true
+      title: ''
+      type: string
+  credentials:
+    client_id:
+      description: The Client ID from your ServiceNow OAuth Application
+      title: Client ID
+      type: string
+    client_secret:
+      description: The Client Secret from your ServiceNow OAuth Application
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: ServiceNow (Client Credentials)
+  proxy:
+    base_url: https://${connectionConfig.hostname} || https://${connectionConfig.subdomain}.service-now.com
+  token_params:
+    grant_type: client_credentials
+  token_url: https://${connectionConfig.hostname}/oauth_token.do || https://${connectionConfig.subdomain}.service-now.com/oauth_token.do
+sharepoint-online-oauth2-cc:
+  auth_mode: OAUTH2_CC
+  categories:
+  - storage
+  - communication
+  connection_config:
+    tenantId:
+      description: The unique identifier for your organization that uses Microsoft services
+      example: a1b2c3d4-e5f6-47a8-9b0c-d1234567890f
+      format: uuid
+      order: 1
+      title: Tenant ID
+      type: string
+  display_name: SharePoint Online (Client Credentials V2)
+  proxy:
+    base_url: https://graph.microsoft.com
+  token_params:
+    grant_type: client_credentials
+  token_url: https://login.microsoftonline.com/${connectionConfig.tenantId}/oauth2/v2.0/token
+shopify-cc:
+  auth_mode: OAUTH2_CC
+  categories:
+  - e-commerce
+  connection_config:
+    subdomain:
+      description: The subdomain of the Shopify store the app is installed in.
+      example: my-store
+      order: 1
+      pattern: ^[a-z0-9_-]+$
+      prefix: https://
+      suffix: .myshopify.com
+      title: Shopify Store Domain
+      type: string
+  credentials:
+    client_id:
+      description: The Client ID for your Shopify app.
+      title: Client ID
+      type: string
+    client_secret:
+      description: The Client Secret for your Shopify app.
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: Shopify (Client Credentials)
+  proxy:
+    base_url: https://${connectionConfig.subdomain}.myshopify.com
+    headers:
+      x-shopify-access-token: ${accessToken}
+  token_params:
+    grant_type: client_credentials
+  token_url: https://${connectionConfig.subdomain}.myshopify.com/admin/oauth/access_token
+shopware:
+  auth_mode: OAUTH2_CC
+  body_format: json
+  categories:
+  - e-commerce
+  connection_config:
+    shopwareUrl:
+      description: The hostname of your Shopware instance.
+      example: myshop.example.com
+      format: hostname
+      order: 1
+      prefix: https://
+      title: Shopware URL
+      type: string
+  credentials:
+    client_id:
+      description: The Access key ID of yout integration.
+      title: Access key ID
+      type: string
+    client_secret:
+      description: The Secret access key of your integration.
+      secret: true
+      title: Secret access key
+      type: string
+  display_name: Shopware (Admin API)
+  proxy:
+    base_url: https://${connectionConfig.shopwareUrl}/api
+  token_params:
+    grant_type: client_credentials
+  token_url: https://${connectionConfig.shopwareUrl}/api/oauth/token
+sophos-central:
+  auth_mode: OAUTH2_CC
+  body_format: form
+  categories:
+  - dev-tools
+  connection_config:
+    dataRegion:
+      automated: true
+      description: ''
+      title: ''
+      type: string
+    tenantId:
+      automated: true
+      description: ''
+      title: ''
+      type: string
+  display_name: Sophos Central
+  post_connection_script: sophosCentralPostConnection
+  proxy:
+    base_url: ${connectionConfig.dataRegion}
+    headers:
+      x-tenant-id: ${connectionConfig.tenantId}
+  token_params:
+    grant_type: client_credentials
+    scope: token
+  token_url: https://id.sophos.com/api/v2/oauth2/token
+spotify-oauth2-cc:
+  auth_mode: OAUTH2_CC
+  categories:
+  - other
+  display_name: Spotify (Client Credentials)
+  proxy:
+    base_url: https://api.spotify.com
+  scope_separator: ' '
+  token_params:
+    grant_type: client_credentials
+  token_request_auth_method: basic
+  token_url: https://accounts.spotify.com/api/token
+swoogo:
+  auth_mode: OAUTH2_CC
+  categories:
+  - marketing
+  credentials:
+    client_id:
+      description: Your Swoogo API key.
+      title: API Key
+      type: string
+    client_secret:
+      description: Your Swoogo API secret.
+      secret: true
+      title: API Secret
+      type: string
+  display_name: Swoogo
+  proxy:
+    base_url: https://api.swoogo.com
+  token_params:
+    grant_type: client_credentials
+  token_request_auth_method: basic
+  token_url: https://api.swoogo.com/api/v1/oauth2/token
+tapclicks:
+  auth_mode: OAUTH2_CC
+  categories:
+  - marketing
+  - analytics
+  display_name: TapClicks
+  proxy:
+    base_url: https://api.tapclicks.com/v2
+  token_params:
+    grant_type: client_credentials
+  token_url: https://api.tapclicks.com/oauth/accesstoken
+thomson-reuters-legal-tracker:
+  auth_mode: OAUTH2_CC
+  categories:
+  - legal
+  connection_config:
+    hostname:
+      description: The regional API hostname for your Thomson Reuters account.
+      enum:
+      - api.thomsonreuters.com
+      - api.thomsonreuters.co.uk
+      - api.thomsonreuters.ca
+      - api.thomsonreuters.au
+      order: 1
+      title: Hostname
+      type: string
+  credentials:
+    client_id:
+      description: The client ID from the App Management.
+      title: Client ID
+      type: string
+    client_secret:
+      description: The client secret from the App Management.
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: Thomson Reuters Legal Tracker
+  proxy:
+    base_url: https://${connectionConfig.hostname}/legal-tracker
+  token_headers:
+    content-type: application/x-www-form-urlencoded
+  token_params:
+    grant_type: client_credentials
+  token_url: https://${connectionConfig.hostname}/onepass/oauth2/token
+thomson-reuters-legal-tracker-tr-account:
+  alias: thomson-reuters-legal-tracker
+  auth_mode: OAUTH2_CC
+  categories:
+  - legal
+  credentials:
+    client_id:
+      description: Your TR Account client ID.
+      title: Client ID
+      type: string
+    client_secret:
+      description: Your TR Account client secret.
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: Thomson Reuters Legal Tracker (TR Account)
+  token_headers:
+    content-type: application/x-www-form-urlencoded
+  token_params:
+    audience: 506f6a92-4fd1-43c1-bf18-4e3735ea55aa
+    grant_type: client_credentials
+  token_request_auth_method: basic
+  token_url: https://auth.thomsonreuters.com/oauth/token
+trafft:
+  auth_mode: OAUTH2_CC
+  categories:
+  - productivity
+  connection_config:
+    subdomain:
+      description: The subdomain of your Trafft instance
+      example: subdomain
+      format: hostname
+      prefix: https://
+      suffix: .admin.trafft.com
+      title: Subdomain
+      type: string
+  credentials:
+    client_id:
+      description: Your Trafft OAuth2 Client ID.
+      title: Client ID
+      type: string
+    client_secret:
+      description: Your Trafft OAuth2 Client Secret.
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: Trafft
+  proxy:
+    base_url: https://${connectionConfig.subdomain}.admin.trafft.com/api
+  token_params:
+    grant_type: client_credentials
+  token_url: https://${connectionConfig.subdomain}.admin.trafft.com/api/v2/token
+transporeon-carrier-oauth2-cc:
+  auth_mode: OAUTH2_CC
+  body_format: query
+  categories:
+  - other
+  connection_config:
+    apiHost:
+      description: The Transporeon Carrier Interface host to connect to.
+      doc_section: '#step-2-selecting-your-token-host-and-api-host'
+      enum:
+      - xp.transporeon.com
+      - xp.test.transporeon.com
+      title: API Host
+      type: string
+    environment:
+      description: The Transporeon OAuth2 token hostname.
+      doc_section: '#step-2-selecting-your-token-host-and-api-host'
+      enum:
+      - api.transporeon.com
+      - api.test.transporeon.com
+      title: Token Host
+      type: string
+  credentials:
+    client_id:
+      description: Your API client ID.
+      doc_section: '#step-1-obtaining-your-client-credentials'
+      example: username@companyId
+      pattern: ^[^@]+@[^@]+$
+      title: Client ID
+      type: string
+    client_secret:
+      description: Your API client secret
+      doc_section: '#step-1-obtaining-your-client-credentials'
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: Transporeon Carrier Interface (Client Credentials)
+  docs: https://nango.dev/docs/api-integrations/transporeon-carrier-oauth2-cc
+  docs_connect: https://nango.dev/docs/api-integrations/transporeon-carrier-oauth2-cc/connect
+  proxy:
+    base_url: https://${connectionConfig.apiHost}/carrier_interface/openapi
+    verification:
+      endpoints:
+      - /v1/transport
+      method: GET
+  token_params:
+    grant_type: client_credentials
+  token_request_auth_method: basic
+  token_url: https://${connectionConfig.environment}/oauth2/token
+transporeon-oauth2-cc:
+  auth_mode: OAUTH2_CC
+  body_format: query
+  categories:
+  - other
+  credentials:
+    client_id:
+      description: Your API client ID.
+      example: username@companyId
+      pattern: ^[^@]+@[^@]+$
+      title: Client ID
+      type: string
+    client_secret:
+      description: Your API client secret
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: Transporeon Appointment Scheduling (Client Credentials)
+  proxy:
+    base_url: https://yard-management-planning-api.dev.eu.trimble-transportation.com
+  token_params:
+    grant_type: client_credentials
+  token_request_auth_method: basic
+  token_url: https://id.eu.trimble-transportation.com/api/identity/v2/oauth2/token
+trustpilot-cc:
+  auth_mode: OAUTH2_CC
+  categories:
+  - marketing
+  - surveys
+  credentials:
+    client_id:
+      description: Your Trustpilot application's API Key.
+      title: API Key
+      type: string
+    client_secret:
+      description: Your Trustpilot application's API Secret.
+      secret: true
+      title: API Secret
+      type: string
+  display_name: Trustpilot (Client Credentials)
+  proxy:
+    base_url: https://api.trustpilot.com/
+  token_params:
+    grant_type: client_credentials
+  token_request_auth_method: basic
+  token_url: https://api.trustpilot.com/v1/oauth/oauth-business-users-for-applications/accesstoken
+twitter-oauth2-cc:
+  auth_mode: OAUTH2_CC
+  categories:
+  - marketing
+  - social
+  display_name: Twitter (Client Credentials)
+  proxy:
+    base_url: https://api.twitter.com
+  scope_separator: ' '
+  token_params:
+    grant_type: client_credentials
+  token_request_auth_method: basic
+  token_url: https://api.twitter.com/oauth2/token
+ukg-pro-cc:
+  auth_mode: OAUTH2_CC
+  body_format: form
+  categories:
+  - hr
+  connection_config:
+    hostname:
+      description: Recruiting application domain from your UKG Pro Recruiting URL.
+      example: recruiting.example.ultipro.com
+      format: hostname
+      order: 2
+      prefix: https://
+      title: Recruiting Application Domain
+      type: string
+    identityServer:
+      description: Identity server for your tenant.
+      example: signin.ukg.net
+      format: hostname
+      order: 1
+      title: Identity Server
+      type: string
+    tenantId:
+      description: Tenant value from your UKG Pro Recruiting URL.
+      example: UO32145HGOGOG
+      order: 3
+      pattern: ^[a-zA-Z0-9]+$
+      title: Tenant
+      type: string
+  credentials:
+    client_id:
+      description: Unique identifier of the identity client provided by UKG customer support.
+      title: Client ID
+      type: string
+    client_secret:
+      description: Client secret associated with the client ID provided by UKG customer support.
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: UKG Pro HCM (Client Credentials)
+  proxy:
+    base_url: https://${connectionConfig.hostname}
+    retry:
+      after:
+      - retry-after
+  token_headers:
+    accept: application/json
+    content-type: application/x-www-form-urlencoded
+  token_params:
+    grant_type: client_credentials
+  token_url: https://${connectionConfig.identityServer}/signin/oauth2/t/${connectionConfig.tenantId}/access_token
+ukg-ready:
+  auth_mode: OAUTH2_CC
+  categories:
+  - hr
+  connection_config:
+    hostname:
+      description: The hostname to your UKG Ready instance
+      example: secure.us.rdy.ukg
+      format: hostname
+      prefix: https://
+      suffix: /ta
+      title: Hostname
+      type: string
+    realmId:
+      description: A unique identifier for your company.
+      example: '23444234'
+      title: Company ID
+      type: string
+  display_name: UKG Ready
+  proxy:
+    base_url: https://${connectionConfig.hostname}
+  token_params:
+    grant_type: client_credentials
+  token_url: https://${connectionConfig.hostname}/ta/rest/v2/companies/${connectionConfig.realmId}/oauth2/token
+vanta:
+  auth_mode: OAUTH2_CC
+  body_format: json
+  categories:
+  - dev-tools
+  display_name: Vanta
+  proxy:
+    base_url: https://api.vanta.com
+  token_params:
+    grant_type: client_credentials
+  token_url: https://api.vanta.com/oauth/token
+xero-oauth2-cc:
+  auth_mode: OAUTH2_CC
+  categories:
+  - accounting
+  display_name: Xero (Client Credentials)
+  proxy:
+    base_url: https://api.xero.com
+    retry:
+      after:
+      - retry-after
+  token_params:
+    grant_type: client_credentials
+  token_request_auth_method: basic
+  token_url: https://identity.xero.com/connect/token
+yokoy:
+  auth_mode: OAUTH2_CC
+  categories:
+  - accounting
+  - invoicing
+  connection_config:
+    environment:
+      description: Your Yokoy environment.
+      enum:
+      - yokoy.ai
+      - test.yokoy.ai
+      order: 1
+      title: Environment
+      type: string
+    organizationId:
+      description: Your Yokoy organization ID.
+      example: 0Ni9IMB000
+      order: 2
+      title: Organization ID
+      type: string
+  credentials:
+    client_id:
+      description: Your Yokoy client ID.
+      title: Client ID
+      type: string
+    client_secret:
+      description: Your Yokoy client secret.
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: Yokoy
+  proxy:
+    base_url: https://api.${connectionConfig.environment}
+    connection_config:
+      organizationId: ${connectionConfig.organizationId}
+    headers:
+      x-yk-auth-method: yokoy
+  token_params:
+    grant_type: client_credentials
+  token_request_auth_method: basic
+  token_url: https://accounts.${connectionConfig.environment}/oauth2/token
+zoom-cc:
+  auth_mode: OAUTH2_CC
+  categories:
+  - video
+  connection_config:
+    accountId:
+      description: Your Zoom account ID.
+      title: Account ID
+      type: string
+  credentials:
+    client_id:
+      description: Your Zoom app's Client ID.
+      title: Client ID
+      type: string
+    client_secret:
+      description: Your Zoom app's Client Secret.
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: Zoom (Server-to-Server OAuth)
+  proxy:
+    base_url: https://api.zoom.us
+  token_params:
+    account_id: ${connectionConfig.accountId}
+    grant_type: account_credentials
+  token_request_auth_method: basic
+  token_url: https://zoom.us/oauth/token
+zoominfo:
+  auth_mode: OAUTH2_CC
+  body_format: json
+  categories:
+  - crm
+  - marketing
+  display_name: ZoomInfo
+  proxy:
+    base_url: https://api.zoominfo.com
+    retry:
+      after:
+      - x-ratelimit-reset
+  token_request_auth_method: custom
+  token_url: https://api.zoominfo.com/authenticate
+zuora:
+  auth_mode: OAUTH2_CC
+  categories:
+  - erp
+  connection_config:
+    subdomain:
+      description: The Subdomain to your Zuora Base URL
+      example: rest.test
+      order: 1
+      prefix: https://
+      suffix: .zuora.com
+      title: Subdomain
+      type: string
+  display_name: Zuora
+  proxy:
+    base_url: https://${connectionConfig.subdomain}.zuora.com
+    retry:
+      after:
+      - ratelimit-reset
+  token_params:
+    grant_type: client_credentials
+  token_url: https://${connectionConfig.subdomain}.zuora.com/oauth/token

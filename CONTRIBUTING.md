@@ -17,8 +17,10 @@ network.
 
 ## Adding a connector
 
-Connectors live in `src/connector_manager/data/connectors.yaml`, one key per
-connector, sorted alphabetically. A minimal API-key entry:
+Connectors live in `src/connector_manager/data/connectors/`, **one file per auth
+mode** — an `API_KEY` connector goes in `api-key.yaml`, an `OAUTH2` one in
+`oauth2.yaml`, and so on. Within a file, one key per connector, sorted
+alphabetically. A minimal API-key entry:
 
 ```yaml
 example-app:
@@ -60,15 +62,24 @@ What a good entry needs:
 - **Categories** drawn from the set already in use — run `connectors stats` to
   see them.
 
+Ids must be unique across all the files — the loader refuses a duplicate rather
+than letting filename order pick a winner. An **alias** may sit in a different
+file from its target; that resolves fine, but the alias belongs in the file for
+the mode it ends up with, which the script below sorts out for you.
+
 Then check your work:
 
 ```bash
+python scripts/split_connectors.py        # puts every entry in the right file
 python -m pytest -q                       # test_proxy asserts every connector
                                           # builds a fully resolved request
 connectors show example-app               # fields render as intended
 connectors connect example-app -c apiKey=... -o /tmp/c.json
 connectors request /tmp/c.json GET /me    # a real call, if you have a key
 ```
+
+If you change a connector's `auth_mode`, re-run the script — it moves the entry
+to the matching file. CI runs `--check` and fails on a stale layout.
 
 Please don't modify existing connector definitions in the same change as adding
 new ones — it makes review much harder.

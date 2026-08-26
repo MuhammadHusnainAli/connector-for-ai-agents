@@ -29,10 +29,30 @@ All notable changes to this project are documented here. The format follows
 
 - `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, and this changelog.
 - `--show-secrets` on `connect`, `verify`, `refresh` and `request`.
+- `scripts/split_connectors.py`, which regroups the catalogue into one file per
+  auth mode and, with `--check`, fails CI when an entry sits in the wrong file.
+- `registry.CONNECTORS_DIR` and `ConnectorRegistry.connectors_path`.
 
 ### Changed
 
+- **The connector catalogue is split by auth mode.** The single 840 KB
+  `data/connectors.yaml` is now `data/connectors/api-key.yaml`,
+  `oauth2.yaml`, `basic.yaml` and 14 more — one file per auth mode, largest
+  404 KB. Adding a connector no longer means a diff against a 35,000-line file,
+  and two connectors in different modes stop colliding. The registry loads and
+  merges every `*.yaml` under the directory, so this is layout, not API: all
+  1,586 connectors resolve byte-for-byte identically to 0.1.2.
+- Alias resolution follows chains and no longer depends on the order entries
+  appear on disk, which it had to once a target could live in another file.
+- Duplicate connector ids across files are rejected rather than resolved by
+  filename order.
 - `auth_mode` is never redacted — it describes the scheme, not a secret.
+
+### Deprecated
+
+- `ConnectorRegistry.connectors_file` is now a read-only alias of
+  `connectors_path`, which may be a directory. Passing `connectors_file=` a
+  single YAML file still works, so a custom catalogue needs no change.
 
 ## [0.1.2] — 2026-08-25
 

@@ -1,0 +1,141 @@
+# Connector definitions: AWS_SIGV4 auth.
+#
+# Auth mode, credential/config fields, api base url and verification endpoint
+# for each connector, sorted by connector id. One file per auth mode; the
+# registry loads every *.yaml under this directory and merges them.
+#
+# Machine-generated grouping -- run `python scripts/split_connectors.py` after
+# changing an `auth_mode` so the entry lands in the right file.
+aws-sigv4:
+  auth_mode: AWS_SIGV4
+  categories:
+  - storage
+  connection_config:
+    region:
+      description: Override the region if it differs from the integration default set by the integration owner.
+      example: us-east-1
+      optional: true
+      title: AWS Region (optional)
+      type: string
+    service:
+      automated: true
+      description: ''
+      title: ''
+      type: string
+  credentials:
+    role_arn:
+      description: The ARN of the IAM role your customer creates via your onboarding template.
+      example: arn:aws:iam::123456789012:role/ApiAccessRole
+      title: IAM Role ARN
+      type: string
+  display_name: AWS SigV4 Proxy
+  integration_config:
+    awsAccessKeyId:
+      description: Access key for the IAM principal used to call STS AssumeRole.
+      optional: true
+      order: 4
+      secret: true
+      title: AWS Access Key ID
+      type: string
+      visible_when:
+        equals: builtin
+        field: stsMode
+    awsSecretAccessKey:
+      description: Secret access key paired with the access key ID above.
+      optional: true
+      order: 5
+      secret: true
+      title: AWS Secret Access Key
+      type: string
+      visible_when:
+        equals: builtin
+        field: stsMode
+    defaultRegion:
+      description: Region used to sign requests when a connection does not specify one.
+      example: us-east-1
+      optional: true
+      order: 2
+      title: Default AWS Region
+      type: string
+    service:
+      description: The AWS service requests are signed for (e.g. s3, execute-api).
+      example: s3
+      order: 1
+      pattern: ^[a-z0-9-]+$
+      title: AWS Service
+      type: string
+    stsApiKey:
+      description: API key value sent to the custom STS endpoint.
+      order: 9
+      secret: true
+      title: STS API Key
+      type: string
+      visible_when:
+        equals: api_key
+        field: stsAuthType
+    stsAuthHeader:
+      default_value: x-api-key
+      description: Header name used to send the API key to the custom STS endpoint.
+      optional: true
+      order: 8
+      title: STS Auth Header
+      type: string
+      visible_when:
+        equals: api_key
+        field: stsAuthType
+    stsAuthPassword:
+      description: Password for basic auth to the custom STS endpoint.
+      order: 11
+      secret: true
+      title: STS Password
+      type: string
+      visible_when:
+        equals: basic
+        field: stsAuthType
+    stsAuthType:
+      default_value: none
+      description: How to authenticate to the custom STS endpoint.
+      enum:
+      - none
+      - api_key
+      - basic
+      optional: true
+      order: 7
+      title: STS Auth Type
+      type: string
+      visible_when:
+        equals: custom
+        field: stsMode
+    stsAuthUsername:
+      description: Username for basic auth to the custom STS endpoint.
+      optional: true
+      order: 10
+      title: STS Username
+      type: string
+      visible_when:
+        equals: basic
+        field: stsAuthType
+    stsEndpointUrl:
+      description: HTTPS endpoint that issues temporary AWS credentials.
+      example: https://sts.example.com/assume
+      format: uri
+      optional: true
+      order: 6
+      pattern: ^https://
+      title: STS Endpoint URL
+      type: string
+      visible_when:
+        equals: custom
+        field: stsMode
+    stsMode:
+      default_value: builtin
+      description: How temporary AWS credentials are issued.
+      enum:
+      - builtin
+      - custom
+      optional: true
+      order: 3
+      title: STS Mode
+      type: string
+  proxy:
+    base_url: https://${connectionConfig.service}.${connectionConfig.region}.amazonaws.com

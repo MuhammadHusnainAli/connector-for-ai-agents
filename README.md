@@ -402,7 +402,7 @@ control.
 | Module | Main classes | Role |
 | --- | --- | --- |
 | `manager.py` | `BaseConnectorManager`, `ConnectorManager`, `AsyncConnectorManager` | the public facade |
-| `registry.py` | `ConnectorRegistry` | loads `connectors.yaml` and icons, pagination, builds `AuthSchema` |
+| `registry.py` | `ConnectorRegistry` | merges `data/connectors/*.yaml` and icons, pagination, builds `AuthSchema` |
 | `models.py` | `Connector`, `ConnectorPage`, `AuthField`, `AuthSchema`, `Connection`, `AuthMode` | the data model |
 | `auth/` | `AuthStrategy` subclasses | one class per auth mode |
 | `flows.py` | `FlowRunner`, `AsyncFlowRunner` | drive one auth flow either sync or async |
@@ -411,9 +411,10 @@ control.
 | `verification.py` | `CredentialVerifier`, `VerificationResult` | proves credentials work |
 | `validation.py` | — | required, pattern, enum, format, `visible_when` |
 | `interpolation.py` | — | the `${…}` template engine |
-| `data/` | — | `connectors.yaml` and 1,591 SVG logos |
+| `data/connectors/` | — | connector definitions, one YAML file per auth mode |
+| `data/icons/` | — | 1,591 SVG logos |
 
-Run the suite with `uv run pytest -q` — 98 tests. Coverage includes the whole
+Run the suite with `uv run pytest -q` — 109 tests. Coverage includes the whole
 catalogue: every connector must expose a name, an icon, a buildable auth schema
 and a fully resolved request with no leftover `${…}` in urls or headers, plus
 mocked connect, refresh and verify flows for each supported auth mode. The async
@@ -500,9 +501,33 @@ credential-verification scripts that are not implemented here. The fields those
 scripts would fill are surfaced with `automated=True` so you can supply them
 yourself, and such connectors report `tested=False` from `verify()`.
 
-Documentation links are intentionally absent from the catalogue.
-`connectors.yaml` carries only what is needed to authenticate and call each API:
-auth mode, field definitions, base url, verification endpoint.
+Documentation links are intentionally absent from the catalogue. It carries
+only what is needed to authenticate and call each API: auth mode, field
+definitions, base url, verification endpoint.
+
+### Where the definitions live
+
+The catalogue is split by auth mode, one file per mode under
+`src/connector_manager/data/connectors/`:
+
+```
+data/connectors/api-key.yaml     899 connectors
+                oauth2.yaml      361
+                oauth2-cc.yaml   110
+                basic.yaml       109
+                two-step.yaml     63
+                mcp-oauth2.yaml   24
+                ...              14 smaller modes
+```
+
+The registry loads every `*.yaml` under that directory and merges them, so the
+layout is an organisational detail rather than API: ids stay unique across
+files, and an alias resolves against its target wherever that target lives.
+`ConnectorRegistry(connectors_file=...)` still accepts a single YAML file if you
+ship your own catalogue.
+
+`python scripts/split_connectors.py` regroups the files after an `auth_mode`
+changes; `--check` reports drift and is what CI runs.
 
 ## Project files
 
@@ -513,6 +538,7 @@ auth mode, field definitions, base url, verification endpoint.
 | [SECURITY.md](SECURITY.md) | Reporting a vulnerability, and handling credentials safely |
 | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | How we treat each other |
 | [docs/added-connectors.md](docs/added-connectors.md) | Provenance and live check behind every connector added in 0.1.2 |
+| [scripts/split_connectors.py](scripts/split_connectors.py) | Regroups the catalogue into one file per auth mode |
 
 ## Licence
 

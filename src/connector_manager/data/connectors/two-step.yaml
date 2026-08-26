@@ -1,0 +1,2809 @@
+# Connector definitions: TWO_STEP auth.
+#
+# Auth mode, credential/config fields, api base url and verification endpoint
+# for each connector, sorted by connector id. One file per auth mode; the
+# registry loads every *.yaml under this directory and merges them.
+#
+# Machine-generated grouping -- run `python scripts/split_connectors.py` after
+# changing an `auth_mode` so the entry lands in the right file.
+3cx:
+  auth_mode: TWO_STEP
+  body_format: form
+  categories:
+  - communication
+  connection_config:
+    domain:
+      description: Your 3CX instance domain
+      example: mycompany.3cx.us
+      format: hostname
+      order: 1
+      prefix: https://
+      title: 3CX Domain
+      type: string
+  credentials:
+    clientId:
+      description: The Client ID from your 3CX API integration
+      title: Client ID
+      type: string
+    clientSecret:
+      description: The API Key generated when creating your 3CX API integration
+      secret: true
+      title: API Key
+      type: string
+  display_name: 3CX
+  proxy:
+    base_url: https://${connectionConfig.domain}/xapi
+  token_expires_in_ms: 3600000
+  token_headers:
+    accept: application/json
+    content-type: application/x-www-form-urlencoded
+  token_params:
+    client_id: ${credentials.clientId}
+    client_secret: ${credentials.clientSecret}
+    grant_type: client_credentials
+  token_response:
+    token: access_token
+  token_url: https://${connectionConfig.domain}/connect/token
+agencyzoom:
+  auth_mode: TWO_STEP
+  body_format: json
+  categories:
+  - crm
+  credentials:
+    password:
+      description: Your AgencyZoom account password.
+      doc_section: '#step-1-obtain-your-credentials'
+      secret: true
+      title: Password
+      type: string
+    username:
+      description: Your AgencyZoom account email address.
+      doc_section: '#step-1-obtain-your-credentials'
+      title: Username
+      type: string
+  display_name: AgencyZoom
+  docs: https://nango.dev/docs/api-integrations/agencyzoom
+  docs_connect: https://nango.dev/docs/api-integrations/agencyzoom/connect
+  proxy:
+    base_url: https://api.agencyzoom.com
+  token_headers:
+    accept: application/json
+    content-type: application/json
+  token_params:
+    password: ${credentials.password}
+    username: ${credentials.username}
+  token_response:
+    token: jwt
+  token_url: https://api.agencyzoom.com/v1/api/auth/login
+altrata:
+  auth_mode: TWO_STEP
+  body_format: form
+  categories:
+  - analytics
+  connection_config:
+    hostname:
+      description: The Altrata service hostname to connect to.
+      example: events.altrata.com
+      format: hostname
+      order: 1
+      pattern: ^(matching|profile|events|relationships)\.altrata\.com$
+      title: Service Hostname
+      type: string
+  credentials:
+    apiKey:
+      description: Your Altrata API key.
+      example: mN3pQv8wLc2jXs5rKt4bGy6uFd1eAh7Z*******
+      pattern: ^[A-Za-z0-9]+$
+      secret: true
+      title: API Key
+      type: string
+    password:
+      description: Your Altrata account password.
+      secret: true
+      title: Password
+      type: string
+    username:
+      description: Your Altrata account username.
+      example: john_doe
+      title: Username
+      type: string
+  display_name: Altrata
+  proxy:
+    base_url: https://${connectionConfig.hostname}
+    headers:
+      x-api-key: ${credentials.apiKey}
+  token_headers:
+    authorization: Basic ${base64(${credentials.username}:${credentials.password})}
+    x-api-key: ${credentials.apiKey}
+  token_response:
+    token: access_token
+    token_expiration: expires_in
+    token_expiration_strategy: expireIn
+  token_url: https://api-auth.altrata.com/oauth2/token?grant_type=client_credentials
+apple-business-manager:
+  assertion:
+    header:
+      alg: ES256
+      kid: ${credentials.keyId}
+    key: ${assertionOption.privateKey}
+    lifetimeInSeconds: 15552000
+    payload:
+      aud: https://account.apple.com/auth/oauth2/v2/token
+      iss: ${credentials.clientId}
+      jti: ${random}
+      sub: ${credentials.clientId}
+    type: jwt
+  assertion_option:
+    privateKey:
+      description: The EC private key (PEM format) used to sign the client assertion JWT.
+      title: Private Key
+      type: string
+  auth_mode: TWO_STEP
+  body_format: form
+  categories:
+  - productivity
+  credentials:
+    assertion:
+      automated: true
+      description: ''
+      title: ''
+      type: string
+    clientId:
+      description: The Client ID generated when you create an API account.
+      title: Client ID
+      type: string
+    keyId:
+      description: The Key ID generated when you create an API account.
+      title: Key ID
+      type: string
+  display_name: Apple Business Manager
+  proxy:
+    base_url: https://api-business.apple.com
+  token_headers:
+    content-type: application/x-www-form-urlencoded
+  token_params:
+    client_assertion: ${credentials.assertion}
+    client_assertion_type: urn:ietf:params:oauth:client-assertion-type:jwt-bearer
+    client_id: ${credentials.clientId}
+    grant_type: client_credentials
+    scope: business.api
+  token_response:
+    token: access_token
+    token_expiration: expires_in
+    token_expiration_strategy: expireIn
+  token_url: https://account.apple.com/auth/oauth2/v2/token
+aspire:
+  auth_mode: TWO_STEP
+  body_format: json
+  categories:
+  - erp
+  connection_config:
+    domain:
+      description: The Aspire API environment to connect to.
+      enum:
+      - cloudsandbox-api.youraspire.com
+      - cloud-api.youraspire.com
+      format: hostname
+      order: 1
+      title: Environment
+      type: string
+  credentials:
+    clientId:
+      description: The Client ID generated for your Aspire application.
+      example: 3f2a91c6-****-****-****-6d5e8a2b7c34
+      format: uuid
+      title: Client ID
+      type: string
+    secret:
+      description: The Secret generated alongside the Client ID.
+      example: 7hLp************************nHa5
+      pattern: ^[a-zA-Z0-9]{32}$
+      secret: true
+      title: Secret
+      type: string
+  display_name: Aspire
+  proxy:
+    base_url: https://${connectionConfig.domain}
+  refresh_token_params:
+    RefreshToken: ${refresh_token}
+  refresh_url: https://${connectionConfig.domain}/Authorization/RefreshToken
+  token_headers:
+    accept: application/json
+    content-type: application/json
+  token_params:
+    ClientId: ${credentials.clientId}
+    Secret: ${credentials.secret}
+  token_response:
+    refresh_token: RefreshToken
+    token: Token
+  token_url: https://${connectionConfig.domain}/Authorization
+avanan:
+  auth_mode: TWO_STEP
+  categories:
+  - other
+  connection_config:
+    subdomain:
+      description: The Avanan API subdomain for your region.
+      enum:
+      - smart-api-production-1-us
+      - smart-api-production-1-eu
+      - smart-api-production-1-ca
+      - smart-api-production-5-ap
+      - smart-api-production-1-euw2
+      - smart-api-production-1-mec1
+      - smart-api-production-1-aps1
+      order: 1
+      title: Subdomain
+      type: string
+  credentials:
+    appId:
+      description: Your Avanan Client ID from Avanan Support.
+      example: 9k8m****************ht3w
+      pattern: ^[a-z0-9]+$
+      title: Client ID
+      type: string
+    secretKey:
+      description: Your Avanan Secret Key from Avanan Support.
+      example: 3k9t****************************0uj5gtrpqlz8x2nvy
+      pattern: ^[a-z0-9]+$
+      secret: true
+      title: Secret Key
+      type: string
+  display_name: Avanan
+  proxy:
+    base_url: https://${connectionConfig.subdomain}.avanan.net
+    headers:
+      x-av-app-id: ${credentials.appId}
+      x-av-date: ${now:YYYY-MM-DDTHH:mm:ss}
+      x-av-req-id: ${random}
+      x-av-sig: ${sha256Hex(${base64(${random}${credentials.appId}${now:YYYY-MM-DDTHH:mm:ss}${endpoint}${credentials.secretKey})})}
+      x-av-token: ${accessToken}
+  token_expires_in_ms: 3600000
+  token_headers:
+    x-av-app-id: ${credentials.appId}
+    x-av-date: ${now:YYYY-MM-DDTHH:mm:ss}
+    x-av-req-id: ${random}
+    x-av-sig: ${sha256Hex(${base64(${random}${credentials.appId}${now:YYYY-MM-DDTHH:mm:ss}${credentials.secretKey})})}
+  token_request_method: GET
+  token_response:
+    token: ''
+  token_url: https://${connectionConfig.subdomain}.avanan.net/v1.0/auth
+breezy-hr:
+  auth_mode: TWO_STEP
+  body_format: json
+  categories:
+  - hr
+  - ats
+  credentials:
+    email:
+      description: The email address associated with your Breezy HR account
+      format: email
+      title: Email
+      type: string
+    password:
+      description: The password for your Breezy HR account
+      secret: true
+      title: Password
+      type: string
+  display_name: Breezy HR
+  proxy:
+    base_url: https://api.breezy.hr
+    headers:
+      authorization: ${accessToken}
+    retry:
+      at:
+      - x-ratelimit-reset
+  token_headers:
+    content-type: application/json
+  token_params:
+    email: ${credentials.email}
+    password: ${credentials.password}
+  token_response:
+    token: access_token
+  token_url: https://api.breezy.hr/v3/signin
+datto-rmm-password-grant:
+  auth_mode: TWO_STEP
+  body_format: form
+  categories:
+  - support
+  connection_config:
+    platform:
+      description: The Datto RMM platform (region) for your account.
+      enum:
+      - pinotage
+      - merlot
+      - concord
+      - vidal
+      - zinfandel
+      - syrah
+      order: 1
+      title: Platform
+      type: string
+  credentials:
+    default_password:
+      default_value: public
+      description: ''
+      hidden: true
+      title: ''
+      type: string
+    default_username:
+      default_value: public-client
+      description: ''
+      hidden: true
+      title: ''
+      type: string
+    password:
+      description: Your Datto RMM Secret Key
+      example: 9XQ7MZB4H1L2WKC0RDFTPY5J8VUNSG3E
+      pattern: ^[A-Z0-9]{32}$
+      title: API Secret Key
+      type: string
+    username:
+      description: Your Datto RMM API Key
+      example: AB7KLM90PQW4XJ8H2TUVN1YZ3R5C6FDG
+      pattern: ^[A-Z0-9]{32}$
+      title: API Key
+      type: string
+  display_name: Datto RMM (Password Grant)
+  proxy:
+    base_url: https://${connectionConfig.platform}-api.centrastage.net/api
+  token_headers:
+    authorization: Basic ${base64(${credentials.default_username}:${credentials.default_password})}
+  token_params:
+    grant_type: password
+    password: ${credentials.password}
+    username: ${credentials.username}
+  token_response:
+    token: access_token
+    token_expiration: expires_in
+    token_expiration_strategy: expireIn
+  token_url: https://${connectionConfig.platform}-api.centrastage.net/auth/oauth/token
+dayforce:
+  auth_mode: TWO_STEP
+  body_format: form
+  categories:
+  - hr
+  connection_config:
+    clientHostname:
+      description: Hostname for the Dayforce API, leave empty for production.
+      example: test.dayforcehcm.com
+      format: hostname
+      optional: true
+      prefix: https://
+      suffix: /api
+      title: API hostname
+      type: string
+    companyId:
+      description: The company ID for your Dayforce account.
+      title: Company ID
+      type: string
+    identityHostname:
+      description: Hostname for the Dayforce Identity token endpoint, leave empty for production.
+      example: dfid.dayforcehcm.com
+      format: hostname
+      optional: true
+      prefix: https://
+      suffix: /connect/token
+      title: Identity hostname
+      type: string
+  credentials:
+    password:
+      description: Your Dayforce account password.
+      title: Password
+      type: string
+    username:
+      description: Your Dayforce account username.
+      title: Username
+      type: string
+  display_name: Dayforce
+  proxy:
+    base_url: https://${connectionConfig.clientHostname}/api || https://www.dayforcehcm.com/api
+    forward_headers_on_redirect: true
+  token_headers:
+    content-type: application/x-www-form-urlencoded
+  token_params:
+    client_id: Dayforce.HCMAnywhere.Client
+    companyId: ${connectionConfig.companyId}
+    grant_type: password
+    password: ${credentials.password}
+    username: ${credentials.username}
+  token_response:
+    token: access_token
+    token_expiration: expires_in
+    token_expiration_strategy: expireIn
+  token_url: https://${connectionConfig.identityHostname}/connect/token || https://dfid.dayforcehcm.com/connect/token
+docuware:
+  additional_steps:
+  - body_format: form
+    token_request_method: GET
+    token_url: ${step1.IdentityServiceUrl}/.well-known/openid-configuration
+  - body_format: form
+    token_headers:
+      content-type: application/x-www-form-urlencoded
+    token_params:
+      client_id: docuware.platform.net.client
+      grant_type: password
+      password: ${credentials.password}
+      scope: docuware.platform
+      username: ${credentials.username}
+    token_url: ${step2.token_endpoint}
+  auth_mode: TWO_STEP
+  body_format: form
+  categories:
+  - productivity
+  connection_config:
+    domain:
+      description: The domain to your DocuWare account
+      example: example.docuware.cloud
+      format: hostname
+      order: 1
+      prefix: https://
+      title: Domain
+      type: string
+  credentials:
+    password:
+      description: The Password to your DocuWare account
+      secret: true
+      title: Password
+      type: string
+    username:
+      description: The Username to your DocuWare account
+      title: Username
+      type: string
+  display_name: DocuWare
+  proxy:
+    base_url: https://${connectionConfig.domain}/DocuWare/Platform
+  token_headers:
+    content-type: application/x-www-form-urlencoded
+  token_request_method: GET
+  token_response:
+    token: access_token
+    token_expiration: expires_in
+    token_expiration_strategy: expireIn
+  token_url: https://${connectionConfig.domain}/DocuWare/Platform/Home/IdentityServiceInfo
+drupal:
+  auth_mode: TWO_STEP
+  body_format: form
+  categories:
+  - dev-tools
+  - design
+  - cms
+  connection_config:
+    baseUrl:
+      description: Your Drupal base url
+      example: example.drupal.com
+      format: hostname
+      order: 1
+      prefix: https://
+      title: Base Url
+      type: string
+  credentials:
+    clientId:
+      description: Your Client ID
+      secret: true
+      title: Client ID
+      type: string
+    clientSecret:
+      description: Your Client Secret
+      secret: true
+      title: Client Secret
+      type: string
+    userName:
+      description: Your Drupal User Name
+      title: User Name
+      type: string
+  display_name: Drupal
+  proxy:
+    base_url: https://${connectionConfig.baseUrl}
+  token_headers:
+    accept: application/json
+    content-type: application/x-www-form-urlencoded
+  token_params:
+    client_id: ${credentials.clientId}
+    client_secret: ${credentials.clientSecret}
+    grant_type: client_credentials
+    username: ${credentials.userName}
+  token_response:
+    token: access_token
+    token_expiration: expires_in
+    token_expiration_strategy: expireIn
+  token_url: https://${connectionConfig.baseUrl}/rest_api/access_token
+ecu360:
+  auth_mode: TWO_STEP
+  body_format: json
+  categories:
+  - other
+  credentials:
+    apiKey:
+      description: Your ECU360 API Key
+      secret: true
+      title: API Key
+      type: string
+    password:
+      description: Your ECU360 password
+      secret: true
+      title: Password
+      type: string
+    userName:
+      description: Your ECU360 username
+      title: Username
+      type: string
+  display_name: ECU360 (Test)
+  proxy:
+    base_url: https://apim-test.ecu360.com
+  token_expires_in_ms: 900000
+  token_headers:
+    content-type: application/json
+    ecu360-api-key: ${credentials.apiKey}
+  token_params:
+    isEncrypted: false
+    mfaToken: ''
+    password: ${credentials.password}
+    userName: ${credentials.userName}
+  token_response:
+    token: jwtToken
+  token_url: https://apim-test.ecu360.com/auth/v1/authenticate
+ecu360-production:
+  alias: ecu360
+  categories:
+  - other
+  display_name: ECU360 (Production)
+  proxy:
+    base_url: https://apim.ecu360.com
+  token_url: https://apim.ecu360.com/auth/v1/authenticate
+embat:
+  auth_mode: TWO_STEP
+  body_format: json
+  categories:
+  - accounting
+  - banking
+  credentials:
+    email:
+      description: The email address of your Embat service user.
+      format: email
+      title: Email
+      type: string
+    password:
+      description: The password for your Embat service user.
+      secret: true
+      title: Password
+      type: string
+  display_name: Embat
+  proxy:
+    base_url: https://api.embat.io
+  token_headers:
+    accept: application/json
+    content-type: application/json
+  token_params:
+    email: ${credentials.email}
+    password: ${credentials.password}
+  token_response:
+    token: idToken
+  token_url: https://api.embat.io/authentication/token
+google-service-account:
+  auth_mode: TWO_STEP
+  body_format: form
+  categories:
+  - dev-tools
+  credentials:
+    delegatedAccessEmailAddress:
+      description: The email address of the user for which the application is requesting delegated access
+      example: some.user@example.com
+      format: email
+      optional: true
+      title: Delegated Access Email Address
+      type: string
+    privateKey:
+      description: The private key associated with your Google service account
+      example: '-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA\n-----END PRIVATE KEY-----'
+      pattern: ^-----BEGIN PRIVATE KEY-----\\n([A-Za-z0-9+/=\\n]+)\\n-----END PRIVATE KEY-----\\n?$
+      title: Private Key
+      type: string
+    scopes:
+      description: Scopes that your application should be granted access to
+      example: https://www.googleapis.com/auth/drive
+      pattern: ^https://[^\s]+( https://[^\s]+)*$
+      title: Scopes
+      type: string
+    serviceAccountEmailAddress:
+      description: The email address of the service account
+      example: test@project.iam.gserviceaccount.com
+      pattern: ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.iam\.gserviceaccount\.com$
+      title: Service Account Email Address
+      type: string
+  display_name: Google Service Account
+  proxy:
+    base_url: https://www.googleapis.com
+  signature:
+    protocol: RSA
+  token:
+    expires_in_ms: 3600000
+    header:
+      alg: RS256
+      typ: JWT
+    payload:
+      aud: https://oauth2.googleapis.com/token
+      iss: ${credentials.serviceAccountEmailAddress}
+      scope: ${credentials.scopes}
+      sub: ${credentials.delegatedAccessEmailAddress}
+    signing_key: ${credentials.privateKey}
+  token_params:
+    assertion: ${token}
+    grant_type: urn:ietf:params:oauth:grant-type:jwt-bearer
+  token_response:
+    token: access_token
+    token_expiration: expires_in
+    token_expiration_strategy: expireIn
+  token_url: https://oauth2.googleapis.com/token
+heap:
+  auth_mode: TWO_STEP
+  categories:
+  - other
+  credentials:
+    apiKey:
+      description: Your Heap API Key
+      example: 1bc32cba-a5d6-438a-bbcc-af312f560a3c
+      format: uuid
+      secret: true
+      title: API Key
+      type: string
+    appId:
+      description: Your Heap application ID
+      example: '3207896401'
+      pattern: ^\d+$
+      title: App ID
+      type: string
+  display_name: Heap
+  proxy:
+    base_url: https://heapanalytics.com/api
+  token_headers:
+    authorization: Basic ${base64(${credentials.appId}:${credentials.apiKey})}
+  token_response:
+    token: access_token
+    token_expiration: expires_in
+    token_expiration_strategy: expireIn
+  token_url: https://heapanalytics.com/api/public/v0/auth_token
+jamf-basic:
+  auth_mode: TWO_STEP
+  categories:
+  - other
+  connection_config:
+    instance:
+      description: Your Jamf Pro instance
+      example: example
+      order: 1
+      prefix: https://
+      suffix: .jamfcloud.com
+      title: Jamf Pro Instance
+      type: string
+  credentials:
+    password:
+      description: Your Jamf Pro password
+      secret: true
+      title: Password
+      type: string
+    username:
+      description: Your Jamf Pro username
+      title: Username
+      type: string
+  display_name: Jamf Pro (Basic Auth)
+  proxy:
+    base_url: https://${connectionConfig.instance}.jamfcloud.com
+    headers:
+      authorization: Bearer ${accessToken}
+  token_headers:
+    authorization: Basic ${base64(${credentials.username}:${credentials.password})}
+  token_response:
+    token: token
+    token_expiration: expires
+    token_expiration_strategy: expireAt
+  token_url: https://${connectionConfig.instance}.jamfcloud.com/api/v1/auth/token
+jobdiva:
+  auth_mode: TWO_STEP
+  categories:
+  - hr
+  - ats
+  credentials:
+    clientId:
+      description: Your JobDiva Client ID
+      example: '3050'
+      pattern: ^[0-9]{4}$
+      title: Client ID
+      type: string
+    password:
+      description: Your JobDiva API password
+      example: password
+      secret: true
+      title: Password
+      type: string
+    username:
+      description: Your JobDiva API username
+      example: username
+      title: Username
+      type: string
+  display_name: JobDiva
+  proxy:
+    base_url: https://api.jobdiva.com
+  token_request_method: GET
+  token_response:
+    token: ''
+  token_url: https://api.jobdiva.com/apiv2/authenticate?clientid=${credentials.clientId}&username=${credentials.username}&password=${credentials.password}
+  webhook_routing_script: jobdivaWebhookRouting
+  webhook_user_defined_secret: true
+leapsome:
+  auth_mode: TWO_STEP
+  categories:
+  - hr
+  credentials:
+    secret:
+      description: The API Secret from your Leapsome admin page.
+      title: API Secret
+      type: string
+  display_name: Leapsome
+  proxy:
+    base_url: https://api.leapsome.com
+  token_headers:
+    accept: application/json
+  token_request_method: GET
+  token_response:
+    token: token
+    token_expiration: expiresIn
+    token_expiration_strategy: expireIn
+  token_url: https://api.leapsome.com/v1/token?secret=${credentials.secret}
+looker:
+  auth_mode: TWO_STEP
+  body_format: form
+  categories:
+  - analytics
+  connection_config:
+    hostname:
+      description: Your Looker instance hostname
+      example: mycompany.looker.com
+      order: 1
+      pattern: ^[a-zA-Z0-9.-]+(:[0-9]+)?$
+      prefix: https://
+      title: Looker Instance Hostname
+      type: string
+  credentials:
+    clientId:
+      description: Your Looker Client ID
+      title: Client ID
+      type: string
+    clientSecret:
+      description: Your Looker Client Secret
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: Looker
+  proxy:
+    base_url: https://${connectionConfig.hostname}/api
+  token_params:
+    client_id: ${credentials.clientId}
+    client_secret: ${credentials.clientSecret}
+  token_response:
+    token: access_token
+    token_expiration: expires_in
+    token_expiration_strategy: expireIn
+  token_url: https://${connectionConfig.hostname}/api/4.0/login
+microsoft-oauth2-cc-cert:
+  assertion:
+    header:
+      alg: PS256
+      x5t#S256: ${credentials.certificateThumbprint}
+    key: ${credentials.privateKey}
+    lifetimeInSeconds: 3600
+    payload:
+      aud: https://login.microsoftonline.com/${connectionConfig.tenantId}/oauth2/v2.0/token
+      iss: ${credentials.clientId}
+      jti: ${random}
+      sub: ${credentials.clientId}
+    type: jwt
+  auth_mode: TWO_STEP
+  body_format: form
+  categories:
+  - communication
+  - dev-tools
+  - productivity
+  connection_config:
+    oauth_scopes:
+      description: The resource scope to request access for.
+      example: https://graph.microsoft.com/.default
+      order: 2
+      title: Scope
+      type: string
+    tenantId:
+      description: The unique identifier for your organization that uses Microsoft services.
+      example: a1b2c3d4-e5f6-47a8-9b0c-d1234567890f
+      format: uuid
+      order: 1
+      title: Tenant ID
+      type: string
+  credentials:
+    assertion:
+      automated: true
+      description: ''
+      title: ''
+      type: string
+    certificateThumbprint:
+      description: The base64url-encoded SHA-256 thumbprint of your certificate.
+      example: rCnkMH5GKJI03tRpdjBh8OG2U8I
+      title: Certificate Thumbprint (x5t#S256)
+      type: string
+    clientId:
+      description: The application (client) ID assigned to your app in Azure.
+      example: 11112222-bbbb-3333-cccc-4444dddd5555
+      format: uuid
+      title: Client ID
+      type: string
+    privateKey:
+      description: The RSA private key (PEM format) matching the certificate uploaded to your Azure app registration.
+      example: '-----BEGIN PRIVATE KEY-----
+
+        MIIEvQIBADANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA
+
+        -----END PRIVATE KEY-----'
+      secret: true
+      title: Private Key
+      type: string
+  display_name: Microsoft (Client Credentials - Certificate)
+  proxy:
+    base_url: https://graph.microsoft.com
+  token_headers:
+    content-type: application/x-www-form-urlencoded
+  token_params:
+    client_assertion: ${credentials.assertion}
+    client_assertion_type: urn:ietf:params:oauth:client-assertion-type:jwt-bearer
+    client_id: ${credentials.clientId}
+    grant_type: client_credentials
+    scope: ${connectionConfig.oauth_scopes}
+  token_response:
+    token: access_token
+    token_expiration: expires_in
+    token_expiration_strategy: expireIn
+  token_url: https://login.microsoftonline.com/${connectionConfig.tenantId}/oauth2/v2.0/token
+mip-cloud:
+  auth_mode: TWO_STEP
+  categories:
+  - accounting
+  connection_config:
+    domain:
+      description: The rest service URL for the cloud-based API service
+      format: hostname
+      prefix: https://
+      suffix: /api/v1/sso/mipadv/login
+      title: HOST REST Service URL
+      type: string
+  credentials:
+    org:
+      description: The MIP Fund Accounting database you will be using.
+      example: ZQXP_98421_NTO
+      optional: true
+      title: ORG
+      type: string
+    password:
+      description: Your Password for MIP Fund Accounting.
+      secret: true
+      title: Password
+      type: string
+    username:
+      description: Your Login ID for MIP Fund Accounting
+      title: ID
+      type: string
+  display_name: MIP Cloud
+  proxy:
+    base_url: https://api.mip.com
+    headers:
+      authorization-token: ${accessToken}
+  token_headers:
+    content-type: application/json
+  token_params:
+    org: ${credentials.org}
+    password: ${credentials.password}
+    username: ${credentials.username}
+  token_response:
+    token: AccessToken
+  token_url: https://${connectionConfig.domain}/api/v1/sso/mipadv/login
+mip-on-premise:
+  auth_mode: TWO_STEP
+  categories:
+  - accounting
+  connection_config:
+    domain:
+      description: The URL of your locally installed REST API server.
+      format: hostname
+      prefix: https://
+      suffix: /api/security/login
+      title: HOST REST Service URL
+      type: string
+  credentials:
+    login:
+      description: Your Login ID for MIP Fund Accounting
+      title: ID
+      type: string
+    org:
+      description: The MIP Fund Accounting database you will be using.
+      title: ORG
+      type: string
+    password:
+      description: Your Password for MIP Fund Accounting.
+      secret: true
+      title: Password
+      type: string
+  display_name: MIP On Premise
+  proxy:
+    base_url: https://api.mip.com
+    headers:
+      authorization-token: ${accessToken}
+  token_headers:
+    content-type: application/json
+  token_params:
+    login: ${credentials.login}
+    org: ${credentials.org}
+    password: ${credentials.password}
+  token_response:
+    token: AccessToken
+  token_url: https://${connectionConfig.domain}/api/security/login
+modmed:
+  auth_mode: TWO_STEP
+  body_format: form
+  categories:
+  - other
+  connection_config:
+    environment:
+      description: The ModMed API environment.
+      enum:
+      - stage.ema-api.com/ema-dev
+      - stage.ema-api.com/ema-training
+      - stage.ema-api.com/ema-prod
+      - mmapi.ema-api.com/ema-dev
+      - mmapi.ema-api.com/ema-training
+      - mmapi.ema-api.com/ema-prod
+      order: 1
+      title: Environment
+      type: string
+    firmUrlPrefix:
+      description: The firm URL prefix for your practice
+      example: emapmsandbox01
+      order: 2
+      title: Firm URL Prefix
+      type: string
+  credentials:
+    apiKey:
+      description: Your API key (x-api-key)
+      example: a1b2c3d4-e5f6-47a8-9b0c-d1234567890f
+      secret: true
+      title: API Key
+      type: string
+    password:
+      description: Your API password
+      secret: true
+      title: Password
+      type: string
+    username:
+      description: Your API username
+      example: fhir_QfLlo
+      title: Username
+      type: string
+  display_name: ModMed
+  proxy:
+    base_url: https://${connectionConfig.environment}/firm/${connectionConfig.firmUrlPrefix}
+    headers:
+      accept: application/fhir+json
+      x-api-key: ${credentials.apiKey}
+  token_headers:
+    accept: application/json
+    content-type: application/x-www-form-urlencoded
+    x-api-key: ${credentials.apiKey}
+  token_params:
+    grant_type: password
+    password: ${credentials.password}
+    username: ${credentials.username}
+  token_response:
+    token: access_token
+  token_url: https://${connectionConfig.environment}/firm/${connectionConfig.firmUrlPrefix}/ema/ws/oauth2/grant
+nable-ncentral:
+  auth_mode: TWO_STEP
+  body_format: form
+  categories:
+  - support
+  connection_config:
+    serverUrl:
+      description: Your N-central server hostname.
+      example: ncentral.example.com
+      format: hostname
+      order: 1
+      prefix: https://
+      title: N-central server URL
+      type: string
+  credentials:
+    userApiToken:
+      description: Your N-central User-API token (JWT)
+      example: eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJOX2NlbnRyYWwifQ.c2lnbmF0dXJl
+      pattern: ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$
+      secret: true
+      title: User-API token
+      type: string
+  display_name: N-able N-central
+  proxy:
+    base_url: https://${connectionConfig.serverUrl}/api
+    verification:
+      endpoints:
+      - /auth/validate
+      method: GET
+  token_headers:
+    accept: application/json
+    authorization: Bearer ${credentials.userApiToken}
+  token_response:
+    token: tokens.access.token
+    token_expiration: tokens.access.expirySeconds
+    token_expiration_strategy: expireIn
+  token_url: https://${connectionConfig.serverUrl}/api/auth/authenticate
+netsuite-client-credentials:
+  alias: netsuite
+  assertion:
+    header:
+      alg: RS256
+      kid: ${credentials.certificateId}
+    key: ${assertionOption.privateKey}
+    lifetimeInSeconds: 3600
+    payload:
+      aud: https://${connectionConfig.accountId}.suitetalk.api.netsuite.com/services/rest/auth/oauth2/v1/token
+      iss: ${credentials.clientId}
+      jti: ${random}
+    type: jwt
+  assertion_option:
+    privateKey:
+      description: The RSA private key (PEM format) used to sign the JWT assertion.
+      example: '-----BEGIN RSA PRIVATE KEY-----
+
+        MIIEow...
+
+        -----END RSA PRIVATE KEY-----'
+      title: Private Key
+      type: string
+  auth_mode: TWO_STEP
+  body_format: form
+  categories:
+  - accounting
+  - erp
+  connection_config:
+    accountId:
+      description: Your NetSuite Account ID (e.g. 1234567 or 1234567_SB1 for sandbox).
+      example: '1234567'
+      title: Account ID
+      type: string
+  credentials:
+    assertion:
+      automated: true
+      description: ''
+      title: ''
+      type: string
+    certificateId:
+      description: The ID of the certificate registered in your NetSuite integration.
+      example: HRril7Vwkk********************eWT2Fgks
+      title: Certificate ID
+      type: string
+    clientId:
+      description: The Client ID from your NetSuite integration record.
+      example: 1c343a716c1d****************************976dde7d8e3e2
+      title: Client ID
+      type: string
+  display_name: NetSuite (Client Credentials)
+  token_headers:
+    content-type: application/x-www-form-urlencoded
+  token_params:
+    client_assertion: ${credentials.assertion}
+    client_assertion_type: urn:ietf:params:oauth:client-assertion-type:jwt-bearer
+    grant_type: client_credentials
+  token_response:
+    token: access_token
+    token_expiration: expires_in
+    token_expiration_strategy: expireIn
+  token_url: https://${connectionConfig.accountId}.suitetalk.api.netsuite.com/services/rest/auth/oauth2/v1/token
+odoo-cc:
+  auth_mode: TWO_STEP
+  body_format: form
+  categories:
+  - erp
+  connection_config:
+    serverUrl:
+      description: The domain to your Odoo account
+      example: example.odoo.com
+      format: hostname
+      order: 1
+      prefix: https://
+      title: Domain
+      type: string
+  credentials:
+    consumerId:
+      description: Your App Consumer ID
+      secret: true
+      title: Consumer ID
+      type: string
+    consumerSecret:
+      description: Your App Consumer Secret
+      secret: true
+      title: Consumer Secret
+      type: string
+  display_name: Odoo (Client Credentials)
+  proxy:
+    base_url: https://${connectionConfig.serverUrl}/restapi
+  token_headers:
+    content-type: application/x-www-form-urlencoded
+  token_params:
+    client_id: ${credentials.consumerId}
+    client_secret: ${credentials.consumerSecret}
+    grant_type: client_credentials
+  token_response:
+    token: access_token
+    token_expiration: access_token_validity
+    token_expiration_strategy: expireIn
+  token_url: https://${connectionConfig.serverUrl}/restapi/1.0/common/oauth2/access_token
+orange-logic:
+  auth_mode: TWO_STEP
+  body_format: json
+  categories:
+  - storage
+  connection_config:
+    serverUrl:
+      description: The base URL of your Orange Logic instance
+      example: mycompany.orangelogic.com
+      format: hostname
+      order: 1
+      prefix: https://
+      title: Orange Logic Server URL
+      type: string
+  credentials:
+    clientId:
+      description: The Client ID from your Orange Logic OAuth 2.0 Client Credentials.
+      title: Client ID
+      type: string
+    clientSecret:
+      description: The Client Secret from your Orange Logic OAuth 2.0 Client Credentials.
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: Orange Logic
+  proxy:
+    base_url: https://${connectionConfig.serverUrl}
+  token_headers:
+    accept: application/json
+    content-type: application/json
+  token_params:
+    client_id: ${credentials.clientId}
+    client_secret: ${credentials.clientSecret}
+  token_response:
+    token: access_token
+    token_expiration: expires_in
+    token_expiration_strategy: expireIn
+  token_url: https://${connectionConfig.serverUrl}/webapi/security/clientcredentialsauthentication/authenticate_46H_v1
+passportal:
+  auth_mode: TWO_STEP
+  categories:
+  - support
+  connection_config:
+    base_url:
+      description: Your Passportal base URL
+      example: mycompany.mypasswordapp.com
+      format: hostname
+      prefix: https://
+      title: Passportal Base URL
+      type: string
+  credentials:
+    apiKey:
+      description: Your Passportal API Access Key ID
+      example: a14e6b4923ba5027189baded6ba7b68e6fcda742008c5d57b867f43a09768ece
+      pattern: ^[a-fA-F0-9]{64}$
+      title: API Access Key ID
+      type: string
+    content:
+      description: Plain text message used to compute the HMAC token
+      example: api-content-hash
+      title: Content String
+      type: string
+    hmacToken:
+      description: Your pre-generated HMAC token, hex encoded
+      example: 23ec313efecb560a7f44239f6dd439ea56d18911c18b59e1150a3c7299da8202
+      pattern: ^[a-fA-F0-9]{64}$
+      secret: true
+      title: HMAC Token
+      type: string
+  display_name: Passportal
+  proxy:
+    base_url: https://${connectionConfig.base_url}
+    headers:
+      x-access-token: ${accessToken}
+    verification:
+      endpoints:
+      - /api/v2/documents?resultsPerPage=1
+      headers:
+        content-type: application/json
+      method: GET
+  token_headers:
+    content-type: application/json
+    x-hash: ${credentials.hmacToken}
+    x-key: ${credentials.apiKey}
+  token_params:
+    content: ${credentials.content}
+    scope: docs_api
+  token_response:
+    token: access_token
+    token_expiration: expiry_time
+    token_expiration_strategy: expireAt
+  token_url: https://${connectionConfig.base_url}/api/v2/auth/client_token
+perimeter81:
+  auth_mode: TWO_STEP
+  categories:
+  - productivity
+  connection_config:
+    domain:
+      description: The domain for Perimeter81.
+      enum:
+      - perimeter81
+      - eu.sase.checkpoint
+      order: 1
+      title: Domain
+      type: string
+  credentials:
+    apiKey:
+      description: The API key for your Perimeter81 account
+      secret: true
+      title: API Key
+      type: string
+  display_name: Perimeter81
+  proxy:
+    base_url: https://api.perimeter81.com/api/rest
+  token_headers:
+    content-type: application/json
+  token_params:
+    apiKey: ${credentials.apiKey}
+    grantType: api_key
+  token_response:
+    token: data.accessToken
+    token_expiration: data.accessTokenExpire
+    token_expiration_strategy: expireAt
+  token_url: https://api.${connectionConfig.domain}.com/api/v1/auth/authorize
+pverify:
+  auth_mode: TWO_STEP
+  body_format: form
+  categories:
+  - other
+  connection_config:
+    apiHost:
+      description: Your pVerify API hostname.
+      example: api.pverify.com
+      pattern: ^(api|testapi)\.pverify\.com$
+      title: API Host
+      type: string
+  credentials:
+    clientId:
+      description: Your pVerify Client ID.
+      example: f1c2d3a4-5b67-4c89-ae01-123456789abc
+      format: uuid
+      title: Client ID
+      type: string
+    clientSecret:
+      description: Your pVerify Client Secret.
+      example: aB3mNpQr7sXwYz2t***************
+      pattern: ^[A-Za-z0-9]+$
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: pVerify
+  proxy:
+    base_url: https://${connectionConfig.apiHost}
+    headers:
+      client-api-id: ${credentials.clientId}
+  token_headers:
+    Client-API-Id: ${credentials.clientId}
+    content-type: application/x-www-form-urlencoded
+  token_params:
+    Client_Id: ${credentials.clientId}
+    Client_Secret: ${credentials.clientSecret}
+    grant_type: client_credentials
+  token_response:
+    token: access_token
+    token_expiration: expires_in
+    token_expiration_strategy: expireIn
+  token_url: https://${connectionConfig.apiHost}/Token
+redtail-crm-sandbox:
+  auth_mode: TWO_STEP
+  categories:
+  - crm
+  credentials:
+    apiKey:
+      description: The API Key for your Redtail CRM account
+      example: f1c2d3a4-5b67-4c89-ae01-123456789abc
+      format: uuid
+      secret: true
+      title: API Key
+      type: string
+    password:
+      description: The password for your Redtail CRM account
+      secret: true
+      title: Password
+      type: string
+    username:
+      description: The username for your Redtail CRM account
+      title: Username
+      type: string
+  display_name: Redtail CRM (Sandbox)
+  proxy:
+    base_url: https://review.crm.redtailtechnology.com/api/public
+    headers:
+      authorization: Userkeyauth ${base64(${credentials.apiKey}:${accessToken})}
+  token_headers:
+    authorization: Basic ${base64(${credentials.apiKey}:${credentials.username}:${credentials.password})}
+  token_request_method: GET
+  token_response:
+    token: authenticated_user.user_key
+  token_url: https://review.crm.redtailtechnology.com/api/public/v1/authentication
+researchdesk:
+  auth_mode: TWO_STEP
+  body_format: json
+  categories:
+  - other
+  connection_config:
+    subdomain:
+      description: The subdomain of the environment to which you want to connect to.
+      enum:
+      - demand
+      - stage-demand
+      order: 1
+      title: Subdomain
+      type: string
+  credentials:
+    email:
+      description: Your ResearchDesk account email
+      format: email
+      title: Email
+      type: string
+    password:
+      description: Your ResearchDesk account password
+      secret: true
+      title: Password
+      type: string
+  display_name: ResearchDesk
+  proxy:
+    base_url: https://${connectionConfig.subdomain}.researchdesk.com
+    headers:
+      authorization: Bearer ${accessToken}
+  token_headers:
+    content-type: application/json
+  token_params:
+    email: ${credentials.email}
+    password: ${credentials.password}
+  token_response:
+    token: token
+    token_expiration: expires
+    token_expiration_strategy: expireAt
+  token_url: https://${connectionConfig.subdomain}.researchdesk.com/tokens
+sage-300-cre:
+  auth_mode: TWO_STEP
+  body_format: json
+  categories:
+  - accounting
+  - erp
+  connection_config:
+    databaseName:
+      description: Your Sage 300 CRE company data folder.
+      doc_section: '#step-1-finding-your-server-hostname-and-company-data-folder'
+      example: Company1
+      order: 2
+      title: Company Data Folder Name
+      type: string
+    serverUrl:
+      description: Hostname of your Sage 300 CRE Web API server.
+      doc_section: '#step-1-finding-your-server-hostname-and-company-data-folder'
+      example: myserver.company.com
+      order: 1
+      prefix: https://
+      title: Server Hostname
+      type: string
+  credentials:
+    dppKey:
+      description: Sage DPP license key (XML blob). Usually preconfigured — only fill in if asked to.
+      doc_section: '#step-3-dpp-license-key-only-if-not-already-configured'
+      optional: true
+      secret: true
+      title: DPP License Key
+      type: string
+    password:
+      description: Password for the Windows user above.
+      doc_section: '#step-2-creating-a-dedicated-integration-user'
+      secret: true
+      title: Password
+      type: string
+    username:
+      description: Windows username, including the domain.
+      doc_section: '#step-2-creating-a-dedicated-integration-user'
+      example: CORP\jdoe
+      title: Username
+      type: string
+  display_name: Sage 300 Construction and Real Estate
+  docs: https://nango.dev/docs/api-integrations/sage-300-cre
+  docs_connect: https://nango.dev/docs/api-integrations/sage-300-cre/connect
+  integration_config:
+    dppKey:
+      description: Sage DPP license key for this integration.
+      doc_section: '#step-3-dpp-license-key-only-if-not-already-configured'
+      optional: true
+      secret: true
+      title: DPP License Key
+      type: string
+  proxy:
+    base_url: https://${connectionConfig.serverUrl}
+    headers:
+      x-credentials: ${accessToken}
+      x-databasename: ${connectionConfig.databaseName}
+      x-dppkey: ${credentials.dppKey}
+  token_headers:
+    x-dppkey: ${credentials.dppKey}
+  token_params:
+    password: ${credentials.password}
+    userid: ${credentials.username}
+  token_response:
+    token: Data
+  token_url: https://${connectionConfig.serverUrl}/api/common/user/authenticate
+sage-intacct:
+  auth_mode: TWO_STEP
+  body_format: xml
+  categories:
+  - accounting
+  - erp
+  credentials:
+    companyId:
+      description: Your Sage Intacct Company ID
+      title: Company ID
+      type: string
+    senderId:
+      description: Your Sage Intacct Sender ID
+      title: Sender ID
+      type: string
+    senderPassword:
+      description: Your Sage Intacct Sender Password
+      secret: true
+      title: Sender Password
+      type: string
+    userId:
+      description: Your Sage Intacct User ID
+      title: User ID
+      type: string
+    userPassword:
+      description: Your Sage Intacct User Password
+      secret: true
+      title: User Password
+      type: string
+  display_name: Sage Intacct
+  proxy:
+    base_url: https://api.intacct.com/ia/xml/xmlgw.phtml
+  token_headers:
+    content-type: application/xml
+  token_params:
+    request:
+      control:
+        controlid: ${now}
+        dtdversion: '3.0'
+        includewhitespace: false
+        password: ${credentials.senderPassword}
+        senderid: ${credentials.senderId}
+        uniqueid: false
+      operation:
+        authentication:
+          login:
+            companyid: ${credentials.companyId}
+            password: ${credentials.userPassword}
+            userid: ${credentials.userId}
+        content:
+          function:
+            $controlid: '{{$guid}}'
+            getAPISession: ''
+  token_response:
+    token: response.operation.result.data.api.sessionid
+    token_expiration: response.operation.authentication.sessiontimeout
+    token_expiration_strategy: expireAt
+  token_url: https://api.intacct.com/ia/xml/xmlgw.phtml
+sage-intacct-cc:
+  auth_mode: TWO_STEP
+  body_format: form
+  categories:
+  - accounting
+  - erp
+  credentials:
+    sessionId:
+      description: A valid UI or API session ID. Required if not using Username.
+      optional: true
+      secret: true
+      title: Session ID
+      type: string
+    username:
+      description: The Web Services user ID in userId@companyId|entityId format. Required if not using Session ID.
+      example: Admin@MyCompany|Central Region
+      optional: true
+      title: Username
+      type: string
+  display_name: Sage Intacct (Client Credentials)
+  integration_config:
+    clientId:
+      description: Your Sage Intacct application Client ID.
+      optional: true
+      order: 1
+      title: Client ID
+      type: string
+    clientSecret:
+      description: Your Sage Intacct application Client Secret.
+      optional: true
+      order: 2
+      secret: true
+      title: Client Secret
+      type: string
+  proxy:
+    base_url: https://api.intacct.com/ia/api
+  token_params:
+    client_id: ${credentials.clientId}
+    client_secret: ${credentials.clientSecret}
+    grant_type: client_credentials
+    session_id: ${credentials.sessionId}
+    username: ${credentials.username}
+  token_response:
+    token: access_token
+    token_expiration: expires_in
+    token_expiration_strategy: expireIn
+  token_url: https://api.intacct.com/ia/api/v1/oauth2/token
+salesforce-cdp:
+  additional_steps:
+  - body_format: form
+    token_headers:
+      content-type: application/x-www-form-urlencoded
+    token_params:
+      grant_type: urn:salesforce:grant-type:external:cdp
+      subject_token: ${step1.access_token}
+      subject_token_type: urn:ietf:params:oauth:token-type:access_token
+    token_url: ${step1.instance_url}/services/a360/token
+  auth_mode: TWO_STEP
+  body_format: form
+  categories:
+  - storage
+  credentials:
+    jwt:
+      description: This is your pre-generated, encoded JSON Web Token (JWT)
+      secret: true
+      title: Encoded JWT
+      type: string
+  display_name: Salesforce (Data Cloud)
+  proxy:
+    base_url: ${connectionConfig.instance_url}
+  token_headers:
+    content-type: application/x-www-form-urlencoded
+  token_params:
+    assertion: ${credentials.jwt}
+    grant_type: urn:ietf:params:oauth:grant-type:jwt-bearer
+  token_response:
+    token: access_token
+    token_expiration: expires_in
+    token_expiration_strategy: expireIn
+  token_response_metadata:
+  - instance_url
+  token_url: https://login.salesforce.com/services/oauth2/token
+salesforce-jwt:
+  auth_mode: TWO_STEP
+  body_format: form
+  categories:
+  - crm
+  connection_config:
+    authorizationUrl:
+      description: Your Salesforce authorization server URL.
+      example: login.salesforce.com
+      format: hostname
+      title: Authorization Server URL
+      type: string
+  credentials:
+    clientId:
+      description: The Consumer Key from your Salesforce Connected App.
+      example: 3MVG9dAEux2v1sLsg0e52***************CJpGsXgqg8E
+      title: Consumer Key
+      type: string
+    clientSecret:
+      description: The Consumer Secret from your Salesforce Connected App.
+      example: 954F73F4C234***************9D069B8FCF83B5
+      pattern: ^[A-F0-9]{64}$
+      title: Consumer Secret
+      type: string
+    privateKey:
+      description: The private key that matches the certificate you uploaded to the Connected App.
+      example: '-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA\n-----END PRIVATE KEY-----'
+      title: Private Key
+      type: string
+    username:
+      description: The Salesforce username of the user the JWT will act on behalf of.
+      example: john@acme.com
+      format: email
+      title: Username
+      type: string
+  display_name: Salesforce (JWT)
+  proxy:
+    base_url: ${connectionConfig.instance_url}
+  signature:
+    protocol: RSA
+  token:
+    expires_in_ms: 3600000
+    header:
+      alg: RS256
+      typ: JWT
+    payload:
+      aud: https://${connectionConfig.authorizationUrl}
+      iss: ${credentials.clientId}
+      sub: ${credentials.username}
+    signing_key: ${credentials.privateKey}
+  token_expires_in_ms: 0
+  token_params:
+    assertion: ${token}
+    grant_type: urn:ietf:params:oauth:grant-type:jwt-bearer
+  token_response:
+    token: access_token
+  token_response_metadata:
+  - instance_url
+  token_url: https://${connectionConfig.authorizationUrl}/services/oauth2/token
+salesmsg:
+  auth_mode: TWO_STEP
+  body_format: json
+  categories:
+  - communication
+  - marketing
+  credentials:
+    apiKey:
+      description: Your Salesmsg Personal Access Token (PAT).
+      example: eyJhbGciOi***.eyJzdWIiOi***.xxxxxxxxxxxx
+      pattern: ^[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]*$
+      title: Personal Access Token
+      type: string
+  display_name: Salesmsg (PAT)
+  proxy:
+    base_url: https://api.salesmessage.com/pub/
+    headers:
+      authorization: Bearer ${accessToken}
+  refresh_token_headers:
+    authorization: Bearer ${refresh_token}
+  token_headers:
+    authorization: Bearer ${credentials.apiKey}
+    content-type: application/json
+  token_response:
+    refresh_token: access_token
+    token: access_token
+    token_expiration: expires_in
+    token_expiration_strategy: expireIn
+  token_url: https://api.salesmessage.com/pub/v2.2/oauth/personal-token/refresh
+sap-business-one:
+  auth_mode: TWO_STEP
+  body_format: json
+  categories:
+  - erp
+  connection_config:
+    companyDb:
+      description: The name of your SAP Business One company database
+      example: 10COR0809H
+      order: 2
+      title: Company Database Name
+      type: string
+    dbInstance:
+      description: The database server instance name
+      example: C200@10.58.114.200:30013
+      optional: true
+      order: 3
+      title: Database Instance
+      type: string
+    domain:
+      description: The base URL for your SAP Business One Service Layer
+      order: 1
+      prefix: https://
+      suffix: /Login
+      title: Service Layer URL
+      type: string
+  credentials:
+    password:
+      description: Your SAP Business One password
+      secret: true
+      title: Password
+      type: string
+    userName:
+      description: Your SAP Business One username
+      title: Username
+      type: string
+  display_name: SAP Business One
+  proxy:
+    base_url: https://${connectionConfig.domain}
+    headers:
+      cookie: ${credentials._cookies}
+  token_expires_in_ms: 1700000
+  token_headers:
+    content-type: application/json
+  token_params:
+    CompanyDB: ${connectionConfig.companyDb}
+    DBInstance: ${connectionConfig.dbInstance}
+    Password: ${credentials.password}
+    UserName: ${credentials.userName}
+  token_response:
+    token: SessionId
+  token_response_headers:
+  - set-cookie
+  token_url: https://${connectionConfig.domain}/Login
+sap-concur-password:
+  auth_mode: TWO_STEP
+  body_format: form
+  categories:
+  - erp
+  connection_config:
+    region:
+      description: The SAP Concur Data Center region.
+      example: us
+      order: 1
+      pattern: ^[a-z0-9-]+$
+      title: Region
+      type: string
+  credentials:
+    clientId:
+      description: Your OAuth application client_id supplied by App Management.
+      title: Client ID
+      type: string
+    clientSecret:
+      description: Your OAuth application client_secret supplied by App Management.
+      secret: true
+      title: Client Secret
+      type: string
+    password:
+      description: Your SAP Concur account password.
+      secret: true
+      title: Password
+      type: string
+    username:
+      description: Your SAP Concur username or userId.
+      title: Username
+      type: string
+  display_name: SAP Concur (Password Grant)
+  proxy:
+    base_url: https://${connectionConfig.region}.api.concursolutions.com
+  token_headers:
+    content-type: application/x-www-form-urlencoded
+  token_params:
+    client_id: ${credentials.clientId}
+    client_secret: ${credentials.clientSecret}
+    grant_type: password
+    password: ${credentials.password}
+    username: ${credentials.username}
+  token_response:
+    refresh_token: refresh_token
+    token: access_token
+    token_expiration: expires_in
+    token_expiration_strategy: expireIn
+  token_url: https://${connectionConfig.region}.api.concursolutions.com/oauth2/v0/token
+sap-fieldglass:
+  auth_mode: TWO_STEP
+  body_format: form
+  categories:
+  - erp
+  connection_config:
+    domain:
+      description: Your SAP Fieldglass environment URL
+      example: auth.fieldglass.net
+      pattern: ^(?:[a-zA-Z0-9_-]+-(?:auth\.)?fgvms\.com|auth\.fieldglass\.net|sso\.fieldglass\.eu)$
+      prefix: https://
+      title: Domain
+      type: string
+  credentials:
+    appKey:
+      description: Your SAP Fieldglass application key
+      optional: true
+      secret: true
+      title: Application Key
+      type: string
+    clientId:
+      description: Your SAP Fieldglass application Client ID
+      title: Client ID
+      type: string
+    clientSecret:
+      description: Your SAP Fieldglass application Client secret
+      secret: true
+      title: Client secret
+      type: string
+  display_name: SAP Fieldglass
+  proxy:
+    base_url: https://${connectionConfig.domain}/api
+  token_headers:
+    X-ApplicationKey: ${credentials.appKey}
+    authorization: Basic ${base64(${credentials.clientId}:${credentials.clientSecret})}
+  token_response:
+    token: access_token
+    token_expiration: expires_in
+    token_expiration_strategy: expireIn
+  token_url: https://${connectionConfig.domain}/api/oauth2/v2.0/token?grant_type=client_credentials&response_type=token
+sap-success-factors:
+  assertion:
+    attributes:
+      api_key: ${credentials.apiKey}
+      external_user: false
+      use_email: false
+      use_username: true
+    audiences: www.successfactors.com
+    issuer: www.successfactors.com
+    key: ${assertionOption.privateKey}
+    lifetimeInSeconds: '315360000'
+    nameIdentifier: ${assertionOption.userName}
+    recipient: https://${connectionConfig.apiServer}/oauth/token
+    sessionIndex: ${random}
+    type: saml
+  assertion_option:
+    privateKey:
+      description: The Private Key for your SAP SuccessFactors Oauth Client
+      title: Private Key
+      type: string
+    userName:
+      description: The username of your SAP SuccessFactors account
+      example: johnDoe
+      title: Username
+      type: string
+  auth_mode: TWO_STEP
+  body_format: form
+  categories:
+  - hr
+  connection_config:
+    apiServer:
+      description: The API Server to connect to your SAP SuccessFactors account
+      example: api41preview.sapsf.com
+      format: hostname
+      order: 1
+      prefix: https://
+      title: API Server
+      type: string
+    companyId:
+      description: The company ID of your SAP SuccessFactors account
+      example: SFSALES012345
+      order: 2
+      pattern: ^[A-Za-z0-9]+$
+      title: Company ID
+      type: string
+  credentials:
+    apiKey:
+      description: The API key for your SAP SuccessFactors account
+      example: YzA4MTVhMTQzZTUzMjc3NTk0ZDY2Nzc1ZmVkOA
+      pattern: ^[A-Za-z0-9+/]{32,44}={0,2}$
+      secret: true
+      title: API Key
+      type: string
+    assertion:
+      automated: true
+      description: ''
+      title: ''
+      type: string
+  display_name: SAP SuccessFactors
+  proxy:
+    base_url: https://${connectionConfig.apiServer}
+  token_headers:
+    content-type: application/x-www-form-urlencoded
+  token_params:
+    assertion: ${credentials.assertion}
+    client_id: ${credentials.apiKey}
+    company_id: ${connectionConfig.companyId}
+    grant_type: urn:ietf:params:oauth:grant-type:saml2-bearer
+    new_token: true
+  token_response:
+    token: access_token
+    token_expiration: expires_in
+    token_expiration_strategy: expireIn
+  token_url: https://${connectionConfig.apiServer}/oauth/token
+sellercloud:
+  additional_steps:
+  - body_format: json
+    token_params:
+      Password: ${credentials.password}
+      Username: ${credentials.username}
+    token_url: ${step1.restApiEndpoint}/api/token
+  auth_mode: TWO_STEP
+  categories:
+  - e-commerce
+  connection_config:
+    restApiEndpoint:
+      automated: true
+      description: ''
+      title: ''
+      type: string
+  credentials:
+    password:
+      description: Your Sellercloud password
+      secret: true
+      title: Password
+      type: string
+    teamName:
+      description: Your Sellercloud team name
+      example: myteam
+      title: Team Name
+      type: string
+    username:
+      description: Your Sellercloud username
+      title: Username
+      type: string
+  display_name: Sellercloud
+  proxy:
+    base_url: ${connectionConfig.restApiEndpoint}
+  token_request_method: GET
+  token_response:
+    token: access_token
+    token_expiration: expires_in
+    token_expiration_strategy: expireIn
+  token_response_metadata:
+  - restApiEndpoint
+  token_url: https://api.sellercloud.com/api/server-by-team/?team=${credentials.teamName}
+semble:
+  auth_mode: TWO_STEP
+  body_format: json
+  categories:
+  - other
+  credentials:
+    email:
+      description: The email address of the Semble user to authenticate as.
+      format: email
+      title: Email
+      type: string
+    password:
+      description: The password for the Semble user.
+      secret: true
+      title: Password
+      type: string
+  display_name: Semble
+  proxy:
+    base_url: https://open.semble.io
+    headers:
+      x-token: ${accessToken}
+  token_headers:
+    content-type: application/json
+  token_params:
+    query: 'mutation { signIn(email: "${credentials.email}", password: "${credentials.password}") { token } }'
+  token_response:
+    token: data.signIn.token
+  token_url: https://open.semble.io/graphql
+servicenow-jwt:
+  auth_mode: TWO_STEP
+  body_format: form
+  categories:
+  - productivity
+  - ticketing
+  connection_config:
+    hostname:
+      description: The full hostname of your ServiceNow instance
+      example: dev12345.service-now.com
+      format: hostname
+      prefix: https://
+      title: ServiceNow Domain
+      type: string
+  credentials:
+    clientId:
+      description: The Client ID from your ServiceNow OAuth JWT API endpoint
+      title: Client ID
+      type: string
+    clientSecret:
+      description: The Client Secret from your ServiceNow OAuth JWT API endpoint
+      secret: true
+      title: Client Secret
+      type: string
+    keyId:
+      description: The Key ID configured in your ServiceNow JWT verifier map
+      example: servicenow-key
+      title: Key ID
+      type: string
+    privateKey:
+      description: The RSA private key matching the certificate in your ServiceNow JWT verifier map
+      secret: true
+      title: Private Key
+      type: string
+    userIdentifier:
+      description: The user's value in the User Field configured on your ServiceNow OAuth JWT API endpoint
+      example: my_integration
+      title: User Identifier
+      type: string
+  display_name: ServiceNow (JWT)
+  proxy:
+    base_url: https://${connectionConfig.hostname}
+  signature:
+    protocol: RSA
+  token:
+    expires_in_ms: 300000
+    header:
+      alg: RS256
+      kid: ${credentials.keyId}
+      typ: JWT
+    payload:
+      aud: ${credentials.clientId}
+      iss: ${credentials.clientId}
+      jti: ${random}
+      sub: ${credentials.userIdentifier}
+    signing_key: ${credentials.privateKey}
+  token_params:
+    assertion: ${token}
+    client_id: ${credentials.clientId}
+    client_secret: ${credentials.clientSecret}
+    grant_type: urn:ietf:params:oauth:grant-type:jwt-bearer
+  token_response:
+    token: access_token
+    token_expiration: expires_in
+    token_expiration_strategy: expireIn
+  token_url: https://${connectionConfig.hostname}/oauth_token.do
+setmore:
+  auth_mode: TWO_STEP
+  categories:
+  - productivity
+  credentials:
+    refreshToken:
+      description: The access token provided to you by Setmore team
+      example: r1/Ab12Cd34Ef56Gh78Ij90KlMnOpQr-StUvWxYz123456
+      pattern: ^r1\/[A-Za-z0-9\-]+$
+      title: Access Token
+      type: string
+  display_name: Setmore
+  proxy:
+    base_url: https://developer.setmore.com/api
+  token_request_method: GET
+  token_response:
+    token: data.token.access_token
+    token_expiration: data.token.expires_in
+    token_expiration_strategy: expireIn
+  token_url: https://developer.setmore.com/api/v1/o/oauth2/token?refreshToken=${credentials.refreshToken}
+sharepoint-online-v1:
+  auth_mode: TWO_STEP
+  body_format: form
+  categories:
+  - storage
+  - communication
+  connection_config:
+    tenantId:
+      description: The unique identifier for your organization that uses Microsoft services
+      example: a1b2c3d4-e5f6-47a8-9b0c-d1234567890f
+      format: uuid
+      order: 1
+      title: Tenant ID
+      type: string
+    tenantName:
+      description: The initial domain name for your Microsoft services tenant
+      example: mycompany
+      order: 2
+      pattern: ^[a-zA-Z0-9]+$
+      title: Tenant Name
+      type: string
+  credentials:
+    assertion:
+      description: Your generated client assertion
+      secret: true
+      title: Client Assertion
+      type: string
+    clientId:
+      description: Your application Client ID
+      secret: true
+      title: Client ID
+      type: string
+  display_name: SharePoint Online (v1)
+  proxy:
+    base_url: https://${connectionConfig.tenantName}.sharepoint.com
+    headers:
+      accept: application/json;odata=verbose
+  token_headers:
+    content-type: application/x-www-form-urlencoded
+  token_params:
+    client_assertion: ${credentials.assertion}
+    client_assertion_type: urn:ietf:params:oauth:client-assertion-type:jwt-bearer
+    client_id: ${credentials.clientId}
+    grant_type: client_credentials
+    resource: https://${connectionConfig.tenantId}.sharepoint.com
+  token_response:
+    token: access_token
+    token_expiration: expires_in
+    token_expiration_strategy: expireIn
+  token_url: https://login.microsoftonline.com/${connectionConfig.tenantId}/oauth2/token
+shopvox:
+  auth_mode: TWO_STEP
+  body_format: json
+  categories:
+  - other
+  credentials:
+    email:
+      description: Your ShopVox login email.
+      format: email
+      title: Email
+      type: string
+    password:
+      description: Your ShopVox login password.
+      secret: true
+      title: Password
+      type: string
+  display_name: ShopVox
+  proxy:
+    base_url: https://api.shopvox.com/
+    query:
+      account_id: ${credentials.raw.accountID}
+      authToken: ${accessToken}
+  token_headers:
+    content-type: application/json
+  token_params:
+    password: ${credentials.password}
+    user: ${credentials.email}
+  token_response:
+    token: authToken
+  token_url: https://api.shopvox.com/v1/login
+shopworks:
+  auth_mode: TWO_STEP
+  body_format: json
+  categories:
+  - other
+  connection_config:
+    hostname:
+      description: The hostname of the API you want to connect to.
+      example: manageordersapi.com/onsite
+      prefix: https://
+      suffix: /signin
+      title: Hostname
+      type: string
+  credentials:
+    password:
+      description: The password for your ShopWorks account.
+      secret: true
+      title: Password
+      type: string
+    username:
+      description: The username for your ShopWorks account.
+      title: Username
+      type: string
+  display_name: ShopWorks
+  proxy:
+    base_url: https://${connectionConfig.hostname}
+    headers:
+      authorization: ${accessToken}
+  token_expires_in_ms: 3600000
+  token_headers:
+    content-type: application/json
+  token_params:
+    password: ${credentials.password}
+    username: ${credentials.username}
+  token_response:
+    token: id_token
+  token_url: https://${connectionConfig.hostname}/signin
+tableau:
+  auth_mode: TWO_STEP
+  categories:
+  - analytics
+  connection_config:
+    hostname:
+      description: The domain of your Tableau instance
+      example: dub01.online.tableau.com
+      format: hostname
+      order: 1
+      prefix: https://
+      title: HostName
+      type: string
+    version:
+      description: The version of the Tableau API to use
+      example: '3.26'
+      order: 2
+      title: API Version
+      type: string
+  credentials:
+    contentUrl:
+      description: Your content URL
+      example: test-eaec4a3fe2
+      optional: true
+      title: Content Url
+      type: string
+    pat:
+      description: Your Personal Access Token
+      title: Personal Access Token
+      type: string
+    secret:
+      description: Your Personal Access Token Secret
+      secret: true
+      title: Personal Access Token Secret
+      type: string
+  display_name: Tableau (PAT)
+  proxy:
+    base_url: https://${connectionConfig.hostname}/api/${connectionConfig.version}
+    headers:
+      accept: application/json
+      content-type: application/json
+      x-tableau-auth: ${accessToken}
+  token_headers:
+    accept: application/json
+    content-type: application/json
+  token_params:
+    credentials:
+      personalAccessTokenName: ${credentials.pat}
+      personalAccessTokenSecret: ${credentials.secret}
+      site:
+        contentUrl: ${credentials.contentUrl}
+  token_response:
+    token: credentials.token
+    token_expiration: credentials.estimatedTimeToExpiration
+    token_expiration_strategy: expireAt
+  token_url: https://${connectionConfig.hostname}/api/${connectionConfig.version}/auth/signin
+tailscale:
+  auth_mode: TWO_STEP
+  body_format: form
+  categories:
+  - dev-tools
+  - productivity
+  connection_config:
+    organizationName:
+      description: Your Tailscale organization name
+      example: example.com
+      order: 1
+      title: Organization Name
+      type: string
+  credentials:
+    clientId:
+      description: Your OAuth Client ID
+      example: kcLBRFmtYZ11CNTRL
+      pattern: ^[A-Za-z0-9]+CNTRL$
+      title: Client ID
+      type: string
+    clientSecret:
+      description: Your OAuth Client secret
+      example: tskey-client-EXAMPLECNTRL-EXAMPLEEXAMPLEEXAMPLEEXAMPLE
+      pattern: ^tskey-client-[A-Za-z0-9]+CNTRL-[A-Za-z0-9]+$
+      secret: true
+      title: Client secret
+      type: string
+  display_name: Tailscale (OAuth)
+  proxy:
+    base_url: https://api.tailscale.com/api
+    connection_config:
+      organizationName: ${connectionConfig.organizationName}
+  token_params:
+    client_id: ${credentials.clientId}
+    client_secret: ${credentials.clientSecret}
+  token_response:
+    token: access_token
+    token_expiration: expires_in
+    token_expiration_strategy: expireIn
+  token_url: https://api.tailscale.com/api/v2/oauth/token
+timify:
+  auth_mode: TWO_STEP
+  body_format: json
+  categories:
+  - productivity
+  connection_config:
+    subdomain:
+      description: The subdomain of your Timify API.
+      example: api
+      order: 1
+      pattern: ^[a-z0-9_-]+$
+      prefix: https://
+      suffix: .timify.com
+      title: Timify Subdomain
+      type: string
+  credentials:
+    appId:
+      description: Your Timify app ID
+      title: App ID
+      type: string
+    appSecret:
+      description: Your Timify app secret
+      secret: true
+      title: App Secret
+      type: string
+  display_name: Timify
+  proxy:
+    base_url: https://${connectionConfig.subdomain}.timify.com
+    headers:
+      authorization: ${accessToken}
+  refresh_token_params:
+    refreshtoken: ${refresh_token}
+  refresh_url: https://${connectionConfig.subdomain}.timify.com/v1/auth/refreshtoken
+  token_headers:
+    accept: application/json
+    content-type: application/json
+  token_params:
+    appid: ${credentials.appId}
+    appsecret: ${credentials.appSecret}
+  token_response:
+    refresh_token: refreshToken
+    token: accessToken
+    token_expiration: expires
+    token_expiration_strategy: expireIn
+  token_url: https://${connectionConfig.subdomain}.timify.com/v1/auth/token
+toast:
+  auth_mode: TWO_STEP
+  body_format: json
+  categories:
+  - erp
+  connection_config:
+    restaurantId:
+      description: The Toast GUID for the restaurant to connect to.
+      example: 4721e7a9-b4ae-4fef-9230-b3dae186e0a4
+      format: uuid
+      optional: true
+      title: Restaurant External ID
+      type: string
+    subdomain:
+      description: The Toast API subdomain for your environment.
+      example: ws-api
+      order: 1
+      pattern: ^[a-z0-9-]+$
+      title: API Subdomain
+      type: string
+  credentials:
+    clientId:
+      description: Your Toast API client identifier.
+      title: Client ID
+      type: string
+    clientSecret:
+      description: Your Toast API client secret.
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: Toast
+  proxy:
+    base_url: https://${connectionConfig.subdomain}.toasttab.com
+    headers:
+      toast-restaurant-external-id: ${connectionConfig.restaurantId}
+  token_expiration_buffer: 60
+  token_headers:
+    content-type: application/json
+  token_params:
+    clientId: ${credentials.clientId}
+    clientSecret: ${credentials.clientSecret}
+    userAccessType: TOAST_MACHINE_CLIENT
+  token_response:
+    token: token.accessToken
+    token_expiration: token.expiresIn
+    token_expiration_strategy: expireIn
+  token_url: https://${connectionConfig.subdomain}.toasttab.com/authentication/v1/authentication/login
+tripletex:
+  auth_mode: TWO_STEP
+  categories:
+  - accounting
+  connection_config:
+    environment:
+      description: The Tripletex environment to connect to.
+      enum:
+      - tripletex.no
+      - api-test.tripletex.tech
+      order: 1
+      title: Environment
+      type: string
+    proxyCompanyId:
+      default_value: '0'
+      description: HTTP Basic-auth username.
+      example: '0'
+      order: 2
+      pattern: ^[0-9]+$
+      title: Proxy Company ID
+      type: string
+  credentials:
+    consumerToken:
+      description: The consumer token issued by Tripletex for this environment.
+      example: eyJ0b2tlbklkIjoxLCJ0b2tlbiI6ImV4YW1wbGUtMDAwMC0wMDAwLTAwMDAtZXhhbXBsZSJ9
+      pattern: ^eyJ[A-Za-z0-9+/=]+$
+      secret: true
+      title: Consumer Token
+      type: string
+    employeeToken:
+      description: The employee token the end user generates in their Tripletex tenant.
+      example: eyJ0b2tlbklkIjoxLCJ0b2tlbiI6ImV4YW1wbGUtMDAwMC0wMDAwLTAwMDAtZXhhbXBsZSJ9
+      pattern: ^eyJ[A-Za-z0-9+/=]+$
+      secret: true
+      title: Employee Token
+      type: string
+  display_name: Tripletex
+  proxy:
+    base_url: https://${connectionConfig.environment}
+    headers:
+      authorization: Basic ${base64(${connectionConfig.proxyCompanyId}:${credentials.token})}
+    paginate:
+      limit_name_in_request: count
+      offset_name_in_request: from
+      offset_start_value: 0
+      type: offset
+    retry:
+      after:
+      - x-rate-limit-reset
+  token_expires_in_ms: 432000000
+  token_headers:
+    accept: application/json
+    content-type: application/json
+  token_params:
+    consumerToken: ${credentials.consumerToken}
+    employeeToken: ${credentials.employeeToken}
+    expirationDate: ${now+7:days:YYYY-MM-DD}
+  token_response:
+    token: value.token
+  token_url: https://${connectionConfig.environment}/v2/token/session/:create
+ukg-pro-wfm-ropc:
+  auth_mode: TWO_STEP
+  body_format: json
+  categories:
+  - hr
+  connection_config:
+    hostname:
+      description: The tenant URL of your UKG Pro instance
+      example: wfm.us1.ukg.com
+      format: hostname
+      prefix: https://
+      suffix: /api
+      title: Tenant URL
+      type: string
+    tenantName:
+      description: The tenant name of your UKG Pro instance
+      example: wfm
+      title: Tenant Name
+      type: string
+  credentials:
+    client_id:
+      description: Client ID for a client configured for the ROPC flow.
+      title: Client ID
+      type: string
+    client_secret:
+      description: Client Secret for that client.
+      secret: true
+      title: Client Secret
+      type: string
+    password:
+      description: Password for that WFM user.
+      secret: true
+      title: Password
+      type: string
+    username:
+      description: Username of the WFM user to authenticate as.
+      title: Username
+      type: string
+  display_name: UKG Pro (Workforce Management ROPC)
+  proxy:
+    base_url: https://${connectionConfig.hostname}/api
+  token_headers:
+    content-type: application/json
+  token_params:
+    audience: https://wfm.ukg.net/api
+    client_id: ${credentials.client_id}
+    client_secret: ${credentials.client_secret}
+    grant_type: http://auth0.com/oauth/grant-type/password-realm
+    password: ${credentials.password}
+    realm: ${connectionConfig.tenantName}
+    username: ${credentials.username}
+  token_response:
+    token: access_token
+    token_expiration: expires_in
+    token_expiration_strategy: expireIn
+  token_url: https://welcome-us.ukg.net/oauth/token
+valley:
+  auth_mode: TWO_STEP
+  body_format: json
+  categories:
+  - marketing
+  credentials:
+    email:
+      description: Your Valley email address
+      format: email
+      title: Email
+      type: string
+    password:
+      description: Your Valley password
+      title: Password
+      type: string
+  display_name: Valley (OAuth)
+  proxy:
+    base_url: https://api.joinvalley.co/api/
+    headers:
+      authorization: Bearer ${accessToken}
+    retry:
+      at:
+      - x-ratelimit-reset
+  refresh_token_params:
+    refresh_token: ${refresh_token}
+  refresh_url: https://api.joinvalley.co/api/v1/auth/refresh-token
+  token_headers:
+    content-type: application/json
+  token_params:
+    email: ${credentials.email}
+    password: ${credentials.password}
+  token_response:
+    refresh_token: refresh_token
+    token: access_token
+    token_expiration: expires_in
+    token_expiration_strategy: expireIn
+  token_url: https://api.joinvalley.co/api/v1/auth/get-token
+veeva-vault:
+  auth_mode: TWO_STEP
+  body_format: form
+  categories:
+  - crm
+  connection_config:
+    subdomain:
+      description: The Vault DNS subdomain of the Veeva Vault you want to connect to
+      example: myvault
+      order: 1
+      prefix: https://
+      suffix: veevavault.com
+      title: Vault DNS (subdomain)
+      type: string
+    version:
+      default_value: ''
+      description: ''
+      hidden: true
+      title: ''
+      type: string
+  credentials:
+    password:
+      description: Your Vault password associated with your assigned Vault user name
+      secret: true
+      title: Password
+      type: string
+    username:
+      description: Your Vault user name assigned by your administrator
+      title: Username
+      type: string
+  display_name: Veeva Vault
+  proxy:
+    base_url: https://${connectionConfig.subdomain}.veevavault.com/api/${connectionConfig.version}
+    headers:
+      accept: application/json
+      authorization: ${accessToken}
+  token_headers:
+    accept: application/json
+    content-type: application/x-www-form-urlencoded
+  token_params:
+    password: ${credentials.password}
+    username: ${credentials.username}
+  token_response:
+    token: sessionId
+  token_url: https://${connectionConfig.subdomain}.veevavault.com/api/${connectionConfig.version}/auth
+veeva-vault-oauth:
+  additional_steps:
+  - body_format: form
+    token_headers:
+      accept: application/json
+      authorization: Bearer ${step1.access_token}
+      content-type: application/x-www-form-urlencoded
+    token_params:
+      client_id: ${credentials.clientId}
+      vaultDNS: ${connectionConfig.subdomain}
+    token_url: https://login.veevavault.com/auth/oauth/session/${connectionConfig.oauthProfileId}
+  auth_mode: TWO_STEP
+  body_format: form
+  categories:
+  - crm
+  connection_config:
+    oauthProfileId:
+      description: The ID of the OAuth 2.0 / OpenID Connect profile configured in Veeva Vault.
+      order: 2
+      title: OAuth 2.0 / OpenID Connect Profile ID
+      type: string
+    scope:
+      description: The OAuth scope requested from your identity provider, if required.
+      optional: true
+      order: 4
+      title: OAuth Scope
+      type: string
+    subdomain:
+      description: The Vault DNS subdomain of the Veeva Vault you want to connect to
+      example: myvault
+      order: 3
+      prefix: https://
+      suffix: veevavault.com
+      title: Vault DNS (subdomain)
+      type: string
+    tokenUrl:
+      description: The OAuth 2.0 token endpoint URL of your identity provider.
+      example: '{your-okta-domain}/oauth2/default/v1/token'
+      order: 1
+      prefix: https://
+      title: Identity Provider Token Endpoint
+      type: string
+  credentials:
+    clientId:
+      description: The client ID of the client credentials application configured in your identity provider.
+      title: Client ID
+      type: string
+    clientSecret:
+      description: The client secret of the client credentials application configured in your identity provider.
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: Veeva Vault (OAuth 2.0 / OIDC)
+  proxy:
+    base_url: https://${connectionConfig.subdomain}.veevavault.com/api
+    headers:
+      accept: application/json
+      authorization: ${accessToken}
+  token_headers:
+    accept: application/json
+    authorization: Basic ${base64(${credentials.clientId}:${credentials.clientSecret})}
+    content-type: application/x-www-form-urlencoded
+  token_params:
+    grant_type: client_credentials
+    scope: ${connectionConfig.scope}
+  token_response:
+    token: sessionId
+  token_url: https://${connectionConfig.tokenUrl}
+workday-adaptive-planning:
+  additional_steps:
+  - token_headers:
+      authorization: Bearer ${step1.access_token}
+    token_request_method: GET
+    token_url: https://${connectionConfig.host}/ccx/api/planning/v1/${connectionConfig.tenant}/adaptiveAPIAccessToken
+  assertion:
+    header:
+      alg: RS256
+      typ: JWT
+    key: ${credentials.privateKey}
+    lifetimeInSeconds: 300
+    payload:
+      aud: wd
+      iss: ${credentials.clientId}
+      sub: ${credentials.isu}
+    type: jwt
+  auth_mode: TWO_STEP
+  body_format: form
+  categories:
+  - accounting
+  connection_config:
+    host:
+      description: The hostname of your Workday account.
+      example: wd3-impl-services1.workday.com
+      format: hostname
+      order: 1
+      prefix: https://
+      title: Host
+      type: string
+    tenant:
+      description: The tenant of your Workday account.
+      example: mytenant
+      order: 2
+      title: Tenant
+      type: string
+  credentials:
+    assertion:
+      automated: true
+      description: ''
+      title: ''
+      type: string
+    clientId:
+      description: The Client ID from the Workday API Client registration.
+      title: Client ID
+      type: string
+    isu:
+      description: The Integration System User (ISU) username.
+      title: ISU Username
+      type: string
+    privateKey:
+      description: The RSA private key (PEM format) used to sign the JWT.
+      secret: true
+      title: Private Key
+      type: string
+  display_name: Workday Adaptive Planning
+  proxy:
+    base_url: https://api.adaptiveplanning.com
+  token_headers:
+    content-type: application/x-www-form-urlencoded
+  token_params:
+    assertion: ${credentials.assertion}
+    grant_type: urn:ietf:params:oauth:grant-type:jwt-bearer
+  token_response:
+    token: adaptiveAPIAccessToken
+  token_url: https://${connectionConfig.host}/ccx/oauth2/${connectionConfig.tenant}/token
+workday-cc:
+  auth_mode: TWO_STEP
+  body_format: form
+  categories:
+  - hr
+  connection_config:
+    tenant:
+      description: The tenant name of your Workday account.
+      example: mytenant
+      order: 2
+      title: Tenant
+      type: string
+    tokenDomain:
+      description: The hostname of your Workday tenant.
+      example: wd3-impl-services1.workday.com
+      format: hostname
+      order: 1
+      prefix: https://
+      title: Token Domain
+      type: string
+  credentials:
+    clientId:
+      description: Your Workday API Client ID.
+      title: Client ID
+      type: string
+    clientSecret:
+      description: Your Workday API Client Secret.
+      secret: true
+      title: Client Secret
+      type: string
+  display_name: Workday (Client Credentials)
+  proxy:
+    base_url: https://${connectionConfig.tokenDomain}/ccx/api
+  token_headers:
+    authorization: ID ${base64(${credentials.clientId}:${credentials.clientSecret})}
+    content-type: application/x-www-form-urlencoded
+  token_params:
+    grant_type: client_credentials
+    tenant_alias: ${connectionConfig.tenant}
+  token_response:
+    token: access_token
+    token_expiration: expires_in
+    token_expiration_strategy: expireIn
+  token_url: https://${connectionConfig.tokenDomain}/ccx/oauth2/${connectionConfig.tenant}/token
+workday-refresh-token:
+  auth_mode: TWO_STEP
+  body_format: form
+  categories:
+  - hr
+  connection_config:
+    tenant:
+      description: The tenant of your Workday account
+      example: mytenant
+      order: 2
+      title: Tenant
+      type: string
+    tokenDomain:
+      description: The domain used to obtain the token for your Workday account
+      example: wd3-impl-services1.workday.com
+      format: hostname
+      order: 1
+      prefix: https://
+      title: Token Domain
+      type: string
+  credentials:
+    clientId:
+      description: Your Workday API Client ID
+      title: Client ID
+      type: string
+    clientSecret:
+      description: Your Workday API Client Secret
+      secret: true
+      title: Client Secret
+      type: string
+    refreshToken:
+      description: Your Workday refresh token for the Integration System User
+      secret: true
+      title: Refresh Token
+      type: string
+  display_name: Workday (Refresh Token Auth)
+  proxy:
+    base_url: https://${connectionConfig.tokenDomain}/ccx/api
+  token_expires_in_ms: 3600000
+  token_headers:
+    authorization: Basic ${base64(${credentials.clientId}:${credentials.clientSecret})}
+    content-type: application/x-www-form-urlencoded
+  token_params:
+    grant_type: refresh_token
+    refresh_token: ${credentials.refreshToken}
+  token_response:
+    token: access_token
+  token_url: https://${connectionConfig.tokenDomain}/ccx/oauth2/${connectionConfig.tenant}/token
+yotpo:
+  auth_mode: TWO_STEP
+  categories:
+  - e-commerce
+  connection_config:
+    storeId:
+      description: Your Yotpo Store Key.
+      example: rvR3359XuCuuuEgCgcHNrQ9TE8zwC5dMzWMULHZm
+      order: 1
+      pattern: ^[A-Za-z0-9]{40}$
+      title: App Key
+      type: string
+  credentials:
+    apiSecret:
+      description: Your Yotpo app's secret key.
+      example: tHrwXaIBaWETHLRwxWaNktfYeEteyTcSjiNJY4IH
+      pattern: ^[A-Za-z0-9]{40}$
+      secret: true
+      title: Secret Key
+      type: string
+  display_name: Yotpo
+  proxy:
+    base_url: https://api.yotpo.com
+    headers:
+      x-yotpo-token: ${accessToken}
+  token_headers:
+    content-type: application/json
+  token_params:
+    secret: ${credentials.apiSecret}
+  token_response:
+    token: access_token
+  token_url: https://api.yotpo.com/core/v3/stores/${connectionConfig.storeId}/access_tokens
