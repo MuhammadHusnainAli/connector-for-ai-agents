@@ -1,0 +1,474 @@
+# monday.com tools.
+#
+# monday.com's API is GraphQL, so every tool posts to /v2 with a fixed query and
+# the caller's arguments as variables. Board ids, item ids and column ids are
+# numeric strings.
+#
+# Column values are written as a JSON *string* keyed by column id, e.g.
+# "{\"status\": {\"label\": \"Done\"}}" -- pass that string, not an object.
+#
+# Docs: https://developer.monday.com/api-reference/reference/about-the-api-reference
+
+connector_id: monday
+display_name: monday.com
+docs_url: https://developer.monday.com/api-reference/reference/about-the-api-reference
+
+scope_rules:
+  implies:
+    "boards:write": ["boards:read"]
+    "workspaces:write": ["workspaces:read"]
+    "users:write": ["users:read"]
+
+tools:
+
+  list_boards:
+    title: List boards
+    description: >-
+      List the account's boards with their ids, names and column definitions.
+      The column ids returned here are what the item tools write to.
+    category: boards
+    scopes: ["boards:read"]
+    read_only: true
+    request:
+      method: POST
+      path: /v2
+      body:
+        query: >-
+          query Boards($limit: Int, $page: Int) {
+            boards(limit: $limit, page: $page) {
+              id name description state board_kind
+              columns { id title type settings_str }
+              groups { id title }
+            }
+          }
+        variables:
+          limit: "${limit}"
+          page: "${page}"
+    input:
+      limit:
+        type: integer
+        description: How many boards per page.
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+    output:
+      description: The account's boards.
+      type: object
+      response_path: data
+      properties:
+        boards: {type: array}
+
+  get_board_items:
+    title: List a board's items
+    description: >-
+      Page through a board's items with their column values. Pass the cursor
+      from the previous response to continue.
+    category: items
+    scopes: ["boards:read"]
+    read_only: true
+    request:
+      method: POST
+      path: /v2
+      body:
+        query: >-
+          query BoardItems($boardId: [ID!], $limit: Int, $cursor: String) {
+            boards(ids: $boardId) {
+              items_page(limit: $limit, cursor: $cursor) {
+                cursor
+                items { id name state created_at
+                        group { id title }
+                        column_values { id text type value } }
+              }
+            }
+          }
+        variables:
+          boardId: "${board_id}"
+          limit: "${limit}"
+          cursor: "${cursor}"
+    input:
+      board_id:
+        type: string
+        description: The board id.
+      limit:
+        type: integer
+        description: How many items per page (1-500).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 500
+      cursor:
+        type: string
+        description: Cursor from the previous response's items_page.cursor.
+        optional: true
+    output:
+      description: A page of board items.
+      type: object
+      response_path: data.boards
+      items: {type: object}
+
+  create_item:
+    title: Create an item
+    description: >-
+      Add an item to a board. column_values is a JSON string keyed by column id,
+      e.g. "{\"status\":{\"label\":\"Working on it\"},\"date4\":{\"date\":\"2026-09-01\"}}".
+    category: items
+    scopes: ["boards:write"]
+    request:
+      method: POST
+      path: /v2
+      body:
+        query: >-
+          mutation CreateItem($boardId: ID!, $groupId: String, $itemName: String!,
+                              $columnValues: JSON, $createLabels: Boolean) {
+            create_item(board_id: $boardId, group_id: $groupId, item_name: $itemName,
+                        column_values: $columnValues, create_labels_if_missing: $createLabels) {
+              id name board { id }
+            }
+          }
+        variables:
+          boardId: "${board_id}"
+          groupId: "${group_id}"
+          itemName: "${item_name}"
+          columnValues: "${column_values}"
+          createLabels: "${create_labels_if_missing}"
+    input:
+      board_id:
+        type: string
+        description: The board to add the item to.
+      item_name:
+        type: string
+        description: The item's name, which fills the board's name column.
+      group_id:
+        type: string
+        description: Group (section) id to place it in. Defaults to the topmost group.
+        optional: true
+      column_values:
+        type: string
+        description: JSON string of column id to value.
+        optional: true
+      create_labels_if_missing:
+        type: boolean
+        description: Create status or dropdown labels that do not exist yet.
+        optional: true
+    output:
+      description: The created item.
+      type: object
+      response_path: data.create_item
+      properties:
+        id: {type: string}
+        name: {type: string}
+
+  update_item_columns:
+    title: Update an item's column values
+    description: >-
+      Write several column values on an item in one call. column_values is a
+      JSON string keyed by column id.
+    category: items
+    scopes: ["boards:write"]
+    request:
+      method: POST
+      path: /v2
+      body:
+        query: >-
+          mutation ChangeColumns($boardId: ID!, $itemId: ID!, $columnValues: JSON!,
+                                 $createLabels: Boolean) {
+            change_multiple_column_values(board_id: $boardId, item_id: $itemId,
+                                          column_values: $columnValues,
+                                          create_labels_if_missing: $createLabels) {
+              id name
+            }
+          }
+        variables:
+          boardId: "${board_id}"
+          itemId: "${item_id}"
+          columnValues: "${column_values}"
+          createLabels: "${create_labels_if_missing}"
+    input:
+      board_id:
+        type: string
+        description: The board the item is on.
+      item_id:
+        type: string
+        description: The item id.
+      column_values:
+        type: string
+        description: JSON string of column id to new value.
+      create_labels_if_missing:
+        type: boolean
+        description: Create status or dropdown labels that do not exist yet.
+        optional: true
+    output:
+      description: The updated item.
+      type: object
+      response_path: data.change_multiple_column_values
+      properties:
+        id: {type: string}
+        name: {type: string}
+
+  delete_item:
+    title: Delete an item
+    description: >-
+      Delete an item from its board. monday.com keeps it in the recycle bin for
+      30 days, but this tool cannot restore it.
+    category: items
+    scopes: ["boards:write"]
+    destructive: true
+    request:
+      method: POST
+      path: /v2
+      body:
+        query: >-
+          mutation DeleteItem($itemId: ID!) {
+            delete_item(item_id: $itemId) { id }
+          }
+        variables:
+          itemId: "${item_id}"
+    input:
+      item_id:
+        type: string
+        description: The item to delete.
+    output:
+      description: The deleted item's id.
+      type: object
+      response_path: data.delete_item
+      properties:
+        id: {type: string}
+
+  search_items_by_column:
+    title: Find items by a column value
+    description: >-
+      Find a board's items whose column matches given values -- the way to look
+      an item up by an external id or an email column.
+    category: items
+    scopes: ["boards:read"]
+    read_only: true
+    request:
+      method: POST
+      path: /v2
+      body:
+        query: >-
+          query ItemsByColumn($boardId: ID!, $columnId: String!, $values: [String]!, $limit: Int) {
+            items_page_by_column_values(board_id: $boardId, limit: $limit,
+                                        columns: [{column_id: $columnId, column_values: $values}]) {
+              cursor
+              items { id name column_values { id text } }
+            }
+          }
+        variables:
+          boardId: "${board_id}"
+          columnId: "${column_id}"
+          values: "${values}"
+          limit: "${limit}"
+    input:
+      board_id:
+        type: string
+        description: The board to search.
+      column_id:
+        type: string
+        description: Column id to match on, from list_boards.
+      values:
+        type: array
+        description: Values to match; an item matching any of them is returned.
+        items: {type: string}
+      limit:
+        type: integer
+        description: How many items to return.
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 500
+    output:
+      description: Matching items.
+      type: object
+      response_path: data.items_page_by_column_values
+      properties:
+        items: {type: array}
+        cursor: {type: string}
+
+  add_item_update:
+    title: Post an update on an item
+    description: >-
+      Add an update (a comment) to an item's activity feed. The body accepts
+      basic HTML.
+    category: items
+    scopes: ["updates:write"]
+    request:
+      method: POST
+      path: /v2
+      body:
+        query: >-
+          mutation CreateUpdate($itemId: ID!, $body: String!) {
+            create_update(item_id: $itemId, body: $body) { id body created_at }
+          }
+        variables:
+          itemId: "${item_id}"
+          body: "${body}"
+    input:
+      item_id:
+        type: string
+        description: The item to post on.
+      body:
+        type: string
+        description: The update text, which may contain basic HTML.
+    output:
+      description: The created update.
+      type: object
+      response_path: data.create_update
+      properties:
+        id: {type: string}
+        body: {type: string}
+
+  create_board:
+    title: Create a board
+    description: >-
+      Create a board in a workspace. Kind is public, private or share -- private
+      and share boards are only visible to their subscribers.
+    category: boards
+    scopes: ["boards:write"]
+    request:
+      method: POST
+      path: /v2
+      body:
+        query: >-
+          mutation CreateBoard($name: String!, $kind: BoardKind!, $workspaceId: ID,
+                               $templateId: ID, $description: String) {
+            create_board(board_name: $name, board_kind: $kind, workspace_id: $workspaceId,
+                         template_id: $templateId, description: $description) {
+              id name
+            }
+          }
+        variables:
+          name: "${name}"
+          kind: "${kind}"
+          workspaceId: "${workspace_id}"
+          templateId: "${template_id}"
+          description: "${description}"
+    input:
+      name:
+        type: string
+        description: The board's name.
+      kind:
+        type: string
+        description: Board visibility.
+        optional: true
+        default: public
+        enum: [public, private, share]
+      workspace_id:
+        type: string
+        description: Workspace to create it in.
+        optional: true
+      template_id:
+        type: string
+        description: Board template to copy the structure from.
+        optional: true
+      description:
+        type: string
+        description: What the board is for.
+        optional: true
+    output:
+      description: The created board.
+      type: object
+      response_path: data.create_board
+      properties:
+        id: {type: string}
+        name: {type: string}
+
+  list_users:
+    title: List account users
+    description: >-
+      List the account's users with the ids that people columns and assignment
+      take, plus their names and email addresses.
+    category: account
+    scopes: ["users:read"]
+    read_only: true
+    request:
+      method: POST
+      path: /v2
+      body:
+        query: >-
+          query Users($limit: Int, $kind: UserKind) {
+            users(limit: $limit, kind: $kind) { id name email enabled is_admin is_guest }
+          }
+        variables:
+          limit: "${limit}"
+          kind: "${kind}"
+    input:
+      limit:
+        type: integer
+        description: How many users to return.
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 1000
+      kind:
+        type: string
+        description: Which users to include.
+        optional: true
+        enum: [all, non_guests, guests, non_pending]
+    output:
+      description: The account's users.
+      type: object
+      response_path: data
+      properties:
+        users: {type: array}
+
+  get_me:
+    title: Get the authenticated user
+    description: >-
+      Read the monday.com account the token belongs to, with its id and
+      account. The cheapest health check for a monday.com connection.
+    category: account
+    scopes: ["me:read"]
+    read_only: true
+    request:
+      method: POST
+      path: /v2
+      body:
+        query: >-
+          query Me { me { id name email is_admin account { id name slug } } }
+    input: {}
+    output:
+      description: The authenticated user.
+      type: object
+      response_path: data.me
+      properties:
+        id: {type: string}
+        name: {type: string}
+        email: {type: string}
+        account: {type: object}
+
+  run_graphql:
+    title: Run a raw GraphQL query
+    description: >-
+      Send any query or mutation to monday.com's API. The escape hatch for
+      subitems, docs, workspaces, webhooks and anything else the other tools do
+      not cover.
+    category: raw
+    scopes: ["boards:read"]
+    notes: A mutation sent through this tool also needs the matching write scope.
+    request:
+      method: POST
+      path: /v2
+      body:
+        query: "${query}"
+        variables: "${variables}"
+    input:
+      query:
+        type: string
+        description: The GraphQL query or mutation document.
+      variables:
+        type: object
+        description: Values for the document's variables.
+        optional: true
+    output:
+      description: Whatever the query selected, under data.
+      type: object
+      properties:
+        data: {type: object}
+        errors: {type: array}

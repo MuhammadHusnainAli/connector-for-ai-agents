@@ -1,0 +1,492 @@
+# Intercom tools.
+#
+# Intercom grants an app the permissions chosen when it was installed rather
+# than issuing OAuth scopes on the token, so no tool declares scopes. A 403 from
+# Intercom means the app's permissions are too narrow, not that a scope is
+# missing from the grant.
+#
+# Docs: https://developers.intercom.com/docs/references/rest-api/api.intercom.io
+
+connector_id: intercom
+display_name: Intercom
+docs_url: https://developers.intercom.com/docs/references/rest-api/api.intercom.io
+
+tools:
+
+  search_contacts:
+    title: Search contacts
+    description: >-
+      Find contacts with Intercom's query shape, e.g.
+      {"field":"email","operator":"=","value":"ada@example.com"} or a nested
+      {"operator":"AND","value":[...]} group.
+    category: contacts
+    read_only: true
+    request:
+      method: POST
+      path: /contacts/search
+      body:
+        query: "${filter}"
+        pagination:
+          per_page: "${limit}"
+          starting_after: "${starting_after}"
+        sort: "${sort}"
+    input:
+      filter:
+        type: object
+        description: >-
+          Intercom search query, e.g. {"field":"email","operator":"=","value":
+          "ada@example.com"}, or a group {"operator":"AND","value":[...]}.
+      limit:
+        type: integer
+        description: How many contacts per page (1-150).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 150
+      starting_after:
+        type: string
+        description: Cursor from the previous response's pages.next.starting_after.
+        optional: true
+      sort:
+        type: object
+        description: Sort order, e.g. {"field":"created_at","order":"descending"}.
+        optional: true
+    output:
+      description: Matching contacts with the total count.
+      type: object
+      properties:
+        data: {type: array}
+        total_count: {type: integer}
+        pages: {type: object}
+
+  get_contact:
+    title: Get a contact
+    description: Read one contact in full -- attributes, tags, companies and last seen time.
+    category: contacts
+    read_only: true
+    request:
+      method: GET
+      path: /contacts/${contact_id}
+    input:
+      contact_id:
+        type: string
+        description: The contact's Intercom id.
+    output:
+      description: The contact.
+      type: object
+      properties:
+        id: {type: string}
+        email: {type: string}
+        name: {type: string}
+        role: {type: string}
+        custom_attributes: {type: object}
+
+  create_contact:
+    title: Create a contact
+    description: >-
+      Create a lead or a user. A user needs an external_id or an email; a lead
+      needs neither. Custom attributes must already exist in Intercom.
+    category: contacts
+    request:
+      method: POST
+      path: /contacts
+      body:
+        role: "${role}"
+        external_id: "${external_id}"
+        email: "${email}"
+        name: "${name}"
+        phone: "${phone}"
+        signed_up_at: "${signed_up_at}"
+        custom_attributes: "${custom_attributes}"
+    input:
+      role:
+        type: string
+        description: Whether this is an identified user or an anonymous lead.
+        optional: true
+        default: user
+        enum: [user, lead]
+      email:
+        type: string
+        description: The contact's email address.
+        optional: true
+        format: email
+      external_id:
+        type: string
+        description: Your own id for this person, which Intercom deduplicates on.
+        optional: true
+      name:
+        type: string
+        description: The contact's full name.
+        optional: true
+      phone:
+        type: string
+        description: The contact's phone number.
+        optional: true
+      signed_up_at:
+        type: integer
+        description: When they signed up, as a Unix epoch in seconds.
+        optional: true
+      custom_attributes:
+        type: object
+        description: Custom attribute values, keyed by attribute name.
+        optional: true
+    output:
+      description: The created contact.
+      type: object
+      properties:
+        id: {type: string}
+        email: {type: string}
+        role: {type: string}
+
+  update_contact:
+    title: Update a contact
+    description: Change a contact's details or custom attributes; unsupplied fields are untouched.
+    category: contacts
+    request:
+      method: PUT
+      path: /contacts/${contact_id}
+      body:
+        email: "${email}"
+        name: "${name}"
+        phone: "${phone}"
+        custom_attributes: "${custom_attributes}"
+        unsubscribed_from_emails: "${unsubscribed_from_emails}"
+    input:
+      contact_id:
+        type: string
+        description: The contact's Intercom id.
+      email:
+        type: string
+        description: New email address.
+        optional: true
+        format: email
+      name:
+        type: string
+        description: New name.
+        optional: true
+      phone:
+        type: string
+        description: New phone number.
+        optional: true
+      custom_attributes:
+        type: object
+        description: Custom attribute values to write.
+        optional: true
+      unsubscribed_from_emails:
+        type: boolean
+        description: Opt the contact out of, or back into, marketing email.
+        optional: true
+    output:
+      description: The updated contact.
+      type: object
+      properties:
+        id: {type: string}
+        email: {type: string}
+
+  list_conversations:
+    title: List conversations
+    description: >-
+      Page through the workspace's conversations, newest activity first, with
+      their state and the contacts on them.
+    category: conversations
+    read_only: true
+    request:
+      method: GET
+      path: /conversations
+      query:
+        per_page: "${limit}"
+        starting_after: "${starting_after}"
+    input:
+      limit:
+        type: integer
+        description: How many conversations per page (1-150).
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 150
+      starting_after:
+        type: string
+        description: Cursor from the previous response's pages.next.starting_after.
+        optional: true
+    output:
+      description: A page of conversations.
+      type: object
+      properties:
+        conversations: {type: array}
+        pages: {type: object}
+
+  get_conversation:
+    title: Get a conversation
+    description: >-
+      Read one conversation with its whole message thread, the contacts on it
+      and the admin assigned to it.
+    category: conversations
+    read_only: true
+    request:
+      method: GET
+      path: /conversations/${conversation_id}
+      query:
+        display_as: "${display_as}"
+    input:
+      conversation_id:
+        type: string
+        description: The conversation's id.
+      display_as:
+        type: string
+        description: Render message bodies as plaintext instead of HTML.
+        optional: true
+        enum: [plaintext]
+    output:
+      description: The conversation and its parts.
+      type: object
+      properties:
+        id: {type: string}
+        state: {type: string}
+        source: {type: object}
+        conversation_parts: {type: object}
+
+  reply_to_conversation:
+    title: Reply to a conversation
+    description: >-
+      Send a reply as an admin. A comment is visible to the customer; a note is
+      internal and only teammates see it.
+    category: conversations
+    request:
+      method: POST
+      path: /conversations/${conversation_id}/reply
+      body:
+        message_type: "${message_type}"
+        type: admin
+        admin_id: "${admin_id}"
+        body: "${body}"
+    input:
+      conversation_id:
+        type: string
+        description: The conversation to reply to.
+      body:
+        type: string
+        description: The reply, as HTML.
+      admin_id:
+        type: string
+        description: Id of the admin the reply comes from, from list_admins.
+      message_type:
+        type: string
+        description: A customer-visible comment, or an internal note.
+        optional: true
+        default: comment
+        enum: [comment, note]
+    output:
+      description: The conversation with the new part appended.
+      type: object
+      properties:
+        id: {type: string}
+        conversation_parts: {type: object}
+
+  assign_conversation:
+    title: Assign a conversation
+    description: >-
+      Route a conversation to an admin or a team. Assigning to admin id "0"
+      puts it back in the unassigned inbox.
+    category: conversations
+    request:
+      method: POST
+      path: /conversations/${conversation_id}/parts
+      body:
+        message_type: assignment
+        type: "${assignee_type}"
+        admin_id: "${admin_id}"
+        assignee_id: "${assignee_id}"
+        body: "${body}"
+    input:
+      conversation_id:
+        type: string
+        description: The conversation to assign.
+      admin_id:
+        type: string
+        description: Id of the admin performing the assignment.
+      assignee_id:
+        type: string
+        description: Id of the admin or team to assign it to.
+      assignee_type:
+        type: string
+        description: Whether the assignee is an admin or a team.
+        optional: true
+        default: admin
+        enum: [admin, team]
+      body:
+        type: string
+        description: An optional note added with the assignment.
+        optional: true
+    output:
+      description: The conversation after assignment.
+      type: object
+      properties:
+        id: {type: string}
+        admin_assignee_id: {type: integer}
+
+  close_conversation:
+    title: Close a conversation
+    description: >-
+      Mark a conversation closed, optionally with a closing note. A new customer
+      message reopens it.
+    category: conversations
+    request:
+      method: POST
+      path: /conversations/${conversation_id}/parts
+      body:
+        message_type: close
+        type: admin
+        admin_id: "${admin_id}"
+        body: "${body}"
+    input:
+      conversation_id:
+        type: string
+        description: The conversation to close.
+      admin_id:
+        type: string
+        description: Id of the admin closing it.
+      body:
+        type: string
+        description: A closing note added to the thread.
+        optional: true
+    output:
+      description: The closed conversation.
+      type: object
+      properties:
+        id: {type: string}
+        state: {type: string}
+
+  start_conversation:
+    title: Start a conversation with a contact
+    description: >-
+      Send a proactive message from an admin to a contact, which opens a new
+      conversation in their Messenger and, if configured, their inbox.
+    category: conversations
+    destructive: true
+    request:
+      method: POST
+      path: /messages
+      body:
+        message_type: "${message_type}"
+        subject: "${subject}"
+        body: "${body}"
+        template: "${template}"
+        from:
+          type: admin
+          id: "${admin_id}"
+        to:
+          type: "${contact_type}"
+          id: "${contact_id}"
+    input:
+      admin_id:
+        type: string
+        description: Id of the admin the message comes from.
+      contact_id:
+        type: string
+        description: Id of the contact to message.
+      body:
+        type: string
+        description: The message, as HTML.
+      message_type:
+        type: string
+        description: Deliver in the Messenger or by email.
+        optional: true
+        default: inapp
+        enum: [inapp, email]
+      subject:
+        type: string
+        description: Subject line, required for an email message.
+        optional: true
+      contact_type:
+        type: string
+        description: Whether the recipient is a user or a lead.
+        optional: true
+        default: user
+        enum: [user, lead, contact]
+      template:
+        type: string
+        description: Email template style.
+        optional: true
+        enum: [plain, personal]
+    output:
+      description: The message that was sent.
+      type: object
+      properties:
+        id: {type: string}
+        message_type: {type: string}
+        created_at: {type: integer}
+
+  tag_contact:
+    title: Tag a contact
+    description: Attach an existing tag to a contact, for segmenting or triggering campaigns.
+    category: tags
+    request:
+      method: POST
+      path: /contacts/${contact_id}/tags
+      body:
+        id: "${tag_id}"
+    input:
+      contact_id:
+        type: string
+        description: The contact's id.
+      tag_id:
+        type: string
+        description: The tag's id, from list_tags.
+    output:
+      description: The tag that was applied.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+
+  list_tags:
+    title: List tags
+    description: List the workspace's tags with their ids, which tag_contact takes.
+    category: tags
+    read_only: true
+    request:
+      method: GET
+      path: /tags
+    input: {}
+    output:
+      description: The workspace's tags.
+      type: object
+      properties:
+        data: {type: array}
+
+  list_admins:
+    title: List admins and teammates
+    description: >-
+      List the workspace's admins with their ids, which the reply, assign and
+      message tools all need.
+    category: admins
+    read_only: true
+    request:
+      method: GET
+      path: /admins
+    input: {}
+    output:
+      description: The workspace's admins.
+      type: object
+      properties:
+        admins: {type: array, description: "Each with id, name, email and away status."}
+
+  get_me:
+    title: Get the authenticated admin
+    description: >-
+      Read the admin the token belongs to and the workspace it is in. The
+      cheapest health check for an Intercom connection.
+    category: admins
+    read_only: true
+    request:
+      method: GET
+      path: /me
+    input: {}
+    output:
+      description: The authenticated admin.
+      type: object
+      properties:
+        id: {type: string}
+        email: {type: string}
+        name: {type: string}
+        app: {type: object}

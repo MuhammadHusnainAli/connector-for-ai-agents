@@ -1,0 +1,428 @@
+# Webflow tools.
+#
+# The hierarchy is site -> collection -> item. Collection item field values live
+# under `fieldData`, keyed by each field's slug.
+#
+# Publishing is separate from saving: a created or updated item stays in the
+# staged version until publish_items pushes it live.
+#
+# Docs: https://developers.webflow.com/data/reference
+
+connector_id: webflow
+display_name: Webflow
+docs_url: https://developers.webflow.com/data/reference
+
+scope_rules:
+  implies:
+    "cms:write": ["cms:read"]
+    "sites:write": ["sites:read"]
+    "forms:write": ["forms:read"]
+    "pages:write": ["pages:read"]
+
+tools:
+
+  list_sites:
+    title: List sites
+    description: >-
+      List the sites the token can reach, with the ids every other tool takes.
+      Start here.
+    category: sites
+    scopes: ["sites:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/sites
+    input: {}
+    output:
+      description: The accessible sites.
+      type: array
+      response_path: sites
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          displayName: {type: string}
+          shortName: {type: string}
+          lastPublished: {type: string}
+
+  list_collections:
+    title: List a site's collections
+    description: >-
+      List a site's CMS collections with their ids and slugs, which the item
+      tools take.
+    category: cms
+    scopes: ["cms:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/sites/${site_id}/collections
+    input:
+      site_id:
+        type: string
+        description: The site id, from list_sites.
+    output:
+      description: The site's collections.
+      type: array
+      response_path: collections
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          displayName: {type: string}
+          slug: {type: string}
+
+  get_collection:
+    title: Get a collection's fields
+    description: >-
+      Read a collection's field definitions — slugs, types and whether each is
+      required. Read this before writing fieldData you did not name yourself.
+    category: cms
+    scopes: ["cms:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/collections/${collection_id}
+    input:
+      collection_id:
+        type: string
+        description: The collection id.
+    output:
+      description: The collection and its schema.
+      type: object
+      properties:
+        id: {type: string}
+        displayName: {type: string}
+        fields: {type: array, description: "Each with slug, displayName, type and isRequired."}
+
+  list_items:
+    title: List a collection's items
+    description: >-
+      Page through a collection's items. Webflow returns the staged version;
+      pass live true to read what is published.
+    category: cms
+    scopes: ["cms:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/collections/${collection_id}/items
+      query:
+        offset: "${offset}"
+        limit: "${limit}"
+        sortBy: "${sort_by}"
+        sortOrder: "${sort_order}"
+    input:
+      collection_id:
+        type: string
+        description: The collection id.
+      limit:
+        type: integer
+        description: How many items per page (1-100).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 100
+      offset:
+        type: integer
+        description: Zero-based index to start from.
+        optional: true
+        minimum: 0
+      sort_by:
+        type: string
+        description: Field to sort by.
+        optional: true
+        enum: [lastPublished, name, slug]
+      sort_order:
+        type: string
+        description: Sort direction.
+        optional: true
+        enum: [asc, desc]
+    output:
+      description: A page of collection items.
+      type: object
+      properties:
+        items: {type: array, description: "Each with id, isDraft and fieldData."}
+        pagination: {type: object}
+
+  get_item:
+    title: Get a collection item
+    description: Read one CMS item's field values, draft state and publish state.
+    category: cms
+    scopes: ["cms:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/collections/${collection_id}/items/${item_id}
+    input:
+      collection_id:
+        type: string
+        description: The collection id.
+      item_id:
+        type: string
+        description: The item id.
+    output:
+      description: The collection item.
+      type: object
+      properties:
+        id: {type: string}
+        fieldData: {type: object}
+        isDraft: {type: boolean}
+        lastPublished: {type: string}
+
+  create_item:
+    title: Create a collection item
+    description: >-
+      Add an item to a CMS collection. fieldData is keyed by field slug and must
+      include `name` and `slug`. The item is staged until publish_items runs.
+    category: cms
+    scopes: ["cms:write"]
+    request:
+      method: POST
+      path: /v2/collections/${collection_id}/items
+      body:
+        isArchived: "${is_archived}"
+        isDraft: "${is_draft}"
+        fieldData: "${field_data}"
+    input:
+      collection_id:
+        type: string
+        description: The collection to add to.
+      field_data:
+        type: object
+        description: >-
+          Field values keyed by slug, e.g. {"name": "Hello world", "slug":
+          "hello-world", "body": "<p>…</p>"}.
+      is_draft:
+        type: boolean
+        description: Create it as a draft, hidden from the published site.
+        optional: true
+      is_archived:
+        type: boolean
+        description: Create it archived.
+        optional: true
+    output:
+      description: The created item.
+      type: object
+      properties:
+        id: {type: string}
+        fieldData: {type: object}
+        isDraft: {type: boolean}
+
+  update_item:
+    title: Update a collection item
+    description: >-
+      Change an item's field values. Only the fields supplied are written, and
+      the change stays staged until publish_items runs.
+    category: cms
+    scopes: ["cms:write"]
+    request:
+      method: PATCH
+      path: /v2/collections/${collection_id}/items/${item_id}
+      body:
+        isArchived: "${is_archived}"
+        isDraft: "${is_draft}"
+        fieldData: "${field_data}"
+    input:
+      collection_id:
+        type: string
+        description: The collection id.
+      item_id:
+        type: string
+        description: The item id.
+      field_data:
+        type: object
+        description: Field values to write, keyed by slug.
+        optional: true
+      is_draft:
+        type: boolean
+        description: Move it to or out of draft.
+        optional: true
+      is_archived:
+        type: boolean
+        description: Archive or unarchive it.
+        optional: true
+    output:
+      description: The updated item.
+      type: object
+      properties:
+        id: {type: string}
+        fieldData: {type: object}
+
+  delete_item:
+    title: Delete a collection item
+    description: >-
+      Permanently delete a CMS item. If it was published, publish the site again
+      to remove it from the live version.
+    category: cms
+    scopes: ["cms:write"]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/collections/${collection_id}/items/${item_id}
+    input:
+      collection_id:
+        type: string
+        description: The collection id.
+      item_id:
+        type: string
+        description: The item to delete.
+    output:
+      description: Empty on success -- Webflow answers 204 No Content.
+      type: object
+
+  publish_items:
+    title: Publish collection items
+    description: >-
+      Push staged items live. Nothing a caller writes is visible on the site
+      until this runs.
+    category: cms
+    scopes: ["cms:write"]
+    destructive: true
+    request:
+      method: POST
+      path: /v2/collections/${collection_id}/items/publish
+      body:
+        itemIds: "${item_ids}"
+    input:
+      collection_id:
+        type: string
+        description: The collection the items belong to.
+      item_ids:
+        type: array
+        description: Ids of the items to publish.
+        items: {type: string}
+    output:
+      description: Which items published and which errored.
+      type: object
+      properties:
+        publishedItemIds: {type: array}
+        errors: {type: array}
+
+  publish_site:
+    title: Publish a site
+    description: >-
+      Publish a site to its domains, pushing every staged change live. This is
+      visible to the public immediately.
+    category: sites
+    scopes: ["sites:write"]
+    destructive: true
+    request:
+      method: POST
+      path: /v2/sites/${site_id}/publish
+      body:
+        customDomains: "${custom_domain_ids}"
+        publishToWebflowSubdomain: "${publish_to_webflow_subdomain}"
+    input:
+      site_id:
+        type: string
+        description: The site to publish.
+      custom_domain_ids:
+        type: array
+        description: Custom domain ids to publish to, from get_site.
+        optional: true
+        items: {type: string}
+      publish_to_webflow_subdomain:
+        type: boolean
+        description: Also publish to the free webflow.io subdomain.
+        optional: true
+    output:
+      description: The publish result.
+      type: object
+      properties:
+        customDomains: {type: array}
+        publishToWebflowSubdomain: {type: boolean}
+
+  list_form_submissions:
+    title: List form submissions
+    description: >-
+      Read what people submitted through a site's forms, newest first — the way
+      to pull leads out of a Webflow site.
+    category: forms
+    scopes: ["forms:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/forms/${form_id}/submissions
+      query:
+        offset: "${offset}"
+        limit: "${limit}"
+    input:
+      form_id:
+        type: string
+        description: The form id, from list_forms.
+      limit:
+        type: integer
+        description: How many submissions per page (1-100).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 100
+      offset:
+        type: integer
+        description: Zero-based index to start from.
+        optional: true
+        minimum: 0
+    output:
+      description: A page of form submissions.
+      type: object
+      properties:
+        formSubmissions: {type: array}
+        pagination: {type: object}
+
+  list_forms:
+    title: List a site's forms
+    description: List the forms on a site, with the ids the submission tool takes.
+    category: forms
+    scopes: ["forms:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/sites/${site_id}/forms
+      query:
+        offset: "${offset}"
+        limit: "${limit}"
+    input:
+      site_id:
+        type: string
+        description: The site id.
+      limit:
+        type: integer
+        description: How many forms per page (1-100).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 100
+      offset:
+        type: integer
+        description: Zero-based index to start from.
+        optional: true
+        minimum: 0
+    output:
+      description: A page of forms.
+      type: object
+      properties:
+        forms: {type: array}
+        pagination: {type: object}
+
+  get_site:
+    title: Get a site
+    description: >-
+      Read a site's name, domains and when it was last published. The cheapest
+      health check once a site id is known.
+    category: sites
+    scopes: ["sites:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/sites/${site_id}
+    input:
+      site_id:
+        type: string
+        description: The site id.
+    output:
+      description: The site.
+      type: object
+      properties:
+        id: {type: string}
+        displayName: {type: string}
+        customDomains: {type: array}
+        lastPublished: {type: string}

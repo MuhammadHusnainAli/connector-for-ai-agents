@@ -1,0 +1,481 @@
+# Attio tools.
+#
+# Attio models everything as records on an object -- `people`, `companies`,
+# `deals` and any custom object. Values are keyed by attribute slug and are
+# always arrays, because Attio keeps a history of each value.
+#
+# Docs: https://developers.attio.com/reference
+
+connector_id: attio
+display_name: Attio
+docs_url: https://developers.attio.com/reference
+
+scope_discovery:
+  method: GET
+  endpoint: /v2/self
+  scopes_path: scope
+
+scope_rules:
+  implies:
+    "record:read-write": ["record:read"]
+    "note:read-write": ["note:read"]
+    "task:read-write": ["task:read"]
+    "list_entry:read-write": ["list_entry:read"]
+    "comment:read-write": ["comment:read"]
+
+tools:
+
+  query_records:
+    title: Query records
+    description: >-
+      Find records on an object. Filters use Attio's shape, e.g.
+      {"name": {"$contains": "Acme"}} or {"email_addresses": "ada@example.com"}.
+    category: records
+    scopes: ["record:read"]
+    read_only: true
+    request:
+      method: POST
+      path: /v2/objects/${object}/records/query
+      body:
+        filter: "${filter}"
+        sorts: "${sorts}"
+        limit: "${limit}"
+        offset: "${offset}"
+    input:
+      object:
+        type: string
+        description: Object slug or id, e.g. people, companies, deals.
+        example: companies
+      filter:
+        type: object
+        description: Attio filter object narrowing the results.
+        optional: true
+      sorts:
+        type: array
+        description: Sort order, e.g. [{"direction":"desc","attribute":"created_at","field":"value"}].
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many records per page (1-500).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 500
+      offset:
+        type: integer
+        description: Zero-based index to start from.
+        optional: true
+        minimum: 0
+    output:
+      description: The matching records.
+      type: array
+      response_path: data
+      items:
+        type: object
+        properties:
+          id: {type: object, description: "Holds record_id."}
+          values: {type: object, description: "Attribute slug to an array of values."}
+
+  get_record:
+    title: Get a record
+    description: Read one record's attribute values by object and record id.
+    category: records
+    scopes: ["record:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/objects/${object}/records/${record_id}
+    input:
+      object:
+        type: string
+        description: Object slug or id.
+      record_id:
+        type: string
+        description: The record's UUID.
+    output:
+      description: The record.
+      type: object
+      response_path: data
+      properties:
+        id: {type: object}
+        values: {type: object}
+        created_at: {type: string}
+
+  create_record:
+    title: Create a record
+    description: >-
+      Create a record on an object. Values are keyed by attribute slug, e.g.
+      {"name": "Acme", "domains": [{"domain": "acme.com"}]}.
+    category: records
+    scopes: ["record:read-write"]
+    request:
+      method: POST
+      path: /v2/objects/${object}/records
+      body:
+        data:
+          values: "${values}"
+    input:
+      object:
+        type: string
+        description: Object slug or id.
+      values:
+        type: object
+        description: Attribute slug to value.
+    output:
+      description: The created record.
+      type: object
+      response_path: data
+      properties:
+        id: {type: object}
+        values: {type: object}
+
+  assert_record:
+    title: Create or update a record by a matching attribute
+    description: >-
+      Upsert a record, matched on a unique attribute such as a company's domain
+      or a person's email address. The idempotent way to sync records in.
+    category: records
+    scopes: ["record:read-write"]
+    request:
+      method: PUT
+      path: /v2/objects/${object}/records
+      query:
+        matching_attribute: "${matching_attribute}"
+      body:
+        data:
+          values: "${values}"
+    input:
+      object:
+        type: string
+        description: Object slug or id.
+      matching_attribute:
+        type: string
+        description: Unique attribute slug to match on, e.g. domains or email_addresses.
+      values:
+        type: object
+        description: Attribute slug to value, including the matching attribute.
+    output:
+      description: The created or updated record.
+      type: object
+      response_path: data
+      properties:
+        id: {type: object}
+        values: {type: object}
+
+  update_record:
+    title: Update a record
+    description: >-
+      Change a record's attribute values. Only the attributes supplied are
+      written; a multiselect value replaces the previous one.
+    category: records
+    scopes: ["record:read-write"]
+    request:
+      method: PATCH
+      path: /v2/objects/${object}/records/${record_id}
+      body:
+        data:
+          values: "${values}"
+    input:
+      object:
+        type: string
+        description: Object slug or id.
+      record_id:
+        type: string
+        description: The record's UUID.
+      values:
+        type: object
+        description: Attribute slug to new value.
+    output:
+      description: The updated record.
+      type: object
+      response_path: data
+      properties:
+        id: {type: object}
+        values: {type: object}
+
+  delete_record:
+    title: Delete a record
+    description: Permanently delete a record from an object. This cannot be undone.
+    category: records
+    scopes: ["record:read-write"]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/objects/${object}/records/${record_id}
+    input:
+      object:
+        type: string
+        description: Object slug or id.
+      record_id:
+        type: string
+        description: The record to delete.
+    output:
+      description: An empty data object on success.
+      type: object
+
+  list_objects:
+    title: List objects
+    description: >-
+      List the workspace's objects — the standard people, companies and deals
+      plus any custom ones — with their slugs.
+    category: schema
+    scopes: ["object_configuration:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/objects
+    input: {}
+    output:
+      description: The workspace's objects.
+      type: array
+      response_path: data
+      items:
+        type: object
+        properties:
+          id: {type: object}
+          api_slug: {type: string}
+          singular_noun: {type: string}
+
+  list_attributes:
+    title: List an object's attributes
+    description: >-
+      Read an object's attribute definitions — slugs, titles and types. Read
+      this before writing values you did not name yourself.
+    category: schema
+    scopes: ["object_configuration:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/objects/${object}/attributes
+      query:
+        limit: "${limit}"
+        offset: "${offset}"
+    input:
+      object:
+        type: string
+        description: Object slug or id.
+      limit:
+        type: integer
+        description: How many attributes per page.
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 500
+      offset:
+        type: integer
+        description: Zero-based index to start from.
+        optional: true
+        minimum: 0
+    output:
+      description: The object's attributes.
+      type: array
+      response_path: data
+      items:
+        type: object
+        properties:
+          api_slug: {type: string}
+          title: "{type: string}"
+          type: {type: string}
+
+  list_lists:
+    title: List lists
+    description: >-
+      List the workspace's lists — pipelines and saved collections — with the
+      ids the entry tools take.
+    category: lists
+    scopes: ["list_configuration:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/lists
+    input: {}
+    output:
+      description: The workspace's lists.
+      type: array
+      response_path: data
+      items:
+        type: object
+        properties:
+          id: {type: object}
+          api_slug: {type: string}
+          name: {type: string}
+
+  add_record_to_list:
+    title: Add a record to a list
+    description: >-
+      Put a record onto a list, optionally setting the list's own attributes —
+      a pipeline stage, for instance.
+    category: lists
+    scopes: ["list_entry:read-write"]
+    request:
+      method: POST
+      path: /v2/lists/${list}/entries
+      body:
+        data:
+          parent_record_id: "${record_id}"
+          parent_object: "${object}"
+          entry_values: "${entry_values}"
+    input:
+      list:
+        type: string
+        description: List slug or id.
+      record_id:
+        type: string
+        description: UUID of the record to add.
+      object:
+        type: string
+        description: Object slug the record belongs to.
+      entry_values:
+        type: object
+        description: "List-specific attribute values, e.g. {\"stage\": \"Contacted\"}."
+        optional: true
+    output:
+      description: The created list entry.
+      type: object
+      response_path: data
+      properties:
+        id: {type: object}
+        entry_values: {type: object}
+
+  create_note:
+    title: Add a note to a record
+    description: >-
+      Attach a note to a record. Content is plain text or Markdown, chosen with
+      format.
+    category: notes
+    scopes: ["note:read-write"]
+    request:
+      method: POST
+      path: /v2/notes
+      body:
+        data:
+          parent_object: "${object}"
+          parent_record_id: "${record_id}"
+          title: "${title}"
+          format: "${format}"
+          content: "${content}"
+    input:
+      object:
+        type: string
+        description: Object slug the record belongs to.
+      record_id:
+        type: string
+        description: UUID of the record to annotate.
+      title:
+        type: string
+        description: The note's title.
+      content:
+        type: string
+        description: The note body.
+      format:
+        type: string
+        description: How the content is written.
+        optional: true
+        default: plaintext
+        enum: [plaintext, markdown]
+    output:
+      description: The created note.
+      type: object
+      response_path: data
+      properties:
+        id: {type: object}
+        title: "{type: string}"
+        created_at: {type: string}
+
+  create_task:
+    title: Create a task
+    description: >-
+      Create a task, optionally linked to records and assigned to workspace
+      members.
+    category: tasks
+    scopes: ["task:read-write"]
+    request:
+      method: POST
+      path: /v2/tasks
+      body:
+        data:
+          content: "${content}"
+          format: plaintext
+          deadline_at: "${deadline_at}"
+          is_completed: "${is_completed}"
+          linked_records: "${linked_records}"
+          assignees: "${assignees}"
+    input:
+      content:
+        type: string
+        description: What the task is.
+      deadline_at:
+        type: string
+        description: When it is due, ISO 8601.
+        optional: true
+      is_completed:
+        type: boolean
+        description: Create it already ticked off.
+        optional: true
+      linked_records:
+        type: array
+        description: >-
+          Records the task relates to, each {"target_object": "companies",
+          "target_record_id": "..."}.
+        optional: true
+        items: {type: object}
+      assignees:
+        type: array
+        description: >-
+          Who it is for, each {"referenced_actor_type": "workspace-member",
+          "referenced_actor_id": "..."}.
+        optional: true
+        items: {type: object}
+    output:
+      description: The created task.
+      type: object
+      response_path: data
+      properties:
+        id: {type: object}
+        content_plaintext: {type: string}
+        deadline_at: {type: string}
+
+  list_workspace_members:
+    title: List workspace members
+    description: >-
+      List the workspace's members with the ids task assignments take, plus
+      their names and email addresses.
+    category: workspace
+    scopes: ["user_management:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/workspace-members
+    input: {}
+    output:
+      description: The workspace's members.
+      type: array
+      response_path: data
+      items:
+        type: object
+        properties:
+          id: {type: object}
+          first_name: {type: string}
+          email_address: {type: string}
+          access_level: {type: string}
+
+  get_self:
+    title: Get the token's identity and scopes
+    description: >-
+      Read which workspace the token belongs to and exactly which scopes it
+      holds. The cheapest health check for an Attio connection.
+    category: workspace
+    read_only: true
+    request:
+      method: GET
+      path: /v2/self
+    input: {}
+    output:
+      description: The token's identity.
+      type: object
+      properties:
+        active: {type: boolean}
+        scope: {type: string}
+        workspace_id: {type: string}
+        workspace_name: {type: string}

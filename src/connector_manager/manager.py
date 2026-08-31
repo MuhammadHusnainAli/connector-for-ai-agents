@@ -17,14 +17,27 @@ the two subclasses differ only in how they drive network flows.
 
 from __future__ import annotations
 
-from typing import Any, Iterator, Mapping
+from typing import Any, Iterator, Mapping, Sequence
 
 from .auth import AuthContext, AuthStrategy, get_strategy
+from .errors import ToolPermissionError, UnknownConnectorError
 from .flows import AsyncFlowRunner, FlowRunner
 from .http import AsyncHttpClient, BaseHttpClient, HttpClient, HttpResponse, Request
 from .models import AuthMode, AuthSchema, Connection, Connector, ConnectorPage
 from .proxy import RequestBuilder
 from .registry import DEFAULT_PAGE_SIZE, ConnectorRegistry
+from .tools import (
+    ScopeDiscoverer,
+    ScopeDiscovery,
+    Tool,
+    ToolExecutor,
+    ToolPack,
+    ToolRegistry,
+    ToolReport,
+    ToolResult,
+    baseline_pack,
+    build_report,
+)
 from .validation import validate as validate_inputs
 from .verification import CredentialVerifier, VerificationResult
 
@@ -32,8 +45,13 @@ from .verification import CredentialVerifier, VerificationResult
 class BaseConnectorManager:
     """Everything that needs no network access, shared by both managers."""
 
-    def __init__(self, registry: ConnectorRegistry | None = None) -> None:
+    def __init__(
+        self,
+        registry: ConnectorRegistry | None = None,
+        tools: ToolRegistry | None = None,
+    ) -> None:
         self.registry = registry or ConnectorRegistry()
+        self.tools = tools or ToolRegistry()
 
     # ------------------------------------------------------------------
     # 1. Catalogue
@@ -217,8 +235,210 @@ class BaseConnectorManager:
         )
 
     # ------------------------------------------------------------------
+    # 4. Tools -- what a connector can do (no network)
+    # ------------------------------------------------------------------
+
+    def has_tools(self, connector_id: str) -> bool:
+        """True when :meth:`list_tools` would return anything for this connector.
+
+        That includes the one generated tool a connector gets from its own
+        declared verification endpoint; use :meth:`has_authored_tools` for the
+        stricter "ships a hand-authored pack".
+        """
+        return self._pack_for(connector_id) is not None
+
+    def has_authored_tools(self, connector_id: str) -> bool:
+        """True when a hand-authored tool pack is bundled for this connector."""
+        return self.tools.has(connector_id)
+
+    def tool_connectors(self, include_generated: bool = False) -> list[str]:
+        """Connector ids that ship tools, aliases included.
+
+        By default only the hand-authored packs. ``include_generated=True`` adds
+        every connector that declares a verification endpoint, and so gets a
+        generated ``check_connection`` tool.
+        """
+        authored = set(self.tools.connector_ids())
+        if not include_generated:
+            return sorted(authored)
+        return sorted(
+            authored | {c.id for c in self.registry if self._baseline_pack(c.id) is not None}
+        )
+
+    def tool_pack(self, connector_id: str) -> ToolPack:
+        """The whole pack: tools, scope rules and how to discover scopes.
+
+        Falls back to the generated single-tool pack when no hand-authored one
+        is bundled, and raises only when the connector has neither.
+        """
+        pack = self._pack_for(connector_id)
+        if pack is None:
+            return self.tools.get_pack(connector_id)  # raises UnknownToolError
+        return pack
+
+    def list_tools(self, connector_id: str) -> list[Tool]:
+        """Every tool this connector has, whatever the credential can do.
+
+        >>> manager = ConnectorManager()
+        >>> [t.name for t in manager.list_tools("outlook")][:2]
+        ['list_messages', 'search_messages']
+        """
+        pack = self._pack_for(connector_id)
+        return list(pack.tools.values()) if pack else []
+
+    def get_tool(self, connector_id: str, name: str) -> Tool:
+        pack = self._pack_for(connector_id)
+        if pack is None or name not in pack.tools:
+            return self.tools.tool(connector_id, name)  # raises with the available names
+        return pack.tools[name]
+
+    def describe_tools(self, connector_id: str, include_request: bool = True) -> dict[str, Any]:
+        """JSON-ready description of a connector's whole tool surface."""
+        return self.tool_pack(connector_id).to_dict(include_request=include_request)
+
+    def search_tools(self, query: str, connector_id: str | None = None) -> list[Tool]:
+        """Tools whose name, title, description or category mentions ``query``."""
+        return self.tools.search(query, connector_id=connector_id)
+
+    def tool_stats(self) -> dict[str, Any]:
+        """How many packs and tools are bundled, and how far they reach.
+
+        ``authored`` counts the hand-authored packs; ``generated`` counts the
+        connectors that get a ``check_connection`` tool from their own declared
+        verification endpoint instead.
+        """
+        stats = self.tools.stats()
+        generated = [
+            c.id
+            for c in self.registry
+            if not self.tools.has(c.id) and self._baseline_pack(c.id) is not None
+        ]
+        stats["generated_connectors"] = len(generated)
+        stats["connectors_with_any_tool"] = stats["connectors_covered"] + len(generated)
+        stats["connectors_without_tools"] = len(self.registry) - stats["connectors_with_any_tool"]
+        return stats
+
+    def tool_specs(
+        self,
+        connector_id: str,
+        format: str = "anthropic",
+        prefix: bool = False,
+    ) -> list[dict[str, Any]]:
+        """A connector's tools as LLM tool definitions.
+
+        ``format`` is ``anthropic``, ``openai`` or ``mcp``. This is the whole
+        surface; for only what a given credential may call, use
+        :meth:`check_tools` and :meth:`ToolReport.specs`.
+        """
+        return [t.spec(format=format, prefix=prefix) for t in self.list_tools(connector_id)]
+
+    # ------------------------------------------------------------------
+    # 5. Tool permissions (no network)
+    # ------------------------------------------------------------------
+
+    def check_tools(
+        self,
+        connection: Connection,
+        granted_scopes: Sequence[str] | None = None,
+        connector_id: str | None = None,
+        scope_source: str = "explicit",
+    ) -> ToolReport:
+        """Which of the connector's tools this connection may actually call.
+
+        Reads the grant off the connection (what the token response said, or
+        what your OAuth layer recorded) and compares it with each tool's
+        required scopes, so a client id and secret with partial permissions
+        yields a list of enabled tools and a list of disabled ones with the
+        missing scopes named. Pass ``granted_scopes`` to judge against a grant
+        you hold elsewhere; use :meth:`ConnectorManager.check_tools_live` to ask
+        the provider instead.
+        """
+        connector_id = connector_id or connection.connector_id
+        pack = self.tool_pack(connector_id)
+        return build_report(
+            pack,
+            connection=connection,
+            granted_scopes=granted_scopes,
+            scope_source=scope_source,
+            connector_id=connector_id,
+        )
+
+    def enabled_tool_specs(
+        self,
+        connection: Connection,
+        format: str = "anthropic",
+        granted_scopes: Sequence[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """LLM tool definitions for exactly what this connection can call."""
+        return self.check_tools(connection, granted_scopes=granted_scopes).specs(format=format)
+
+    # ------------------------------------------------------------------
+    # 6. Tool calls (request building only; the managers send them)
+    # ------------------------------------------------------------------
+
+    def prepare_tool_request(
+        self,
+        connection: Connection,
+        name: str,
+        arguments: Mapping[str, Any] | None = None,
+    ) -> Request:
+        """Validate arguments and build the authenticated request, without sending.
+
+        For agent runtimes that own the HTTP call, and for inspecting exactly
+        what a tool would do before letting it.
+        """
+        return self._tool_executor(connection, name).build(arguments)
+
+    def validate_tool_arguments(
+        self,
+        connector_id: str,
+        name: str,
+        arguments: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Check arguments against a tool's input schema, filling defaults."""
+        tool = self.get_tool(connector_id, name)
+        placeholder = Connection(connection_id="", connector_id=connector_id, auth_mode=AuthMode.NONE)
+        return ToolExecutor(self.registry.raw(connector_id), tool, placeholder).validate(arguments)
+
+    # ------------------------------------------------------------------
     # internals shared by both flavours
     # ------------------------------------------------------------------
+
+    def _baseline_pack(self, connector_id: str) -> ToolPack | None:
+        """The generated pack for a connector, or ``None`` when it has no basis."""
+        try:
+            connector = self.registry.get(connector_id)
+        except UnknownConnectorError:
+            return None
+        return baseline_pack(connector.id, connector.display_name, connector.raw)
+
+    def _pack_for(self, connector_id: str) -> ToolPack | None:
+        """The hand-authored pack if there is one, else the generated fallback."""
+        return self.tools.pack(connector_id) or self._baseline_pack(connector_id)
+
+    def _tool_executor(self, connection: Connection, name: str) -> ToolExecutor:
+        tool = self.get_tool(connection.connector_id, name)
+        return ToolExecutor(self.registry.raw(connection.connector_id), tool, connection)
+
+    def _scope_discoverer(self, connection: Connection) -> ScopeDiscoverer:
+        pack = self.tool_pack(connection.connector_id)
+        return ScopeDiscoverer(self.registry.raw(connection.connector_id), pack, connection)
+
+    def _guard_tool_scopes(self, connection: Connection, name: str) -> None:
+        """Refuse a call the recorded grant already rules out.
+
+        Only a *known* shortfall blocks: an unknown grant lets the call through
+        so the provider gets the final say.
+        """
+        report = self.check_tools(connection)
+        status = report.status(name)
+        if status is not None and status.availability.value == "disabled":
+            raise ToolPermissionError(
+                f"Tool '{name}' needs scopes this connection does not have: "
+                f"{', '.join(status.missing_scopes)}",
+                tool=name,
+                missing_scopes=list(status.missing_scopes),
+            )
 
     def _connect_context(
         self,
@@ -423,6 +643,61 @@ class ConnectorManager(BaseConnectorManager):
             )
         )
 
+    # -- tools -------------------------------------------------------------
+
+    def discover_scopes(self, connection: Connection) -> ScopeDiscovery:
+        """Ask the provider which scopes this credential actually carries.
+
+        Reads the access token's own claims where the provider issues a JWT
+        (no request at all), otherwise calls its token-info endpoint. Falls back
+        to whatever the connection recorded when the connector declares neither,
+        so there is always an answer -- check ``.known`` to tell "no scopes"
+        from "could not tell".
+        """
+        return self.runner.run(self._scope_discoverer(connection).flow())
+
+    def check_tools_live(self, connection: Connection) -> ToolReport:
+        """:meth:`check_tools`, but against the scopes the provider reports.
+
+        This is the authoritative answer to "what can this client id and secret
+        really do": the grant comes from the provider, not from what your app
+        asked for.
+        """
+        discovery = self.discover_scopes(connection)
+        if not discovery.known:
+            return self.check_tools(connection)
+        return self.check_tools(
+            connection, granted_scopes=discovery.scopes, scope_source=discovery.source
+        )
+
+    def call_tool(
+        self,
+        connection: Connection,
+        name: str,
+        arguments: Mapping[str, Any] | None = None,
+        enforce_scopes: bool = True,
+        auto_refresh: bool = True,
+    ) -> ToolResult:
+        """Run one of the connector's tools and return its parsed result.
+
+        Arguments are validated against the tool's input schema first, so a bad
+        call fails locally with every problem named rather than as a provider
+        400. ``enforce_scopes`` refuses a call the recorded grant already rules
+        out; an unknown grant never blocks.
+
+            result = manager.call_tool(connection, "send_email", {
+                "to": ["ada@example.com"], "subject": "Hi", "body": "..."})
+            result.ok, result.data
+        """
+        if enforce_scopes:
+            self._guard_tool_scopes(connection, name)
+        executor = self._tool_executor(connection, name)
+        request = executor.build(arguments)
+        if auto_refresh:
+            connection = self.ensure_fresh(connection)
+            request = self._tool_executor(connection, name).build(arguments)
+        return executor.parse(self.http.send(request))
+
     def close(self) -> None:
         self.http.close()
 
@@ -551,6 +826,39 @@ class AsyncConnectorManager(BaseConnectorManager):
                 data=data,
             )
         )
+
+    # -- tools -------------------------------------------------------------
+
+    async def discover_scopes(self, connection: Connection) -> ScopeDiscovery:
+        """Async counterpart of :meth:`ConnectorManager.discover_scopes`."""
+        return await self.runner.run(self._scope_discoverer(connection).flow())
+
+    async def check_tools_live(self, connection: Connection) -> ToolReport:
+        """Async counterpart of :meth:`ConnectorManager.check_tools_live`."""
+        discovery = await self.discover_scopes(connection)
+        if not discovery.known:
+            return self.check_tools(connection)
+        return self.check_tools(
+            connection, granted_scopes=discovery.scopes, scope_source=discovery.source
+        )
+
+    async def call_tool(
+        self,
+        connection: Connection,
+        name: str,
+        arguments: Mapping[str, Any] | None = None,
+        enforce_scopes: bool = True,
+        auto_refresh: bool = True,
+    ) -> ToolResult:
+        """Async counterpart of :meth:`ConnectorManager.call_tool`."""
+        if enforce_scopes:
+            self._guard_tool_scopes(connection, name)
+        executor = self._tool_executor(connection, name)
+        request = executor.build(arguments)
+        if auto_refresh:
+            connection = await self.ensure_fresh(connection)
+            request = self._tool_executor(connection, name).build(arguments)
+        return executor.parse(await self.http.send(request))
 
     async def aclose(self) -> None:
         await self.http.aclose()

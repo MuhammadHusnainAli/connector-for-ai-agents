@@ -1,0 +1,525 @@
+# Linear tools.
+#
+# Linear's API is GraphQL, so every tool posts to /graphql with a fixed query
+# and the caller's arguments as variables. Ids are UUIDs; the human-facing
+# "ENG-123" is the identifier field, which search_issues matches on.
+#
+# Docs: https://linear.app/developers/graphql
+
+connector_id: linear
+display_name: Linear
+docs_url: https://linear.app/developers/graphql
+
+scope_rules:
+  implies:
+    admin: [read, write, "issues:create", "comments:create"]
+    write: [read, "issues:create", "comments:create"]
+
+tools:
+
+  list_issues:
+    title: List issues
+    description: >-
+      List issues, newest first, optionally filtered. `filter` takes Linear's
+      IssueFilter shape, e.g. {"state": {"name": {"eq": "Todo"}}} or
+      {"assignee": {"email": {"eq": "ada@example.com"}}}.
+    category: issues
+    scopes: [read]
+    read_only: true
+    request:
+      method: POST
+      path: /graphql
+      body:
+        query: >-
+          query Issues($first: Int, $after: String, $filter: IssueFilter) {
+            issues(first: $first, after: $after, filter: $filter) {
+              nodes { id identifier title description priority url createdAt
+                      state { name type } assignee { name email }
+                      team { key name } labels { nodes { name } } }
+              pageInfo { hasNextPage endCursor }
+            }
+          }
+        variables:
+          first: "${limit}"
+          after: "${after}"
+          filter: "${filter}"
+    input:
+      limit:
+        type: integer
+        description: How many issues per page (1-250).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 250
+      after:
+        type: string
+        description: Cursor from the previous response's pageInfo.endCursor.
+        optional: true
+      filter:
+        type: object
+        description: Linear IssueFilter narrowing the results.
+        optional: true
+    output:
+      description: A page of issues.
+      type: object
+      response_path: data.issues
+      properties:
+        nodes: {type: array}
+        pageInfo: {type: object}
+
+  search_issues:
+    title: Search issues
+    description: >-
+      Full-text search across issue titles, descriptions and identifiers. Pass
+      "ENG-123" to find one issue by its human-facing key.
+    category: issues
+    scopes: [read]
+    read_only: true
+    request:
+      method: POST
+      path: /graphql
+      body:
+        query: >-
+          query SearchIssues($term: String!, $first: Int) {
+            searchIssues(term: $term, first: $first) {
+              nodes { id identifier title url priority
+                      state { name } assignee { name email } team { key } }
+            }
+          }
+        variables:
+          term: "${query}"
+          first: "${limit}"
+    input:
+      query:
+        type: string
+        description: Words to search for, or an issue identifier like ENG-123.
+      limit:
+        type: integer
+        description: How many results to return.
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 100
+    output:
+      description: Matching issues.
+      type: object
+      response_path: data.searchIssues
+      properties:
+        nodes: {type: array}
+
+  get_issue:
+    title: Get an issue
+    description: >-
+      Read one issue in full, including its description, state, assignee,
+      labels and comment thread.
+    category: issues
+    scopes: [read]
+    read_only: true
+    request:
+      method: POST
+      path: /graphql
+      body:
+        query: >-
+          query Issue($id: String!) {
+            issue(id: $id) {
+              id identifier title description priority url createdAt updatedAt
+              state { name type } assignee { name email } creator { name }
+              team { id key name } labels { nodes { id name } }
+              comments { nodes { id body createdAt user { name } } }
+            }
+          }
+        variables:
+          id: "${issue_id}"
+    input:
+      issue_id:
+        type: string
+        description: Issue UUID, or its identifier like ENG-123.
+    output:
+      description: The issue.
+      type: object
+      response_path: data.issue
+      properties:
+        id: {type: string}
+        identifier: {type: string}
+        title: "{type: string}"
+        description: "{type: string}"
+        state: {type: object}
+
+  create_issue:
+    title: Create an issue
+    description: >-
+      Create an issue on a team. team_id is required and comes from list_teams.
+      Priority is 0 none, 1 urgent, 2 high, 3 medium, 4 low.
+    category: issues
+    scopes_any: ["issues:create", write]
+    request:
+      method: POST
+      path: /graphql
+      body:
+        query: >-
+          mutation CreateIssue($input: IssueCreateInput!) {
+            issueCreate(input: $input) {
+              success
+              issue { id identifier title url state { name } }
+            }
+          }
+        variables:
+          input:
+            teamId: "${team_id}"
+            title: "${title}"
+            description: "${description}"
+            assigneeId: "${assignee_id}"
+            priority: "${priority}"
+            stateId: "${state_id}"
+            labelIds: "${label_ids}"
+            projectId: "${project_id}"
+            dueDate: "${due_date}"
+    input:
+      team_id:
+        type: string
+        description: UUID of the team the issue belongs to, from list_teams.
+      title:
+        type: string
+        description: Issue title.
+      description:
+        type: string
+        description: Issue body, in Markdown.
+        optional: true
+      assignee_id:
+        type: string
+        description: UUID of the user to assign it to.
+        optional: true
+      priority:
+        type: integer
+        description: "Priority: 0 none, 1 urgent, 2 high, 3 medium, 4 low."
+        optional: true
+        minimum: 0
+        maximum: 4
+      state_id:
+        type: string
+        description: UUID of the workflow state to start in, from list_teams.
+        optional: true
+      label_ids:
+        type: array
+        description: UUIDs of labels to apply.
+        optional: true
+        items: {type: string}
+      project_id:
+        type: string
+        description: UUID of a project to file it under.
+        optional: true
+      due_date:
+        type: string
+        description: Due date as YYYY-MM-DD.
+        optional: true
+    output:
+      description: The created issue.
+      type: object
+      response_path: data.issueCreate
+      properties:
+        success: {type: boolean}
+        issue: {type: object, description: "Holds id, identifier and url."}
+
+  update_issue:
+    title: Update an issue
+    description: >-
+      Change an issue -- retitle it, move it to another workflow state,
+      reassign it, or reprioritise it. Only what is supplied is written.
+    category: issues
+    scopes: [write]
+    request:
+      method: POST
+      path: /graphql
+      body:
+        query: >-
+          mutation UpdateIssue($id: String!, $input: IssueUpdateInput!) {
+            issueUpdate(id: $id, input: $input) {
+              success
+              issue { id identifier title url state { name } assignee { name } }
+            }
+          }
+        variables:
+          id: "${issue_id}"
+          input:
+            title: "${title}"
+            description: "${description}"
+            stateId: "${state_id}"
+            assigneeId: "${assignee_id}"
+            priority: "${priority}"
+            labelIds: "${label_ids}"
+            dueDate: "${due_date}"
+    input:
+      issue_id:
+        type: string
+        description: Issue UUID or identifier.
+      title:
+        type: string
+        description: New title.
+        optional: true
+      description:
+        type: string
+        description: New body, in Markdown.
+        optional: true
+      state_id:
+        type: string
+        description: UUID of the workflow state to move it to.
+        optional: true
+      assignee_id:
+        type: string
+        description: UUID of the new assignee.
+        optional: true
+      priority:
+        type: integer
+        description: "New priority: 0 none, 1 urgent, 2 high, 3 medium, 4 low."
+        optional: true
+        minimum: 0
+        maximum: 4
+      label_ids:
+        type: array
+        description: Replaces the label set entirely.
+        optional: true
+        items: {type: string}
+      due_date:
+        type: string
+        description: New due date as YYYY-MM-DD.
+        optional: true
+    output:
+      description: The updated issue.
+      type: object
+      response_path: data.issueUpdate
+      properties:
+        success: {type: boolean}
+        issue: {type: object}
+
+  comment_on_issue:
+    title: Comment on an issue
+    description: Add a Markdown comment to an issue's thread, as the token's user.
+    category: issues
+    scopes_any: ["comments:create", write]
+    request:
+      method: POST
+      path: /graphql
+      body:
+        query: >-
+          mutation CreateComment($input: CommentCreateInput!) {
+            commentCreate(input: $input) {
+              success
+              comment { id body url createdAt }
+            }
+          }
+        variables:
+          input:
+            issueId: "${issue_id}"
+            body: "${body}"
+    input:
+      issue_id:
+        type: string
+        description: Issue UUID or identifier.
+      body:
+        type: string
+        description: The comment, in Markdown.
+    output:
+      description: The created comment.
+      type: object
+      response_path: data.commentCreate
+      properties:
+        success: {type: boolean}
+        comment: {type: object}
+
+  list_teams:
+    title: List teams and their workflow states
+    description: >-
+      List the workspace's teams with their ids, keys and workflow states.
+      create_issue and update_issue need the ids this returns.
+    category: workspace
+    scopes: [read]
+    read_only: true
+    request:
+      method: POST
+      path: /graphql
+      body:
+        query: >-
+          query Teams($first: Int) {
+            teams(first: $first) {
+              nodes { id key name description
+                      states { nodes { id name type position } }
+                      labels { nodes { id name } } }
+            }
+          }
+        variables:
+          first: "${limit}"
+    input:
+      limit:
+        type: integer
+        description: How many teams to return.
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 250
+    output:
+      description: The workspace's teams.
+      type: object
+      response_path: data.teams
+      properties:
+        nodes: {type: array, description: "Each with id, key, states and labels."}
+
+  list_projects:
+    title: List projects
+    description: List the workspace's projects with their state, progress and target date.
+    category: workspace
+    scopes: [read]
+    read_only: true
+    request:
+      method: POST
+      path: /graphql
+      body:
+        query: >-
+          query Projects($first: Int, $after: String) {
+            projects(first: $first, after: $after) {
+              nodes { id name description state progress targetDate url
+                      lead { name email } }
+              pageInfo { hasNextPage endCursor }
+            }
+          }
+        variables:
+          first: "${limit}"
+          after: "${after}"
+    input:
+      limit:
+        type: integer
+        description: How many projects per page.
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 250
+      after:
+        type: string
+        description: Cursor from the previous response's pageInfo.endCursor.
+        optional: true
+    output:
+      description: A page of projects.
+      type: object
+      response_path: data.projects
+      properties:
+        nodes: {type: array}
+        pageInfo: {type: object}
+
+  list_users:
+    title: List workspace members
+    description: >-
+      List the workspace's members with the UUIDs the assignee arguments take,
+      alongside their names and email addresses.
+    category: workspace
+    scopes: [read]
+    read_only: true
+    request:
+      method: POST
+      path: /graphql
+      body:
+        query: >-
+          query Users($first: Int) {
+            users(first: $first) { nodes { id name displayName email active admin } }
+          }
+        variables:
+          first: "${limit}"
+    input:
+      limit:
+        type: integer
+        description: How many members to return.
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 250
+    output:
+      description: The workspace's members.
+      type: object
+      response_path: data.users
+      properties:
+        nodes: {type: array}
+
+  get_viewer:
+    title: Get the authenticated user
+    description: >-
+      Read who the token belongs to and which organisation it is in. The
+      cheapest health check for a Linear connection.
+    category: workspace
+    scopes: [read]
+    read_only: true
+    request:
+      method: POST
+      path: /graphql
+      body:
+        query: >-
+          query Viewer {
+            viewer { id name email admin
+                     organization { id name urlKey } }
+          }
+    input: {}
+    output:
+      description: The authenticated user and their organisation.
+      type: object
+      response_path: data.viewer
+      properties:
+        id: {type: string}
+        name: {type: string}
+        email: {type: string}
+        organization: {type: object}
+
+  archive_issue:
+    title: Archive an issue
+    description: >-
+      Archive an issue, taking it off the active board. Linear keeps it
+      recoverable from the UI, but this tool cannot restore it.
+    category: issues
+    scopes: [write]
+    destructive: true
+    request:
+      method: POST
+      path: /graphql
+      body:
+        query: >-
+          mutation ArchiveIssue($id: String!) {
+            issueArchive(id: $id) { success }
+          }
+        variables:
+          id: "${issue_id}"
+    input:
+      issue_id:
+        type: string
+        description: Issue UUID or identifier.
+    output:
+      description: Whether the archive succeeded.
+      type: object
+      response_path: data.issueArchive
+      properties:
+        success: {type: boolean}
+
+  run_graphql:
+    title: Run a raw GraphQL query
+    description: >-
+      Send any query or mutation to Linear's GraphQL API. The escape hatch for
+      cycles, roadmaps, attachments and anything else the other tools do not
+      cover.
+    category: raw
+    scopes: [read]
+    notes: A mutation sent through this tool also needs the write scope.
+    request:
+      method: POST
+      path: /graphql
+      body:
+        query: "${query}"
+        variables: "${variables}"
+    input:
+      query:
+        type: string
+        description: The GraphQL query or mutation document.
+      variables:
+        type: object
+        description: Values for the document's variables.
+        optional: true
+    output:
+      description: Whatever the query selected, under data.
+      type: object
+      properties:
+        data: {type: object}
+        errors: {type: array}

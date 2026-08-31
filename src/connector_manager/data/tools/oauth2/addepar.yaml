@@ -1,0 +1,3701 @@
+# Addepar tools.
+#
+# Addepar's API is JSON:API, which shapes every tool here:
+#
+#   * reads answer with `{"data": [...], "links": {...}, "meta": {...}}` and
+#     page with `page[limit]` plus the `page[cursor]` taken from the previous
+#     response's links -- there are no page numbers;
+#   * writes send `{"data": {"type": "<resource>", "attributes": {...}}}`, so
+#     each create/update tool takes an `attributes` object and wraps it;
+#   * the media type is `application/vnd.api+json`, which the tools set.
+#
+# The connector points at api.addepar.com and sends the `Addepar-Firm` header
+# from the connection's Firm ID, so paths below start at /v1 and no tool asks
+# for the firm again.
+#
+# Scopes are Addepar's own OAuth scopes. The write variants imply their read
+# counterparts, which `scope_rules` records, and contacts fall under USERS
+# rather than a scope of their own.
+#
+# Heavy extracts are asynchronous by design: `create_job` (or
+# `create_timeseries_job`) starts one, `get_job` reports progress, and
+# `download_job` returns the result. Sending `compute_type` BATCH on a portfolio
+# query tells Addepar to schedule it as batch work rather than answering inline.
+#
+# Not covered, because this layer sends JSON rather than multipart: uploading a
+# file (POST /v1/files) and creating a data import (POST /v1/imports). Reading,
+# downloading and deleting files is here.
+#
+# Docs: https://developers.addepar.com/reference/introduction
+
+connector_id: addepar
+display_name: Addepar (OAuth)
+docs_url: https://developers.addepar.com/reference/introduction
+
+scope_rules:
+  case_insensitive: true
+  implies:
+    TRANSACTIONS_WRITE: [TRANSACTIONS]
+    FILES_WRITE: [FILES]
+    GROUPS_WRITE: [GROUPS]
+    ENTITIES_WRITE: [ENTITIES]
+    POSITIONS_WRITE: [POSITIONS]
+    USERS_WRITE: [USERS]
+    TEAMS_WRITE: [TEAMS]
+    BENCHMARKS_WRITE: [BENCHMARKS_READ]
+    BILLING_WRITE: [BILLING_READ]
+
+tools:
+
+  # -- meta ------------------------------------------------------------------
+
+  get_api_version:
+    title: Get the API version
+    description: >-
+      The version of the Addepar API the firm is served by. The cheapest call
+      that proves the token, the firm header and the base url all line up.
+    category: meta
+    read_only: true
+    request:
+      method: GET
+      path: /v1/api_version
+      headers:
+        Accept: application/vnd.api+json
+    input: {}
+    output:
+      description: The API version.
+      type: object
+      properties:
+        data: {type: object, description: "Holds the version string in its attributes."}
+
+  get_current_user:
+    title: Get the authenticated user
+    description: >-
+      Who the token belongs to -- name, email, user id and firm id. Start here
+      when you need the caller's own id, since most other tools want an id
+      rather than an email.
+    category: meta
+    scopes: [PROFILE]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/users/me
+      headers:
+        Accept: application/vnd.api+json
+    input: {}
+    output:
+      description: The authenticated user.
+      type: object
+      properties:
+        data: {type: object, description: "The user resource, with id, type and attributes."}
+
+  # -- portfolio data --------------------------------------------------------
+
+  query_portfolio:
+    title: Query portfolio data
+    description: >-
+      Addepar's main read: values, performance and any other attribute for a
+      portfolio, grouped and filtered as a report would be. `columns` are the
+      attributes to compute, `groupings` the rows to break them down by, and
+      `portfolio_type` plus `portfolio_id` say whose portfolio -- FIRM with the
+      firm id for everything, ENTITY or GROUP for one client or grouping. A
+      single-date measure wants `end_date` alone; a period measure wants both
+      dates. Large queries are better sent with `compute_type` BATCH, or run
+      through `create_job`.
+    category: portfolio
+    scopes: [PORTFOLIO]
+    read_only: true
+    request:
+      method: POST
+      path: /v1/portfolio/query
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+        Addepar-Compute-Type: "${compute_type}"
+      body:
+        data:
+          type: portfolio_query
+          attributes:
+            columns: "${columns}"
+            groupings: "${groupings}"
+            filters: "${filters}"
+            portfolio_type: "${portfolio_type}"
+            portfolio_id: "${portfolio_id}"
+            start_date: "${start_date}"
+            end_date: "${end_date}"
+            as_of_knowledge_date: "${as_of_knowledge_date}"
+            hide_previous_holdings: "${hide_previous_holdings}"
+            look_through_composite_securities: "${look_through_composite_securities}"
+            expand_wrapper_entities: "${expand_wrapper_entities}"
+            display_account_fees: "${display_account_fees}"
+            disable_total_row: "${disable_total_row}"
+            group_by_historical_values: "${group_by_historical_values}"
+    input:
+      columns:
+        type: array
+        description: >-
+          Attributes to compute, each {"key": "<attribute key>"} with optional
+          "arguments". `list_attributes` gives the keys, e.g. value,
+          time_weighted_return.
+        items:
+          type: object
+          properties:
+            key: {type: string}
+            arguments: {type: object}
+      portfolio_type:
+        type: string
+        description: What kind of portfolio to report on.
+        enum:
+          - FIRM
+          - ENTITY
+          - GROUP
+          - ENTITY_FUNDS
+          - GROUP_FUNDS
+          - FIRM_ACCOUNTS
+          - FIRM_CLIENTS
+          - FIRM_FUNDS
+          - FIRM_HOUSEHOLDS
+          - FIRM_TRADING_GROUPS
+          - FIRM_UNVERIFIED_ACCOUNTS
+      portfolio_id:
+        type: array
+        description: >-
+          Ids of the portfolios to report on -- the firm id for a FIRM query,
+          entity ids for ENTITY, group ids for GROUP.
+        items: {type: integer}
+      end_date:
+        type: string
+        description: The as-of date, or the end of the period, as YYYY-MM-DD.
+        example: "2026-08-31"
+      groupings:
+        type: array
+        description: >-
+          Attributes to group rows by, in order, each {"key": "<attribute key>"}.
+          An empty list returns just the total row.
+        optional: true
+        items:
+          type: object
+          properties:
+            key: {type: string}
+            arguments: {type: object}
+      filters:
+        type: array
+        description: >-
+          Filters restricting which holdings are included, in the shape
+          Addepar's saved-view filters use.
+        optional: true
+        items: {type: object}
+      start_date:
+        type: string
+        description: Start of the period, as YYYY-MM-DD. Needed for period measures such as returns.
+        optional: true
+      as_of_knowledge_date:
+        type: string
+        description: >-
+          Report the data as it was known on this date, as YYYY-MM-DD -- how you
+          reproduce a figure published before later corrections landed.
+        optional: true
+      hide_previous_holdings:
+        type: boolean
+        description: Leave out positions that were closed before the period began.
+        optional: true
+      look_through_composite_securities:
+        type: boolean
+        description: Break composite securities down into their constituents.
+        optional: true
+      expand_wrapper_entities:
+        type: boolean
+        description: Show the holdings inside wrapper entities rather than the wrapper.
+        optional: true
+      display_account_fees:
+        type: boolean
+        description: Include account fees in the results.
+        optional: true
+      disable_total_row:
+        type: boolean
+        description: Omit the total row from the response.
+        optional: true
+      group_by_historical_values:
+        type: boolean
+        description: Group by the attribute values as at each date rather than today's.
+        optional: true
+      compute_type:
+        type: string
+        description: >-
+          BATCH schedules the query as batch work, which is how large queries
+          avoid timing out. DEFAULT computes it inline.
+        optional: true
+        default: DEFAULT
+        enum: [DEFAULT, BATCH]
+    output:
+      description: The computed portfolio data, as a grouped tree.
+      type: object
+      properties:
+        meta: {type: object, description: "The columns and groupings that were computed."}
+        data: {type: object, description: "attributes.total holds the total row and its children."}
+
+  list_portfolio_views:
+    title: List portfolio views
+    description: >-
+      The saved views in the firm -- the report definitions users built in the
+      UI. Their ids are what `get_portfolio_view_results` and `create_job`
+      take, which is how you run an analyst's saved report from code instead of
+      rebuilding its columns by hand.
+    category: portfolio
+    scopes: [PORTFOLIO]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/portfolio/views
+      query:
+        page[limit]: "${limit}"
+        page[cursor]: "${cursor}"
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      limit:
+        type: integer
+        description: How many views per page.
+        optional: true
+        default: 25
+        minimum: 1
+      cursor:
+        type: string
+        description: Cursor from the previous response's links, to get the next page.
+        optional: true
+    output:
+      description: A page of saved views.
+      type: object
+      properties:
+        data: {type: array, description: "Each a view resource with id and attributes."}
+        links: {type: object, description: "Holds the next cursor."}
+
+  get_portfolio_view:
+    title: Get a portfolio view
+    description: >-
+      One saved view's definition -- its columns, groupings and filters, and its
+      sort criteria when asked for. Read this to see what a view computes before
+      running it.
+    category: portfolio
+    scopes: [PORTFOLIO]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/portfolio/views/${view_id}
+      query:
+        include_sort_criteria: "${include_sort_criteria}"
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      view_id:
+        type: integer
+        description: The view's id.
+      include_sort_criteria:
+        type: boolean
+        description: Also return how the view sorts its rows.
+        optional: true
+    output:
+      description: The saved view.
+      type: object
+      properties:
+        data: {type: object, description: "The view resource, with its columns, groupings and filters."}
+
+  get_portfolio_view_results:
+    title: Run a portfolio view
+    description: >-
+      Compute a saved view for a portfolio and return its rows. The view
+      supplies the columns, groupings and filters; you supply whose portfolio
+      and over what dates. Prefer `create_job` when the view is large -- this
+      call computes inline unless `compute_type` is BATCH.
+    category: portfolio
+    scopes: [PORTFOLIO]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/portfolio/views/${view_id}/results
+      query:
+        portfolio_type: "${portfolio_type}"
+        portfolio_id: "${portfolio_id}"
+        output_type: "${output_type}"
+        start_date: "${start_date}"
+        end_date: "${end_date}"
+        as_of_knowledge_date: "${as_of_knowledge_date}"
+      headers:
+        Accept: application/vnd.api+json
+        Addepar-Compute-Type: "${compute_type}"
+    input:
+      view_id:
+        type: integer
+        description: The saved view to run.
+      portfolio_type:
+        type: string
+        description: What kind of portfolio to run the view against.
+        enum:
+          - FIRM
+          - ENTITY
+          - GROUP
+          - ENTITY_FUNDS
+          - GROUP_FUNDS
+          - FIRM_ACCOUNTS
+          - FIRM_CLIENTS
+          - FIRM_FUNDS
+          - FIRM_HOUSEHOLDS
+          - FIRM_TRADING_GROUPS
+          - FIRM_UNVERIFIED_ACCOUNTS
+      portfolio_id:
+        type: integer
+        description: Id of the portfolio -- the firm id, an entity id or a group id.
+      end_date:
+        type: string
+        description: The as-of date, or the end of the period, as YYYY-MM-DD.
+        optional: true
+      start_date:
+        type: string
+        description: Start of the period, as YYYY-MM-DD.
+        optional: true
+      as_of_knowledge_date:
+        type: string
+        description: Report the data as it was known on this date, as YYYY-MM-DD.
+        optional: true
+      output_type:
+        type: string
+        description: Which output format the view should be returned in, where it offers a choice.
+        optional: true
+      compute_type:
+        type: string
+        description: BATCH schedules the computation; DEFAULT computes it inline.
+        optional: true
+        default: DEFAULT
+        enum: [DEFAULT, BATCH]
+    output:
+      description: The view's computed rows.
+      type: object
+      properties:
+        meta: {type: object, description: "The columns and groupings the view computed."}
+        data: {type: object, description: "attributes.total holds the total row and its children."}
+
+  list_view_sets:
+    title: List view sets
+    description: >-
+      The view sets in the firm -- named collections of views used to give a
+      contact or portal user a consistent set of reports.
+    category: portfolio
+    scopes: [PORTFOLIO]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/view_sets
+      query:
+        page[limit]: "${limit}"
+        page[cursor]: "${cursor}"
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      limit:
+        type: integer
+        description: How many view sets per page.
+        optional: true
+        default: 25
+        minimum: 1
+      cursor:
+        type: string
+        description: Cursor from the previous response's links.
+        optional: true
+    output:
+      description: A page of view sets.
+      type: object
+      properties:
+        data: {type: array}
+        links: {type: object}
+
+  get_view_set:
+    title: Get a view set
+    description: >-
+      One view set by id, with the views it contains -- what a contact assigned
+      this set will see in the portal.
+    category: portfolio
+    scopes: [PORTFOLIO]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/view_sets/${view_set_id}
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      view_set_id:
+        type: string
+        description: The view set's id.
+    output:
+      description: The view set.
+      type: object
+      properties:
+        data: {type: object}
+
+  # -- attributes ------------------------------------------------------------
+
+  list_attributes:
+    title: List attributes
+    description: >-
+      Every attribute the firm can compute -- the keys that go in a portfolio
+      query's `columns` and `groupings`, from stock measures like value and
+      time_weighted_return to the firm's own calculated and custom attributes.
+    category: attributes
+    scopes: [PORTFOLIO]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/attributes
+      query:
+        page[limit]: "${limit}"
+        page[cursor]: "${cursor}"
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      limit:
+        type: integer
+        description: How many attributes per page.
+        optional: true
+        default: 25
+        minimum: 1
+      cursor:
+        type: string
+        description: Cursor from the previous response's links.
+        optional: true
+    output:
+      description: A page of attributes.
+      type: object
+      properties:
+        data: {type: array, description: "Each with its key, display name, type and whether it takes arguments."}
+        links: {type: object}
+
+  get_attribute:
+    title: Get an attribute
+    description: >-
+      One attribute by key, with its display name, output type and the
+      arguments it accepts -- what you need to pass it correctly in a query's
+      `columns`.
+    category: attributes
+    scopes: [PORTFOLIO]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/attributes/${attribute_id}
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      attribute_id:
+        type: string
+        description: The attribute's key, e.g. value or time_weighted_return.
+        example: value
+    output:
+      description: The attribute.
+      type: object
+      properties:
+        data: {type: object}
+
+  list_attribute_arguments:
+    title: List an attribute's arguments
+    description: >-
+      The arguments one attribute accepts, with their allowed values -- for
+      example the currency or annualisation an return attribute can be computed
+      with.
+    category: attributes
+    scopes: [PORTFOLIO]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/attributes/${attribute_id}/arguments
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      attribute_id:
+        type: string
+        description: The attribute's key.
+    output:
+      description: The attribute's arguments.
+      type: object
+      properties:
+        data: {type: array}
+
+  query_attributes:
+    title: Query attributes
+    description: >-
+      Search the firm's attributes rather than paging the whole list -- the
+      practical way to find a key when a firm has thousands of calculated
+      attributes.
+    category: attributes
+    scopes: [PORTFOLIO]
+    read_only: true
+    request:
+      method: POST
+      path: /v1/attributes/query
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+      body:
+        data:
+          type: attributes_query
+          attributes:
+            search: "${search}"
+            page[limit]: "${limit}"
+            page[cursor]: "${cursor}"
+    input:
+      search:
+        type: string
+        description: Text to match against attribute keys and display names.
+        example: return
+      limit:
+        type: integer
+        description: How many attributes per page.
+        optional: true
+        minimum: 1
+      cursor:
+        type: string
+        description: Cursor from the previous response, to get the next page.
+        optional: true
+    output:
+      description: The matching attributes.
+      type: object
+      properties:
+        data: {type: array}
+        links: {type: object}
+
+  list_arguments:
+    title: List attribute argument definitions
+    description: >-
+      The argument definitions attributes draw on, each with its allowed
+      values. Useful when building a query generator that must offer valid
+      argument choices.
+    category: attributes
+    scopes: [PORTFOLIO]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/arguments
+      query:
+        page[limit]: "${limit}"
+        page[cursor]: "${cursor}"
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      limit:
+        type: integer
+        description: How many argument definitions per page.
+        optional: true
+        default: 25
+        minimum: 1
+      cursor:
+        type: string
+        description: Cursor from the previous response's links.
+        optional: true
+    output:
+      description: A page of argument definitions.
+      type: object
+      properties:
+        data: {type: array}
+        links: {type: object}
+
+  get_argument:
+    title: Get an attribute argument definition
+    description: >-
+      One argument definition by id, with the values it accepts -- the
+      authoritative list for that argument rather than a guess.
+    category: attributes
+    scopes: [PORTFOLIO]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/arguments/${argument_id}
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      argument_id:
+        type: string
+        description: The argument definition's id.
+    output:
+      description: The argument definition.
+      type: object
+      properties:
+        data: {type: object}
+
+  # -- asynchronous extracts -------------------------------------------------
+
+  create_job:
+    title: Start a portfolio extract job
+    description: >-
+      Queue an asynchronous extract of a saved view's results -- the right tool
+      for a whole-firm pull that would time out inline. Give it the view and the
+      portfolio in `attributes`, then poll `get_job` and fetch the output with
+      `download_job`.
+    category: jobs
+    scopes: [PORTFOLIO]
+    request:
+      method: POST
+      path: /v1/jobs
+      query:
+        useStringId: "${use_string_id}"
+        isHighPrio: "${high_priority}"
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+        Addepar-Compute-Type: "${compute_type}"
+      body:
+        data:
+          type: job
+          attributes:
+            job_type: "${job_type}"
+            parameters: "${parameters}"
+    input:
+      job_type:
+        type: string
+        description: >-
+          Which kind of extract to run, as documented for the jobs API, e.g.
+          PORTFOLIO_VIEW_RESULTS.
+        example: PORTFOLIO_VIEW_RESULTS
+      parameters:
+        type: object
+        description: >-
+          The extract's parameters -- typically the view id, the portfolio type
+          and id, and the dates, in the same form a portfolio query takes.
+      use_string_id:
+        type: boolean
+        description: Return the job's id as a string UUID rather than a number.
+        optional: true
+      high_priority:
+        type: boolean
+        description: Flag the job as high priority in the firm's queue.
+        optional: true
+      compute_type:
+        type: string
+        description: BATCH schedules the computation as batch work; DEFAULT is the standard queue.
+        optional: true
+        default: DEFAULT
+        enum: [DEFAULT, BATCH]
+    output:
+      description: The job that was queued.
+      type: object
+      properties:
+        data: {type: object, description: "The job resource, with its id, status and percent_complete."}
+
+  list_jobs:
+    title: List extract jobs
+    description: >-
+      The firm's extract jobs with their status and parameters -- what is
+      queued, running, finished or failed.
+    category: jobs
+    scopes: [PORTFOLIO]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/jobs
+      query:
+        useStringId: "${use_string_id}"
+        page[limit]: "${limit}"
+        page[cursor]: "${cursor}"
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      use_string_id:
+        type: boolean
+        description: Return job ids as string UUIDs rather than numbers.
+        optional: true
+      limit:
+        type: integer
+        description: How many jobs per page.
+        optional: true
+        default: 25
+        minimum: 1
+      cursor:
+        type: string
+        description: Cursor from the previous response's links.
+        optional: true
+    output:
+      description: A page of jobs.
+      type: object
+      properties:
+        data: {type: array, description: "Each with id, job_type, status, percent_complete and any errors."}
+        links: {type: object}
+
+  get_job:
+    title: Get an extract job
+    description: >-
+      One job's status, parameters and progress. Poll this after `create_job`
+      until it reports completion, then call `download_job` -- downloading
+      early returns nothing useful.
+    category: jobs
+    scopes: [PORTFOLIO]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/jobs/${job_id}
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      job_id:
+        type: string
+        description: The job's id.
+    output:
+      description: The job.
+      type: object
+      properties:
+        data: {type: object, description: "status, percent_complete, started_at, completed_at and errors."}
+
+  download_job:
+    title: Download an extract job's results
+    description: >-
+      The output of a finished job. Only meaningful once `get_job` reports the
+      job complete; the payload can be large, since this is the whole extract.
+    category: jobs
+    scopes: [PORTFOLIO]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/jobs/${job_id}/download
+    input:
+      job_id:
+        type: string
+        description: The job's id.
+    output:
+      description: The job's results.
+      type: object
+
+  delete_job:
+    title: Delete an extract job
+    description: >-
+      Remove a job and its results. Worth doing after a large extract has been
+      collected, and the only way to cancel one that is no longer wanted.
+    category: jobs
+    scopes: [PORTFOLIO]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/jobs/${job_id}
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      job_id:
+        type: string
+        description: The job's id.
+    output:
+      description: Confirmation that the job was removed.
+      type: object
+
+  retrieve_jobs:
+    title: Retrieve several jobs at once
+    description: >-
+      Status, parameters and -- for finished jobs -- content, for a list of job
+      ids in one call. Cheaper than polling each job separately when a batch
+      was queued together.
+    category: jobs
+    scopes: [PORTFOLIO]
+    read_only: true
+    request:
+      method: POST
+      path: /v1/jobs/retrieve
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+      body:
+        data:
+          type: job_retrieve
+          attributes:
+            job_ids: "${job_ids}"
+    input:
+      job_ids:
+        type: array
+        description: The jobs to report on.
+        items: {type: string}
+    output:
+      description: The requested jobs, with content where they have finished.
+      type: object
+      properties:
+        data: {type: array}
+
+  create_timeseries_job:
+    title: Start a timeseries extract job
+    description: >-
+      Queue an asynchronous extract of a saved view computed for every day in a
+      range, rather than a single as-of date. Poll `get_timeseries_job`, which
+      also reports which days have been produced so far.
+    category: jobs
+    scopes: [PORTFOLIO]
+    request:
+      method: POST
+      path: /v1/jobs/timeseries
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+        Addepar-Compute-Type: "${compute_type}"
+      body:
+        data:
+          type: job
+          attributes:
+            job_type: "${job_type}"
+            parameters: "${parameters}"
+    input:
+      job_type:
+        type: string
+        description: Which kind of timeseries extract to run, as documented for the jobs API.
+      parameters:
+        type: object
+        description: >-
+          The extract's parameters -- the view, the portfolio, and the date
+          range to produce a value for each day of.
+      compute_type:
+        type: string
+        description: BATCH schedules the computation as batch work.
+        optional: true
+        default: DEFAULT
+        enum: [DEFAULT, BATCH]
+    output:
+      description: The timeseries job that was queued.
+      type: object
+      properties:
+        data: {type: object}
+
+  get_timeseries_job:
+    title: Get a timeseries extract job
+    description: >-
+      Status of a timeseries job, including which days have been uploaded so
+      far -- so a long backfill can be consumed as it completes rather than
+      only at the end.
+    category: jobs
+    scopes: [PORTFOLIO]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/jobs/timeseries/${job_id}
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      job_id:
+        type: string
+        description: The timeseries job's id.
+    output:
+      description: The timeseries job.
+      type: object
+      properties:
+        data: {type: object, description: "Its status and the days produced so far."}
+
+  # -- entities --------------------------------------------------------------
+
+  list_entities:
+    title: List entities
+    description: >-
+      The firm's entities -- clients, households, trusts, accounts, funds and
+      securities all live in this one graph. Pages with `page[limit]` and the
+      cursor from the previous response.
+    category: entities
+    scopes: [ENTITIES]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/entities
+      query:
+        page[limit]: "${limit}"
+        page[cursor]: "${cursor}"
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      limit:
+        type: integer
+        description: How many entities per page.
+        optional: true
+        default: 25
+        minimum: 1
+      cursor:
+        type: string
+        description: Cursor from the previous response's links.
+        optional: true
+    output:
+      description: A page of entities.
+      type: object
+      properties:
+        data: {type: array, description: "Each an entity with id, type and attributes including its model type."}
+        links: {type: object}
+
+  get_entity:
+    title: Get an entity
+    description: >-
+      One entity by id, with its name, model type, currency and the attribute
+      values stored on it.
+    category: entities
+    scopes: [ENTITIES]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/entities/${entity_id}
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      entity_id:
+        type: integer
+        description: The entity's id.
+    output:
+      description: The entity.
+      type: object
+      properties:
+        data: {type: object}
+
+  create_entity:
+    title: Create an entity
+    description: >-
+      Add an entity to the firm's graph -- a client, a trust, an account or a
+      security. `model_type` decides what it is and therefore which attributes
+      apply, so it is the field to get right; the rest go in `attributes`.
+      Ownership is a separate step: use `create_position` to link the new
+      entity to its owner.
+    category: entities
+    scopes: [ENTITIES_WRITE]
+    request:
+      method: POST
+      path: /v1/entities
+      query:
+        allow_new_investment_types: "${allow_new_investment_types}"
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+      body:
+        data:
+          type: entity
+          attributes:
+            model_type: "${model_type}"
+            currency_factor: "${currency_factor}"
+            ownership_type: "${ownership_type}"
+            factors: "${factors}"
+    input:
+      model_type:
+        type: string
+        description: >-
+          What kind of entity this is, e.g. HOUSEHOLD, TRUST, FINANCIAL_ACCOUNT,
+          STOCK, BOND, HEDGE_FUND, PRIVATE_INVESTMENT, CASH.
+        example: FINANCIAL_ACCOUNT
+      factors:
+        type: object
+        description: >-
+          The entity's attribute values, keyed by attribute key -- its name and
+          anything else the model type expects.
+      currency_factor:
+        type: string
+        description: The entity's currency, as an ISO code such as USD or EUR.
+        optional: true
+      ownership_type:
+        type: string
+        description: How ownership of this entity is expressed.
+        optional: true
+        enum: ["Share Based", "Percent Based", "Value Based"]
+      allow_new_investment_types:
+        type: boolean
+        description: Permit an investment type the firm has not used before.
+        optional: true
+    output:
+      description: The entity that was created.
+      type: object
+      properties:
+        data: {type: object, description: "The new entity, including the id Addepar assigned."}
+
+  update_entity:
+    title: Update an entity
+    description: >-
+      Change an entity's attributes. Only what you send is touched. Watch
+      `missingRecomendedAttributes` in the response -- it is Addepar telling you
+      which attributes the model type expects but does not yet have.
+    category: entities
+    scopes: [ENTITIES_WRITE]
+    request:
+      method: PATCH
+      path: /v1/entities/${entity_id}
+      query:
+        allow_new_investment_types: "${allow_new_investment_types}"
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+      body:
+        data:
+          type: entity
+          id: "${entity_id}"
+          attributes:
+            model_type: "${model_type}"
+            currency_factor: "${currency_factor}"
+            ownership_type: "${ownership_type}"
+            factors: "${factors}"
+    input:
+      entity_id:
+        type: integer
+        description: The entity's id.
+      factors:
+        type: object
+        description: Attribute values to set, keyed by attribute key.
+        optional: true
+      model_type:
+        type: string
+        description: New model type for the entity.
+        optional: true
+      currency_factor:
+        type: string
+        description: New currency, as an ISO code.
+        optional: true
+      ownership_type:
+        type: string
+        description: How ownership of this entity is expressed.
+        optional: true
+        enum: ["Share Based", "Percent Based", "Value Based"]
+      allow_new_investment_types:
+        type: boolean
+        description: Permit an investment type the firm has not used before.
+        optional: true
+    output:
+      description: The updated entity.
+      type: object
+      properties:
+        data: {type: object}
+
+  delete_entity:
+    title: Delete an entity
+    description: >-
+      Remove an entity from the firm's graph. Anything hanging off it --
+      positions, transactions, prices -- goes too, so this is not a way to tidy
+      up a live client; it is for removing something created in error.
+    category: entities
+    scopes: [ENTITIES_WRITE]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/entities/${entity_id}
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      entity_id:
+        type: integer
+        description: The entity's id.
+    output:
+      description: Confirmation that the entity was deleted.
+      type: object
+
+  query_entities:
+    title: Look up entities by external id
+    description: >-
+      Find entities by the ids your own systems use, rather than Addepar's. Each
+      pair is an external id plus the external id type it belongs to, which is
+      how a custodian or CRM key maps onto an Addepar entity.
+    category: entities
+    scopes: [ENTITIES]
+    read_only: true
+    request:
+      method: POST
+      path: /v1/entities/query
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+      body:
+        data:
+          type: entities_query
+          attributes:
+            externalIds: "${external_ids}"
+    input:
+      external_ids:
+        type: array
+        description: >-
+          The external ids to resolve, each
+          {"external_id": "...", "external_type_key": "..."}.
+          `list_external_id_types` gives the type keys.
+        items:
+          type: object
+          properties:
+            external_id: {type: string}
+            external_type_key: {type: string}
+    output:
+      description: The entities matching those external ids.
+      type: object
+      properties:
+        data: {type: array}
+
+  list_entity_types:
+    title: List entity types
+    description: >-
+      The entity types configured in the firm, with the attributes each one
+      expects -- the vocabulary `create_entity`'s `model_type` draws on.
+    category: entities
+    scopes: [ENTITIES]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/entity_types
+      query:
+        page[limit]: "${limit}"
+        page[cursor]: "${cursor}"
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      limit:
+        type: integer
+        description: How many entity types per page.
+        optional: true
+        default: 25
+        minimum: 1
+      cursor:
+        type: string
+        description: Cursor from the previous response's links.
+        optional: true
+    output:
+      description: A page of entity types.
+      type: object
+      properties:
+        data: {type: array}
+        links: {type: object}
+
+  list_external_id_types:
+    title: List external id types
+    description: >-
+      The external id namespaces the firm has defined -- one per outside system
+      whose keys are stored against Addepar records. Their keys are what
+      `query_entities` and report generation take.
+    category: entities
+    scopes: [ENTITIES]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/external_id_types
+      query:
+        page[limit]: "${limit}"
+        page[cursor]: "${cursor}"
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      limit:
+        type: integer
+        description: How many id types per page.
+        optional: true
+        default: 25
+        minimum: 1
+      cursor:
+        type: string
+        description: Cursor from the previous response's links.
+        optional: true
+    output:
+      description: A page of external id types.
+      type: object
+      properties:
+        data: {type: array}
+        links: {type: object}
+
+  list_entity_prices:
+    title: List an entity's prices
+    description: >-
+      The prices stored against one entity, optionally for a single date. This
+      is how a privately held asset or a security the firm prices itself gets
+      its valuation history.
+    category: prices
+    scopes: [ENTITIES]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/entities/${entity_id}/prices
+      query:
+        date: "${date}"
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      entity_id:
+        type: integer
+        description: The entity whose prices to read.
+      date:
+        type: string
+        description: Only the price for this date, as YYYY-MM-DD.
+        optional: true
+    output:
+      description: The entity's prices.
+      type: object
+      properties:
+        data: {type: array, description: "Each with a date, a value and any comment."}
+
+  create_entity_price:
+    title: Set an entity's price
+    description: >-
+      Record a price for an entity on a date. `node_id` is the position or node
+      the price applies to, and `price_id` is the id this price is stored
+      under, so re-sending the same one replaces that price rather than adding
+      a second.
+    category: prices
+    scopes: [ENTITIES_WRITE]
+    request:
+      method: POST
+      path: /v1/entities/${entity_id}/prices
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+      body:
+        data:
+          type: entity_price
+          attributes:
+            id: "${price_id}"
+            date: "${date}"
+            nodeId: "${node_id}"
+            value: "${value}"
+            priceFactor: "${price_factor}"
+            comment: "${comment}"
+    input:
+      entity_id:
+        type: integer
+        description: The entity the price belongs to.
+      price_id:
+        type: string
+        description: Id to store the price under. Reusing one overwrites that price.
+      date:
+        type: string
+        description: The date the price applies to, as YYYY-MM-DD.
+        example: "2026-08-31"
+      node_id:
+        type: integer
+        description: Id of the node the price applies to.
+      value:
+        type: number
+        description: The price itself.
+      price_factor:
+        type: number
+        description: Factor applied to the price, where the asset needs one.
+        optional: true
+      comment:
+        type: string
+        description: A note recording where the price came from.
+        optional: true
+    output:
+      description: The price that was stored.
+      type: object
+      properties:
+        data: {type: object}
+
+  delete_entity_prices:
+    title: Delete an entity's prices for a date
+    description: >-
+      Remove the prices stored against an entity for one date. Valuations
+      computed from that price change on the next run, so treat this as a
+      correction rather than routine housekeeping.
+    category: prices
+    scopes: [ENTITIES_WRITE]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/entities/${entity_id}/prices/${date}
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      entity_id:
+        type: integer
+        description: The entity whose price to remove.
+      date:
+        type: string
+        description: The date to clear, as YYYY-MM-DD.
+    output:
+      description: Confirmation that the prices were deleted.
+      type: object
+
+  # -- positions -------------------------------------------------------------
+
+  list_positions:
+    title: List positions
+    description: >-
+      Positions -- the ownership links between two entities, which is how a
+      household owns an account and an account holds a security. Every holding
+      in Addepar is one of these edges.
+    category: positions
+    scopes: [POSITIONS]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/positions
+      query:
+        page[limit]: "${limit}"
+        page[cursor]: "${cursor}"
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      limit:
+        type: integer
+        description: How many positions per page.
+        optional: true
+        default: 25
+        minimum: 1
+      cursor:
+        type: string
+        description: Cursor from the previous response's links.
+        optional: true
+    output:
+      description: A page of positions.
+      type: object
+      properties:
+        data: {type: array, description: "Each with its owner and owned entity ids and inception details."}
+        links: {type: object}
+
+  get_position:
+    title: Get a position
+    description: >-
+      One position by id, with the entities at each end and the inception
+      details that opened it.
+    category: positions
+    scopes: [POSITIONS]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/positions/${position_id}
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      position_id:
+        type: integer
+        description: The position's id.
+    output:
+      description: The position.
+      type: object
+      properties:
+        data: {type: object}
+
+  create_position:
+    title: Create a position
+    description: >-
+      Link two entities by ownership: `from_entity_id` owns `to_entity_id`. The
+      incepting fields say when the holding starts and at what value or
+      percentage -- an opening balance for a position whose transaction history
+      begins later.
+    category: positions
+    scopes: [POSITIONS_WRITE]
+    request:
+      method: POST
+      path: /v1/positions
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+      body:
+        data:
+          type: position
+          attributes:
+            fromEntityId: "${from_entity_id}"
+            toEntityId: "${to_entity_id}"
+            name: "${name}"
+            displayName: "${display_name}"
+            inceptingOpenPositionDate: "${incepting_date}"
+            inceptingOpenPositionValue: "${incepting_value}"
+            inceptingOpenPositionOwnershipPercentage: "${incepting_ownership_percentage}"
+            inceptingOpenPositionCurrencyFactor: "${incepting_currency}"
+            factors: "${factors}"
+    input:
+      from_entity_id:
+        type: integer
+        description: The owning entity -- the household, trust or account that holds.
+      to_entity_id:
+        type: integer
+        description: The owned entity -- the account, fund or security that is held.
+      name:
+        type: string
+        description: Internal name for the position.
+        optional: true
+      display_name:
+        type: string
+        description: Name shown for the position in reports.
+        optional: true
+      incepting_date:
+        type: string
+        description: When the holding starts, as YYYY-MM-DD.
+        optional: true
+      incepting_value:
+        type: number
+        description: Opening value of the holding at inception.
+        optional: true
+      incepting_ownership_percentage:
+        type: number
+        description: Opening ownership percentage, for a percent-based position.
+        optional: true
+      incepting_currency:
+        type: string
+        description: Currency of the opening value, as an ISO code.
+        optional: true
+      factors:
+        type: object
+        description: Attribute values to store on the position, keyed by attribute key.
+        optional: true
+    output:
+      description: The position that was created.
+      type: object
+      properties:
+        data: {type: object}
+
+  update_position:
+    title: Update a position
+    description: >-
+      Change a position's names, inception details or stored attributes. The
+      entities at either end are set at creation; to move a holding, delete the
+      position and create the right one.
+    category: positions
+    scopes: [POSITIONS_WRITE]
+    request:
+      method: PATCH
+      path: /v1/positions/${position_id}
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+      body:
+        data:
+          type: position
+          id: "${position_id}"
+          attributes:
+            name: "${name}"
+            displayName: "${display_name}"
+            inceptingOpenPositionDate: "${incepting_date}"
+            inceptingOpenPositionValue: "${incepting_value}"
+            inceptingOpenPositionOwnershipPercentage: "${incepting_ownership_percentage}"
+            inceptingOpenPositionCurrencyFactor: "${incepting_currency}"
+            factors: "${factors}"
+    input:
+      position_id:
+        type: integer
+        description: The position's id.
+      name:
+        type: string
+        description: New internal name.
+        optional: true
+      display_name:
+        type: string
+        description: New name shown in reports.
+        optional: true
+      incepting_date:
+        type: string
+        description: New inception date, as YYYY-MM-DD.
+        optional: true
+      incepting_value:
+        type: number
+        description: New opening value.
+        optional: true
+      incepting_ownership_percentage:
+        type: number
+        description: New opening ownership percentage.
+        optional: true
+      incepting_currency:
+        type: string
+        description: Currency of the opening value, as an ISO code.
+        optional: true
+      factors:
+        type: object
+        description: Attribute values to set on the position.
+        optional: true
+    output:
+      description: The updated position.
+      type: object
+      properties:
+        data: {type: object}
+
+  delete_position:
+    title: Delete a position
+    description: >-
+      Remove an ownership link. The entities themselves stay; what goes is the
+      holding relationship, and with it the holding's place in every portfolio
+      that rolled it up.
+    category: positions
+    scopes: [POSITIONS_WRITE]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/positions/${position_id}
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      position_id:
+        type: integer
+        description: The position's id.
+    output:
+      description: Confirmation that the position was deleted.
+      type: object
+
+  # -- transactions ----------------------------------------------------------
+
+  get_transaction:
+    title: Get a transaction
+    description: >-
+      One transaction by id, with its type, dates, amount, currency, the
+      position it belongs to and the cash position it offsets.
+    category: transactions
+    scopes: [TRANSACTIONS]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/transactions/${transaction_id}
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      transaction_id:
+        type: integer
+        description: The transaction's id.
+    output:
+      description: The transaction.
+      type: object
+      properties:
+        data: {type: object}
+
+  create_transaction:
+    title: Create a transaction
+    description: >-
+      Record a transaction -- a buy, sale, contribution, distribution, dividend
+      or fee. Which attributes matter depends on the transaction type, and the
+      flags (`affectsCostBasis`, `affectsAdjustedValue`,
+      `affectsUnfundedCommitment`) decide how it feeds performance and cost
+      basis, so send them deliberately rather than by default.
+    category: transactions
+    scopes: [TRANSACTIONS_WRITE]
+    request:
+      method: POST
+      path: /v1/transactions
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+      body:
+        data:
+          type: transaction
+          attributes: "${attributes}"
+    input:
+      attributes:
+        type: object
+        description: >-
+          The transaction's attributes: its type, positionId, dates, amount,
+          units and currency, plus the affects* flags and any cashPositionId it
+          offsets.
+    output:
+      description: The transaction that was created.
+      type: object
+      properties:
+        data: {type: object, description: "The new transaction, including its id."}
+
+  update_transaction:
+    title: Update a transaction
+    description: >-
+      Amend a transaction. Only the attributes you send change. Corrections
+      here move historical performance, so `as_of_knowledge_date` on a later
+      portfolio query is how you compare before and after.
+    category: transactions
+    scopes: [TRANSACTIONS_WRITE]
+    request:
+      method: PATCH
+      path: /v1/transactions/${transaction_id}
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+      body:
+        data:
+          type: transaction
+          id: "${transaction_id}"
+          attributes: "${attributes}"
+    input:
+      transaction_id:
+        type: integer
+        description: The transaction's id.
+      attributes:
+        type: object
+        description: The attributes to change, keyed as the transaction resource declares them.
+    output:
+      description: The updated transaction.
+      type: object
+      properties:
+        data: {type: object}
+
+  delete_transaction:
+    title: Delete a transaction
+    description: >-
+      Remove a transaction. Performance and cost basis for the affected
+      position are recomputed without it, so prefer a cancellation transaction
+      where an audit trail matters.
+    category: transactions
+    scopes: [TRANSACTIONS_WRITE]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/transactions/${transaction_id}
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      transaction_id:
+        type: integer
+        description: The transaction's id.
+    output:
+      description: Confirmation that the transaction was deleted.
+      type: object
+
+  query_transactions:
+    title: Query transactions
+    description: >-
+      Search transactions across the firm -- by portfolio, date range and
+      transaction type -- rather than fetching them one id at a time. The usual
+      way to reconcile a period against a custodian's own file.
+    category: transactions
+    scopes: [TRANSACTIONS]
+    read_only: true
+    request:
+      method: POST
+      path: /v1/transactions/query
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+      body:
+        data:
+          type: transactions_query
+          attributes: "${attributes}"
+    input:
+      attributes:
+        type: object
+        description: >-
+          The query: the portfolio type and ids, the date range, and any
+          transaction types or columns to restrict the result to.
+    output:
+      description: The matching transactions.
+      type: object
+      properties:
+        data: {type: array}
+        links: {type: object}
+
+  get_transaction_view_results:
+    title: Run a transaction view
+    description: >-
+      Results of a saved transaction view -- the transaction-level equivalent
+      of running a portfolio view, for statements and reconciliation reports
+      built in the UI.
+    category: transactions
+    scopes: [TRANSACTIONS]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/transactions/views/${view_id}/results
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      view_id:
+        type: integer
+        description: The saved transaction view's id.
+    output:
+      description: The view's transaction rows.
+      type: object
+      properties:
+        meta: {type: object}
+        data: {type: object}
+
+  list_transaction_datasets:
+    title: List transaction datasets
+    description: >-
+      The transaction datasets in the firm -- the named sources transactions
+      are loaded under, which is how data from different custodians stays
+      separable.
+    category: transactions
+    scopes: [TRANSACTIONS]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/transaction_datasets
+      query:
+        page[limit]: "${limit}"
+        page[cursor]: "${cursor}"
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      limit:
+        type: integer
+        description: How many datasets per page.
+        optional: true
+        default: 25
+        minimum: 1
+      cursor:
+        type: string
+        description: Cursor from the previous response's links.
+        optional: true
+    output:
+      description: A page of transaction datasets.
+      type: object
+      properties:
+        data: {type: array}
+        links: {type: object}
+
+  create_transaction_job:
+    title: Start a transaction extract job
+    description: >-
+      Queue an asynchronous transaction extract, for volumes too large to pull
+      inline. Poll `get_transaction_job` and collect the output with
+      `download_transaction_job`.
+    category: transactions
+    scopes: [TRANSACTIONS]
+    request:
+      method: POST
+      path: /v1/transaction_jobs
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+      body:
+        data:
+          type: transaction_job
+          attributes: "${attributes}"
+    input:
+      attributes:
+        type: object
+        description: >-
+          The extract's parameters -- the portfolio, the date range and the
+          transaction view or columns wanted.
+    output:
+      description: The transaction job that was queued.
+      type: object
+      properties:
+        data: {type: object}
+
+  get_transaction_job:
+    title: Get a transaction extract job
+    description: >-
+      Status and parameters of a transaction extract job. Download only once it
+      reports complete.
+    category: transactions
+    scopes: [TRANSACTIONS]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/transaction_jobs/${transaction_job_id}
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      transaction_job_id:
+        type: string
+        description: The transaction job's id.
+    output:
+      description: The transaction job.
+      type: object
+      properties:
+        data: {type: object}
+
+  download_transaction_job:
+    title: Download a transaction extract
+    description: >-
+      The output of a finished transaction extract job. Can be very large,
+      since it is every transaction the job selected.
+    category: transactions
+    scopes: [TRANSACTIONS]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/transaction_jobs/${transaction_job_id}/download
+    input:
+      transaction_job_id:
+        type: string
+        description: The transaction job's id.
+    output:
+      description: The extracted transactions.
+      type: object
+
+  # -- groups ----------------------------------------------------------------
+
+  list_groups:
+    title: List groups
+    description: >-
+      The firm's groups -- named sets of entities used to report on a segment,
+      a household cluster or a book of business. A group can also contain other
+      groups.
+    category: groups
+    scopes: [GROUPS]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/groups
+      query:
+        page[limit]: "${limit}"
+        page[cursor]: "${cursor}"
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      limit:
+        type: integer
+        description: How many groups per page.
+        optional: true
+        default: 25
+        minimum: 1
+      cursor:
+        type: string
+        description: Cursor from the previous response's links.
+        optional: true
+    output:
+      description: A page of groups.
+      type: object
+      properties:
+        data: {type: array}
+        links: {type: object}
+
+  get_group:
+    title: Get a group
+    description: >-
+      One group by id, with its name, group type and the ids of its members and
+      child groups.
+    category: groups
+    scopes: [GROUPS]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/groups/${group_id}
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      group_id:
+        type: integer
+        description: The group's id.
+    output:
+      description: The group.
+      type: object
+      properties:
+        data: {type: object}
+
+  create_group:
+    title: Create a group
+    description: >-
+      Create a group of entities, optionally with its members and child groups
+      in the same call. The group's id is what a portfolio query takes as a
+      GROUP portfolio id.
+    category: groups
+    scopes: [GROUPS_WRITE]
+    request:
+      method: POST
+      path: /v1/groups
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+      body:
+        data:
+          type: group
+          attributes:
+            name: "${name}"
+            displayName: "${display_name}"
+            groupType: "${group_type}"
+            members: "${members}"
+            childGroupIds: "${child_group_ids}"
+            factors: "${factors}"
+    input:
+      name:
+        type: string
+        description: Name of the group.
+        example: West coast households
+      display_name:
+        type: string
+        description: Name shown for the group in reports.
+        optional: true
+      group_type:
+        type: string
+        description: Which group type this belongs to. `list_group_types` lists them.
+        optional: true
+      members:
+        type: array
+        description: Entity ids to put in the group.
+        optional: true
+        items: {type: integer}
+      child_group_ids:
+        type: array
+        description: Ids of groups to nest inside this one.
+        optional: true
+        items: {type: integer}
+      factors:
+        type: object
+        description: Attribute values to store on the group.
+        optional: true
+    output:
+      description: The group that was created.
+      type: object
+      properties:
+        data: {type: object}
+
+  update_group:
+    title: Update a group
+    description: >-
+      Change a group's name, type, attributes or membership. Sending `members`
+      here sets the whole list; `add_group_members` and `remove_group_members`
+      are the incremental way.
+    category: groups
+    scopes: [GROUPS_WRITE]
+    request:
+      method: PATCH
+      path: /v1/groups/${group_id}
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+      body:
+        data:
+          type: group
+          id: "${group_id}"
+          attributes:
+            name: "${name}"
+            displayName: "${display_name}"
+            groupType: "${group_type}"
+            members: "${members}"
+            childGroupIds: "${child_group_ids}"
+            factors: "${factors}"
+    input:
+      group_id:
+        type: integer
+        description: The group's id.
+      name:
+        type: string
+        description: New name for the group.
+        optional: true
+      display_name:
+        type: string
+        description: New display name.
+        optional: true
+      group_type:
+        type: string
+        description: New group type.
+        optional: true
+      members:
+        type: array
+        description: Replacement list of member entity ids.
+        optional: true
+        items: {type: integer}
+      child_group_ids:
+        type: array
+        description: Replacement list of child group ids.
+        optional: true
+        items: {type: integer}
+      factors:
+        type: object
+        description: Attribute values to set on the group.
+        optional: true
+    output:
+      description: The updated group.
+      type: object
+      properties:
+        data: {type: object}
+
+  delete_group:
+    title: Delete a group
+    description: >-
+      Remove a group. Its member entities are untouched -- only the grouping
+      goes, along with any report that pointed at it as a portfolio.
+    category: groups
+    scopes: [GROUPS_WRITE]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/groups/${group_id}
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      group_id:
+        type: integer
+        description: The group's id.
+    output:
+      description: Confirmation that the group was deleted.
+      type: object
+
+  get_group_members:
+    title: Get a group's members
+    description: >-
+      The entities in one group, as full resources rather than bare ids -- what
+      you want before reporting on the group or auditing who is in it.
+    category: groups
+    scopes: [GROUPS]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/groups/${group_id}/members
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      group_id:
+        type: integer
+        description: The group's id.
+    output:
+      description: The group's member entities.
+      type: object
+      properties:
+        data: {type: array}
+
+  add_group_members:
+    title: Add members to a group
+    description: >-
+      Add entities to a group without disturbing the members already in it --
+      the incremental counterpart to setting `members` through `update_group`.
+    category: groups
+    scopes: [GROUPS_WRITE]
+    request:
+      method: POST
+      path: /v1/groups/${group_id}/relationships/members
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+      body:
+        data:
+          type: group_members
+          attributes:
+            ids: "${entity_ids}"
+            jsonApiType: "${json_api_type}"
+    input:
+      group_id:
+        type: integer
+        description: The group to add to.
+      entity_ids:
+        type: array
+        description: Ids of the entities to add.
+        items: {type: integer}
+      json_api_type:
+        type: string
+        description: Resource type of the ids being added, where the group accepts more than one.
+        optional: true
+    output:
+      description: The group's membership after the change.
+      type: object
+      properties:
+        data: {type: object}
+
+  remove_group_members:
+    title: Remove members from a group
+    description: >-
+      Take entities out of a group. The entities themselves are untouched; only
+      their membership ends.
+    category: groups
+    scopes: [GROUPS_WRITE]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/groups/${group_id}/relationships/members
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+      body:
+        data:
+          type: group_members
+          attributes:
+            ids: "${entity_ids}"
+            jsonApiType: "${json_api_type}"
+    input:
+      group_id:
+        type: integer
+        description: The group to remove from.
+      entity_ids:
+        type: array
+        description: Ids of the entities to remove.
+        items: {type: integer}
+      json_api_type:
+        type: string
+        description: Resource type of the ids being removed.
+        optional: true
+    output:
+      description: The group's membership after the change.
+      type: object
+      properties:
+        data: {type: object}
+
+  query_groups:
+    title: Query groups
+    description: >-
+      Find groups by display name, group type or external id, rather than
+      paging the whole list -- the way to resolve "the group called X" into an
+      id.
+    category: groups
+    scopes: [GROUPS]
+    read_only: true
+    request:
+      method: POST
+      path: /v1/groups/query
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+      body:
+        data:
+          type: groups_query
+          attributes:
+            displayNames: "${display_names}"
+            groupTypes: "${group_types}"
+            externalIds: "${external_ids}"
+    input:
+      display_names:
+        type: array
+        description: Group display names to match.
+        optional: true
+        items: {type: string}
+      group_types:
+        type: array
+        description: Group types to match.
+        optional: true
+        items: {type: string}
+      external_ids:
+        type: array
+        description: >-
+          External ids to resolve, each
+          {"external_id": "...", "external_type_key": "..."}.
+        optional: true
+        items:
+          type: object
+          properties:
+            external_id: {type: string}
+            external_type_key: {type: string}
+    output:
+      description: The matching groups.
+      type: object
+      properties:
+        data: {type: array}
+
+  list_group_types:
+    title: List group types
+    description: >-
+      The group types configured in the firm -- the categories a group can
+      belong to, which is what `group_type` on a group refers to.
+    category: groups
+    scopes: [GROUPS]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/group_types
+      query:
+        page[limit]: "${limit}"
+        page[cursor]: "${cursor}"
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      limit:
+        type: integer
+        description: How many group types per page.
+        optional: true
+        default: 25
+        minimum: 1
+      cursor:
+        type: string
+        description: Cursor from the previous response's links.
+        optional: true
+    output:
+      description: A page of group types.
+      type: object
+      properties:
+        data: {type: array}
+        links: {type: object}
+
+  # -- users, contacts, teams, roles ----------------------------------------
+
+  list_users:
+    title: List users
+    description: >-
+      The firm's Addepar users, with their names, emails, admin flag and the
+      role or persona assigned to them.
+    category: users
+    scopes: [USERS]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/users
+      query:
+        page[limit]: "${limit}"
+        page[cursor]: "${cursor}"
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      limit:
+        type: integer
+        description: How many users per page.
+        optional: true
+        default: 25
+        minimum: 1
+      cursor:
+        type: string
+        description: Cursor from the previous response's links.
+        optional: true
+    output:
+      description: A page of users.
+      type: object
+      properties:
+        data: {type: array}
+        links: {type: object}
+
+  get_user:
+    title: Get a user
+    description: >-
+      One user by id, with their name, email, login method, admin flag and the
+      role and persona they hold.
+    category: users
+    scopes: [USERS]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/users/${user_id}
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      user_id:
+        type: integer
+        description: The user's id.
+    output:
+      description: The user.
+      type: object
+      properties:
+        data: {type: object}
+
+  create_user:
+    title: Create a user
+    description: >-
+      Add a user to the firm. Data access is the part to get right:
+      `all_data_access` grants everything, otherwise
+      `permissioned_entities` and `permissioned_groups` decide what they can
+      see, and the assigned role decides what they can do.
+    category: users
+    scopes: [USERS_WRITE]
+    request:
+      method: POST
+      path: /v1/users
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+      body:
+        data:
+          type: user
+          attributes:
+            email: "${email}"
+            firstName: "${first_name}"
+            lastName: "${last_name}"
+            isAdmin: "${is_admin}"
+            allDataAccess: "${all_data_access}"
+            assignedRole: "${assigned_role}"
+            assignedPersona: "${assigned_persona}"
+            permissionedEntities: "${permissioned_entities}"
+            permissionedGroups: "${permissioned_groups}"
+            externalUserId: "${external_user_id}"
+            loginMethod: "${login_method}"
+    input:
+      email:
+        type: string
+        description: The user's email address, which is also their login.
+        format: email
+        example: analyst@example.com
+      first_name:
+        type: string
+        description: The user's first name.
+      last_name:
+        type: string
+        description: The user's last name.
+      is_admin:
+        type: boolean
+        description: Whether the user is a firm administrator.
+        optional: true
+      all_data_access:
+        type: boolean
+        description: >-
+          Grant access to all of the firm's data, rather than the permissioned
+          entities and groups below.
+        optional: true
+      assigned_role:
+        type: integer
+        description: Id of the role to assign. `list_roles` lists them.
+        optional: true
+      assigned_persona:
+        type: integer
+        description: Id of the persona to assign.
+        optional: true
+      permissioned_entities:
+        type: array
+        description: Entity ids the user may see, when they do not have all-data access.
+        optional: true
+        items: {type: integer}
+      permissioned_groups:
+        type: array
+        description: Group ids the user may see, when they do not have all-data access.
+        optional: true
+        items: {type: integer}
+      external_user_id:
+        type: string
+        description: Your own identifier for this user, for keeping systems in step.
+        optional: true
+      login_method:
+        type: string
+        description: How the user authenticates, e.g. password or SAML, as the firm configures it.
+        optional: true
+    output:
+      description: The user that was created.
+      type: object
+      properties:
+        data: {type: object}
+
+  update_user:
+    title: Update a user
+    description: >-
+      Change a user's details, role or data access. Only the attributes you send
+      change -- but note that sending `permissioned_entities` replaces the list
+      rather than adding to it.
+    category: users
+    scopes: [USERS_WRITE]
+    request:
+      method: PATCH
+      path: /v1/users/${user_id}
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+      body:
+        data:
+          type: user
+          id: "${user_id}"
+          attributes:
+            email: "${email}"
+            firstName: "${first_name}"
+            lastName: "${last_name}"
+            isAdmin: "${is_admin}"
+            allDataAccess: "${all_data_access}"
+            assignedRole: "${assigned_role}"
+            assignedPersona: "${assigned_persona}"
+            permissionedEntities: "${permissioned_entities}"
+            permissionedGroups: "${permissioned_groups}"
+            externalUserId: "${external_user_id}"
+            loginMethod: "${login_method}"
+    input:
+      user_id:
+        type: integer
+        description: The user's id.
+      email:
+        type: string
+        description: New email address.
+        optional: true
+        format: email
+      first_name:
+        type: string
+        description: New first name.
+        optional: true
+      last_name:
+        type: string
+        description: New last name.
+        optional: true
+      is_admin:
+        type: boolean
+        description: Whether the user is a firm administrator.
+        optional: true
+      all_data_access:
+        type: boolean
+        description: Whether the user may see all of the firm's data.
+        optional: true
+      assigned_role:
+        type: integer
+        description: Id of the role to assign.
+        optional: true
+      assigned_persona:
+        type: integer
+        description: Id of the persona to assign.
+        optional: true
+      permissioned_entities:
+        type: array
+        description: Replacement list of entity ids the user may see.
+        optional: true
+        items: {type: integer}
+      permissioned_groups:
+        type: array
+        description: Replacement list of group ids the user may see.
+        optional: true
+        items: {type: integer}
+      external_user_id:
+        type: string
+        description: Your own identifier for this user.
+        optional: true
+      login_method:
+        type: string
+        description: How the user authenticates.
+        optional: true
+    output:
+      description: The updated user.
+      type: object
+      properties:
+        data: {type: object}
+
+  delete_user:
+    title: Delete a user
+    description: >-
+      Remove a user from the firm. Their access ends immediately; what they
+      created stays. Off-boarding usually wants this after their permissions
+      have been reviewed.
+    category: users
+    scopes: [USERS_WRITE]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/users/${user_id}
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      user_id:
+        type: integer
+        description: The user's id.
+    output:
+      description: Confirmation that the user was deleted.
+      type: object
+
+  get_user_permissions:
+    title: Get a user's permissions
+    description: >-
+      What one user is actually permitted to see and do, resolved from their
+      role, persona and permissioned entities and groups -- the answer to "why
+      can this user see that portfolio".
+    category: users
+    scopes: [USERS]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/users/${user_id}/permissions
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      user_id:
+        type: integer
+        description: The user's id.
+    output:
+      description: The user's resolved permissions.
+      type: object
+      properties:
+        data: {type: object}
+
+  query_users_by_email:
+    title: Look up users by email
+    description: >-
+      Resolve email addresses to Addepar users in one call -- how an
+      integration that only knows an email finds the user id every other tool
+      wants.
+    category: users
+    scopes: [USERS]
+    read_only: true
+    request:
+      method: POST
+      path: /v1/users/email_query
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+      body:
+        data:
+          type: users_email_query
+          attributes:
+            emailIds: "${emails}"
+    input:
+      emails:
+        type: array
+        description: The email addresses to resolve.
+        items: {type: string}
+    output:
+      description: The users matching those addresses.
+      type: object
+      properties:
+        data: {type: array}
+
+  list_contacts:
+    title: List contacts
+    description: >-
+      The firm's contacts -- the client-side people who may be invited to the
+      portal, as distinct from Addepar users at the firm. Contacts fall under
+      the USERS scope.
+    category: contacts
+    scopes: [USERS]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/contacts
+      query:
+        page[limit]: "${limit}"
+        page[cursor]: "${cursor}"
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      limit:
+        type: integer
+        description: How many contacts per page.
+        optional: true
+        default: 25
+        minimum: 1
+      cursor:
+        type: string
+        description: Cursor from the previous response's links.
+        optional: true
+    output:
+      description: A page of contacts.
+      type: object
+      properties:
+        data: {type: array}
+        links: {type: object}
+
+  get_contact:
+    title: Get a contact
+    description: >-
+      One contact by id, with their names, emails, employer, family members and
+      the entities and groups they are affiliated with.
+    category: contacts
+    scopes: [USERS]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/contacts/${contact_id}
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      contact_id:
+        type: integer
+        description: The contact's id.
+    output:
+      description: The contact.
+      type: object
+      properties:
+        data: {type: object}
+
+  create_contact:
+    title: Create a contact
+    description: >-
+      Add a client contact. `entity_affiliation_ids` is what ties them to the
+      entities whose reports they may see, and `default_view_set_id` decides
+      which views they get in the portal. Creating a contact does not invite
+      them -- `invite_contact` does that.
+    category: contacts
+    scopes: [USERS_WRITE]
+    request:
+      method: POST
+      path: /v1/contacts
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+      body:
+        data:
+          type: contact
+          attributes:
+            firstName: "${first_name}"
+            lastName: "${last_name}"
+            emails: "${emails}"
+            employer: "${employer}"
+            birthday: "${birthday}"
+            externalUserId: "${external_user_id}"
+            defaultViewSetId: "${default_view_set_id}"
+            entityAffiliationIds: "${entity_affiliation_ids}"
+            familyMembers: "${family_members}"
+    input:
+      first_name:
+        type: string
+        description: The contact's first name.
+      last_name:
+        type: string
+        description: The contact's last name.
+      emails:
+        type: array
+        description: >-
+          The contact's email addresses, each
+          {"email": "...", "email_type": "..."}.
+        optional: true
+        items:
+          type: object
+          properties:
+            email: {type: string}
+            email_type: {type: string}
+      employer:
+        type: string
+        description: Where the contact works.
+        optional: true
+      birthday:
+        type: string
+        description: The contact's birthday, as YYYY-MM-DD.
+        optional: true
+      external_user_id:
+        type: string
+        description: Your own identifier for this contact.
+        optional: true
+      default_view_set_id:
+        type: string
+        description: Id of the view set the contact sees by default in the portal.
+        optional: true
+      entity_affiliation_ids:
+        type: array
+        description: Ids of the entities this contact is affiliated with.
+        optional: true
+        items: {type: string}
+      family_members:
+        type: array
+        description: >-
+          The contact's family members, each
+          {"first_name": ..., "last_name": ..., "relationship": ...}.
+        optional: true
+        items:
+          type: object
+          properties:
+            first_name: {type: string}
+            last_name: {type: string}
+            relationship: {type: string}
+    output:
+      description: The contact that was created.
+      type: object
+      properties:
+        data: {type: object}
+
+  update_contact:
+    title: Update a contact
+    description: >-
+      Change a contact's details, affiliations or default view set. Only the
+      attributes you send change, and a list you send replaces the existing one.
+    category: contacts
+    scopes: [USERS_WRITE]
+    request:
+      method: PATCH
+      path: /v1/contacts/${contact_id}
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+      body:
+        data:
+          type: contact
+          id: "${contact_id}"
+          attributes:
+            firstName: "${first_name}"
+            lastName: "${last_name}"
+            emails: "${emails}"
+            employer: "${employer}"
+            birthday: "${birthday}"
+            externalUserId: "${external_user_id}"
+            defaultViewSetId: "${default_view_set_id}"
+            entityAffiliationIds: "${entity_affiliation_ids}"
+            familyMembers: "${family_members}"
+    input:
+      contact_id:
+        type: integer
+        description: The contact's id.
+      first_name:
+        type: string
+        description: New first name.
+        optional: true
+      last_name:
+        type: string
+        description: New last name.
+        optional: true
+      emails:
+        type: array
+        description: 'Replacement email addresses, each {"email": ..., "email_type": ...}.'
+        optional: true
+        items:
+          type: object
+          properties:
+            email: {type: string}
+            email_type: {type: string}
+      employer:
+        type: string
+        description: New employer.
+        optional: true
+      birthday:
+        type: string
+        description: New birthday, as YYYY-MM-DD.
+        optional: true
+      external_user_id:
+        type: string
+        description: Your own identifier for this contact.
+        optional: true
+      default_view_set_id:
+        type: string
+        description: Id of the view set the contact sees by default.
+        optional: true
+      entity_affiliation_ids:
+        type: array
+        description: Replacement list of affiliated entity ids.
+        optional: true
+        items: {type: string}
+      family_members:
+        type: array
+        description: Replacement list of family members.
+        optional: true
+        items:
+          type: object
+          properties:
+            first_name: {type: string}
+            last_name: {type: string}
+            relationship: {type: string}
+    output:
+      description: The updated contact.
+      type: object
+      properties:
+        data: {type: object}
+
+  delete_contact:
+    title: Delete a contact
+    description: >-
+      Remove a client contact, and with them their portal access. The entities
+      they were affiliated with are untouched.
+    category: contacts
+    scopes: [USERS_WRITE]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/contacts/${contact_id}
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      contact_id:
+        type: integer
+        description: The contact's id.
+    output:
+      description: Confirmation that the contact was deleted.
+      type: object
+
+  invite_contact:
+    title: Invite a contact to the portal
+    description: >-
+      Send a contact their portal invitation. This emails a real person, so it
+      is worth confirming their affiliations and view set are right first --
+      what they can see is decided by those, not by the invitation.
+    category: contacts
+    scopes: [USERS_WRITE]
+    request:
+      method: POST
+      path: /v1/contacts/${contact_id}/invite
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+    input:
+      contact_id:
+        type: integer
+        description: The contact to invite.
+    output:
+      description: The invitation that was sent.
+      type: object
+      properties:
+        data: {type: object}
+
+  list_teams:
+    title: List teams
+    description: >-
+      The firm's teams, which group users for permissioning and report
+      assignment. Pages with `page[limit]` and a cursor.
+    category: teams
+    scopes: [TEAMS]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/teams
+      query:
+        page[limit]: "${limit}"
+        page[cursor]: "${cursor}"
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      limit:
+        type: integer
+        description: How many teams per page.
+        optional: true
+        minimum: 1
+      cursor:
+        type: string
+        description: Cursor from the previous response's links.
+        optional: true
+    output:
+      description: A page of teams.
+      type: object
+      properties:
+        data: {type: array}
+        links: {type: object}
+
+  get_team:
+    title: Get a team
+    description: One team by id, with its name and the users who belong to it.
+    category: teams
+    scopes: [TEAMS]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/teams/${team_id}
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      team_id:
+        type: integer
+        description: The team's id.
+    output:
+      description: The team.
+      type: object
+      properties:
+        data: {type: object}
+
+  get_team_members:
+    title: Get a team's members
+    description: >-
+      The users in one team, as full resources -- who would inherit anything
+      permissioned to the team.
+    category: teams
+    scopes: [TEAMS]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/teams/${team_id}/members
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      team_id:
+        type: integer
+        description: The team's id.
+    output:
+      description: The team's members.
+      type: object
+      properties:
+        data: {type: array}
+
+  create_team:
+    title: Create a team
+    description: >-
+      Create a team of users. Teams are how a firm permissions a book of
+      business to a group of people rather than user by user.
+    category: teams
+    scopes: [TEAMS_WRITE]
+    request:
+      method: POST
+      path: /v1/teams
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+      body:
+        data:
+          type: team
+          attributes: "${attributes}"
+    input:
+      attributes:
+        type: object
+        description: The team's attributes -- its name, and its members where the API accepts them inline.
+    output:
+      description: The team that was created.
+      type: object
+      properties:
+        data: {type: object}
+
+  add_team_members:
+    title: Add members to a team
+    description: >-
+      Add users to a team without replacing the ones already in it. What the
+      team is permissioned to see follows automatically.
+    category: teams
+    scopes: [TEAMS_WRITE]
+    request:
+      method: POST
+      path: /v1/teams/${team_id}/relationships/members
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+      body:
+        data:
+          type: team_members
+          attributes:
+            ids: "${user_ids}"
+    input:
+      team_id:
+        type: integer
+        description: The team to add to.
+      user_ids:
+        type: array
+        description: Ids of the users to add.
+        items: {type: integer}
+    output:
+      description: The team's membership after the change.
+      type: object
+      properties:
+        data: {type: object}
+
+  list_roles:
+    title: List roles
+    description: >-
+      The roles defined in the firm, with what each permits. A role's id is
+      what `create_user`'s `assigned_role` takes.
+    category: users
+    scopes: [USERS]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/roles
+      headers:
+        Accept: application/vnd.api+json
+    input: {}
+    output:
+      description: The firm's roles.
+      type: object
+      properties:
+        data: {type: array}
+
+  list_personas:
+    title: List personas
+    description: >-
+      The personas defined in the firm -- reusable bundles of role, teams and
+      users, used to give a class of user a consistent setup.
+    category: users
+    scopes: [USERS]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/personas
+      query:
+        page[limit]: "${limit}"
+        page[cursor]: "${cursor}"
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      limit:
+        type: integer
+        description: How many personas per page.
+        optional: true
+        default: 25
+        minimum: 1
+      cursor:
+        type: string
+        description: Cursor from the previous response's links.
+        optional: true
+    output:
+      description: A page of personas.
+      type: object
+      properties:
+        data: {type: array}
+        links: {type: object}
+
+  # -- files -----------------------------------------------------------------
+
+  list_files:
+    title: List files
+    description: >-
+      The files stored in the firm, with their names, types and the entities
+      and groups they are associated with. Uploading is not available through
+      this connector, since it needs a multipart request.
+    category: files
+    scopes: [FILES]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/files
+      query:
+        page[limit]: "${limit}"
+        page[cursor]: "${cursor}"
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      limit:
+        type: integer
+        description: How many files per page.
+        optional: true
+        default: 25
+        minimum: 1
+      cursor:
+        type: string
+        description: Cursor from the previous response's links.
+        optional: true
+    output:
+      description: A page of files.
+      type: object
+      properties:
+        data: {type: array}
+        links: {type: object}
+
+  get_file:
+    title: Get a file's details
+    description: >-
+      One file's metadata by id -- name, type, size and dates. The content
+      comes from `download_file`.
+    category: files
+    scopes: [FILES]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/files/${file_id}
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      file_id:
+        type: integer
+        description: The file's id.
+    output:
+      description: The file's metadata.
+      type: object
+      properties:
+        data: {type: object}
+
+  download_file:
+    title: Download a file
+    description: >-
+      The contents of one stored file. Client files may hold portfolio data, so
+      treat what comes back as confidential.
+    category: files
+    scopes: [FILES]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/files/${file_id}/download
+    input:
+      file_id:
+        type: integer
+        description: The file's id.
+    output:
+      description: The file's contents.
+      type: string
+
+  get_file_associated_entities:
+    title: Get a file's associated entities
+    description: >-
+      Which entities a file is attached to -- and therefore which clients'
+      users can see it.
+    category: files
+    scopes: [FILES]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/files/${file_id}/associated_entities
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      file_id:
+        type: integer
+        description: The file's id.
+    output:
+      description: The entities the file is associated with.
+      type: object
+      properties:
+        data: {type: array}
+
+  associate_file_with_entities:
+    title: Associate a file with entities
+    description: >-
+      Attach a stored file to entities, which is what makes it visible in those
+      clients' portals. Existing associations are kept.
+    category: files
+    scopes: [FILES_WRITE]
+    request:
+      method: POST
+      path: /v1/files/${file_id}/relationships/associated_entities
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+      body:
+        data:
+          type: file_associated_entities
+          attributes:
+            ids: "${entity_ids}"
+    input:
+      file_id:
+        type: integer
+        description: The file to attach.
+      entity_ids:
+        type: array
+        description: Ids of the entities to attach it to.
+        items: {type: integer}
+    output:
+      description: The file's associations after the change.
+      type: object
+      properties:
+        data: {type: object}
+
+  delete_file:
+    title: Delete a file
+    description: >-
+      Remove a stored file and its associations. It disappears from any portal
+      that showed it, and there is no undo.
+    category: files
+    scopes: [FILES_WRITE]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/files/${file_id}
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      file_id:
+        type: integer
+        description: The file's id.
+    output:
+      description: Confirmation that the file was deleted.
+      type: object
+
+  list_archive_files:
+    title: List archived files
+    description: >-
+      Files in the firm's archive, with their associations -- where generated
+      statements and published reports are kept once they are no longer live.
+    category: files
+    scopes: [FILES]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/archive/files
+      query:
+        page[limit]: "${limit}"
+        page[cursor]: "${cursor}"
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      limit:
+        type: integer
+        description: How many archived files per page.
+        optional: true
+        default: 25
+        minimum: 1
+      cursor:
+        type: string
+        description: Cursor from the previous response's links.
+        optional: true
+    output:
+      description: A page of archived files.
+      type: object
+      properties:
+        data: {type: array}
+        links: {type: object}
+
+  download_archive_file:
+    title: Download an archived file
+    description: >-
+      The contents of one archived file -- how a previously issued statement is
+      retrieved exactly as it was published.
+    category: files
+    scopes: [FILES]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/archive/files/${archive_id}/download
+    input:
+      archive_id:
+        type: integer
+        description: The archived file's id.
+    output:
+      description: The archived file's contents.
+      type: string
+
+  # -- reporting -------------------------------------------------------------
+
+  list_reports:
+    title: List reports
+    description: >-
+      The report definitions in the firm -- the multi-page client reports built
+      in Addepar's report builder, as opposed to single views.
+    category: reports
+    scopes: [REPORTS_WRITE]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/reports
+      query:
+        page[limit]: "${limit}"
+        page[cursor]: "${cursor}"
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      limit:
+        type: string
+        description: How many reports per page.
+        optional: true
+      cursor:
+        type: string
+        description: Cursor from the previous response's links.
+        optional: true
+    output:
+      description: A page of report definitions.
+      type: object
+      properties:
+        data: {type: array}
+        links: {type: object}
+
+  create_report_generation_job:
+    title: Generate reports
+    description: >-
+      Run a report for one or more portfolios and produce the output files.
+      This can email contacts and publish to the client portal:
+      `contact_notification` and `portal_publishing` decide whether it does, and
+      the safe values while testing are DO_NOT_NOTIFY and DO_NOT_PUBLISH.
+      Progress is followed through `list_generated_reports`.
+    category: reports
+    scopes: [REPORTS_WRITE]
+    request:
+      method: POST
+      path: /v1/report_generation_job
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+      body:
+        data:
+          type: report_generation_job
+          attributes:
+            portfolios: "${portfolios}"
+            externalIds: "${external_ids}"
+            endDate: "${end_date}"
+            asOfKnowledgeDate: "${as_of_knowledge_date}"
+            contactNotification: "${contact_notification}"
+            portalPublishing: "${portal_publishing}"
+            brandId: "${brand_id}"
+            label: "${labels}"
+    input:
+      portfolios:
+        type: array
+        description: >-
+          Which portfolios to generate for, each
+          {"portfolio_id": <id>, "portfolio_type": "..."} plus the report to run
+          as the API documents it.
+        items: {type: object}
+      end_date:
+        type: string
+        description: The report's as-of date, as YYYY-MM-DD.
+        optional: true
+      as_of_knowledge_date:
+        type: string
+        description: Generate the report as the data was known on this date, as YYYY-MM-DD.
+        optional: true
+      external_ids:
+        type: array
+        description: >-
+          Portfolios named by external id instead, each with addepar_type,
+          external_id and external_type_key.
+        optional: true
+        items:
+          type: object
+          properties:
+            addepar_type: {type: string}
+            external_id: {type: string}
+            external_type_key: {type: string}
+      contact_notification:
+        type: string
+        description: >-
+          Whether contacts are emailed about the generated report.
+          USE_CONTACT_PREFERENCE follows each contact's own setting.
+        optional: true
+        enum: [DO_NOT_NOTIFY, NOTIFY, USE_CONTACT_PREFERENCE]
+      portal_publishing:
+        type: string
+        description: Whether the output is published to the client portal.
+        optional: true
+        enum: [DO_NOT_PUBLISH, PUBLISH, USE_CONTACT_PREFERENCE]
+      brand_id:
+        type: string
+        description: Id of the brand to render the report with.
+        optional: true
+      labels:
+        type: array
+        description: Ids of labels to tag the generated report with.
+        optional: true
+        items: {type: integer}
+    output:
+      description: The report generation job that was queued.
+      type: object
+      properties:
+        data: {type: object}
+
+  list_generated_reports:
+    title: List generated reports
+    description: >-
+      The reports that have been generated, with their status and the zipped
+      output attached to each -- how you find what a generation job produced.
+    category: reports
+    scopes: [REPORTS_WRITE]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/generated_reports
+      query:
+        page[limit]: "${limit}"
+        page[cursor]: "${cursor}"
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      limit:
+        type: integer
+        description: How many generated reports per page.
+        optional: true
+        default: 25
+        minimum: 1
+      cursor:
+        type: string
+        description: Cursor from the previous response's links.
+        optional: true
+    output:
+      description: A page of generated reports.
+      type: object
+      properties:
+        data: {type: array}
+        links: {type: object}
+
+  get_generated_report:
+    title: Get a generated report
+    description: >-
+      One generated report by id, with its status, its creator and a reference
+      to the zipped output file.
+    category: reports
+    scopes: [REPORTS_WRITE]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/generated_reports/${generated_report_id}
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      generated_report_id:
+        type: integer
+        description: The generated report's id.
+    output:
+      description: The generated report.
+      type: object
+      properties:
+        data: {type: object}
+
+  download_generated_report:
+    title: Download a generated report
+    description: >-
+      The zipped output of a generated report -- the PDFs a client would
+      receive. Only available once generation has finished.
+    category: reports
+    scopes: [REPORTS_WRITE]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/generated_reports/${generated_report_id}/zipped_file/download
+    input:
+      generated_report_id:
+        type: integer
+        description: The generated report's id.
+    output:
+      description: The zipped report output.
+      type: string
+
+  list_report_schedules:
+    title: List report schedules
+    description: >-
+      The firm's report schedules -- which reports run automatically, for whom
+      and how often.
+    category: reports
+    scopes: [REPORTS_WRITE]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/report_schedule
+      query:
+        page[limit]: "${limit}"
+        page[cursor]: "${cursor}"
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      limit:
+        type: integer
+        description: How many schedules per page.
+        optional: true
+        default: 25
+        minimum: 1
+      cursor:
+        type: string
+        description: Cursor from the previous response's links.
+        optional: true
+    output:
+      description: A page of report schedules.
+      type: object
+      properties:
+        data: {type: array}
+        links: {type: object}
+
+  get_report_schedule:
+    title: Get a report schedule
+    description: >-
+      One report schedule by id, with its cadence, portfolios and delivery
+      settings, so you can see what will go out and to whom.
+    category: reports
+    scopes: [REPORTS_WRITE]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/report_schedule/${report_schedule_id}
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      report_schedule_id:
+        type: integer
+        description: The report schedule's id.
+    output:
+      description: The report schedule.
+      type: object
+      properties:
+        data: {type: object}
+
+  execute_report_schedule:
+    title: Run a report schedule now
+    description: >-
+      Trigger a scheduled report immediately, off its cadence. It uses the
+      schedule's own delivery settings, so it can email contacts and publish to
+      the portal -- check `get_report_schedule` before running one.
+    category: reports
+    scopes: [REPORTS_WRITE]
+    request:
+      method: POST
+      path: /v1/report_schedule/${report_schedule_id}/execute
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+      body:
+        data:
+          type: report_schedule_execute
+          attributes: "${attributes}"
+    input:
+      report_schedule_id:
+        type: integer
+        description: The schedule to run.
+      attributes:
+        type: object
+        description: >-
+          Overrides for this run, such as the as-of date, as the schedule
+          accepts them.
+    output:
+      description: The run that was started.
+      type: object
+      properties:
+        data: {type: object}
+
+  # -- benchmarks, billing, audit -------------------------------------------
+
+  list_benchmarks:
+    title: List benchmarks
+    description: >-
+      The benchmarks defined in the firm, which portfolio performance is
+      measured against.
+    category: benchmarks
+    scopes: [BENCHMARKS_READ]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/benchmarks
+      query:
+        page[limit]: "${limit}"
+        page[cursor]: "${cursor}"
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      limit:
+        type: integer
+        description: How many benchmarks per page.
+        optional: true
+        default: 25
+        minimum: 1
+      cursor:
+        type: string
+        description: Cursor from the previous response's links.
+        optional: true
+    output:
+      description: A page of benchmarks.
+      type: object
+      properties:
+        data: {type: array}
+        links: {type: object}
+
+  get_benchmark:
+    title: Get a benchmark
+    description: >-
+      One benchmark by id, with how it is composed -- the indices or proxies
+      behind it and their weights.
+    category: benchmarks
+    scopes: [BENCHMARKS_READ]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/benchmarks/${benchmark_id}
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      benchmark_id:
+        type: string
+        description: The benchmark's id.
+    output:
+      description: The benchmark.
+      type: object
+      properties:
+        data: {type: object}
+
+  list_benchmark_compositions:
+    title: List benchmark compositions
+    description: >-
+      The compositions behind the firm's benchmarks -- which constituents make
+      up a blended benchmark, and in what proportion.
+    category: benchmarks
+    scopes: [BENCHMARKS_READ]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/benchmark_compositions
+      query:
+        page[limit]: "${limit}"
+        page[cursor]: "${cursor}"
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      limit:
+        type: integer
+        description: How many compositions per page.
+        optional: true
+        default: 25
+        minimum: 1
+      cursor:
+        type: string
+        description: Cursor from the previous response's links.
+        optional: true
+    output:
+      description: A page of benchmark compositions.
+      type: object
+      properties:
+        data: {type: array}
+        links: {type: object}
+
+  list_billable_portfolios:
+    title: List billable portfolios
+    description: >-
+      The portfolios the firm bills, each with the fee schedule assigned to it
+      -- the input to a billing run.
+    category: billing
+    scopes: [BILLING_READ]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/billable_portfolios
+      query:
+        page[limit]: "${limit}"
+        page[cursor]: "${cursor}"
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      limit:
+        type: integer
+        description: How many billable portfolios per page.
+        optional: true
+        default: 25
+        minimum: 1
+      cursor:
+        type: string
+        description: Cursor from the previous response's links.
+        optional: true
+    output:
+      description: A page of billable portfolios.
+      type: object
+      properties:
+        data: {type: array}
+        links: {type: object}
+
+  list_fee_schedules:
+    title: List fee schedules
+    description: >-
+      The fee schedules defined in the firm, with the fees each contains --
+      what a billable portfolio is charged under.
+    category: billing
+    scopes: [BILLING_READ]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/fee_schedules
+      query:
+        page[limit]: "${limit}"
+        page[cursor]: "${cursor}"
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      limit:
+        type: integer
+        description: How many fee schedules per page.
+        optional: true
+        default: 25
+        minimum: 1
+      cursor:
+        type: string
+        description: Cursor from the previous response's links.
+        optional: true
+    output:
+      description: A page of fee schedules.
+      type: object
+      properties:
+        data: {type: array}
+        links: {type: object}
+
+  list_fees:
+    title: List fees
+    description: >-
+      The individual fees defined in the firm, each with its rate structure --
+      the building blocks fee schedules assemble.
+    category: billing
+    scopes: [BILLING_READ]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/fees
+      query:
+        page[limit]: "${limit}"
+        page[cursor]: "${cursor}"
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      limit:
+        type: integer
+        description: How many fees per page.
+        optional: true
+        default: 25
+        minimum: 1
+      cursor:
+        type: string
+        description: Cursor from the previous response's links.
+        optional: true
+    output:
+      description: A page of fees.
+      type: object
+      properties:
+        data: {type: array}
+        links: {type: object}
+
+  query_audit_trail:
+    title: Query the audit trail
+    description: >-
+      What happened in the firm's Addepar instance and who did it, filtered by
+      date range, action, object type and user. The record to reach for when a
+      figure changed and nobody remembers why.
+    category: audit
+    scopes: [AUDIT_TRAIL]
+    read_only: true
+    request:
+      method: POST
+      path: /v1/audit_trail
+      headers:
+        Content-Type: application/vnd.api+json
+        Accept: application/vnd.api+json
+      body:
+        data:
+          type: audit_trail_query
+          attributes:
+            startDate: "${start_date}"
+            endDate: "${end_date}"
+            actions: "${actions}"
+            objectType: "${object_type}"
+            users: "${users}"
+            userType: "${user_type}"
+    input:
+      start_date:
+        type: string
+        description: Earliest date to include, as YYYY-MM-DD.
+        example: "2026-08-01"
+      end_date:
+        type: string
+        description: Latest date to include, as YYYY-MM-DD.
+        example: "2026-08-31"
+      actions:
+        type: array
+        description: Only these actions, e.g. create, update, delete.
+        optional: true
+        items: {type: string}
+      object_type:
+        type: string
+        description: Only entries about this kind of object.
+        optional: true
+      users:
+        type: array
+        description: Only entries by these users.
+        optional: true
+        items: {type: string}
+      user_type:
+        type: string
+        description: Only entries by users of this kind, e.g. firm users or portal contacts.
+        optional: true
+    output:
+      description: The matching audit entries.
+      type: object
+      properties:
+        data: {type: array}
+        links: {type: object}
+
+  get_audit_trail_entry:
+    title: Get an audit trail entry
+    description: >-
+      One audit entry by id, with the full before-and-after detail of the
+      change it records.
+    category: audit
+    scopes: [AUDIT_TRAIL]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/audit_trail/${audit_trail_id}
+      headers:
+        Accept: application/vnd.api+json
+    input:
+      audit_trail_id:
+        type: string
+        description: The audit entry's id.
+    output:
+      description: The audit entry.
+      type: object
+      properties:
+        data: {type: object}

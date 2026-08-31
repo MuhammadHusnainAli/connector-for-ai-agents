@@ -1,0 +1,573 @@
+# Bitbucket Cloud tools.
+#
+# A repository is addressed as workspace + repo_slug. Paged endpoints return
+# {values, page, next}; pass the page number back to walk them.
+#
+# Docs: https://developer.atlassian.com/cloud/bitbucket/rest/
+
+connector_id: bitbucket
+display_name: Bitbucket
+docs_url: https://developer.atlassian.com/cloud/bitbucket/rest/
+
+scope_rules:
+  implies:
+    "repository:write": [repository]
+    "repository:admin": ["repository:write", repository]
+    "pullrequest:write": [pullrequest, repository]
+    pullrequest: [repository]
+    "issue:write": [issue, repository]
+    issue: [repository]
+
+tools:
+
+  list_repositories:
+    title: List a workspace's repositories
+    description: >-
+      List the repositories in a workspace, with the slugs every other tool
+      takes.
+    category: repositories
+    scopes: [repository]
+    read_only: true
+    request:
+      method: GET
+      path: /2.0/repositories/${workspace}
+      query:
+        page: "${page}"
+        pagelen: "${page_size}"
+        q: "${query}"
+        sort: "${sort}"
+    input:
+      workspace:
+        type: string
+        description: Workspace id or slug.
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      page_size:
+        type: integer
+        description: How many repositories per page (1-100).
+        optional: true
+        default: 30
+        minimum: 1
+        maximum: 100
+      query:
+        type: string
+        description: Bitbucket query expression, e.g. 'name ~ "api"'.
+        optional: true
+      sort:
+        type: string
+        description: Field to sort by, e.g. "-updated_on".
+        optional: true
+    output:
+      description: A page of repositories.
+      type: object
+      properties:
+        values: {type: array, description: "Each with slug, full_name and mainbranch."}
+        next: {type: string}
+        size: {type: integer}
+
+  get_repository:
+    title: Get a repository
+    description: Read one repository's description, main branch, size and privacy.
+    category: repositories
+    scopes: [repository]
+    read_only: true
+    request:
+      method: GET
+      path: /2.0/repositories/${workspace}/${repo_slug}
+    input:
+      workspace:
+        type: string
+        description: Workspace id or slug.
+      repo_slug:
+        type: string
+        description: Repository slug.
+    output:
+      description: The repository.
+      type: object
+      properties:
+        uuid: {type: string}
+        full_name: {type: string}
+        mainbranch: {type: object}
+        is_private: {type: boolean}
+
+  list_pull_requests:
+    title: List pull requests
+    description: List a repository's pull requests, filtered by state.
+    category: pull_requests
+    scopes: [pullrequest]
+    read_only: true
+    request:
+      method: GET
+      path: /2.0/repositories/${workspace}/${repo_slug}/pullrequests
+      query:
+        state: "${state}"
+        page: "${page}"
+        pagelen: "${page_size}"
+        q: "${query}"
+    input:
+      workspace:
+        type: string
+        description: Workspace id or slug.
+      repo_slug:
+        type: string
+        description: Repository slug.
+      state:
+        type: string
+        description: Which pull requests to include.
+        optional: true
+        default: OPEN
+        enum: [OPEN, MERGED, DECLINED, SUPERSEDED]
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      page_size:
+        type: integer
+        description: How many per page (1-50).
+        optional: true
+        default: 30
+        minimum: 1
+        maximum: 50
+      query:
+        type: string
+        description: Bitbucket query expression, e.g. 'author.username = "ada"'.
+        optional: true
+    output:
+      description: A page of pull requests.
+      type: object
+      properties:
+        values: {type: array}
+        next: {type: string}
+
+  get_pull_request:
+    title: Get a pull request
+    description: >-
+      Read one pull request in full, including its source and destination
+      branches and merge state.
+    category: pull_requests
+    scopes: [pullrequest]
+    read_only: true
+    request:
+      method: GET
+      path: /2.0/repositories/${workspace}/${repo_slug}/pullrequests/${pull_request_id}
+    input:
+      workspace:
+        type: string
+        description: Workspace id or slug.
+      repo_slug:
+        type: string
+        description: Repository slug.
+      pull_request_id:
+        type: integer
+        description: The pull request number.
+    output:
+      description: The pull request.
+      type: object
+      properties:
+        id: {type: integer}
+        title: "{type: string}"
+        state: {type: string}
+        source: {type: object}
+        destination: {type: object}
+
+  create_pull_request:
+    title: Open a pull request
+    description: >-
+      Open a pull request from a source branch into a destination branch,
+      optionally closing the source branch on merge.
+    category: pull_requests
+    scopes: ["pullrequest:write"]
+    request:
+      method: POST
+      path: /2.0/repositories/${workspace}/${repo_slug}/pullrequests
+      body:
+        title: "${title}"
+        description: "${description}"
+        source:
+          branch:
+            name: "${source_branch}"
+        destination:
+          $when: "${destination_branch}"
+          branch:
+            name: "${destination_branch}"
+        close_source_branch: "${close_source_branch}"
+        reviewers: "${reviewers}"
+    input:
+      workspace:
+        type: string
+        description: Workspace id or slug.
+      repo_slug:
+        type: string
+        description: Repository slug.
+      title:
+        type: string
+        description: Pull request title.
+      source_branch:
+        type: string
+        description: Branch the changes are on.
+      destination_branch:
+        type: string
+        description: Branch to merge into. Defaults to the repository's main branch.
+        optional: true
+      description:
+        type: string
+        description: Description, in Markdown.
+        optional: true
+      close_source_branch:
+        type: boolean
+        description: Delete the source branch once merged.
+        optional: true
+      reviewers:
+        type: array
+        description: "Reviewers, each {\"uuid\": \"{...}\"}."
+        optional: true
+        items: {type: object}
+    output:
+      description: The created pull request.
+      type: object
+      properties:
+        id: {type: integer}
+        title: "{type: string}"
+        links: {type: object}
+
+  merge_pull_request:
+    title: Merge a pull request
+    description: >-
+      Merge a pull request into its destination branch. Fails when builds have
+      not passed or approvals are missing.
+    category: pull_requests
+    scopes: ["pullrequest:write"]
+    destructive: true
+    request:
+      method: POST
+      path: /2.0/repositories/${workspace}/${repo_slug}/pullrequests/${pull_request_id}/merge
+      body:
+        message: "${message}"
+        merge_strategy: "${merge_strategy}"
+        close_source_branch: "${close_source_branch}"
+    input:
+      workspace:
+        type: string
+        description: Workspace id or slug.
+      repo_slug:
+        type: string
+        description: Repository slug.
+      pull_request_id:
+        type: integer
+        description: The pull request number.
+      message:
+        type: string
+        description: Merge commit message.
+        optional: true
+      merge_strategy:
+        type: string
+        description: How to merge.
+        optional: true
+        enum: [merge_commit, squash, fast_forward]
+      close_source_branch:
+        type: boolean
+        description: Delete the source branch after merging.
+        optional: true
+    output:
+      description: The merged pull request.
+      type: object
+      properties:
+        id: {type: integer}
+        state: {type: string}
+        merge_commit: {type: object}
+
+  comment_on_pull_request:
+    title: Comment on a pull request
+    description: Add a comment to a pull request's conversation, in Markdown.
+    category: pull_requests
+    scopes: ["pullrequest:write"]
+    request:
+      method: POST
+      path: /2.0/repositories/${workspace}/${repo_slug}/pullrequests/${pull_request_id}/comments
+      body:
+        content:
+          raw: "${body}"
+    input:
+      workspace:
+        type: string
+        description: Workspace id or slug.
+      repo_slug:
+        type: string
+        description: Repository slug.
+      pull_request_id:
+        type: integer
+        description: The pull request number.
+      body:
+        type: string
+        description: The comment, in Markdown.
+    output:
+      description: The created comment.
+      type: object
+      properties:
+        id: {type: integer}
+        content: {type: object}
+
+  approve_pull_request:
+    title: Approve a pull request
+    description: Record the authenticated user's approval on a pull request.
+    category: pull_requests
+    scopes: ["pullrequest:write"]
+    request:
+      method: POST
+      path: /2.0/repositories/${workspace}/${repo_slug}/pullrequests/${pull_request_id}/approve
+      body: {}
+    input:
+      workspace:
+        type: string
+        description: Workspace id or slug.
+      repo_slug:
+        type: string
+        description: Repository slug.
+      pull_request_id:
+        type: integer
+        description: The pull request number.
+    output:
+      description: The recorded approval.
+      type: object
+      properties:
+        approved: {type: boolean}
+        user: {type: object}
+
+  list_issues:
+    title: List a repository's issues
+    description: >-
+      List issues on a repository. Bitbucket's issue tracker must be enabled on
+      the repository for this to return anything.
+    category: issues
+    scopes: [issue]
+    read_only: true
+    request:
+      method: GET
+      path: /2.0/repositories/${workspace}/${repo_slug}/issues
+      query:
+        q: "${query}"
+        page: "${page}"
+        pagelen: "${page_size}"
+        sort: "${sort}"
+    input:
+      workspace:
+        type: string
+        description: Workspace id or slug.
+      repo_slug:
+        type: string
+        description: Repository slug.
+      query:
+        type: string
+        description: Bitbucket query expression, e.g. 'state = "new"'.
+        optional: true
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      page_size:
+        type: integer
+        description: How many issues per page (1-50).
+        optional: true
+        default: 30
+        minimum: 1
+        maximum: 50
+      sort:
+        type: string
+        description: Field to sort by, e.g. "-updated_on".
+        optional: true
+    output:
+      description: A page of issues.
+      type: object
+      properties:
+        values: {type: array}
+        next: {type: string}
+
+  create_issue:
+    title: Create an issue
+    description: Open an issue on a repository whose issue tracker is enabled.
+    category: issues
+    scopes: ["issue:write"]
+    request:
+      method: POST
+      path: /2.0/repositories/${workspace}/${repo_slug}/issues
+      body:
+        title: "${title}"
+        content:
+          $when: "${description}"
+          raw: "${description}"
+        kind: "${kind}"
+        priority: "${priority}"
+    input:
+      workspace:
+        type: string
+        description: Workspace id or slug.
+      repo_slug:
+        type: string
+        description: Repository slug.
+      title:
+        type: string
+        description: Issue title.
+      description:
+        type: string
+        description: Issue body, in Markdown.
+        optional: true
+      kind:
+        type: string
+        description: What kind of issue this is.
+        optional: true
+        enum: [bug, enhancement, proposal, task]
+      priority:
+        type: string
+        description: Issue priority.
+        optional: true
+        enum: [trivial, minor, major, critical, blocker]
+    output:
+      description: The created issue.
+      type: object
+      properties:
+        id: {type: integer}
+        title: "{type: string}"
+        links: {type: object}
+
+  get_file:
+    title: Read a file from a repository
+    description: >-
+      Read a file's contents at a branch, tag or commit. Bitbucket returns the
+      raw bytes rather than a JSON wrapper.
+    category: source
+    scopes: [repository]
+    read_only: true
+    request:
+      method: GET
+      path: /2.0/repositories/${workspace}/${repo_slug}/src/${ref}/${file_path}
+    input:
+      workspace:
+        type: string
+        description: Workspace id or slug.
+      repo_slug:
+        type: string
+        description: Repository slug.
+      ref:
+        type: string
+        description: Branch, tag or commit hash.
+        example: main
+      file_path:
+        type: string
+        description: Path to the file in the repository.
+        example: src/main.py
+    output:
+      description: The file's raw contents.
+      type: string
+
+  list_commits:
+    title: List commits
+    description: List a repository's commits, optionally from one branch or tag.
+    category: source
+    scopes: [repository]
+    read_only: true
+    request:
+      method: GET
+      path: /2.0/repositories/${workspace}/${repo_slug}/commits/${ref}
+      query:
+        page: "${page}"
+        pagelen: "${page_size}"
+    input:
+      workspace:
+        type: string
+        description: Workspace id or slug.
+      repo_slug:
+        type: string
+        description: Repository slug.
+      ref:
+        type: string
+        description: Branch, tag or commit hash to list from.
+        optional: true
+        default: main
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      page_size:
+        type: integer
+        description: How many commits per page (1-100).
+        optional: true
+        default: 30
+        minimum: 1
+        maximum: 100
+    output:
+      description: A page of commits.
+      type: object
+      properties:
+        values: {type: array}
+        next: {type: string}
+
+  list_pipelines:
+    title: List CI pipelines
+    description: List a repository's Bitbucket Pipelines runs, newest first.
+    category: ci
+    scopes: [repository]
+    read_only: true
+    request:
+      method: GET
+      path: /2.0/repositories/${workspace}/${repo_slug}/pipelines
+      query:
+        page: "${page}"
+        pagelen: "${page_size}"
+        sort: "${sort}"
+    input:
+      workspace:
+        type: string
+        description: Workspace id or slug.
+      repo_slug:
+        type: string
+        description: Repository slug.
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      page_size:
+        type: integer
+        description: How many runs per page (1-100).
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 100
+      sort:
+        type: string
+        description: Field to sort by, e.g. "-created_on".
+        optional: true
+        default: "-created_on"
+    output:
+      description: A page of pipeline runs.
+      type: object
+      properties:
+        values: {type: array}
+        next: {type: string}
+
+  get_current_user:
+    title: Get the authenticated user
+    description: >-
+      Read the Bitbucket account the token belongs to. The cheapest health check
+      for a Bitbucket connection.
+    category: users
+    scopes: [account]
+    read_only: true
+    request:
+      method: GET
+      path: /2.0/user
+    input: {}
+    output:
+      description: The authenticated user.
+      type: object
+      properties:
+        uuid: {type: string}
+        username: {type: string}
+        display_name: {type: string}
+        account_id: {type: string}

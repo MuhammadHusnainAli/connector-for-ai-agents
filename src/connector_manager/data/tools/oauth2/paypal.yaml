@@ -1,0 +1,477 @@
+# PayPal tools.
+#
+# PayPal's token carries long URN scopes rather than short names, and which ones
+# an app holds depends on the products enabled for it, so no tool declares
+# scopes -- a 403 here means the app is missing a product, not a scope.
+#
+# Amounts are strings with an explicit currency, e.g. {"currency_code": "USD",
+# "value": "10.00"}.
+#
+# Docs: https://developer.paypal.com/api/rest/
+
+connector_id: paypal
+display_name: PayPal
+docs_url: https://developer.paypal.com/api/rest/
+applies_to:
+  - paypal-sandbox
+
+tools:
+
+  create_order:
+    title: Create an order
+    description: >-
+      Start a payment. Returns the order id and an approve link to send the
+      buyer to. intent CAPTURE takes the money when the buyer approves;
+      AUTHORIZE holds it for capture_order later.
+    category: checkout
+    destructive: true
+    request:
+      method: POST
+      path: /v2/checkout/orders
+      body:
+        intent: "${intent}"
+        purchase_units: "${purchase_units}"
+        payment_source: "${payment_source}"
+    input:
+      purchase_units:
+        type: array
+        description: >-
+          What is being bought, each {"amount": {"currency_code": "USD",
+          "value": "10.00"}, "description": "...", "reference_id": "..."}.
+        items: {type: object}
+      intent:
+        type: string
+        description: CAPTURE takes the money on approval; AUTHORIZE only holds it.
+        optional: true
+        default: CAPTURE
+        enum: [CAPTURE, AUTHORIZE]
+      payment_source:
+        type: object
+        description: >-
+          Checkout experience settings, e.g. {"paypal": {"experience_context":
+          {"return_url": "...", "cancel_url": "..."}}}.
+        optional: true
+    output:
+      description: The created order.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string}
+        links: {type: array, description: "Holds the approve link to send the buyer to."}
+
+  get_order:
+    title: Get an order
+    description: Read an order's status, amounts and the captures made against it.
+    category: checkout
+    read_only: true
+    request:
+      method: GET
+      path: /v2/checkout/orders/${order_id}
+    input:
+      order_id:
+        type: string
+        description: The order id.
+    output:
+      description: The order.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string}
+        purchase_units: {type: array}
+        payer: {type: object}
+
+  capture_order:
+    title: Capture an approved order
+    description: >-
+      Take the money for an order the buyer has approved. Only works once the
+      order's status is APPROVED, and cannot be undone except by a refund.
+    category: checkout
+    destructive: true
+    request:
+      method: POST
+      path: /v2/checkout/orders/${order_id}/capture
+      headers:
+        PayPal-Request-Id: "${request_id}"
+      body: {}
+    input:
+      order_id:
+        type: string
+        description: The approved order to capture.
+      request_id:
+        type: string
+        description: Your own idempotency key, so a retry cannot double-charge.
+        optional: true
+    output:
+      description: The captured order.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string}
+        purchase_units: {type: array, description: "Each holds payments.captures with the capture ids."}
+
+  refund_capture:
+    title: Refund a payment
+    description: >-
+      Refund a capture in full, or partially by naming an amount. Refunds cannot
+      be reversed.
+    category: payments
+    destructive: true
+    request:
+      method: POST
+      path: /v2/payments/captures/${capture_id}/refund
+      headers:
+        PayPal-Request-Id: "${request_id}"
+      body:
+        amount: "${amount}"
+        note_to_payer: "${note}"
+        invoice_id: "${invoice_id}"
+    input:
+      capture_id:
+        type: string
+        description: The capture id, from capture_order's payments.captures.
+      amount:
+        type: object
+        description: >-
+          How much to refund, e.g. {"currency_code": "USD", "value": "5.00"}.
+          Omit to refund the whole capture.
+        optional: true
+      note:
+        type: string
+        description: Note shown to the payer on their refund.
+        optional: true
+      invoice_id:
+        type: string
+        description: Your own reference for the refund.
+        optional: true
+      request_id:
+        type: string
+        description: Idempotency key, so a retry cannot double-refund.
+        optional: true
+    output:
+      description: The refund.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string}
+        amount: {type: object}
+
+  get_capture:
+    title: Get a payment capture
+    description: Read one capture's status, amount and the fee PayPal took.
+    category: payments
+    read_only: true
+    request:
+      method: GET
+      path: /v2/payments/captures/${capture_id}
+    input:
+      capture_id:
+        type: string
+        description: The capture id.
+    output:
+      description: The capture.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string}
+        amount: {type: object}
+        seller_receivable_breakdown: {type: object}
+
+  list_transactions:
+    title: List transactions
+    description: >-
+      Read the account's transaction history over a date range. PayPal allows
+      at most 31 days per call and data is available for the last three years.
+    category: reporting
+    read_only: true
+    request:
+      method: GET
+      path: /v1/reporting/transactions
+      query:
+        start_date: "${start_date}"
+        end_date: "${end_date}"
+        fields: "${fields}"
+        transaction_status: "${transaction_status}"
+        page_size: "${page_size}"
+        page: "${page}"
+    input:
+      start_date:
+        type: string
+        description: Start of the range, ISO 8601 with an offset, e.g. 2026-08-01T00:00:00-0000.
+        example: "2026-08-01T00:00:00-0000"
+      end_date:
+        type: string
+        description: End of the range, ISO 8601 with an offset. At most 31 days after start_date.
+      fields:
+        type: string
+        description: Which blocks to include, e.g. "transaction_info,payer_info".
+        optional: true
+      transaction_status:
+        type: string
+        description: Only transactions in this state.
+        optional: true
+        enum: [D, P, S, V]
+      page_size:
+        type: integer
+        description: How many transactions per page (1-500).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 500
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+    output:
+      description: The transactions in the range.
+      type: object
+      properties:
+        transaction_details: {type: array}
+        total_items: {type: integer}
+        total_pages: {type: integer}
+
+  create_invoice:
+    title: Create a draft invoice
+    description: >-
+      Create an invoice as a draft. It is not sent until send_invoice is
+      called. Items carry their own name, quantity and unit amount.
+    category: invoicing
+    request:
+      method: POST
+      path: /v2/invoicing/invoices
+      body:
+        detail: "${detail}"
+        invoicer: "${invoicer}"
+        primary_recipients: "${recipients}"
+        items: "${items}"
+    input:
+      detail:
+        type: object
+        description: >-
+          Invoice header, e.g. {"currency_code": "USD", "invoice_number":
+          "0001", "note": "Thanks", "payment_term": {"term_type": "NET_30"}}.
+      recipients:
+        type: array
+        description: >-
+          Who to bill, each {"billing_info": {"email_address":
+          "ada@example.com", "name": {"given_name": "Ada"}}}.
+        items: {type: object}
+      items:
+        type: array
+        description: >-
+          Line items, each {"name": "Consulting", "quantity": "2",
+          "unit_amount": {"currency_code": "USD", "value": "500.00"}}.
+        optional: true
+        items: {type: object}
+      invoicer:
+        type: object
+        description: Your business details shown on the invoice.
+        optional: true
+    output:
+      description: The draft invoice.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string}
+        href: {type: string}
+
+  send_invoice:
+    title: Send an invoice
+    description: >-
+      Email a draft invoice to its recipients and mark it SENT. This reaches a
+      real customer and cannot be recalled.
+    category: invoicing
+    destructive: true
+    request:
+      method: POST
+      path: /v2/invoicing/invoices/${invoice_id}/send
+      body:
+        send_to_invoicer: "${send_to_invoicer}"
+        subject: "${subject}"
+        note: "${note}"
+    input:
+      invoice_id:
+        type: string
+        description: The draft invoice to send.
+      subject:
+        type: string
+        description: Subject line of the email.
+        optional: true
+      note:
+        type: string
+        description: Message included with the invoice.
+        optional: true
+      send_to_invoicer:
+        type: boolean
+        description: Copy the sender on the email.
+        optional: true
+    output:
+      description: Confirmation, with a link to the sent invoice.
+      type: object
+      properties:
+        href: {type: string}
+        rel: {type: string}
+
+  list_invoices:
+    title: List invoices
+    description: Page through the account's invoices with their status and totals.
+    category: invoicing
+    read_only: true
+    request:
+      method: GET
+      path: /v2/invoicing/invoices
+      query:
+        page: "${page}"
+        page_size: "${page_size}"
+        total_required: "${total_required}"
+    input:
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      page_size:
+        type: integer
+        description: How many invoices per page (1-100).
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 100
+      total_required:
+        type: boolean
+        description: Include the total count in the response.
+        optional: true
+    output:
+      description: A page of invoices.
+      type: object
+      properties:
+        items: {type: array}
+        total_items: {type: integer}
+
+  create_subscription:
+    title: Create a subscription
+    description: >-
+      Subscribe a customer to a billing plan. Returns an approve link the
+      customer must open before the subscription starts.
+    category: billing
+    destructive: true
+    request:
+      method: POST
+      path: /v1/billing/subscriptions
+      body:
+        plan_id: "${plan_id}"
+        subscriber: "${subscriber}"
+        start_time: "${start_time}"
+        application_context: "${application_context}"
+    input:
+      plan_id:
+        type: string
+        description: The billing plan id.
+      subscriber:
+        type: object
+        description: >-
+          Who is subscribing, e.g. {"name": {"given_name": "Ada"},
+          "email_address": "ada@example.com"}.
+        optional: true
+      start_time:
+        type: string
+        description: When billing starts, ISO 8601. Defaults to immediately.
+        optional: true
+      application_context:
+        type: object
+        description: Return and cancel URLs for the approval flow.
+        optional: true
+    output:
+      description: The created subscription.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string}
+        links: {type: array, description: "Holds the approve link."}
+
+  get_subscription:
+    title: Get a subscription
+    description: Read a subscription's status, plan and next billing date.
+    category: billing
+    read_only: true
+    request:
+      method: GET
+      path: /v1/billing/subscriptions/${subscription_id}
+    input:
+      subscription_id:
+        type: string
+        description: The subscription id.
+    output:
+      description: The subscription.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string}
+        plan_id: {type: string}
+        billing_info: {type: object}
+
+  cancel_subscription:
+    title: Cancel a subscription
+    description: >-
+      Cancel a subscription so it stops billing. PayPal records the reason; this
+      cannot be undone.
+    category: billing
+    destructive: true
+    request:
+      method: POST
+      path: /v1/billing/subscriptions/${subscription_id}/cancel
+      body:
+        reason: "${reason}"
+    input:
+      subscription_id:
+        type: string
+        description: The subscription to cancel.
+      reason:
+        type: string
+        description: Why it is being cancelled.
+    output:
+      description: Empty on success -- PayPal answers 204 No Content.
+      type: object
+
+  list_plans:
+    title: List billing plans
+    description: >-
+      List the subscription plans defined on the account, with the ids
+      create_subscription takes.
+    category: billing
+    read_only: true
+    request:
+      method: GET
+      path: /v1/billing/plans
+      query:
+        product_id: "${product_id}"
+        page: "${page}"
+        page_size: "${page_size}"
+        total_required: "${total_required}"
+    input:
+      product_id:
+        type: string
+        description: Only plans for this product.
+        optional: true
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      page_size:
+        type: integer
+        description: How many plans per page (1-20).
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 20
+      total_required:
+        type: boolean
+        description: Include the total count.
+        optional: true
+    output:
+      description: A page of billing plans.
+      type: object
+      properties:
+        plans: {type: array}
+        total_items: {type: integer}

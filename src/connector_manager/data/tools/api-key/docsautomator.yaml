@@ -1,0 +1,395 @@
+# DocsAutomator tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://docs.docsautomator.co/openapi.json
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: docsautomator
+display_name: DocsAutomator
+docs_url: https://docs.docsautomator.co/openapi.json
+generated: true
+generated_from: https://docs.docsautomator.co/openapi.json
+tools:
+  get_automation:
+    title: Get automation
+    description: Get automation Retrieves a single automation by ID with full configuration details. Calls
+      GET /automation on the provider's API.
+    category: automation
+    request:
+      method: GET
+      path: /automation
+      query:
+        automationId: ${automation_id}
+        docId: ${doc_id}
+    input:
+      automation_id:
+        type: string
+        description: The automation ID. Either automationId or docId is required.
+        optional: true
+      doc_id:
+        type: string
+        description: Alternative to automationId.
+        optional: true
+    output:
+      description: Automation details
+      type: object
+    read_only: true
+  list_automations:
+    title: List automations
+    description: List automations Retrieves all automations in the workspace with their configuration
+      details. Calls GET /automations on the provider's API.
+    category: automations
+    request:
+      method: GET
+      path: /automations
+    input: {}
+    output:
+      description: List of automations
+      type: object
+    read_only: true
+  create_automation:
+    title: Create automation
+    description: Create automation Creates a new automation with the specified data source and optional
+      Google Doc template. PDF templates are uploaded through the DocsAutomator app. Calls POST /createAutomation
+      on the provider's API.
+    category: create_automation
+    request:
+      method: POST
+      path: /createAutomation
+      body:
+        title: ${title}
+        dataSourceName: ${data_source_name}
+        docTemplateLink: ${doc_template_link}
+    input:
+      title:
+        type: string
+        description: Name for the automation.
+      data_source_name:
+        type: string
+        description: The data source type.
+        enum:
+        - Airtable
+        - API
+        - ClickUp
+        - Glide
+        - Google Sheets
+        - Make
+        - n8n
+        - Noloco
+        - SmartSuite
+        - Zapier
+      doc_template_link:
+        type: string
+        description: Google Doc template URL.
+        optional: true
+    output:
+      description: Automation created
+      type: object
+  create_document:
+    title: Create a document
+    description: Create a document Triggers document generation from an automation template (Google Doc
+      or PDF). Supports sync mode (waits for result) and async mode (returns a job ID for polling). The
+      response includes PDF and optional Google Doc URLs. When the automation has e-signatures enabled
+      and the template contains e-sign pla Calls POST /createDocument on the provider's API.
+    category: create_document
+    request:
+      method: POST
+      path: /createDocument
+      body:
+        docId: ${doc_id}
+        data: ${data}
+        documentName: ${document_name}
+        async: ${async}
+        webhookParams: ${webhook_params}
+        existingPdfs: ${existing_pdfs}
+        docTemplateLink: ${doc_template_link}
+    input:
+      doc_id:
+        type: string
+        description: The automation ID to execute. Also accepted as automationId.
+      data:
+        type: object
+        description: Key-value pairs for template placeholders. Keys must match placeholder names in your
+          template (Google Doc syntax or PDF placeholder names). Line items are also included inside this
+          object as lineitems1, lineitems2, etc. — each is an array of objects whose keys match line item
+          placeholder names. Use the children key within line item objects for nested line items (up to
+          2 levels).
+        optional: true
+      document_name:
+        type: string
+        description: Custom name for the generated document. Overrides the automation's document name
+          setting.
+        optional: true
+      async:
+        type: boolean
+        description: When true, returns immediately with a jobId (HTTP 202). Poll GET /job/{jobId} for
+          the result. When false (default), the request blocks until the document is ready (up to 5 minutes).
+        optional: true
+      webhook_params:
+        type: object
+        description: Custom parameters passed through to webhook notifications and stored on signing sessions.
+          Returned in webhook payloads as webhookParams (an identical additionalParams key also exists,
+          kept only for legacy integrations). The trigger record identifier (recId, Notion pageId, ClickUp
+          taskId, Google Sheets rowNumber) is folded in automatically — your own keys are never overwritten.
+        optional: true
+      existing_pdfs:
+        type: array
+        description: PDF URLs to merge or prepend to the generated document.
+        optional: true
+        items:
+          type: string
+      doc_template_link:
+        type: string
+        description: Override the automation's Google Doc template URL for this request only.
+        optional: true
+    output:
+      description: Document created successfully (sync mode)
+      type: object
+  delete_automation:
+    title: Delete automation
+    description: Delete automation Permanently deletes an automation and all its settings. This action
+      cannot be undone. Calls DELETE /deleteAutomation on the provider's API.
+    category: delete_automation
+    request:
+      method: DELETE
+      path: /deleteAutomation
+      query:
+        docId: ${doc_id}
+    input:
+      doc_id:
+        type: string
+        description: The automation ID to delete.
+    output:
+      description: Automation deleted
+      type: object
+    destructive: true
+  duplicate_automation:
+    title: Duplicate automation
+    description: Duplicate automation Creates a copy of an existing automation with ' COPY' appended to
+      the title. Calls POST /duplicateAutomation on the provider's API.
+    category: duplicate_automation
+    request:
+      method: POST
+      path: /duplicateAutomation
+      query:
+        automationId: ${automation_id}
+    input:
+      automation_id:
+        type: string
+        description: The automation ID to duplicate.
+    output:
+      description: Automation duplicated
+      type: object
+  duplicate_template:
+    title: Duplicate template
+    description: Duplicate template Creates a copy of the Google Doc template associated with an automation.
+      The new template is saved to your Google Drive. Calls POST /duplicateGoogleDocTemplate on the provider's
+      API.
+    category: duplicate_google_doc_template
+    request:
+      method: POST
+      path: /duplicateGoogleDocTemplate
+      query:
+        automationId: ${automation_id}
+        newTemplateName: ${new_template_name}
+    input:
+      automation_id:
+        type: string
+        description: The automation ID.
+      new_template_name:
+        type: string
+        description: Custom name for the duplicated template. Defaults to the automation title.
+        optional: true
+    output:
+      description: Template duplicated
+      type: object
+  list_placeholders:
+    title: List template placeholders
+    description: List template placeholders Extracts and returns all placeholders from the automation's
+      Google Doc template. Placeholders are grouped into main (top-level) and line item groups (lineitems1,
+      lineitems2, etc.). Calls GET /listPlaceholdersV2 on the provider's API.
+    category: list_placeholders_v2
+    request:
+      method: GET
+      path: /listPlaceholdersV2
+      query:
+        automationId: ${automation_id}
+        docId: ${doc_id}
+    input:
+      automation_id:
+        type: string
+        description: The automation ID. The automation must have a template configured. Either automationId
+          or docId is required.
+        optional: true
+      doc_id:
+        type: string
+        description: Alternative to automationId.
+        optional: true
+    output:
+      description: Placeholders extracted
+      type: object
+    read_only: true
+  send_test_email:
+    title: Send test email
+    description: Send test email Sends a test email with a sample PDF attachment to verify your email
+      configuration. Rate limited to 25 emails per hour per automation. Calls POST /sendTestEmail on the
+      provider's API.
+    category: send_test_email
+    request:
+      method: POST
+      path: /sendTestEmail
+      body:
+        automationId: ${automation_id}
+        recipient: ${recipient}
+    input:
+      automation_id:
+        type: string
+        description: The automation ID.
+      recipient:
+        type: string
+        description: Email address to send the test to.
+    output:
+      description: Test email sent
+      type: object
+  update_automation:
+    title: Update automation
+    description: Update automation Updates an existing automation's settings. Only the fields included
+      in the request body are updated. Calls PUT /updateAutomation on the provider's API.
+    category: update_automation
+    request:
+      method: PUT
+      path: /updateAutomation
+      query:
+        docId: ${doc_id}
+      body:
+        title: ${title}
+        docTemplateLink: ${doc_template_link}
+        newDocumentNameField: ${new_document_name_field}
+        isActive: ${is_active}
+        saveGoogleDoc: ${save_google_doc}
+        googleDocDestinationFolderUrl: ${google_doc_destination_folder_url}
+        locale: ${locale}
+        formatNumbersWithLocale: ${format_numbers_with_locale}
+        pdfExpiration: ${pdf_expiration}
+        imageOptions: ${image_options}
+    input:
+      doc_id:
+        type: string
+        description: The automation ID to update.
+      title:
+        type: string
+        description: Automation name.
+        optional: true
+      doc_template_link:
+        type: string
+        description: Google Doc template URL.
+        optional: true
+      new_document_name_field:
+        type: string
+        description: Field name or formula for generated document names.
+        optional: true
+      is_active:
+        type: boolean
+        description: Whether the automation is active.
+        optional: true
+      save_google_doc:
+        type: boolean
+        description: Save a Google Doc copy alongside the PDF.
+        optional: true
+      google_doc_destination_folder_url:
+        type: string
+        description: Google Drive folder URL for saved documents.
+        optional: true
+      locale:
+        type: string
+        description: Locale for date and number formatting (e.g., en-us, de-de).
+        optional: true
+      format_numbers_with_locale:
+        type: boolean
+        description: Format numbers using the automation's locale.
+        optional: true
+      pdf_expiration:
+        type: string
+        description: PDF expiration period. never means PDFs never expire, immediate means they expire
+          right away, and other values set the expiration window.
+        optional: true
+        enum:
+        - never
+        - immediate
+        - oneday
+        - threedays
+        - oneweek
+        - twoweeks
+        - onemonth
+        - threemonths
+        - sixmonths
+        - oneyear
+      image_options:
+        type: object
+        description: The imageOptions field of the request body.
+        optional: true
+    output:
+      description: Automation updated
+      type: object
+  list_signing_sessions:
+    title: List signing sessions
+    description: List signing sessions Retrieves signing sessions with optional filtering by status or
+      signer email. Returns paginated results. Calls GET /esign/sessions on the provider's API.
+    category: esign
+    request:
+      method: GET
+      path: /esign/sessions
+      query:
+        status: ${status}
+        email: ${email}
+        page: ${page}
+        limit: ${limit}
+    input:
+      status:
+        type: string
+        description: Filter by session status.
+        optional: true
+        enum:
+        - pending
+        - in_progress
+        - completed
+        - declined
+        - cancelled
+      email:
+        type: string
+        description: Filter by signer email (partial match, case-insensitive).
+        optional: true
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        default: 1
+      limit:
+        type: integer
+        description: Results per page (max 250).
+        optional: true
+        default: 20
+    output:
+      description: Signing sessions list
+      type: object
+    read_only: true
+  get_queue_stats:
+    title: Get queue statistics
+    description: Get queue statistics Returns current document generation queue statistics for your workspace.
+      Calls GET /queue/stats on the provider's API.
+    category: queue
+    request:
+      method: GET
+      path: /queue/stats
+    input: {}
+    output:
+      description: Queue statistics
+      type: object
+    read_only: true

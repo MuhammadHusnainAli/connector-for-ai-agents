@@ -1,0 +1,415 @@
+# Smartsheet tools.
+#
+# A sheet's rows are addressed by row id, and each cell names the column it
+# belongs to by columnId -- get_sheet returns both, so read a sheet before
+# writing rows into it.
+#
+# Docs: https://smartsheet.redoc.ly/
+
+connector_id: smartsheet
+display_name: Smartsheet
+docs_url: https://smartsheet.redoc.ly/
+
+scope_rules:
+  implies:
+    ADMIN_SHEETS: [READ_SHEETS, WRITE_SHEETS, SHARE_SHEETS, DELETE_SHEETS]
+    WRITE_SHEETS: [READ_SHEETS]
+    DELETE_SHEETS: [READ_SHEETS]
+    SHARE_SHEETS: [READ_SHEETS]
+    ADMIN_WORKSPACES: [READ_SHEETS, WRITE_SHEETS]
+
+tools:
+
+  list_sheets:
+    title: List sheets
+    description: >-
+      List the sheets the user can see, with the ids every row tool takes.
+      Start here.
+    category: sheets
+    scopes: [READ_SHEETS]
+    read_only: true
+    request:
+      method: GET
+      path: /2.0/sheets
+      query:
+        page: "${page}"
+        pageSize: "${page_size}"
+        includeAll: "${include_all}"
+        modifiedSince: "${modified_since}"
+    input:
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      page_size:
+        type: integer
+        description: How many sheets per page.
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 10000
+      include_all:
+        type: boolean
+        description: Return every sheet in one response instead of paging.
+        optional: true
+      modified_since:
+        type: string
+        description: Only sheets changed since this ISO 8601 instant.
+        optional: true
+    output:
+      description: A page of sheets.
+      type: object
+      properties:
+        data: {type: array, description: "Each with id, name and permalink."}
+        totalCount: {type: integer}
+
+  get_sheet:
+    title: Get a sheet
+    description: >-
+      Read a sheet's columns and rows. Column ids returned here are what
+      add_rows and update_rows must reference in each cell.
+    category: sheets
+    scopes: [READ_SHEETS]
+    read_only: true
+    request:
+      method: GET
+      path: /2.0/sheets/${sheet_id}
+      query:
+        include: "${include}"
+        columnIds: "${column_ids}"
+        rowIds: "${row_ids}"
+        pageSize: "${page_size}"
+        page: "${page}"
+    input:
+      sheet_id:
+        type: string
+        description: The sheet id.
+      include:
+        type: array
+        description: Extra data to inline, e.g. ["attachments","discussions","format"].
+        optional: true
+        items: {type: string}
+      column_ids:
+        type: array
+        description: Only return these columns.
+        optional: true
+        items: {type: string}
+      row_ids:
+        type: array
+        description: Only return these rows.
+        optional: true
+        items: {type: string}
+      page_size:
+        type: integer
+        description: How many rows per page.
+        optional: true
+        minimum: 1
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+    output:
+      description: The sheet, its columns and its rows.
+      type: object
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        columns: {type: array, description: "Each with id, title and type."}
+        rows: {type: array, description: "Each with id and cells."}
+
+  add_rows:
+    title: Add rows to a sheet
+    description: >-
+      Append rows to a sheet. Each row is {"toBottom": true, "cells":
+      [{"columnId": 123, "value": "Ada"}]} — cells must name real column ids
+      from get_sheet.
+    category: rows
+    scopes: [WRITE_SHEETS]
+    request:
+      method: POST
+      path: /2.0/sheets/${sheet_id}/rows
+      body: "${rows}"
+    input:
+      sheet_id:
+        type: string
+        description: The sheet to add to.
+      rows:
+        type: array
+        description: Rows to add, each with a cells array and a placement flag.
+        items: {type: object}
+    output:
+      description: The created rows.
+      type: object
+      properties:
+        message: {type: string}
+        result: {type: array}
+
+  update_rows:
+    title: Update rows
+    description: >-
+      Change existing rows. Each entry is {"id": 456, "cells": [{"columnId":
+      123, "value": "Done"}]}; only the cells named are written.
+    category: rows
+    scopes: [WRITE_SHEETS]
+    request:
+      method: PUT
+      path: /2.0/sheets/${sheet_id}/rows
+      body: "${rows}"
+    input:
+      sheet_id:
+        type: string
+        description: The sheet id.
+      rows:
+        type: array
+        description: Rows to change, each with an id and a cells array.
+        items: {type: object}
+    output:
+      description: The updated rows.
+      type: object
+      properties:
+        message: {type: string}
+        result: {type: array}
+
+  delete_rows:
+    title: Delete rows
+    description: >-
+      Permanently delete rows from a sheet. Smartsheet cannot restore them
+      through the API.
+    category: rows
+    scopes: [DELETE_SHEETS]
+    destructive: true
+    request:
+      method: DELETE
+      path: /2.0/sheets/${sheet_id}/rows
+      query:
+        ids: "${row_ids}"
+        ignoreRowsNotFound: "${ignore_missing}"
+    input:
+      sheet_id:
+        type: string
+        description: The sheet id.
+      row_ids:
+        type: array
+        description: Row ids to delete.
+        items: {type: string}
+      ignore_missing:
+        type: boolean
+        description: Succeed even when some ids are already gone.
+        optional: true
+    output:
+      description: Which rows were deleted.
+      type: object
+      properties:
+        message: {type: string}
+        result: {type: array}
+
+  search:
+    title: Search everything
+    description: >-
+      Search across sheets, reports, dashboards and their contents for text —
+      the fastest way to find where something lives.
+    category: search
+    scopes: [READ_SHEETS]
+    read_only: true
+    request:
+      method: GET
+      path: /2.0/search
+      query:
+        query: "${query}"
+        scopes: "${scopes}"
+        include: "${include}"
+        location: "${location}"
+        modifiedSince: "${modified_since}"
+    input:
+      query:
+        type: string
+        description: Words to search for.
+      scopes:
+        type: array
+        description: Where to look, e.g. ["cellData","sheetNames","comments"].
+        optional: true
+        items: {type: string}
+      include:
+        type: array
+        description: Extra results to include, e.g. ["favoriteFlag"].
+        optional: true
+        items: {type: string}
+      location:
+        type: string
+        description: Set to "personalWorkspace" to search only the user's own space.
+        optional: true
+      modified_since:
+        type: string
+        description: Only items changed since this ISO 8601 instant.
+        optional: true
+    output:
+      description: The matches.
+      type: object
+      properties:
+        results: {type: array}
+        totalCount: {type: integer}
+
+  search_sheet:
+    title: Search within one sheet
+    description: Find rows in a single sheet whose cells contain the given text.
+    category: search
+    scopes: [READ_SHEETS]
+    read_only: true
+    request:
+      method: GET
+      path: /2.0/search/sheets/${sheet_id}
+      query:
+        query: "${query}"
+    input:
+      sheet_id:
+        type: string
+        description: The sheet to search.
+      query:
+        type: string
+        description: Words to search for.
+    output:
+      description: The matching rows and cells.
+      type: object
+      properties:
+        results: {type: array}
+        totalCount: {type: integer}
+
+  create_sheet:
+    title: Create a sheet
+    description: >-
+      Create a sheet in a workspace or the user's home. Columns are
+      [{"title": "Task", "type": "TEXT_NUMBER", "primary": true}] — exactly one
+      column must be primary.
+    category: sheets
+    scopes: [WRITE_SHEETS]
+    request:
+      method: POST
+      path: /2.0/sheets
+      body:
+        name: "${name}"
+        columns: "${columns}"
+    input:
+      name:
+        type: string
+        description: The sheet's name.
+      columns:
+        type: array
+        description: >-
+          Column definitions, each with title and type. Types include
+          TEXT_NUMBER, DATE, CHECKBOX, PICKLIST, CONTACT_LIST.
+        items: {type: object}
+    output:
+      description: The created sheet.
+      type: object
+      properties:
+        message: {type: string}
+        result: {type: object, description: "Holds id, name and permalink."}
+
+  share_sheet:
+    title: Share a sheet
+    description: >-
+      Grant someone access to a sheet by email, with a role. Smartsheet emails
+      them unless the notification is suppressed.
+    category: sharing
+    scopes: [SHARE_SHEETS]
+    request:
+      method: POST
+      path: /2.0/sheets/${sheet_id}/shares
+      query:
+        sendEmail: "${send_email}"
+      body:
+        email: "${email}"
+        accessLevel: "${access_level}"
+        subject: "${subject}"
+        message: "${message}"
+    input:
+      sheet_id:
+        type: string
+        description: The sheet to share.
+      email:
+        type: string
+        description: Who to share it with.
+        format: email
+      access_level:
+        type: string
+        description: What they may do.
+        optional: true
+        default: VIEWER
+        enum: [VIEWER, COMMENTER, EDITOR, EDITOR_SHARE, ADMIN, OWNER]
+      send_email:
+        type: boolean
+        description: Email them about the share.
+        optional: true
+      subject:
+        type: string
+        description: Subject line of the notification email.
+        optional: true
+      message:
+        type: string
+        description: Message included in the notification email.
+        optional: true
+    output:
+      description: The created share.
+      type: object
+      properties:
+        message: {type: string}
+        result: {type: object}
+
+  list_workspaces:
+    title: List workspaces
+    description: List the workspaces the user can see, which sheets are grouped into.
+    category: workspaces
+    scopes: [READ_SHEETS]
+    read_only: true
+    request:
+      method: GET
+      path: /2.0/workspaces
+      query:
+        page: "${page}"
+        pageSize: "${page_size}"
+        includeAll: "${include_all}"
+    input:
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      page_size:
+        type: integer
+        description: How many workspaces per page.
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 10000
+      include_all:
+        type: boolean
+        description: Return every workspace in one response.
+        optional: true
+    output:
+      description: A page of workspaces.
+      type: object
+      properties:
+        data: {type: array}
+        totalCount: {type: integer}
+
+  get_current_user:
+    title: Get the authenticated user
+    description: >-
+      Read the Smartsheet account the token belongs to and its licence. The
+      cheapest health check for the connection.
+    category: account
+    read_only: true
+    request:
+      method: GET
+      path: /2.0/users/me
+    input: {}
+    output:
+      description: The authenticated user.
+      type: object
+      properties:
+        id: {type: integer}
+        email: {type: string}
+        firstName: {type: string}
+        admin: {type: boolean}

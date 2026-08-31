@@ -1,0 +1,476 @@
+# Eventbrite tools.
+#
+# Events belong to an organization, so most listings need an organization id --
+# get_current_user_organizations returns them.
+#
+# Money is an object of an integer in the currency's minor unit plus a currency
+# code, e.g. {"currency": "USD", "value": 1000} is $10.00.
+#
+# Docs: https://www.eventbrite.com/platform/api
+
+connector_id: eventbrite
+display_name: Eventbrite
+docs_url: https://www.eventbrite.com/platform/api
+
+tools:
+
+  get_current_user:
+    title: Get the authenticated user
+    description: >-
+      Read the Eventbrite account the token belongs to. The cheapest health
+      check for the connection.
+    category: account
+    read_only: true
+    request:
+      method: GET
+      path: /v3/users/me/
+    input: {}
+    output:
+      description: The authenticated user.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        emails: {type: array}
+
+  list_organizations:
+    title: List the organisations I can act for
+    description: >-
+      List the organisations the token can reach, with the ids the event tools
+      take. Start here.
+    category: account
+    read_only: true
+    request:
+      method: GET
+      path: /v3/users/me/organizations/
+    input: {}
+    output:
+      description: The accessible organisations.
+      type: object
+      properties:
+        organizations: {type: array, description: "Each with id and name."}
+        pagination: {type: object}
+
+  list_events:
+    title: List an organisation's events
+    description: >-
+      List events for an organisation, filtered by status. Use "live" for what
+      is currently on sale and "draft" for unpublished work.
+    category: events
+    read_only: true
+    request:
+      method: GET
+      path: /v3/organizations/${organization_id}/events/
+      query:
+        status: "${status}"
+        order_by: "${order_by}"
+        page: "${page}"
+        continuation: "${continuation}"
+        time_filter: "${time_filter}"
+    input:
+      organization_id:
+        type: string
+        description: The organisation id, from list_organizations.
+      status:
+        type: string
+        description: Only events in this state.
+        optional: true
+        enum: [draft, live, started, ended, completed, canceled, all]
+      order_by:
+        type: string
+        description: Sort order.
+        optional: true
+        enum: [start_asc, start_desc, created_asc, created_desc, name_asc, name_desc]
+      time_filter:
+        type: string
+        description: Restrict to past or upcoming events.
+        optional: true
+        enum: [past, current_future, all]
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      continuation:
+        type: string
+        description: Continuation token from the previous response's pagination.
+        optional: true
+    output:
+      description: A page of events.
+      type: object
+      properties:
+        events: {type: array, description: "Each with id, name, start, end and status."}
+        pagination: {type: object}
+
+  get_event:
+    title: Get an event
+    description: >-
+      Read one event's name, description, times, venue and capacity.
+    category: events
+    read_only: true
+    request:
+      method: GET
+      path: /v3/events/${event_id}/
+      query:
+        expand: "${expand}"
+    input:
+      event_id:
+        type: string
+        description: The event id.
+      expand:
+        type: array
+        description: Related records to inline, e.g. ["venue","organizer","ticket_classes"].
+        optional: true
+        items: {type: string}
+    output:
+      description: The event.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: object}
+        start: {type: object}
+        end: {type: object}
+        status: {type: string}
+        url: {type: string}
+
+  create_event:
+    title: Create an event
+    description: >-
+      Create an event as a draft. Times are ISO 8601 in the event's own
+      timezone. Nothing is on sale until ticket classes are added and the event
+      is published.
+    category: events
+    request:
+      method: POST
+      path: /v3/organizations/${organization_id}/events/
+      body:
+        event:
+          name:
+            html: "${name}"
+          description:
+            $when: "${description}"
+            html: "${description}"
+          start:
+            timezone: "${timezone}"
+            utc: "${start}"
+          end:
+            timezone: "${timezone}"
+            utc: "${end}"
+          currency: "${currency}"
+          online_event: "${online_event}"
+          listed: "${listed}"
+          capacity: "${capacity}"
+          venue_id: "${venue_id}"
+          summary: "${summary}"
+    input:
+      organization_id:
+        type: string
+        description: The organisation to create it under.
+      name:
+        type: string
+        description: The event's title.
+      start:
+        type: string
+        description: Start time in UTC, e.g. 2026-09-01T18:00:00Z.
+        example: "2026-09-01T18:00:00Z"
+      end:
+        type: string
+        description: End time in UTC.
+      currency:
+        type: string
+        description: Three-letter ISO currency code tickets are priced in.
+        example: USD
+      timezone:
+        type: string
+        description: IANA timezone the event happens in, e.g. America/New_York.
+        optional: true
+        default: UTC
+      description:
+        type: string
+        description: Event description, as HTML.
+        optional: true
+      summary:
+        type: string
+        description: Short plain-text summary shown in listings.
+        optional: true
+      online_event:
+        type: boolean
+        description: Mark it as an online event with no physical venue.
+        optional: true
+      listed:
+        type: boolean
+        description: Show it in Eventbrite's public search.
+        optional: true
+      capacity:
+        type: integer
+        description: Total attendee capacity.
+        optional: true
+        minimum: 1
+      venue_id:
+        type: string
+        description: Venue id for a physical event.
+        optional: true
+    output:
+      description: The created event.
+      type: object
+      properties:
+        id: {type: string}
+        url: {type: string}
+        status: {type: string}
+
+  publish_event:
+    title: Publish an event
+    description: >-
+      Take an event live so tickets go on sale. Eventbrite refuses until the
+      event has a venue or is marked online, and at least one ticket class.
+    category: events
+    destructive: true
+    request:
+      method: POST
+      path: /v3/events/${event_id}/publish/
+      body: {}
+    input:
+      event_id:
+        type: string
+        description: The draft event to publish.
+    output:
+      description: Whether it published.
+      type: object
+      properties:
+        published: {type: boolean}
+
+  cancel_event:
+    title: Cancel an event
+    description: >-
+      Cancel a live event, stopping ticket sales. Refunds are not issued
+      automatically, and Eventbrite refuses if tickets have been sold and not
+      yet refunded.
+    category: events
+    destructive: true
+    request:
+      method: POST
+      path: /v3/events/${event_id}/cancel/
+      body: {}
+    input:
+      event_id:
+        type: string
+        description: The event to cancel.
+    output:
+      description: Whether it cancelled.
+      type: object
+      properties:
+        canceled: {type: boolean}
+
+  list_ticket_classes:
+    title: List an event's ticket types
+    description: >-
+      Read the ticket classes on an event — their prices, quantities and how
+      many are sold.
+    category: tickets
+    read_only: true
+    request:
+      method: GET
+      path: /v3/events/${event_id}/ticket_classes/
+      query:
+        page: "${page}"
+    input:
+      event_id:
+        type: string
+        description: The event id.
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+    output:
+      description: The event's ticket classes.
+      type: object
+      properties:
+        ticket_classes: {type: array}
+        pagination: {type: object}
+
+  create_ticket_class:
+    title: Add a ticket type to an event
+    description: >-
+      Create a ticket class. Give `cost` as "USD,1000" for $10.00, or set free
+      true instead.
+    category: tickets
+    request:
+      method: POST
+      path: /v3/events/${event_id}/ticket_classes/
+      body:
+        ticket_class:
+          name: "${name}"
+          description: "${description}"
+          quantity_total: "${quantity_total}"
+          cost: "${cost}"
+          free: "${free}"
+          sales_start: "${sales_start}"
+          sales_end: "${sales_end}"
+          minimum_quantity: "${minimum_quantity}"
+          maximum_quantity: "${maximum_quantity}"
+    input:
+      event_id:
+        type: string
+        description: The event to add the ticket type to.
+      name:
+        type: string
+        description: What the ticket is called, e.g. "General Admission".
+      quantity_total:
+        type: integer
+        description: How many of this ticket exist.
+        minimum: 1
+      cost:
+        type: string
+        description: Price as "CURRENCY,minor-units", e.g. "USD,1000" for $10.00.
+        optional: true
+        example: "USD,1000"
+      free:
+        type: boolean
+        description: Make it a free ticket. Use instead of cost.
+        optional: true
+      description:
+        type: string
+        description: What the ticket includes.
+        optional: true
+      sales_start:
+        type: string
+        description: When sales open, ISO 8601 UTC.
+        optional: true
+      sales_end:
+        type: string
+        description: When sales close, ISO 8601 UTC.
+        optional: true
+      minimum_quantity:
+        type: integer
+        description: Fewest that can be bought at once.
+        optional: true
+        minimum: 1
+      maximum_quantity:
+        type: integer
+        description: Most that can be bought at once.
+        optional: true
+        minimum: 1
+    output:
+      description: The created ticket class.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        cost: {type: object}
+
+  list_attendees:
+    title: List an event's attendees
+    description: >-
+      Read who is coming, with their names, email addresses, ticket class and
+      check-in status.
+    category: attendees
+    read_only: true
+    request:
+      method: GET
+      path: /v3/events/${event_id}/attendees/
+      query:
+        status: "${status}"
+        changed_since: "${changed_since}"
+        page: "${page}"
+        continuation: "${continuation}"
+    input:
+      event_id:
+        type: string
+        description: The event id.
+      status:
+        type: string
+        description: Only attendees in this state.
+        optional: true
+        enum: [attending, not_attending, unpaid]
+      changed_since:
+        type: string
+        description: Only attendees changed since this ISO 8601 instant.
+        optional: true
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      continuation:
+        type: string
+        description: Continuation token from the previous response.
+        optional: true
+    output:
+      description: A page of attendees.
+      type: object
+      properties:
+        attendees: {type: array, description: "Each with id, profile, ticket_class_name and checked_in."}
+        pagination: {type: object}
+
+  list_orders:
+    title: List an event's orders
+    description: >-
+      Read the orders placed for an event, with buyer details and totals — the
+      way to reconcile sales.
+    category: orders
+    read_only: true
+    request:
+      method: GET
+      path: /v3/events/${event_id}/orders/
+      query:
+        status: "${status}"
+        changed_since: "${changed_since}"
+        page: "${page}"
+        expand: "${expand}"
+    input:
+      event_id:
+        type: string
+        description: The event id.
+      status:
+        type: string
+        description: Only orders in this state.
+        optional: true
+        enum: [placed, refunded, pending]
+      changed_since:
+        type: string
+        description: Only orders changed since this ISO 8601 instant.
+        optional: true
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      expand:
+        type: array
+        description: Related records to inline, e.g. ["attendees"].
+        optional: true
+        items: {type: string}
+    output:
+      description: A page of orders.
+      type: object
+      properties:
+        orders: {type: array}
+        pagination: {type: object}
+
+  list_venues:
+    title: List an organisation's venues
+    description: >-
+      List saved venues with their ids, which create_event's venue_id takes.
+    category: events
+    read_only: true
+    request:
+      method: GET
+      path: /v3/organizations/${organization_id}/venues/
+      query:
+        page: "${page}"
+    input:
+      organization_id:
+        type: string
+        description: The organisation id.
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of venues.
+      type: object
+      properties:
+        venues: {type: array}
+        pagination: {type: object}

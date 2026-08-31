@@ -1,0 +1,303 @@
+# OneNote tools (Microsoft Graph).
+#
+# The hierarchy is notebook -> section -> page. Page content is HTML, and
+# OneNote's own markup lives inside a <div data-id="..."> so append_to_page can
+# target it.
+#
+# Docs: https://learn.microsoft.com/graph/api/resources/onenote-api-overview
+
+connector_id: one-note
+display_name: OneNote
+docs_url: https://learn.microsoft.com/graph/api/resources/onenote-api-overview
+applies_to:
+  - microsoft-onenote
+
+scope_rules:
+  case_insensitive: true
+  implies:
+    Notes.ReadWrite.All: [Notes.ReadWrite, Notes.Read.All, Notes.Read, Notes.Create]
+    Notes.ReadWrite: [Notes.Read, Notes.Create]
+    Notes.Read.All: [Notes.Read]
+
+scope_discovery:
+  jwt_claim: scp
+
+tools:
+
+  list_notebooks:
+    title: List notebooks
+    description: >-
+      List the signed-in user's OneNote notebooks with their ids. Everything
+      else hangs off a notebook.
+    category: notebooks
+    scopes: [Notes.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/onenote/notebooks
+      query:
+        $top: "${limit}"
+        $orderby: "${order_by}"
+    input:
+      limit:
+        type: integer
+        description: How many notebooks to return.
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 999
+      order_by:
+        type: string
+        description: OData $orderby expression, e.g. "lastModifiedDateTime desc".
+        optional: true
+    output:
+      description: The user's notebooks.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          displayName: {type: string}
+          links: {type: object}
+
+  list_sections:
+    title: List a notebook's sections
+    description: List the sections inside a notebook, with the ids the page tools take.
+    category: sections
+    scopes: [Notes.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/onenote/notebooks/${notebook_id}/sections
+      query:
+        $top: "${limit}"
+    input:
+      notebook_id:
+        type: string
+        description: The notebook id.
+      limit:
+        type: integer
+        description: How many sections to return.
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 999
+    output:
+      description: The notebook's sections.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          displayName: {type: string}
+
+  list_pages:
+    title: List pages
+    description: >-
+      List pages across every notebook, or just those in one section. Titles and
+      links come back; use get_page_content for the body.
+    category: pages
+    scopes: [Notes.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/onenote/pages
+      query:
+        $top: "${limit}"
+        $search: "${search}"
+        $filter: "${filter}"
+        $orderby: "${order_by}"
+    input:
+      limit:
+        type: integer
+        description: How many pages to return.
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 100
+      search:
+        type: string
+        description: Full-text search across page titles and content.
+        optional: true
+      filter:
+        type: string
+        description: OData $filter, e.g. "parentSection/id eq '<section-id>'".
+        optional: true
+      order_by:
+        type: string
+        description: OData $orderby expression.
+        optional: true
+        default: lastModifiedDateTime desc
+    output:
+      description: The matching pages.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          title: "{type: string}"
+          links: {type: object}
+          lastModifiedDateTime: {type: string}
+
+  get_page_content:
+    title: Read a page's content
+    description: >-
+      Fetch a page's HTML body. With include_ids set, OneNote adds data-id
+      attributes to each element, which append_to_page needs to target one.
+    category: pages
+    scopes: [Notes.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/onenote/pages/${page_id}/content
+      query:
+        includeIDs: "${include_ids}"
+    input:
+      page_id:
+        type: string
+        description: The page id.
+      include_ids:
+        type: boolean
+        description: Add data-id attributes so elements can be targeted later.
+        optional: true
+    output:
+      description: The page's HTML.
+      type: string
+
+  create_page:
+    title: Create a page
+    description: >-
+      Create a page in a section from HTML. The title comes from the document's
+      <title> element, so include one — for example
+      "<html><head><title>Notes</title></head><body><p>…</p></body></html>".
+    category: pages
+    scopes_any: [Notes.Create, Notes.ReadWrite]
+    request:
+      method: POST
+      path: /v1.0/me/onenote/sections/${section_id}/pages
+      content: "${html}"
+      headers:
+        content-type: text/html
+    input:
+      section_id:
+        type: string
+        description: The section to create the page in.
+      html:
+        type: string
+        description: The page as an HTML document, with a <title> for the page title.
+    output:
+      description: The created page.
+      type: object
+      properties:
+        id: {type: string}
+        title: "{type: string}"
+        links: {type: object}
+
+  append_to_page:
+    title: Append content to a page
+    description: >-
+      Add HTML to an existing page. Target is an element's data-id from
+      get_page_content with include_ids, or "body" for the page body itself.
+    category: pages
+    scopes: [Notes.ReadWrite]
+    request:
+      method: PATCH
+      path: /v1.0/me/onenote/pages/${page_id}/content
+      body:
+        - target: "${target}"
+          action: "${action}"
+          position: "${position}"
+          content: "${html}"
+    input:
+      page_id:
+        type: string
+        description: The page id.
+      html:
+        type: string
+        description: HTML to add.
+      target:
+        type: string
+        description: Element data-id to act on, or "body" for the page body.
+        optional: true
+        default: body
+      action:
+        type: string
+        description: How to apply the content.
+        optional: true
+        default: append
+        enum: [append, insert, prepend, replace]
+      position:
+        type: string
+        description: Where relative to the target, for insert and append.
+        optional: true
+        enum: [after, before]
+    output:
+      description: Empty on success -- Graph answers 204 No Content.
+      type: object
+
+  create_section:
+    title: Create a section
+    description: Add a section to a notebook, ready for pages to be created in it.
+    category: sections
+    scopes: [Notes.ReadWrite]
+    request:
+      method: POST
+      path: /v1.0/me/onenote/notebooks/${notebook_id}/sections
+      body:
+        displayName: "${name}"
+    input:
+      notebook_id:
+        type: string
+        description: The notebook to add the section to.
+      name:
+        type: string
+        description: Section name.
+    output:
+      description: The created section.
+      type: object
+      properties:
+        id: {type: string}
+        displayName: {type: string}
+
+  create_notebook:
+    title: Create a notebook
+    description: Create a OneNote notebook in the signed-in user's OneDrive.
+    category: notebooks
+    scopes: [Notes.ReadWrite]
+    request:
+      method: POST
+      path: /v1.0/me/onenote/notebooks
+      body:
+        displayName: "${name}"
+    input:
+      name:
+        type: string
+        description: Notebook name. It may not contain ?*\/:<>|'" characters.
+    output:
+      description: The created notebook.
+      type: object
+      properties:
+        id: {type: string}
+        displayName: {type: string}
+
+  delete_page:
+    title: Delete a page
+    description: >-
+      Delete a page. OneNote keeps it in the notebook's recycle bin for a while,
+      but this tool cannot restore it.
+    category: pages
+    scopes: [Notes.ReadWrite]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1.0/me/onenote/pages/${page_id}
+    input:
+      page_id:
+        type: string
+        description: The page to delete.
+    output:
+      description: Empty on success -- Graph answers 204 No Content.
+      type: object

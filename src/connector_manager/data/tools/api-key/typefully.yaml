@@ -1,0 +1,291 @@
+# Typefully tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://api.typefully.com/v2/openapi.json
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: typefully
+display_name: Typefully
+docs_url: https://api.typefully.com/v2/openapi.json
+generated: true
+generated_from: https://api.typefully.com/v2/openapi.json
+tools:
+  typefully_apps_apiv2_s_user_get_me:
+    title: Get current user
+    description: Get current user Retrieve the currently authenticated Typefully user associated with
+      your API Key Calls GET /v2/me on Typefully's API.
+    category: me
+    request:
+      method: GET
+      path: /v2/me
+    input: {}
+    output:
+      description: OK
+      type: object
+    read_only: true
+  get_v2_social_sets:
+    title: List social sets
+    description: List social sets Retrieve all social sets (accounts) you can access. This includes accounts
+      you own directly and accounts that belong to teams you are a member of. Calls GET /v2/social-sets
+      on Typefully's API.
+    category: social_sets
+    request:
+      method: GET
+      path: /v2/social-sets
+      query:
+        limit: ${limit}
+        offset: ${offset}
+    input:
+      limit:
+        type: string
+        description: Maximum number of items to return per page
+        optional: true
+        default: 10
+      offset:
+        type: integer
+        description: Number of items to skip from the beginning
+        optional: true
+        default: 0
+    output:
+      description: OK
+      type: object
+    read_only: true
+  get_v2_social_sets_alt:
+    title: Get social set details
+    description: 'Get social set details Retrieve detailed information about a social set, including every
+      configured social media platform (X, LinkedIn, Mastodon, Threads, Bluesky) with account details
+      and profile information. Required permission: READ access to the social set. Calls GET /v2/social-sets/{social_set_id}/
+      on Typefully''s API.'
+    category: social_sets
+    request:
+      method: GET
+      path: /v2/social-sets/${social_set_id}/
+    input:
+      social_set_id:
+        type: integer
+        description: The social_set_id parameter.
+    output:
+      description: OK
+      type: object
+    read_only: true
+  typefully_apps_apiv2_s_drafts_list_drafts:
+    title: List drafts
+    description: 'List drafts Retrieve all drafts for a specific social set with optional filtering and
+      sorting. Drafts are ordered by last edited date (most recent first) by default. Draft statuses:
+      ''draft'' = saved but not scheduled. ''scheduled'' = queued to auto-publish at its scheduleddate.
+      ''planned'' = dated but inert: it has Calls GET /v2/social-sets/{social_set_id}/drafts on Typefully''s
+      API.'
+    category: social_sets
+    request:
+      method: GET
+      path: /v2/social-sets/${social_set_id}/drafts
+      query:
+        status: ${status}
+        tag: ${tag}
+        order_by: ${order_by}
+        limit: ${limit}
+        offset: ${offset}
+    input:
+      social_set_id:
+        type: integer
+        description: The social_set_id parameter.
+      status:
+        type: string
+        description: 'Filter by draft status. ''draft'' = saved but not scheduled. ''scheduled'' = queued
+          to auto-publish at its scheduleddate. ''planned'' = dated but inert: it has a scheduleddate
+          but will NOT auto-publish until confirmed (by setting publishat). A planned draft whose scheduleddate
+          has passed is NOT overdue and NOT a failure - it simply hasn''t been confirmed; replan it or
+          confirm it. ''publishing'' = a publish'
+        optional: true
+      tag:
+        type: string
+        description: The tag parameter.
+        optional: true
+      order_by:
+        type: string
+        description: The order_by parameter.
+        optional: true
+        default: -updated_at
+      limit:
+        type: string
+        description: Maximum number of items to return per page
+        optional: true
+        default: 10
+      offset:
+        type: integer
+        description: Number of items to skip from the beginning
+        optional: true
+        default: 0
+    output:
+      description: OK
+      type: object
+    read_only: true
+  typefully_apps_apiv2_s_drafts_create_draft:
+    title: Create draft
+    description: 'Create draft Create a new draft with content for one or more social media platforms.
+      The draft can be saved as a draft, planned (planat: dated but inert - it never auto-publishes until
+      confirmed), scheduled for later publishing, or published immediately. Account-level settings: This
+      endpoint automatically applie Calls POST /v2/social-sets/{social_set_id}/drafts on Typefully''s
+      API.'
+    category: social_sets
+    request:
+      method: POST
+      path: /v2/social-sets/${social_set_id}/drafts
+      body:
+        platforms: ${platforms}
+        draft_title: ${draft_title}
+        scratchpad_text: ${scratchpad_text}
+        tags: ${tags}
+        share: ${share}
+        publish_at: ${publish_at}
+        plan_at: ${plan_at}
+    input:
+      social_set_id:
+        type: integer
+        description: The social_set_id parameter.
+      platforms:
+        type: object
+        description: Schema for all platform configurations
+      draft_title:
+        type: string
+        description: Draft title, for internal organization only; not posted to social media.
+        optional: true
+      scratchpad_text:
+        type: string
+        description: Plain text scratchpad notes for the draft. Formatting is stripped.
+        optional: true
+      tags:
+        type: array
+        description: Tag slugs (not names). Tags must already exist in the social set - list them via
+          /tags.
+        optional: true
+        items:
+          type: string
+      share:
+        type: boolean
+        description: Whether to generate a public share URL for this draft. When true, anyone with the
+          URL can view the draft content.
+        optional: true
+      publish_at:
+        type: string
+        description: 'When to publish: "now" (immediate), "next-free-slot" (next available posting slot),
+          or a future ISO 8601 datetime with timezone. Omit to save as a draft. Mutually exclusive with
+          planat. "now" is asynchronous: the response returns publishstate="inprogress" while status stays
+          "draft" and published URLs are null - success, not failure; poll GET /drafts/{id} until publishstate="finished",
+          then read st'
+        optional: true
+      plan_at:
+        type: string
+        description: 'When to plan the draft. A planned draft is dated but inert: it shows on the queue
+          and calendar at its date but never auto-publishes until confirmed by later setting publishat.
+          Accepts "next-free-slot" or a future ISO 8601 datetime with timezone ("now" is not valid). Mutually
+          exclusive with publishat. Omit to save as a plain draft.'
+        optional: true
+    output:
+      description: Created
+      type: object
+  typefully_apps_apiv2_s_queue_get_queue:
+    title: Get queue
+    description: 'Get queue Retrieve queue slots and the scheduled AND planned drafts occupying them,
+      between startdate and enddate (inclusive). Check each draft''s status: ''scheduled'' = will auto-publish
+      at its scheduleddate; ''planned'' = dated but inert - it will NOT auto-publish until confirmed (a
+      past planned date is not ove Calls GET /v2/social-sets/{social_set_id}/queue on Typefully''s API.'
+    category: social_sets
+    request:
+      method: GET
+      path: /v2/social-sets/${social_set_id}/queue
+      query:
+        start_date: ${start_date}
+        end_date: ${end_date}
+    input:
+      social_set_id:
+        type: integer
+        description: The social_set_id parameter.
+      start_date:
+        type: string
+        description: The start_date parameter.
+      end_date:
+        type: string
+        description: The end_date parameter.
+    output:
+      description: Queue view (slots + scheduled drafts) for a date range.
+      type: object
+    read_only: true
+  typefully_apps_apiv2_s_tags_list_tags:
+    title: List tags
+    description: 'List tags Retrieve all tags for a social set, ordered by their slugs. Required permission:
+      READ access to the social set. Calls GET /v2/social-sets/{social_set_id}/tags on Typefully''s API.'
+    category: social_sets
+    request:
+      method: GET
+      path: /v2/social-sets/${social_set_id}/tags
+      query:
+        limit: ${limit}
+        offset: ${offset}
+    input:
+      social_set_id:
+        type: integer
+        description: The social_set_id parameter.
+      limit:
+        type: string
+        description: Maximum number of items to return per page
+        optional: true
+        default: 10
+      offset:
+        type: integer
+        description: Number of items to skip from the beginning
+        optional: true
+        default: 0
+    output:
+      description: OK
+      type: object
+    read_only: true
+  typefully_apps_apiv2_s_tags_create_tag:
+    title: Create tag
+    description: 'Create tag Create a new tag for a social set. The slug is automatically generated from
+      the tag name, which must be unique per social set. Required permission: WRITE access to the social
+      set. Calls POST /v2/social-sets/{social_set_id}/tags on Typefully''s API.'
+    category: social_sets
+    request:
+      method: POST
+      path: /v2/social-sets/${social_set_id}/tags
+      body:
+        name: ${name}
+    input:
+      social_set_id:
+        type: integer
+        description: The social_set_id parameter.
+      name:
+        type: string
+        description: Display name for the tag. The slug will be auto-generated from this name.
+    output:
+      description: Created
+      type: object
+  typefully_apps_apiv2_s_drafts_delete_draft:
+    title: Delete draft
+    description: 'Delete draft Delete a draft. Requires WRITE access. You can delete your own drafts in
+      any status (DRAFT, ERROR, SCHEDULED, PUBLISHED, PUBLISHING) with WRITE access. Drafts created by
+      other users also require WRITE access to delete. Required permission: WRITE access to this social
+      set. Calls DELETE /v2/social-sets/{social_set_id}/drafts/{draft_id} on Typefully''s API.'
+    category: social_sets
+    request:
+      method: DELETE
+      path: /v2/social-sets/${social_set_id}/drafts/${draft_id}
+    input:
+      social_set_id:
+        type: integer
+        description: The social_set_id parameter.
+      draft_id:
+        type: integer
+        description: The draft_id parameter.
+    output:
+      description: No Content
+      type: object
+    destructive: true

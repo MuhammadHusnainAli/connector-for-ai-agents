@@ -1,0 +1,614 @@
+# Microsoft Entra ID (Azure AD) directory tools, via Microsoft Graph.
+#
+# Users and groups are addressed by object id (a GUID) or by userPrincipalName.
+# Directory writes need admin consent, so a token that reads happily may still
+# be refused a create.
+#
+# Docs: https://learn.microsoft.com/graph/api/resources/users
+
+connector_id: microsoft-entra-id
+display_name: Microsoft Entra ID
+docs_url: https://learn.microsoft.com/graph/api/resources/users
+applies_to:
+  - microsoft-admin
+
+scope_rules:
+  case_insensitive: true
+  implies:
+    Directory.ReadWrite.All: [Directory.Read.All, User.ReadWrite.All, Group.ReadWrite.All, User.Read.All, Group.Read.All]
+    Directory.Read.All: [User.Read.All, Group.Read.All, User.ReadBasic.All]
+    User.ReadWrite.All: [User.Read.All, User.ReadBasic.All, User.Read]
+    User.Read.All: [User.ReadBasic.All, User.Read]
+    Group.ReadWrite.All: [Group.Read.All, GroupMember.ReadWrite.All, GroupMember.Read.All]
+    Group.Read.All: [GroupMember.Read.All]
+    GroupMember.ReadWrite.All: [GroupMember.Read.All]
+
+scope_discovery:
+  jwt_claim: scp
+
+tools:
+
+  list_users:
+    title: List directory users
+    description: >-
+      Page through the tenant's users. Narrow with an OData filter such as
+      "accountEnabled eq true" or "startswith(displayName,'A')".
+    category: users
+    scopes_any: [User.Read.All, User.ReadBasic.All, Directory.Read.All]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/users
+      query:
+        $top: "${limit}"
+        $filter: "${filter}"
+        $select: "${select}"
+        $orderby: "${order_by}"
+        $count: "${count}"
+      headers:
+        ConsistencyLevel: "${consistency_level}"
+    input:
+      limit:
+        type: integer
+        description: How many users per page (1-999).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 999
+      filter:
+        type: string
+        description: OData $filter expression.
+        optional: true
+        example: accountEnabled eq true
+      select:
+        type: array
+        description: Fields to return, e.g. ["id","displayName","mail","jobTitle"].
+        optional: true
+        items: {type: string}
+      order_by:
+        type: string
+        description: OData $orderby expression.
+        optional: true
+      count:
+        type: boolean
+        description: Include the total count. Requires consistency_level "eventual".
+        optional: true
+      consistency_level:
+        type: string
+        description: Set to "eventual" for advanced queries -- $count, $search, some filters.
+        optional: true
+        enum: [eventual]
+    output:
+      description: A page of users.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string, description: "Object id -- what the other tools take."}
+          displayName: {type: string}
+          userPrincipalName: {type: string}
+          mail: {type: string}
+          jobTitle: {type: string}
+
+  search_users:
+    title: Search users by name or email
+    description: >-
+      Find users with Graph's $search, which matches display name, mail and
+      userPrincipalName. Needs the eventual consistency header, which this tool
+      sends for you.
+    category: users
+    scopes_any: [User.Read.All, User.ReadBasic.All, Directory.Read.All]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/users
+      query:
+        $search: '"displayName:${query}" OR "mail:${query}"'
+        $top: "${limit}"
+        $select: "${select}"
+      headers:
+        ConsistencyLevel: eventual
+    input:
+      query:
+        type: string
+        description: Name or email fragment to match.
+        example: ada
+      limit:
+        type: integer
+        description: How many users to return.
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 999
+      select:
+        type: array
+        description: Fields to return.
+        optional: true
+        items: {type: string}
+    output:
+      description: Matching users.
+      type: array
+      response_path: value
+      items: {type: object}
+
+  get_user:
+    title: Get a user
+    description: >-
+      Read one user's profile by object id or userPrincipalName -- name, mail,
+      job title, department, office and account state.
+    category: users
+    scopes_any: [User.Read.All, User.ReadBasic.All, Directory.Read.All]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/users/${user_id}
+      query:
+        $select: "${select}"
+    input:
+      user_id:
+        type: string
+        description: Object id or userPrincipalName.
+      select:
+        type: array
+        description: Fields to return. Some, like `manager`, need an expand instead.
+        optional: true
+        items: {type: string}
+    output:
+      description: The user.
+      type: object
+      properties:
+        id: {type: string}
+        displayName: {type: string}
+        userPrincipalName: {type: string}
+        mail: {type: string}
+        accountEnabled: {type: boolean}
+        department: {type: string}
+
+  create_user:
+    title: Create a user
+    description: >-
+      Add a user to the directory. The userPrincipalName must use a verified
+      domain, and the initial password is set through password_profile.
+    category: users
+    scopes: [User.ReadWrite.All]
+    request:
+      method: POST
+      path: /v1.0/users
+      body:
+        accountEnabled: "${account_enabled}"
+        displayName: "${display_name}"
+        mailNickname: "${mail_nickname}"
+        userPrincipalName: "${user_principal_name}"
+        passwordProfile:
+          password: "${password}"
+          forceChangePasswordNextSignIn: "${force_password_change}"
+        jobTitle: "${job_title}"
+        department: "${department}"
+        usageLocation: "${usage_location}"
+    input:
+      display_name:
+        type: string
+        description: The user's full name.
+      user_principal_name:
+        type: string
+        description: Sign-in name, on a verified domain, e.g. ada@contoso.com.
+        format: email
+      mail_nickname:
+        type: string
+        description: Mail alias, usually the part before the @.
+      password:
+        type: string
+        description: Initial password. Must satisfy the tenant's complexity policy.
+        secret: true
+      account_enabled:
+        type: boolean
+        description: Whether the account can sign in.
+        optional: true
+        default: true
+      force_password_change:
+        type: boolean
+        description: Require a password change at first sign-in.
+        optional: true
+        default: true
+      job_title:
+        type: string
+        description: Job title.
+        optional: true
+      department:
+        type: string
+        description: Department.
+        optional: true
+      usage_location:
+        type: string
+        description: Two-letter country code, required before most licences can be assigned.
+        optional: true
+    output:
+      description: The created user.
+      type: object
+      properties:
+        id: {type: string}
+        userPrincipalName: {type: string}
+        displayName: {type: string}
+
+  update_user:
+    title: Update a user
+    description: >-
+      Change a user's profile or disable their account. Only what is supplied is
+      written.
+    category: users
+    scopes: [User.ReadWrite.All]
+    request:
+      method: PATCH
+      path: /v1.0/users/${user_id}
+      body:
+        displayName: "${display_name}"
+        jobTitle: "${job_title}"
+        department: "${department}"
+        officeLocation: "${office_location}"
+        mobilePhone: "${mobile_phone}"
+        accountEnabled: "${account_enabled}"
+        usageLocation: "${usage_location}"
+    input:
+      user_id:
+        type: string
+        description: Object id or userPrincipalName.
+      display_name:
+        type: string
+        description: New full name.
+        optional: true
+      job_title:
+        type: string
+        description: New job title.
+        optional: true
+      department:
+        type: string
+        description: New department.
+        optional: true
+      office_location:
+        type: string
+        description: New office.
+        optional: true
+      mobile_phone:
+        type: string
+        description: New mobile number.
+        optional: true
+      account_enabled:
+        type: boolean
+        description: Set false to block sign-in without deleting the account.
+        optional: true
+      usage_location:
+        type: string
+        description: Two-letter country code.
+        optional: true
+    output:
+      description: Empty on success -- Graph answers 204 No Content.
+      type: object
+
+  delete_user:
+    title: Delete a user
+    description: >-
+      Move a user to the directory's deleted items, where Entra keeps them for
+      30 days. This tool cannot restore one.
+    category: users
+    scopes: [User.ReadWrite.All]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1.0/users/${user_id}
+    input:
+      user_id:
+        type: string
+        description: Object id or userPrincipalName.
+    output:
+      description: Empty on success -- Graph answers 204 No Content.
+      type: object
+
+  get_user_manager:
+    title: Get a user's manager
+    description: Read who a user reports to, as a directory object.
+    category: users
+    scopes_any: [User.Read.All, Directory.Read.All]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/users/${user_id}/manager
+    input:
+      user_id:
+        type: string
+        description: Object id or userPrincipalName.
+    output:
+      description: The user's manager.
+      type: object
+      properties:
+        id: {type: string}
+        displayName: {type: string}
+        mail: {type: string}
+
+  list_direct_reports:
+    title: List a user's direct reports
+    description: List the people who report to a user — one level of the org chart.
+    category: users
+    scopes_any: [User.Read.All, Directory.Read.All]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/users/${user_id}/directReports
+      query:
+        $top: "${limit}"
+    input:
+      user_id:
+        type: string
+        description: Object id or userPrincipalName.
+      limit:
+        type: integer
+        description: How many reports to return.
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 999
+    output:
+      description: The user's direct reports.
+      type: array
+      response_path: value
+      items: {type: object}
+
+  list_groups:
+    title: List groups
+    description: >-
+      Page through the tenant's groups — security groups, Microsoft 365 groups
+      and distribution lists.
+    category: groups
+    scopes_any: [Group.Read.All, Directory.Read.All]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/groups
+      query:
+        $top: "${limit}"
+        $filter: "${filter}"
+        $select: "${select}"
+      headers:
+        ConsistencyLevel: "${consistency_level}"
+    input:
+      limit:
+        type: integer
+        description: How many groups per page.
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 999
+      filter:
+        type: string
+        description: OData $filter, e.g. "startswith(displayName,'Sales')".
+        optional: true
+      select:
+        type: array
+        description: Fields to return.
+        optional: true
+        items: {type: string}
+      consistency_level:
+        type: string
+        description: Set to "eventual" for advanced queries.
+        optional: true
+        enum: [eventual]
+    output:
+      description: A page of groups.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          displayName: {type: string}
+          mail: {type: string}
+          groupTypes: {type: array}
+
+  list_group_members:
+    title: List a group's members
+    description: List the users and groups that belong to a group.
+    category: groups
+    scopes_any: [GroupMember.Read.All, Group.Read.All, Directory.Read.All]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/groups/${group_id}/members
+      query:
+        $top: "${limit}"
+        $select: "${select}"
+    input:
+      group_id:
+        type: string
+        description: The group's object id.
+      limit:
+        type: integer
+        description: How many members per page.
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 999
+      select:
+        type: array
+        description: Fields to return.
+        optional: true
+        items: {type: string}
+    output:
+      description: The group's members.
+      type: array
+      response_path: value
+      items: {type: object}
+
+  add_group_member:
+    title: Add someone to a group
+    description: >-
+      Add a user to a group by object id. Adding to a Microsoft 365 group also
+      grants its mailbox, calendar and Teams team.
+    category: groups
+    scopes_any: [GroupMember.ReadWrite.All, Group.ReadWrite.All]
+    request:
+      method: POST
+      path: /v1.0/groups/${group_id}/members/$ref
+      body:
+        "@odata.id": "https://graph.microsoft.com/v1.0/directoryObjects/${user_id}"
+    input:
+      group_id:
+        type: string
+        description: The group's object id.
+      user_id:
+        type: string
+        description: Object id of the user to add.
+    output:
+      description: Empty on success -- Graph answers 204 No Content.
+      type: object
+
+  remove_group_member:
+    title: Remove someone from a group
+    description: >-
+      Take a user out of a group, which also removes the access the group
+      granted them.
+    category: groups
+    scopes_any: [GroupMember.ReadWrite.All, Group.ReadWrite.All]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1.0/groups/${group_id}/members/${user_id}/$ref
+    input:
+      group_id:
+        type: string
+        description: The group's object id.
+      user_id:
+        type: string
+        description: Object id of the user to remove.
+    output:
+      description: Empty on success -- Graph answers 204 No Content.
+      type: object
+
+  create_group:
+    title: Create a group
+    description: >-
+      Create a security group or a Microsoft 365 group. A Microsoft 365 group
+      needs groupTypes ["Unified"] and brings a mailbox, calendar and site with
+      it.
+    category: groups
+    scopes: [Group.ReadWrite.All]
+    request:
+      method: POST
+      path: /v1.0/groups
+      body:
+        displayName: "${display_name}"
+        mailNickname: "${mail_nickname}"
+        mailEnabled: "${mail_enabled}"
+        securityEnabled: "${security_enabled}"
+        groupTypes: "${group_types}"
+        description: "${description}"
+        visibility: "${visibility}"
+    input:
+      display_name:
+        type: string
+        description: The group's name.
+      mail_nickname:
+        type: string
+        description: Mail alias, with no spaces.
+      mail_enabled:
+        type: boolean
+        description: Whether the group has a mailbox. True for a Microsoft 365 group.
+        optional: true
+        default: false
+      security_enabled:
+        type: boolean
+        description: Whether the group can be used to grant access.
+        optional: true
+        default: true
+      group_types:
+        type: array
+        description: Pass ["Unified"] for a Microsoft 365 group; omit for a security group.
+        optional: true
+        items: {type: string}
+      description:
+        type: string
+        description: What the group is for.
+        optional: true
+      visibility:
+        type: string
+        description: Who can see a Microsoft 365 group.
+        optional: true
+        enum: [Public, Private, HiddenMembership]
+    output:
+      description: The created group.
+      type: object
+      properties:
+        id: {type: string}
+        displayName: {type: string}
+        mail: {type: string}
+
+  list_my_group_memberships:
+    title: List the groups I am in
+    description: >-
+      List the groups and directory roles the signed-in user belongs to — a
+      quick way to see what access their account carries.
+    category: groups
+    scopes_any: [User.Read, Directory.Read.All, GroupMember.Read.All]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/memberOf
+      query:
+        $top: "${limit}"
+    input:
+      limit:
+        type: integer
+        description: How many entries to return.
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 999
+    output:
+      description: The groups and roles the user belongs to.
+      type: array
+      response_path: value
+      items: {type: object}
+
+  revoke_user_sessions:
+    title: Revoke a user's sign-in sessions
+    description: >-
+      Invalidate every refresh token the user holds, forcing a fresh sign-in
+      everywhere. The first move when an account may be compromised.
+    category: users
+    scopes: [User.ReadWrite.All]
+    destructive: true
+    request:
+      method: POST
+      path: /v1.0/users/${user_id}/revokeSignInSessions
+      body: {}
+    input:
+      user_id:
+        type: string
+        description: Object id or userPrincipalName.
+    output:
+      description: Whether the revocation was accepted.
+      type: object
+      properties:
+        value: {type: boolean}
+
+  get_organization:
+    title: Get the tenant
+    description: >-
+      Read the tenant's name, id, verified domains and country. The cheapest
+      health check for an Entra ID connection.
+    category: directory
+    scopes_any: [Directory.Read.All, User.Read, Organization.Read.All]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/organization
+    input: {}
+    output:
+      description: The tenant.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          displayName: {type: string}
+          verifiedDomains: {type: array}

@@ -1,0 +1,362 @@
+# AgentLine tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://api.agentline.cloud/openapi.json
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: agentline
+display_name: AgentLine
+docs_url: https://api.agentline.cloud/openapi.json
+generated: true
+generated_from: https://api.agentline.cloud/openapi.json
+tools:
+  health_check:
+    title: Root
+    description: Root Calls GET / on AgentLine's API. Generated from the provider's published OpenAPI
+      specification.
+    category: api
+    request:
+      method: GET
+      path: /
+    input: {}
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  health_status:
+    title: Health
+    description: Health Liveness probe for Railway. Keep this fast — never block on slow I/O. Calls GET
+      /health on AgentLine's API.
+    category: health
+    request:
+      method: GET
+      path: /health
+    input: {}
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  agentline_integration_discovery:
+    title: Agentline Integration Discovery
+    description: Agentline Integration Discovery Calls GET /.well-known/agentline.json on AgentLine's
+      API.
+    category: well_known
+    request:
+      method: GET
+      path: /.well-known/agentline.json
+    input: {}
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  x402_discovery_manifest:
+    title: X402 Discovery Manifest
+    description: X402 Discovery Manifest x402 service discovery manifest. Returns the machine-readable
+      catalog of x402-payable resources so that AI agents, wallets, and the x402 Index can auto-discover
+      payment requirements without hitting the actual endpoints first. Calls GET /.well-known/x402.json
+      on AgentLine's API.
+    category: well_known
+    request:
+      method: GET
+      path: /.well-known/x402.json
+    input: {}
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  debug_callback_urls:
+    title: Debug Urls
+    description: Debug Urls Show the callback URLs that providers will receive — useful for debugging.
+      Calls GET /debug/urls on AgentLine's API.
+    category: debug
+    request:
+      method: GET
+      path: /debug/urls
+    input: {}
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  list_agents:
+    title: List Agents
+    description: List Agents List all AI voice agents configured on your account. Returns every AI phone
+      agent you've created, including their system prompts, voice settings, and associated phone numbers.
+      Useful for checking which agents are ready to make or receive calls. Calls GET /v1/agents on AgentLine's
+      API.
+    category: agents
+    request:
+      method: GET
+      path: /v1/agents
+    input: {}
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  create_agent:
+    title: Create Agent
+    description: 'Create Agent Create a new AI voice agent for telephony. Sets up a new AI phone agent
+      with a custom system prompt, voice, and greeting. Once created, buy a phone number and attach it
+      to this agent so it can make and receive calls autonomously. Fields: - name: Display name for the
+      agent - systemprompt: Instruction Calls POST /v1/agents on AgentLine''s API.'
+    category: agents
+    request:
+      method: POST
+      path: /v1/agents
+      body:
+        name: ${name}
+        system_prompt: ${system_prompt}
+        initial_greeting: ${initial_greeting}
+        voice_id: ${voice_id}
+        transfer_number: ${transfer_number}
+        voicemail_message: ${voicemail_message}
+        owner_phone: ${owner_phone}
+    input:
+      name:
+        type: string
+        description: Display name for the AI voice agent
+      system_prompt:
+        type: string
+        description: Default instructions for the agent's personality and behavior on ALL calls (inbound
+          and outbound). Can be overridden per-call via POST /v1/calls.
+        optional: true
+      initial_greeting:
+        type: string
+        description: Default opening line spoken on ALL calls (inbound and outbound), e.g. 'Hello, how
+          can I help you today?'. Can be overridden per-call via POST /v1/calls.
+        optional: true
+      voice_id:
+        type: string
+        description: TTS voice preset name (e.g. 'female-1', 'male-1') or Cartesia voice UUID; defaults
+          to system voice if not set
+        optional: true
+      transfer_number:
+        type: string
+        description: Phone number in E.164 format to transfer calls to (e.g. a human operator fallback)
+        optional: true
+      voicemail_message:
+        type: string
+        description: Message the AI agent leaves if the call goes to voicemail
+        optional: true
+      owner_phone:
+        type: string
+        description: Owner's phone number in E.164 format (e.g. '+12125551234'). Calls from this number
+          enter task mode — the agent treats speech as executable instructions.
+        optional: true
+    output:
+      description: Successful Response
+      type: object
+  list_calls:
+    title: List Calls
+    description: 'List Calls List voice calls made by your AI agents. Returns call history with optional
+      filters by agent or status. Each entry includes direction (inbound/outbound), duration, phone numbers,
+      and current status. Filters: - agentid: only calls for a specific AI agent - status: "initiated",
+      "in-progress", "complet Calls GET /v1/calls on AgentLine''s API.'
+    category: calls
+    request:
+      method: GET
+      path: /v1/calls
+      query:
+        agent_id: ${agent_id}
+        status: ${status}
+        limit: ${limit}
+        offset: ${offset}
+    input:
+      agent_id:
+        type: string
+        description: Filter calls by AI agent ID
+        optional: true
+      status:
+        type: string
+        description: 'Filter by call status: ''initiated'', ''in-progress'', ''completed'', or ''failed'''
+        optional: true
+      limit:
+        type: integer
+        description: Maximum number of calls to return (1-200)
+        optional: true
+        default: 50
+      offset:
+        type: integer
+        description: Number of calls to skip for pagination
+        optional: true
+        default: 0
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  make_outbound_call:
+    title: Create Call
+    description: Create Call Make an outbound phone call from your AI agent. Initiates a real phone call
+      from the AI agent's phone number to the specified destination. The agent uses its configured system
+      prompt, voice, and greeting to conduct the conversation autonomously. The AI agent handles the entire
+      call — speech-to-text, Calls POST /v1/calls on AgentLine's API.
+    category: calls
+    request:
+      method: POST
+      path: /v1/calls
+      body:
+        agent_id: ${agent_id}
+        to_number: ${to_number}
+        system_prompt: ${system_prompt}
+        initial_greeting: ${initial_greeting}
+        voice_id: ${voice_id}
+        from_number_id: ${from_number_id}
+    input:
+      agent_id:
+        type: string
+        description: ID of the AI agent making the call (e.g. 'agtabc123')
+      to_number:
+        type: string
+        description: Destination phone number in E.164 format (e.g. '+12125551234')
+      system_prompt:
+        type: string
+        description: Per-call system prompt override. Replaces the agent's default prompt for this call
+          ONLY. If omitted, the agent's default systemprompt is used.
+        optional: true
+      initial_greeting:
+        type: string
+        description: Per-call greeting override. Replaces the agent's default greeting for this call ONLY.
+          If omitted, the agent's default initialgreeting is used.
+        optional: true
+      voice_id:
+        type: string
+        description: 'Override the TTS voice for this call: preset name (e.g. ''female-1'') or Cartesia
+          UUID'
+        optional: true
+      from_number_id:
+        type: string
+        description: Specific phone number ID to call from; defaults to the agent's assigned number
+        optional: true
+    output:
+      description: Successful Response
+      type: object
+  poll_events:
+    title: List Events
+    description: List Events Poll for telephony events from your AI agents. Returns pending events such
+      as call completions, transcripts, and failures. Events are consumed on retrieval (one-time read)
+      — once polled, they are automatically deleted from the mailbox. Your AI agent should call this endpoint
+      periodically to receive Calls GET /v1/events on AgentLine's API.
+    category: events
+    request:
+      method: GET
+      path: /v1/events
+      query:
+        agent_id: ${agent_id}
+        event_type: ${event_type}
+        limit: ${limit}
+    input:
+      agent_id:
+        type: string
+        description: Filter events by AI agent ID
+        optional: true
+      event_type:
+        type: string
+        description: Filter by event type (e.g. 'call.completed', 'call.failed')
+        optional: true
+      limit:
+        type: integer
+        description: Maximum number of events to return (1-200)
+        optional: true
+        default: 50
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  list_feedback:
+    title: List Feedback
+    description: List Feedback List feedback you have submitted. Returns your feedback history with optional
+      filters by category (bug, featurerequest, difficulty, feedback) and status (open, acknowledged,
+      inprogress, resolved, closed). Useful for tracking progress on bugs or feature requests you reported.
+      Calls GET /v1/feedback on AgentLine's API.
+    category: feedback
+    request:
+      method: GET
+      path: /v1/feedback
+      query:
+        category: ${category}
+        status: ${status}
+        limit: ${limit}
+        offset: ${offset}
+    input:
+      category:
+        type: string
+        description: 'Filter by feedback type: ''bug'', ''featurerequest'', ''difficulty'', or ''feedback'''
+        optional: true
+      status:
+        type: string
+        description: 'Filter by status: ''open'', ''acknowledged'', ''inprogress'', ''resolved'', ''closed'''
+        optional: true
+      limit:
+        type: integer
+        description: Maximum number of feedback entries to return (1-200)
+        optional: true
+        default: 50
+      offset:
+        type: integer
+        description: Number of entries to skip for pagination
+        optional: true
+        default: 0
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  submit_feedback:
+    title: Submit Feedback
+    description: 'Submit Feedback Submit feedback, report a bug, or request a feature. Use this endpoint
+      to tell the AgentLine team about anything you encounter while using the platform: - bug — something
+      is broken or not working as expected - featurerequest — you wish a capability existed - difficulty
+      — something was hard or confus Calls POST /v1/feedback on AgentLine''s API.'
+    category: feedback
+    request:
+      method: POST
+      path: /v1/feedback
+      body:
+        category: ${category}
+        message: ${message}
+        subject: ${subject}
+        severity: ${severity}
+        agent_id: ${agent_id}
+        contact_email: ${contact_email}
+    input:
+      category:
+        type: string
+        description: The category field of the request body.
+        enum:
+        - bug
+        - feature_request
+        - difficulty
+        - feedback
+      message:
+        type: string
+        description: Detailed description of the feedback, issue, or request. For bugs, include what you
+          expected vs. what actually happened.
+      subject:
+        type: string
+        description: Short summary title for the feedback (optional)
+        optional: true
+      severity:
+        type: string
+        description: The severity field of the request body.
+        optional: true
+        enum:
+        - low
+        - normal
+        - high
+        - critical
+      agent_id:
+        type: string
+        description: ID of the AI agent this feedback relates to, if applicable
+        optional: true
+      contact_email:
+        type: string
+        description: Email address for follow-up about this feedback (optional)
+        optional: true
+    output:
+      description: Successful Response
+      type: object

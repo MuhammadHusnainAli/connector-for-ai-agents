@@ -1,0 +1,554 @@
+# Klaviyo tools.
+#
+# Klaviyo pins its API by date: every call must carry a `revision` header. The
+# tools default to a recent one and expose it as an argument so a caller can
+# pin their own.
+#
+# Bodies follow JSON:API — a `data` envelope with `type` and `attributes`.
+#
+# Docs: https://developers.klaviyo.com/en/reference/api_overview
+
+connector_id: klaviyo-oauth
+display_name: Klaviyo
+docs_url: https://developers.klaviyo.com/en/reference/api_overview
+
+scope_rules:
+  implies:
+    "profiles:write": ["profiles:read"]
+    "lists:write": ["lists:read"]
+    "segments:write": ["segments:read"]
+    "campaigns:write": ["campaigns:read"]
+    "events:write": ["events:read"]
+    "metrics:write": ["metrics:read"]
+    "templates:write": ["templates:read"]
+
+tools:
+
+  list_profiles:
+    title: List profiles
+    description: >-
+      Page through the account's profiles. Narrow with a Klaviyo filter such as
+      equals(email,"ada@example.com") or greater-than(created,2026-01-01).
+    category: profiles
+    scopes: ["profiles:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /api/profiles
+      headers:
+        revision: "${revision}"
+      query:
+        filter: "${filter}"
+        page[size]: "${page_size}"
+        page[cursor]: "${cursor}"
+        sort: "${sort}"
+        additional-fields[profile]: "${additional_fields}"
+    input:
+      filter:
+        type: string
+        description: Klaviyo filter expression.
+        optional: true
+        example: equals(email,"ada@example.com")
+      page_size:
+        type: integer
+        description: How many profiles per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      cursor:
+        type: string
+        description: Cursor from the previous response's links.next.
+        optional: true
+      sort:
+        type: string
+        description: Sort order, e.g. "-created".
+        optional: true
+      additional_fields:
+        type: array
+        description: Extra blocks to inline, e.g. ["subscriptions","predictive_analytics"].
+        optional: true
+        items: {type: string}
+      revision:
+        type: string
+        description: Klaviyo API revision date the call is pinned to.
+        optional: true
+        default: "2024-10-15"
+    output:
+      description: A page of profiles.
+      type: object
+      properties:
+        data: {type: array, description: "Each with id, type and attributes."}
+        links: {type: object}
+
+  get_profile:
+    title: Get a profile
+    description: Read one profile's attributes, custom properties and subscription state.
+    category: profiles
+    scopes: ["profiles:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /api/profiles/${profile_id}
+      headers:
+        revision: "${revision}"
+      query:
+        additional-fields[profile]: "${additional_fields}"
+    input:
+      profile_id:
+        type: string
+        description: The profile id.
+      additional_fields:
+        type: array
+        description: Extra blocks to inline.
+        optional: true
+        items: {type: string}
+      revision:
+        type: string
+        description: Klaviyo API revision date.
+        optional: true
+        default: "2024-10-15"
+    output:
+      description: The profile.
+      type: object
+      properties:
+        data: {type: object}
+
+  create_or_update_profile:
+    title: Create or update a profile
+    description: >-
+      Upsert a profile, matched on email or external id. Custom data goes in
+      `properties`; standard fields like first_name sit alongside it.
+    category: profiles
+    scopes: ["profiles:write"]
+    request:
+      method: POST
+      path: /api/profile-import
+      headers:
+        revision: "${revision}"
+      body:
+        data:
+          type: profile
+          attributes:
+            email: "${email}"
+            phone_number: "${phone_number}"
+            external_id: "${external_id}"
+            first_name: "${first_name}"
+            last_name: "${last_name}"
+            organization: "${organization}"
+            title: "${title}"
+            location: "${location}"
+            properties: "${properties}"
+    input:
+      email:
+        type: string
+        description: The profile's email address, which Klaviyo deduplicates on.
+        optional: true
+        format: email
+      phone_number:
+        type: string
+        description: Phone number in E.164 format.
+        optional: true
+      external_id:
+        type: string
+        description: Your own id for this person.
+        optional: true
+      first_name:
+        type: string
+        description: First name.
+        optional: true
+      last_name:
+        type: string
+        description: Last name.
+        optional: true
+      organization:
+        type: string
+        description: Company name.
+        optional: true
+      title:
+        type: string
+        description: Job title.
+        optional: true
+      location:
+        type: object
+        description: Location object, e.g. {"city":"Austin","country":"US"}.
+        optional: true
+      properties:
+        type: object
+        description: Custom properties, e.g. {"plan":"pro","signup_source":"web"}.
+        optional: true
+      revision:
+        type: string
+        description: Klaviyo API revision date.
+        optional: true
+        default: "2024-10-15"
+    output:
+      description: The created or updated profile.
+      type: object
+      properties:
+        data: {type: object}
+
+  list_lists:
+    title: List lists
+    description: List the account's lists with their ids, which the subscribe tools take.
+    category: lists
+    scopes: ["lists:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /api/lists
+      headers:
+        revision: "${revision}"
+      query:
+        page[cursor]: "${cursor}"
+        filter: "${filter}"
+    input:
+      cursor:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+      filter:
+        type: string
+        description: Klaviyo filter expression, e.g. equals(name,"Newsletter").
+        optional: true
+      revision:
+        type: string
+        description: Klaviyo API revision date.
+        optional: true
+        default: "2024-10-15"
+    output:
+      description: The account's lists.
+      type: object
+      properties:
+        data: {type: array}
+        links: {type: object}
+
+  subscribe_profiles:
+    title: Subscribe people to a list
+    description: >-
+      Add profiles to a list and record consent. Klaviyo treats this as an
+      explicit opt-in, so only use it where consent was genuinely given.
+    category: lists
+    scopes: ["lists:write"]
+    destructive: true
+    request:
+      method: POST
+      path: /api/profile-subscription-bulk-create-jobs
+      headers:
+        revision: "${revision}"
+      body:
+        data:
+          type: profile-subscription-bulk-create-job
+          attributes:
+            custom_source: "${source}"
+            profiles:
+              data:
+                $map:
+                  source: "${emails}"
+                  template:
+                    type: profile
+                    attributes:
+                      email: "${item}"
+                      subscriptions:
+                        email:
+                          marketing:
+                            consent: SUBSCRIBED
+          relationships:
+            list:
+              data:
+                type: list
+                id: "${list_id}"
+    input:
+      list_id:
+        type: string
+        description: The list to subscribe them to.
+      emails:
+        type: array
+        description: Email addresses to subscribe.
+        items: {type: string, format: email}
+      source:
+        type: string
+        description: Where the consent came from, recorded on the profile.
+        optional: true
+      revision:
+        type: string
+        description: Klaviyo API revision date.
+        optional: true
+        default: "2024-10-15"
+    output:
+      description: Empty on success -- Klaviyo answers 202 Accepted and processes asynchronously.
+      type: object
+
+  unsubscribe_profiles:
+    title: Unsubscribe people from a list
+    description: >-
+      Remove marketing consent for profiles, either globally or from one list.
+      Klaviyo honours this immediately.
+    category: lists
+    scopes: ["lists:write"]
+    destructive: true
+    request:
+      method: POST
+      path: /api/profile-subscription-bulk-delete-jobs
+      headers:
+        revision: "${revision}"
+      body:
+        data:
+          type: profile-subscription-bulk-delete-job
+          attributes:
+            profiles:
+              data:
+                $map:
+                  source: "${emails}"
+                  template:
+                    type: profile
+                    attributes:
+                      email: "${item}"
+          relationships:
+            list:
+              $when: "${list_id}"
+              data:
+                type: list
+                id: "${list_id}"
+    input:
+      emails:
+        type: array
+        description: Email addresses to unsubscribe.
+        items: {type: string, format: email}
+      list_id:
+        type: string
+        description: List to unsubscribe from. Omit to remove marketing consent entirely.
+        optional: true
+      revision:
+        type: string
+        description: Klaviyo API revision date.
+        optional: true
+        default: "2024-10-15"
+    output:
+      description: Empty on success -- Klaviyo answers 202 Accepted.
+      type: object
+
+  track_event:
+    title: Track an event
+    description: >-
+      Record something a person did — a purchase, a signup, a page view — which
+      Klaviyo flows and segments can then trigger on.
+    category: events
+    scopes: ["events:write"]
+    request:
+      method: POST
+      path: /api/events
+      headers:
+        revision: "${revision}"
+      body:
+        data:
+          type: event
+          attributes:
+            properties: "${properties}"
+            time: "${time}"
+            value: "${value}"
+            value_currency: "${value_currency}"
+            unique_id: "${unique_id}"
+            metric:
+              data:
+                type: metric
+                attributes:
+                  name: "${metric_name}"
+            profile:
+              data:
+                type: profile
+                attributes:
+                  email: "${email}"
+                  external_id: "${external_id}"
+    input:
+      metric_name:
+        type: string
+        description: What happened, e.g. "Placed Order" or "Viewed Product".
+      email:
+        type: string
+        description: Email of the person it happened to.
+        optional: true
+        format: email
+      external_id:
+        type: string
+        description: Your own id for the person, instead of an email.
+        optional: true
+      properties:
+        type: object
+        description: Event details, e.g. {"OrderId":"1234","Items":["Shirt"]}.
+        optional: true
+      time:
+        type: string
+        description: When it happened, ISO 8601. Defaults to now.
+        optional: true
+      value:
+        type: number
+        description: Monetary value of the event, for revenue reporting.
+        optional: true
+      value_currency:
+        type: string
+        description: Three-letter currency code for `value`.
+        optional: true
+      unique_id:
+        type: string
+        description: Your own id for this event, so a retry does not duplicate it.
+        optional: true
+      revision:
+        type: string
+        description: Klaviyo API revision date.
+        optional: true
+        default: "2024-10-15"
+    output:
+      description: Empty on success -- Klaviyo answers 202 Accepted.
+      type: object
+
+  list_events:
+    title: List events
+    description: >-
+      Read recorded events, optionally filtered to one profile or metric and a
+      time range.
+    category: events
+    scopes: ["events:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /api/events
+      headers:
+        revision: "${revision}"
+      query:
+        filter: "${filter}"
+        page[cursor]: "${cursor}"
+        sort: "${sort}"
+        include: "${include}"
+    input:
+      filter:
+        type: string
+        description: Klaviyo filter expression, e.g. equals(metric_id,"abc123").
+        optional: true
+      cursor:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+      sort:
+        type: string
+        description: Sort order, e.g. "-datetime".
+        optional: true
+      include:
+        type: array
+        description: Related records to inline, e.g. ["profile","metric"].
+        optional: true
+        items: {type: string}
+      revision:
+        type: string
+        description: Klaviyo API revision date.
+        optional: true
+        default: "2024-10-15"
+    output:
+      description: A page of events.
+      type: object
+      properties:
+        data: {type: array}
+        links: {type: object}
+
+  list_campaigns:
+    title: List campaigns
+    description: >-
+      List email or SMS campaigns. Klaviyo requires a channel filter, which
+      defaults to email here.
+    category: campaigns
+    scopes: ["campaigns:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /api/campaigns
+      headers:
+        revision: "${revision}"
+      query:
+        filter: "${filter}"
+        page[cursor]: "${cursor}"
+        sort: "${sort}"
+    input:
+      filter:
+        type: string
+        description: Klaviyo filter. A messages.channel clause is required.
+        optional: true
+        default: equals(messages.channel,'email')
+      cursor:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+      sort:
+        type: string
+        description: Sort order, e.g. "-created_at".
+        optional: true
+      revision:
+        type: string
+        description: Klaviyo API revision date.
+        optional: true
+        default: "2024-10-15"
+    output:
+      description: A page of campaigns.
+      type: object
+      properties:
+        data: {type: array}
+        links: {type: object}
+
+  list_metrics:
+    title: List metrics
+    description: >-
+      List the metrics the account tracks, with the ids event filters refer to.
+    category: metrics
+    scopes: ["metrics:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /api/metrics
+      headers:
+        revision: "${revision}"
+      query:
+        page[cursor]: "${cursor}"
+        filter: "${filter}"
+    input:
+      cursor:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+      filter:
+        type: string
+        description: Klaviyo filter expression.
+        optional: true
+      revision:
+        type: string
+        description: Klaviyo API revision date.
+        optional: true
+        default: "2024-10-15"
+    output:
+      description: The account's metrics.
+      type: object
+      properties:
+        data: {type: array}
+
+  get_account:
+    title: Get the connected account
+    description: >-
+      Read the Klaviyo account the token belongs to — company name, timezone and
+      contact details. The cheapest health check for the connection.
+    category: account
+    scopes: ["accounts:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /api/accounts
+      headers:
+        revision: "${revision}"
+    input:
+      revision:
+        type: string
+        description: Klaviyo API revision date.
+        optional: true
+        default: "2024-10-15"
+    output:
+      description: The account.
+      type: object
+      properties:
+        data: {type: array}

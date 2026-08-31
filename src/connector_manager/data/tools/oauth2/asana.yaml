@@ -1,0 +1,671 @@
+# Asana tools.
+#
+# Asana's OAuth `default` scope grants an app everything the authorising user
+# can do, so no tool declares scopes and every one reports as enabled. What
+# actually limits a token is the user's own membership and permissions, which
+# Asana enforces per request.
+#
+# Every request and response body is wrapped in a `data` envelope; the tools
+# unwrap it on the way out via response_path.
+#
+# Docs: https://developers.asana.com/reference/rest-api-reference
+
+connector_id: asana
+display_name: Asana
+docs_url: https://developers.asana.com/reference/rest-api-reference
+
+tools:
+
+  list_workspaces:
+    title: List workspaces
+    description: >-
+      List the workspaces and organisations the user belongs to, with the gids
+      the project and task tools take.
+    category: workspaces
+    read_only: true
+    request:
+      method: GET
+      path: /api/1.0/workspaces
+      query:
+        limit: "${limit}"
+        offset: "${offset}"
+    input:
+      limit:
+        type: integer
+        description: How many workspaces per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      offset:
+        type: string
+        description: Cursor from the previous response's next_page.offset.
+        optional: true
+    output:
+      description: The user's workspaces.
+      type: array
+      response_path: data
+      items:
+        type: object
+        properties:
+          gid: {type: string}
+          name: {type: string}
+          is_organization: {type: boolean}
+
+  list_projects:
+    title: List projects
+    description: List projects in a workspace or team, with their gids and names.
+    category: projects
+    read_only: true
+    request:
+      method: GET
+      path: /api/1.0/projects
+      query:
+        workspace: "${workspace_gid}"
+        team: "${team_gid}"
+        archived: "${archived}"
+        limit: "${limit}"
+        offset: "${offset}"
+        opt_fields: "${fields}"
+    input:
+      workspace_gid:
+        type: string
+        description: Workspace gid to list projects in.
+        optional: true
+      team_gid:
+        type: string
+        description: Team gid to list projects in.
+        optional: true
+      archived:
+        type: boolean
+        description: Return archived projects instead of active ones.
+        optional: true
+      limit:
+        type: integer
+        description: How many projects per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      offset:
+        type: string
+        description: Cursor from the previous response's next_page.offset.
+        optional: true
+      fields:
+        type: array
+        description: Extra fields to return, e.g. ["name","notes","due_on","owner"].
+        optional: true
+        items: {type: string}
+    output:
+      description: A page of projects.
+      type: array
+      response_path: data
+      items:
+        type: object
+        properties:
+          gid: {type: string}
+          name: {type: string}
+
+  get_project:
+    title: Get a project
+    description: >-
+      Read one project's details -- name, notes, owner, team, due date and
+      current status.
+    category: projects
+    read_only: true
+    request:
+      method: GET
+      path: /api/1.0/projects/${project_gid}
+      query:
+        opt_fields: "${fields}"
+    input:
+      project_gid:
+        type: string
+        description: The project gid.
+      fields:
+        type: array
+        description: Extra fields to return.
+        optional: true
+        items: {type: string}
+    output:
+      description: The project.
+      type: object
+      response_path: data
+      properties:
+        gid: {type: string}
+        name: {type: string}
+        notes: "{type: string}"
+        owner: {type: object}
+        due_on: {type: string}
+
+  create_project:
+    title: Create a project
+    description: >-
+      Create a project in a workspace, optionally under a team. In an
+      organisation a team gid is required.
+    category: projects
+    request:
+      method: POST
+      path: /api/1.0/projects
+      body:
+        data:
+          name: "${name}"
+          workspace: "${workspace_gid}"
+          team: "${team_gid}"
+          notes: "${notes}"
+          due_on: "${due_on}"
+          color: "${color}"
+          public: "${public}"
+    input:
+      name:
+        type: string
+        description: Project name.
+      workspace_gid:
+        type: string
+        description: Workspace gid to create it in.
+      team_gid:
+        type: string
+        description: Team gid. Required in an organisation.
+        optional: true
+      notes:
+        type: string
+        description: Project description.
+        optional: true
+      due_on:
+        type: string
+        description: Due date as YYYY-MM-DD.
+        optional: true
+      color:
+        type: string
+        description: Project colour, e.g. light-green, dark-blue.
+        optional: true
+      public:
+        type: boolean
+        description: Visible to the whole team rather than just members.
+        optional: true
+    output:
+      description: The created project.
+      type: object
+      response_path: data
+      properties:
+        gid: {type: string}
+        name: {type: string}
+        permalink_url: {type: string}
+
+  list_tasks:
+    title: List tasks
+    description: >-
+      List tasks in a project, section, tag, or assigned to someone in a
+      workspace. Exactly one of project_gid, section_gid or the
+      assignee/workspace pair must be given.
+    category: tasks
+    read_only: true
+    request:
+      method: GET
+      path: /api/1.0/tasks
+      query:
+        project: "${project_gid}"
+        section: "${section_gid}"
+        assignee: "${assignee}"
+        workspace: "${workspace_gid}"
+        completed_since: "${completed_since}"
+        modified_since: "${modified_since}"
+        limit: "${limit}"
+        offset: "${offset}"
+        opt_fields: "${fields}"
+    input:
+      project_gid:
+        type: string
+        description: List the tasks in this project.
+        optional: true
+      section_gid:
+        type: string
+        description: List the tasks in this section.
+        optional: true
+      assignee:
+        type: string
+        description: User gid or email. Must be paired with workspace_gid.
+        optional: true
+      workspace_gid:
+        type: string
+        description: Workspace to scope an assignee search to.
+        optional: true
+      completed_since:
+        type: string
+        description: Only tasks completed since this ISO 8601 instant, or "now" for incomplete ones.
+        optional: true
+      modified_since:
+        type: string
+        description: Only tasks changed since this ISO 8601 instant.
+        optional: true
+      limit:
+        type: integer
+        description: How many tasks per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      offset:
+        type: string
+        description: Cursor from the previous response's next_page.offset.
+        optional: true
+      fields:
+        type: array
+        description: Extra fields to return, e.g. ["name","completed","due_on","assignee.name"].
+        optional: true
+        items: {type: string}
+    output:
+      description: A page of tasks.
+      type: array
+      response_path: data
+      items:
+        type: object
+        properties:
+          gid: {type: string}
+          name: {type: string}
+          completed: {type: boolean}
+
+  search_tasks:
+    title: Search tasks in a workspace
+    description: >-
+      Full-text search across a workspace's tasks, optionally narrowed to
+      complete or incomplete ones. Only available on paid Asana plans.
+    category: tasks
+    read_only: true
+    request:
+      method: GET
+      path: /api/1.0/workspaces/${workspace_gid}/tasks/search
+      query:
+        text: "${query}"
+        completed: "${completed}"
+        "assignee.any": "${assignee}"
+        "projects.any": "${project_gids}"
+        limit: "${limit}"
+        opt_fields: "${fields}"
+    input:
+      workspace_gid:
+        type: string
+        description: Workspace to search in.
+      query:
+        type: string
+        description: Words to search for in task names and descriptions.
+      completed:
+        type: boolean
+        description: Restrict to complete or incomplete tasks.
+        optional: true
+      assignee:
+        type: array
+        description: Only tasks assigned to any of these user gids.
+        optional: true
+        items: {type: string}
+      project_gids:
+        type: array
+        description: Only tasks in any of these projects.
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: How many results to return (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      fields:
+        type: array
+        description: Extra fields to return.
+        optional: true
+        items: {type: string}
+    output:
+      description: Matching tasks.
+      type: array
+      response_path: data
+      items: {type: object}
+
+  get_task:
+    title: Get a task
+    description: >-
+      Read one task in full -- name, notes, assignee, due date, projects,
+      custom fields and subtask count.
+    category: tasks
+    read_only: true
+    request:
+      method: GET
+      path: /api/1.0/tasks/${task_gid}
+      query:
+        opt_fields: "${fields}"
+    input:
+      task_gid:
+        type: string
+        description: The task gid.
+      fields:
+        type: array
+        description: Extra fields to return.
+        optional: true
+        items: {type: string}
+    output:
+      description: The task.
+      type: object
+      response_path: data
+      properties:
+        gid: {type: string}
+        name: {type: string}
+        notes: "{type: string}"
+        assignee: {type: object}
+        due_on: {type: string}
+        completed: {type: boolean}
+
+  create_task:
+    title: Create a task
+    description: >-
+      Create a task and put it in one or more projects. Either projects or a
+      workspace is required; a task with neither has nowhere to live.
+    category: tasks
+    request:
+      method: POST
+      path: /api/1.0/tasks
+      body:
+        data:
+          name: "${name}"
+          notes: "${notes}"
+          projects: "${project_gids}"
+          workspace: "${workspace_gid}"
+          assignee: "${assignee}"
+          due_on: "${due_on}"
+          due_at: "${due_at}"
+          parent: "${parent_task_gid}"
+          followers: "${followers}"
+          custom_fields: "${custom_fields}"
+    input:
+      name:
+        type: string
+        description: What the task is.
+      project_gids:
+        type: array
+        description: Projects to add the task to.
+        optional: true
+        items: {type: string}
+      workspace_gid:
+        type: string
+        description: Workspace for a task with no project.
+        optional: true
+      notes:
+        type: string
+        description: Task description, as plain text.
+        optional: true
+      assignee:
+        type: string
+        description: User gid or email to assign it to. "me" works too.
+        optional: true
+      due_on:
+        type: string
+        description: Due date as YYYY-MM-DD.
+        optional: true
+      due_at:
+        type: string
+        description: Due date and time, ISO 8601. Use instead of due_on, not with it.
+        optional: true
+      parent_task_gid:
+        type: string
+        description: Make this a subtask of that task.
+        optional: true
+      followers:
+        type: array
+        description: User gids to follow the task.
+        optional: true
+        items: {type: string}
+      custom_fields:
+        type: object
+        description: Custom field gid to value.
+        optional: true
+    output:
+      description: The created task.
+      type: object
+      response_path: data
+      properties:
+        gid: {type: string}
+        name: {type: string}
+        permalink_url: {type: string}
+
+  update_task:
+    title: Update a task
+    description: >-
+      Change a task -- rename it, reassign it, move its due date, or mark it
+      complete. Only what is supplied is written.
+    category: tasks
+    request:
+      method: PUT
+      path: /api/1.0/tasks/${task_gid}
+      body:
+        data:
+          name: "${name}"
+          notes: "${notes}"
+          assignee: "${assignee}"
+          due_on: "${due_on}"
+          completed: "${completed}"
+          custom_fields: "${custom_fields}"
+    input:
+      task_gid:
+        type: string
+        description: The task gid.
+      name:
+        type: string
+        description: New name.
+        optional: true
+      notes:
+        type: string
+        description: New description.
+        optional: true
+      assignee:
+        type: string
+        description: New assignee's user gid or email. Pass "null" to unassign.
+        optional: true
+      due_on:
+        type: string
+        description: New due date as YYYY-MM-DD.
+        optional: true
+      completed:
+        type: boolean
+        description: Mark the task complete or incomplete.
+        optional: true
+      custom_fields:
+        type: object
+        description: Custom field gid to new value.
+        optional: true
+    output:
+      description: The updated task.
+      type: object
+      response_path: data
+      properties:
+        gid: {type: string}
+        completed: {type: boolean}
+
+  delete_task:
+    title: Delete a task
+    description: >-
+      Move a task to the user's deleted items, where Asana keeps it for 30 days.
+      Not recoverable through this tool.
+    category: tasks
+    destructive: true
+    request:
+      method: DELETE
+      path: /api/1.0/tasks/${task_gid}
+    input:
+      task_gid:
+        type: string
+        description: The task to delete.
+    output:
+      description: An empty data envelope on success.
+      type: object
+
+  comment_on_task:
+    title: Comment on a task
+    description: Add a comment to a task's activity feed, as plain text or HTML.
+    category: tasks
+    request:
+      method: POST
+      path: /api/1.0/tasks/${task_gid}/stories
+      body:
+        data:
+          text: "${text}"
+          html_text: "${html_text}"
+    input:
+      task_gid:
+        type: string
+        description: The task gid.
+      text:
+        type: string
+        description: The comment as plain text. Use html_text instead for formatting.
+        optional: true
+      html_text:
+        type: string
+        description: The comment as Asana-flavoured HTML, wrapped in <body>...</body>.
+        optional: true
+    output:
+      description: The created comment story.
+      type: object
+      response_path: data
+      properties:
+        gid: {type: string}
+        text: {type: string}
+        created_at: {type: string}
+
+  add_task_to_project:
+    title: Add a task to a project
+    description: >-
+      Put an existing task into a project, optionally in a specific section or
+      at a specific position.
+    category: tasks
+    request:
+      method: POST
+      path: /api/1.0/tasks/${task_gid}/addProject
+      body:
+        data:
+          project: "${project_gid}"
+          section: "${section_gid}"
+          insert_after: "${insert_after}"
+          insert_before: "${insert_before}"
+    input:
+      task_gid:
+        type: string
+        description: The task gid.
+      project_gid:
+        type: string
+        description: Project to add it to.
+      section_gid:
+        type: string
+        description: Section within the project.
+        optional: true
+      insert_after:
+        type: string
+        description: Task gid to place this one after.
+        optional: true
+      insert_before:
+        type: string
+        description: Task gid to place this one before.
+        optional: true
+    output:
+      description: An empty data envelope on success.
+      type: object
+
+  list_sections:
+    title: List a project's sections
+    description: List the sections (columns or groups) in a project, with their gids.
+    category: projects
+    read_only: true
+    request:
+      method: GET
+      path: /api/1.0/projects/${project_gid}/sections
+      query:
+        limit: "${limit}"
+        offset: "${offset}"
+    input:
+      project_gid:
+        type: string
+        description: The project gid.
+      limit:
+        type: integer
+        description: How many sections per page.
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      offset:
+        type: string
+        description: Cursor from the previous response's next_page.offset.
+        optional: true
+    output:
+      description: The project's sections.
+      type: array
+      response_path: data
+      items:
+        type: object
+        properties:
+          gid: {type: string}
+          name: {type: string}
+
+  list_users:
+    title: List workspace members
+    description: >-
+      List the users in a workspace with their gids and email addresses, which
+      the assignee arguments take.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /api/1.0/users
+      query:
+        workspace: "${workspace_gid}"
+        limit: "${limit}"
+        offset: "${offset}"
+        opt_fields: "${fields}"
+    input:
+      workspace_gid:
+        type: string
+        description: Workspace whose members to list.
+      limit:
+        type: integer
+        description: How many users per page.
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      offset:
+        type: string
+        description: Cursor from the previous response's next_page.offset.
+        optional: true
+      fields:
+        type: array
+        description: Extra fields to return, e.g. ["name","email"].
+        optional: true
+        items: {type: string}
+    output:
+      description: The workspace's members.
+      type: array
+      response_path: data
+      items:
+        type: object
+        properties:
+          gid: {type: string}
+          name: {type: string}
+          email: {type: string}
+
+  get_me:
+    title: Get the authenticated user
+    description: >-
+      Read the Asana account the token belongs to and the workspaces it can
+      reach. The cheapest health check for an Asana connection.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /api/1.0/users/me
+    input: {}
+    output:
+      description: The authenticated user.
+      type: object
+      response_path: data
+      properties:
+        gid: {type: string}
+        name: {type: string}
+        email: {type: string}
+        workspaces: {type: array}

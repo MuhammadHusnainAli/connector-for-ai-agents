@@ -1,0 +1,982 @@
+# Stripe API tools.
+#
+# Stripe takes form-encoded bodies, not JSON, with nested values in bracket
+# notation -- `encoding: form` handles that. Connect OAuth issues just two
+# scopes, read_only and read_write, so every write tool asks for read_write.
+#
+# Docs: https://docs.stripe.com/api
+
+connector_id: stripe
+display_name: Stripe
+docs_url: https://docs.stripe.com/api
+
+scope_rules:
+  implies:
+    read_write: [read_only]
+
+tools:
+
+  # -- customers -------------------------------------------------------------
+
+  list_customers:
+    title: List customers
+    description: >-
+      Page through customers, newest first. Use starting_after with the last
+      id from the previous page to walk the whole list.
+    category: customers
+    scopes: [read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/customers
+      query:
+        limit: "${limit}"
+        starting_after: "${starting_after}"
+        email: "${email}"
+    input:
+      limit:
+        type: integer
+        description: How many customers per page (1-100).
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 100
+      starting_after:
+        type: string
+        description: Object id from the previous page, to fetch the next one.
+        optional: true
+      email:
+        type: string
+        description: Only customers with exactly this email address.
+        optional: true
+        format: email
+    output:
+      description: A page of customers.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}
+
+  get_customer:
+    title: Get a customer
+    description: Read one customer's details, including their default payment method and balance.
+    category: customers
+    scopes: [read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/customers/${customer_id}
+    input:
+      customer_id:
+        type: string
+        description: The customer id, starting cus_.
+        example: cus_ABC123
+    output:
+      description: The customer.
+      type: object
+      properties:
+        id: {type: string}
+        email: {type: string}
+        name: {type: string}
+        balance: {type: integer}
+        currency: {type: string}
+
+  search_customers:
+    title: Search customers
+    description: >-
+      Find customers with Stripe's search query language, e.g.
+      "email:'ada@example.com'" or "metadata['tier']:'gold'".
+    category: customers
+    scopes: [read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/customers/search
+      query:
+        query: "${query}"
+        limit: "${limit}"
+        page: "${page}"
+    input:
+      query:
+        type: string
+        description: Stripe search query.
+        example: "email:'ada@example.com'"
+      limit:
+        type: integer
+        description: How many results per page (1-100).
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 100
+      page:
+        type: string
+        description: Cursor from the previous response's next_page.
+        optional: true
+    output:
+      description: Matching customers.
+      type: object
+      properties:
+        data: {type: array}
+        next_page: {type: string}
+
+  create_customer:
+    title: Create a customer
+    description: >-
+      Create a customer record to attach payments, invoices and subscriptions
+      to. Metadata is arbitrary key-value data Stripe stores alongside it.
+    category: customers
+    scopes: [read_write]
+    request:
+      method: POST
+      path: /v1/customers
+      encoding: form
+      body:
+        email: "${email}"
+        name: "${name}"
+        phone: "${phone}"
+        description: "${description}"
+        metadata: "${metadata}"
+    input:
+      email:
+        type: string
+        description: The customer's email address.
+        optional: true
+        format: email
+      name:
+        type: string
+        description: The customer's full name or business name.
+        optional: true
+      phone:
+        type: string
+        description: Phone number.
+        optional: true
+      description:
+        type: string
+        description: Internal note shown in the Stripe dashboard.
+        optional: true
+      metadata:
+        type: object
+        description: "Your own key-value data, e.g. {\"user_id\": \"42\"}."
+        optional: true
+    output:
+      description: The created customer.
+      type: object
+      properties:
+        id: {type: string}
+        email: {type: string}
+        created: {type: integer}
+
+  update_customer:
+    title: Update a customer
+    description: Change a customer's details or metadata; unsupplied fields are untouched.
+    category: customers
+    scopes: [read_write]
+    request:
+      method: POST
+      path: /v1/customers/${customer_id}
+      encoding: form
+      body:
+        email: "${email}"
+        name: "${name}"
+        phone: "${phone}"
+        description: "${description}"
+        metadata: "${metadata}"
+    input:
+      customer_id:
+        type: string
+        description: The customer id.
+      email:
+        type: string
+        description: New email address.
+        optional: true
+        format: email
+      name:
+        type: string
+        description: New name.
+        optional: true
+      phone:
+        type: string
+        description: New phone number.
+        optional: true
+      description:
+        type: string
+        description: New internal note.
+        optional: true
+      metadata:
+        type: object
+        description: Metadata to merge in. A key set to an empty string is removed.
+        optional: true
+    output:
+      description: The updated customer.
+      type: object
+      properties:
+        id: {type: string}
+        email: {type: string}
+
+  delete_customer:
+    title: Delete a customer
+    description: >-
+      Permanently delete a customer. Their subscriptions are cancelled
+      immediately. This cannot be undone.
+    category: customers
+    scopes: [read_write]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/customers/${customer_id}
+    input:
+      customer_id:
+        type: string
+        description: The customer id.
+    output:
+      description: Confirmation of deletion.
+      type: object
+      properties:
+        id: {type: string}
+        deleted: {type: boolean}
+
+  # -- payments --------------------------------------------------------------
+
+  list_payment_intents:
+    title: List payment intents
+    description: >-
+      Page through payment intents, newest first, optionally for one customer
+      or within a date range.
+    category: payments
+    scopes: [read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/payment_intents
+      query:
+        limit: "${limit}"
+        starting_after: "${starting_after}"
+        customer: "${customer_id}"
+        created: "${created}"
+    input:
+      limit:
+        type: integer
+        description: How many payment intents per page (1-100).
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 100
+      starting_after:
+        type: string
+        description: Object id from the previous page.
+        optional: true
+      customer_id:
+        type: string
+        description: Only payments for this customer.
+        optional: true
+      created:
+        type: object
+        description: "Date filter, e.g. {\"gte\": 1750000000} as a Unix epoch."
+        optional: true
+    output:
+      description: A page of payment intents.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}
+
+  get_payment_intent:
+    title: Get a payment intent
+    description: Read one payment intent's status, amount and the charge it produced.
+    category: payments
+    scopes: [read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/payment_intents/${payment_intent_id}
+    input:
+      payment_intent_id:
+        type: string
+        description: The payment intent id, starting pi_.
+        example: pi_ABC123
+    output:
+      description: The payment intent.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string}
+        amount: {type: integer}
+        currency: {type: string}
+        latest_charge: {type: string}
+
+  create_payment_intent:
+    title: Create a payment intent
+    description: >-
+      Start a payment. Amount is in the currency's smallest unit -- 1000 is
+      $10.00. The returned client_secret is what a front end confirms with.
+    category: payments
+    scopes: [read_write]
+    destructive: true
+    request:
+      method: POST
+      path: /v1/payment_intents
+      encoding: form
+      body:
+        amount: "${amount}"
+        currency: "${currency}"
+        customer: "${customer_id}"
+        description: "${description}"
+        receipt_email: "${receipt_email}"
+        automatic_payment_methods:
+          enabled: "${automatic_payment_methods}"
+        metadata: "${metadata}"
+    input:
+      amount:
+        type: integer
+        description: Amount in the smallest currency unit, e.g. 1000 for $10.00.
+        minimum: 1
+      currency:
+        type: string
+        description: Three-letter ISO currency code, lower case.
+        example: usd
+      customer_id:
+        type: string
+        description: Customer to charge, if the payment belongs to one.
+        optional: true
+      description:
+        type: string
+        description: What the payment is for, shown on the statement.
+        optional: true
+      receipt_email:
+        type: string
+        description: Send the receipt here.
+        optional: true
+        format: email
+      automatic_payment_methods:
+        type: boolean
+        description: Let Stripe choose which payment methods to offer.
+        optional: true
+        default: true
+      metadata:
+        type: object
+        description: Your own key-value data.
+        optional: true
+    output:
+      description: The created payment intent.
+      type: object
+      properties:
+        id: {type: string}
+        client_secret: {type: string, description: "Secret the front end confirms the payment with."}
+        status: {type: string}
+        amount: {type: integer}
+
+  refund_payment:
+    title: Refund a payment
+    description: >-
+      Refund a payment in full, or partially by naming an amount. Refunds cannot
+      be reversed.
+    category: payments
+    scopes: [read_write]
+    destructive: true
+    request:
+      method: POST
+      path: /v1/refunds
+      encoding: form
+      body:
+        payment_intent: "${payment_intent_id}"
+        amount: "${amount}"
+        reason: "${reason}"
+        metadata: "${metadata}"
+    input:
+      payment_intent_id:
+        type: string
+        description: The payment intent to refund.
+      amount:
+        type: integer
+        description: Amount to refund in the smallest currency unit. Omit to refund it all.
+        optional: true
+        minimum: 1
+      reason:
+        type: string
+        description: Why it is being refunded.
+        optional: true
+        enum: [duplicate, fraudulent, requested_by_customer]
+      metadata:
+        type: object
+        description: Your own key-value data.
+        optional: true
+    output:
+      description: The refund.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string}
+        amount: {type: integer}
+
+  list_charges:
+    title: List charges
+    description: Page through charges, newest first, optionally for one customer.
+    category: payments
+    scopes: [read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/charges
+      query:
+        limit: "${limit}"
+        starting_after: "${starting_after}"
+        customer: "${customer_id}"
+    input:
+      limit:
+        type: integer
+        description: How many charges per page (1-100).
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 100
+      starting_after:
+        type: string
+        description: Object id from the previous page.
+        optional: true
+      customer_id:
+        type: string
+        description: Only charges for this customer.
+        optional: true
+    output:
+      description: A page of charges.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}
+
+  # -- checkout and billing --------------------------------------------------
+
+  create_checkout_session:
+    title: Create a Checkout session
+    description: >-
+      Create a hosted Stripe Checkout page and return its URL. Line items name
+      existing prices, e.g. [{"price": "price_123", "quantity": 1}].
+    category: checkout
+    scopes: [read_write]
+    request:
+      method: POST
+      path: /v1/checkout/sessions
+      encoding: form
+      body:
+        mode: "${mode}"
+        line_items: "${line_items}"
+        success_url: "${success_url}"
+        cancel_url: "${cancel_url}"
+        customer: "${customer_id}"
+        customer_email: "${customer_email}"
+        metadata: "${metadata}"
+    input:
+      mode:
+        type: string
+        description: What the session charges for.
+        enum: [payment, subscription, setup]
+      line_items:
+        type: array
+        description: "What is being sold, each {\"price\": \"price_...\", \"quantity\": 1}."
+        items: {type: object}
+      success_url:
+        type: string
+        description: Where to send the customer after paying.
+        format: uri
+      cancel_url:
+        type: string
+        description: Where to send the customer if they back out.
+        optional: true
+        format: uri
+      customer_id:
+        type: string
+        description: Existing customer to bill.
+        optional: true
+      customer_email:
+        type: string
+        description: Prefill the email field for a new customer.
+        optional: true
+        format: email
+      metadata:
+        type: object
+        description: Your own key-value data.
+        optional: true
+    output:
+      description: The Checkout session.
+      type: object
+      properties:
+        id: {type: string}
+        url: {type: string, description: "The hosted page to send the customer to."}
+        status: {type: string}
+
+  list_subscriptions:
+    title: List subscriptions
+    description: Page through subscriptions, optionally for one customer or in one state.
+    category: billing
+    scopes: [read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/subscriptions
+      query:
+        limit: "${limit}"
+        starting_after: "${starting_after}"
+        customer: "${customer_id}"
+        status: "${status}"
+        price: "${price_id}"
+    input:
+      limit:
+        type: integer
+        description: How many subscriptions per page (1-100).
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 100
+      starting_after:
+        type: string
+        description: Object id from the previous page.
+        optional: true
+      customer_id:
+        type: string
+        description: Only subscriptions for this customer.
+        optional: true
+      status:
+        type: string
+        description: Only subscriptions in this state.
+        optional: true
+        enum: [active, past_due, unpaid, canceled, incomplete, incomplete_expired, trialing, paused, all]
+      price_id:
+        type: string
+        description: Only subscriptions on this price.
+        optional: true
+    output:
+      description: A page of subscriptions.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}
+
+  create_subscription:
+    title: Create a subscription
+    description: >-
+      Subscribe a customer to one or more prices. Items are
+      [{"price": "price_123", "quantity": 1}]; set trial_period_days to start
+      with a free trial.
+    category: billing
+    scopes: [read_write]
+    destructive: true
+    request:
+      method: POST
+      path: /v1/subscriptions
+      encoding: form
+      body:
+        customer: "${customer_id}"
+        items: "${items}"
+        trial_period_days: "${trial_period_days}"
+        default_payment_method: "${default_payment_method}"
+        metadata: "${metadata}"
+    input:
+      customer_id:
+        type: string
+        description: Customer to subscribe.
+      items:
+        type: array
+        description: "Prices to subscribe them to, each {\"price\": ..., \"quantity\": ...}."
+        items: {type: object}
+      trial_period_days:
+        type: integer
+        description: Days of free trial before the first charge.
+        optional: true
+        minimum: 1
+      default_payment_method:
+        type: string
+        description: Payment method id to bill.
+        optional: true
+      metadata:
+        type: object
+        description: Your own key-value data.
+        optional: true
+    output:
+      description: The created subscription.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string}
+        current_period_end: {type: integer}
+
+  cancel_subscription:
+    title: Cancel a subscription
+    description: >-
+      Cancel a subscription immediately. To let it run to the end of the paid
+      period instead, use update_subscription with cancel_at_period_end.
+    category: billing
+    scopes: [read_write]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/subscriptions/${subscription_id}
+    input:
+      subscription_id:
+        type: string
+        description: The subscription id, starting sub_.
+    output:
+      description: The cancelled subscription.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string}
+        canceled_at: {type: integer}
+
+  update_subscription:
+    title: Update a subscription
+    description: >-
+      Change a subscription -- swap items, or set cancel_at_period_end so it
+      ends when the current period does rather than right now.
+    category: billing
+    scopes: [read_write]
+    request:
+      method: POST
+      path: /v1/subscriptions/${subscription_id}
+      encoding: form
+      body:
+        cancel_at_period_end: "${cancel_at_period_end}"
+        items: "${items}"
+        proration_behavior: "${proration_behavior}"
+        metadata: "${metadata}"
+    input:
+      subscription_id:
+        type: string
+        description: The subscription id.
+      cancel_at_period_end:
+        type: boolean
+        description: End the subscription when the current period finishes.
+        optional: true
+      items:
+        type: array
+        description: "Item changes, each {\"id\": \"si_...\", \"price\": \"price_...\"}."
+        optional: true
+        items: {type: object}
+      proration_behavior:
+        type: string
+        description: How to handle the mid-period price change.
+        optional: true
+        enum: [create_prorations, none, always_invoice]
+      metadata:
+        type: object
+        description: Your own key-value data.
+        optional: true
+    output:
+      description: The updated subscription.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string}
+        cancel_at_period_end: {type: boolean}
+
+  list_invoices:
+    title: List invoices
+    description: Page through invoices, optionally for one customer or in one state.
+    category: billing
+    scopes: [read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/invoices
+      query:
+        limit: "${limit}"
+        starting_after: "${starting_after}"
+        customer: "${customer_id}"
+        status: "${status}"
+    input:
+      limit:
+        type: integer
+        description: How many invoices per page (1-100).
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 100
+      starting_after:
+        type: string
+        description: Object id from the previous page.
+        optional: true
+      customer_id:
+        type: string
+        description: Only invoices for this customer.
+        optional: true
+      status:
+        type: string
+        description: Only invoices in this state.
+        optional: true
+        enum: [draft, open, paid, uncollectible, void]
+    output:
+      description: A page of invoices.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}
+
+  create_invoice:
+    title: Create a draft invoice
+    description: >-
+      Open a draft invoice for a customer. Add line items with invoice items,
+      then send it with send_invoice.
+    category: billing
+    scopes: [read_write]
+    request:
+      method: POST
+      path: /v1/invoices
+      encoding: form
+      body:
+        customer: "${customer_id}"
+        description: "${description}"
+        days_until_due: "${days_until_due}"
+        collection_method: "${collection_method}"
+        auto_advance: "${auto_advance}"
+        metadata: "${metadata}"
+    input:
+      customer_id:
+        type: string
+        description: Customer to invoice.
+      description:
+        type: string
+        description: Note shown on the invoice.
+        optional: true
+      collection_method:
+        type: string
+        description: Whether to charge automatically or send an invoice to pay.
+        optional: true
+        enum: [charge_automatically, send_invoice]
+      days_until_due:
+        type: integer
+        description: Payment terms in days. Only valid with send_invoice.
+        optional: true
+        minimum: 0
+      auto_advance:
+        type: boolean
+        description: Let Stripe finalise and collect on the invoice automatically.
+        optional: true
+      metadata:
+        type: object
+        description: Your own key-value data.
+        optional: true
+    output:
+      description: The draft invoice.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string}
+        total: {type: integer}
+
+  send_invoice:
+    title: Send an invoice to the customer
+    description: >-
+      Finalise a draft invoice and email it to the customer. Only works when the
+      invoice's collection_method is send_invoice.
+    category: billing
+    scopes: [read_write]
+    destructive: true
+    request:
+      method: POST
+      path: /v1/invoices/${invoice_id}/send
+      encoding: form
+      body:
+        expand: "${expand}"
+    input:
+      invoice_id:
+        type: string
+        description: The invoice id, starting in_.
+      expand:
+        type: array
+        description: Related objects to inline in the response, e.g. ["customer"].
+        optional: true
+        items: {type: string}
+    output:
+      description: The sent invoice.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string}
+        hosted_invoice_url: {type: string}
+
+  # -- catalogue and account -------------------------------------------------
+
+  list_products:
+    title: List products
+    description: Page through the product catalogue, optionally only the active products.
+    category: catalogue
+    scopes: [read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/products
+      query:
+        limit: "${limit}"
+        starting_after: "${starting_after}"
+        active: "${active}"
+    input:
+      limit:
+        type: integer
+        description: How many products per page (1-100).
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 100
+      starting_after:
+        type: string
+        description: Object id from the previous page.
+        optional: true
+      active:
+        type: boolean
+        description: Only active products.
+        optional: true
+    output:
+      description: A page of products.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}
+
+  create_product:
+    title: Create a product
+    description: >-
+      Add a product to the catalogue. Prices are separate objects created
+      against it with create_price.
+    category: catalogue
+    scopes: [read_write]
+    request:
+      method: POST
+      path: /v1/products
+      encoding: form
+      body:
+        name: "${name}"
+        description: "${description}"
+        active: "${active}"
+        metadata: "${metadata}"
+    input:
+      name:
+        type: string
+        description: Product name, shown to customers.
+      description:
+        type: string
+        description: Product description, shown at checkout.
+        optional: true
+      active:
+        type: boolean
+        description: Whether it can be bought.
+        optional: true
+      metadata:
+        type: object
+        description: Your own key-value data.
+        optional: true
+    output:
+      description: The created product.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        active: {type: boolean}
+
+  create_price:
+    title: Create a price
+    description: >-
+      Attach a price to a product. unit_amount is in the smallest currency unit;
+      supply recurring_interval for a subscription price.
+    category: catalogue
+    scopes: [read_write]
+    request:
+      method: POST
+      path: /v1/prices
+      encoding: form
+      body:
+        product: "${product_id}"
+        unit_amount: "${unit_amount}"
+        currency: "${currency}"
+        recurring:
+          interval: "${recurring_interval}"
+          interval_count: "${recurring_interval_count}"
+        metadata: "${metadata}"
+    input:
+      product_id:
+        type: string
+        description: Product this price belongs to.
+      unit_amount:
+        type: integer
+        description: Price in the smallest currency unit, e.g. 2500 for $25.00.
+        minimum: 0
+      currency:
+        type: string
+        description: Three-letter ISO currency code, lower case.
+        example: usd
+      recurring_interval:
+        type: string
+        description: Billing period for a subscription price. Omit for a one-off price.
+        optional: true
+        enum: [day, week, month, year]
+      recurring_interval_count:
+        type: integer
+        description: How many intervals between charges, e.g. 3 with month for quarterly.
+        optional: true
+        minimum: 1
+      metadata:
+        type: object
+        description: Your own key-value data.
+        optional: true
+    output:
+      description: The created price.
+      type: object
+      properties:
+        id: {type: string}
+        unit_amount: {type: integer}
+        currency: {type: string}
+
+  get_balance:
+    title: Get the account balance
+    description: >-
+      Read the connected Stripe account's available and pending balance per
+      currency.
+    category: account
+    scopes: [read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/balance
+    input: {}
+    output:
+      description: The balance, split by currency.
+      type: object
+      properties:
+        available: {type: array}
+        pending: {type: array}
+
+  list_events:
+    title: List recent account events
+    description: >-
+      Read the account's event log -- every object change Stripe recorded, which
+      is also what webhooks deliver. Useful for reconciling missed webhooks.
+    category: account
+    scopes: [read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/events
+      query:
+        limit: "${limit}"
+        starting_after: "${starting_after}"
+        type: "${type}"
+    input:
+      limit:
+        type: integer
+        description: How many events per page (1-100).
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 100
+      starting_after:
+        type: string
+        description: Object id from the previous page.
+        optional: true
+      type:
+        type: string
+        description: Only events of this type, e.g. "invoice.paid". Wildcards allowed.
+        optional: true
+    output:
+      description: A page of events.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}

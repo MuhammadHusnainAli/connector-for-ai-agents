@@ -84,6 +84,64 @@ to the matching file. CI runs `--check` and fails on a stale layout.
 Please don't modify existing connector definitions in the same change as adding
 new ones — it makes review much harder.
 
+## Adding tools for a connector
+
+A connector's *tools* are the named capabilities an agent can call with it —
+`send_email_with_file_attachments`, `create_deal`, `merge_pull_request`. They
+live in one YAML file per connector, in the folder for that connector's auth
+mode, and adding a set needs no code change:
+
+```bash
+# If the provider publishes an OpenAPI spec, start from it rather than a blank file:
+python scripts/discover_openapi.py --out plan.json          # find specs
+python scripts/generate_from_openapi.py --plan plan.json    # build packs from them
+
+python scripts/scaffold_tools.py --new stripe   # writes data/tools/oauth2/stripe.yaml
+python scripts/scaffold_tools.py --check        # lints every pack, and README's coverage table
+python scripts/scaffold_tools.py --readme       # refreshes that table after adding a pack
+python scripts/scaffold_tools.py --backlog      # what still needs a pack, most-connected categories first
+python scripts/scaffold_tools.py --catalogue    # regenerate TOOLS.md after adding a pack
+python scripts/scaffold_tools.py --backlog --category crm --limit 20
+pytest tests/test_tool_packs.py                 # the same contract, in CI
+```
+
+[docs/tools.md](docs/tools.md) is the field-by-field reference. What a reviewer
+will look for:
+
+- **The description is what the model reads.** Say what the tool does, what it
+  returns, and when to reach for a different tool instead — `send_email` versus
+  `create_draft` versus `send_email_with_link_attachments`. At least 40
+  characters, and the lint enforces that floor rather than blessing it as a
+  target.
+- **Scopes come from the provider's own docs**, and `docs_url` has to point at
+  the page they came from so a reviewer can check them. If a provider does not
+  put permissions on the token at all — Notion, Asana, Intercom — declare no
+  scopes and say so in the file's header comment. Guessing a scope name is worse
+  than declaring none, because a wrong one disables a tool that in fact works.
+- **Arguments are the tool's contract.** Every one needs a type and a
+  description; every one must be read by some template; no template may read one
+  that is not declared. Prefer arguments a model can fill from a conversation
+  (`to`, `subject`, `body`) over ones it would have to construct (`raw`,
+  `payload`) — `$map` and `$mime` exist so the provider's shape stays in the
+  YAML rather than in the caller's head.
+- **`read_only` and `destructive` gate approval policies**, so they must match
+  the verb: `GET` is read-only, `DELETE` is destructive, and a POST that only
+  reads (GraphQL, search endpoints) is read-only too.
+- **Keep the pack in one file, sorted by category.** A pack that outgrows its
+  file is a sign the connector wants splitting in the catalogue, not that the
+  tools want scattering.
+
+- **Guard the objects that hang on one optional argument.** A nested object
+  keeps its defaults and literals even when the argument that justifies it is
+  absent, and `{"contentType": "HTML"}` with no `content` tells Graph to clear
+  the body. Put `$when: "${body}"` on such a node. The suite builds every tool
+  with only its required arguments and fails on any empty object or array, which
+  is what catches the ones you miss.
+
+The lint builds every tool's request with synthetic arguments and fails if the
+url, query, headers or body come back with a leftover `${…}` — so a pack that
+passes `--check` will at least reach the provider.
+
 ## Changing the machinery
 
 `registry.py` (catalogue), `auth/` (one module per auth mode), `proxy.py`

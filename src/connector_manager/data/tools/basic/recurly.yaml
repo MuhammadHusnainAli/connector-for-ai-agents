@@ -1,0 +1,563 @@
+# Recurly tools.
+#
+# Recurly v3 addresses records either by their id or by a `code-` prefixed
+# business key: account "code-acme" is the account whose code is "acme". Both
+# work wherever an id is taken.
+#
+# Amounts are decimal numbers in the site's currency, and every list endpoint
+# pages with a cursor.
+#
+# Docs: https://recurly.com/developers/api/v2021-02-25/
+
+connector_id: recurly
+display_name: Recurly
+docs_url: https://recurly.com/developers/api/v2021-02-25/
+
+tools:
+
+  list_accounts:
+    title: List accounts
+    description: >-
+      Page through customer accounts. Recurly pages with an opaque cursor
+      returned in `next`.
+    category: accounts
+    read_only: true
+    request:
+      method: GET
+      path: /accounts
+      query:
+        limit: "${limit}"
+        cursor: "${cursor}"
+        state: "${state}"
+        email: "${email}"
+        sort: "${sort}"
+        order: "${order}"
+    input:
+      limit:
+        type: integer
+        description: How many accounts per page (1-200).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 200
+      cursor:
+        type: string
+        description: Cursor from the previous response's `next` link.
+        optional: true
+      state:
+        type: string
+        description: Only accounts in this state.
+        optional: true
+        enum: [active, inactive]
+      email:
+        type: string
+        description: Only accounts with this email address.
+        optional: true
+        format: email
+      sort:
+        type: string
+        description: Field to sort by.
+        optional: true
+        enum: [created_at, updated_at]
+      order:
+        type: string
+        description: Sort direction.
+        optional: true
+        enum: [asc, desc]
+    output:
+      description: A page of accounts.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}
+        next: {type: string}
+
+  get_account:
+    title: Get an account
+    description: >-
+      Read one account by id, or by its code using the "code-" prefix, e.g.
+      "code-acme".
+    category: accounts
+    read_only: true
+    request:
+      method: GET
+      path: /accounts/${account_id}
+    input:
+      account_id:
+        type: string
+        description: Account id, or "code-<your-account-code>".
+        example: code-acme
+    output:
+      description: The account.
+      type: object
+      properties:
+        id: {type: string}
+        code: {type: string}
+        email: {type: string}
+        state: {type: string}
+        balance: {type: object}
+
+  create_account:
+    title: Create an account
+    description: >-
+      Create a customer account. `code` is your own unique identifier for the
+      customer and is how the account is addressed later.
+    category: accounts
+    request:
+      method: POST
+      path: /accounts
+      body:
+        code: "${code}"
+        email: "${email}"
+        first_name: "${first_name}"
+        last_name: "${last_name}"
+        company: "${company}"
+        preferred_locale: "${preferred_locale}"
+        billing_info: "${billing_info}"
+        address: "${address}"
+    input:
+      code:
+        type: string
+        description: Your own unique code for the customer, e.g. their user id.
+      email:
+        type: string
+        description: The customer's email address.
+        optional: true
+        format: email
+      first_name:
+        type: string
+        description: First name.
+        optional: true
+      last_name:
+        type: string
+        description: Last name.
+        optional: true
+      company:
+        type: string
+        description: Company name.
+        optional: true
+      preferred_locale:
+        type: string
+        description: Locale for invoices and emails, e.g. en-GB.
+        optional: true
+      billing_info:
+        type: object
+        description: "Payment details, usually {\"token_id\": \"<Recurly.js token>\"}."
+        optional: true
+      address:
+        type: object
+        description: Billing address, e.g. {"street1":"1 Main St","city":"Austin"}.
+        optional: true
+    output:
+      description: The created account.
+      type: object
+      properties:
+        id: {type: string}
+        code: {type: string}
+        state: {type: string}
+
+  update_account:
+    title: Update an account
+    description: Change an account's details or billing information.
+    category: accounts
+    request:
+      method: PUT
+      path: /accounts/${account_id}
+      body:
+        email: "${email}"
+        first_name: "${first_name}"
+        last_name: "${last_name}"
+        company: "${company}"
+        billing_info: "${billing_info}"
+        address: "${address}"
+    input:
+      account_id:
+        type: string
+        description: Account id, or "code-<code>".
+      email:
+        type: string
+        description: New email address.
+        optional: true
+        format: email
+      first_name:
+        type: string
+        description: New first name.
+        optional: true
+      last_name:
+        type: string
+        description: New last name.
+        optional: true
+      company:
+        type: string
+        description: New company name.
+        optional: true
+      billing_info:
+        type: object
+        description: New payment details, usually a fresh token_id.
+        optional: true
+      address:
+        type: object
+        description: New billing address.
+        optional: true
+    output:
+      description: The updated account.
+      type: object
+      properties:
+        id: {type: string}
+        updated_at: {type: string}
+
+  list_subscriptions:
+    title: List subscriptions
+    description: >-
+      Page through subscriptions across the site, optionally in one state.
+    category: subscriptions
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions
+      query:
+        limit: "${limit}"
+        cursor: "${cursor}"
+        state: "${state}"
+        sort: "${sort}"
+        order: "${order}"
+    input:
+      limit:
+        type: integer
+        description: How many subscriptions per page (1-200).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 200
+      cursor:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+      state:
+        type: string
+        description: Only subscriptions in this state.
+        optional: true
+        enum: [active, canceled, expired, future, in_trial, live, paused]
+      sort:
+        type: string
+        description: Field to sort by.
+        optional: true
+        enum: [created_at, updated_at]
+      order:
+        type: string
+        description: Sort direction.
+        optional: true
+        enum: [asc, desc]
+    output:
+      description: A page of subscriptions.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}
+        next: {type: string}
+
+  create_subscription:
+    title: Create a subscription
+    description: >-
+      Subscribe an account to a plan. The account must already have billing
+      information, or supply it inline through account.billing_info.
+    category: subscriptions
+    destructive: true
+    request:
+      method: POST
+      path: /subscriptions
+      body:
+        plan_code: "${plan_code}"
+        account:
+          code: "${account_code}"
+        currency: "${currency}"
+        quantity: "${quantity}"
+        unit_amount: "${unit_amount}"
+        starts_at: "${starts_at}"
+        trial_ends_at: "${trial_ends_at}"
+        collection_method: "${collection_method}"
+        custom_fields: "${custom_fields}"
+    input:
+      plan_code:
+        type: string
+        description: Code of the plan to subscribe to.
+      account_code:
+        type: string
+        description: Code of the account being subscribed.
+      currency:
+        type: string
+        description: Three-letter currency code.
+        optional: true
+      quantity:
+        type: integer
+        description: How many units of the plan.
+        optional: true
+        minimum: 1
+      unit_amount:
+        type: number
+        description: Override the plan's price per unit.
+        optional: true
+        minimum: 0
+      starts_at:
+        type: string
+        description: When billing starts, ISO 8601. Defaults to now.
+        optional: true
+      trial_ends_at:
+        type: string
+        description: When any trial ends, ISO 8601.
+        optional: true
+      collection_method:
+        type: string
+        description: Charge automatically, or invoice the customer.
+        optional: true
+        enum: [automatic, manual]
+      custom_fields:
+        type: array
+        description: "Custom field values, each {\"name\": \"...\", \"value\": \"...\"}."
+        optional: true
+        items: {type: object}
+    output:
+      description: The created subscription.
+      type: object
+      properties:
+        id: {type: string}
+        state: {type: string}
+        current_period_ends_at: {type: string}
+
+  cancel_subscription:
+    title: Cancel a subscription
+    description: >-
+      Cancel a subscription. By default it runs to the end of the paid term;
+      pass "bill_date" to terminate at the next bill instead.
+    category: subscriptions
+    destructive: true
+    request:
+      method: PUT
+      path: /subscriptions/${subscription_id}/cancel
+      body:
+        timeframe: "${timeframe}"
+    input:
+      subscription_id:
+        type: string
+        description: Subscription id, or "uuid-<uuid>".
+      timeframe:
+        type: string
+        description: When the cancellation takes effect.
+        optional: true
+        default: term_end
+        enum: [term_end, bill_date]
+    output:
+      description: The cancelled subscription.
+      type: object
+      properties:
+        id: {type: string}
+        state: {type: string}
+        canceled_at: {type: string}
+
+  list_invoices:
+    title: List invoices
+    description: Page through the site's invoices, optionally in one state or type.
+    category: invoices
+    read_only: true
+    request:
+      method: GET
+      path: /invoices
+      query:
+        limit: "${limit}"
+        cursor: "${cursor}"
+        state: "${state}"
+        type: "${type}"
+        sort: "${sort}"
+    input:
+      limit:
+        type: integer
+        description: How many invoices per page (1-200).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 200
+      cursor:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+      state:
+        type: string
+        description: Only invoices in this state.
+        optional: true
+        enum: [pending, paid, failed, past_due, open, processing, voided]
+      type:
+        type: string
+        description: Only invoices of this type.
+        optional: true
+        enum: [charge, credit, legacy, non-legacy]
+      sort:
+        type: string
+        description: Field to sort by.
+        optional: true
+        enum: [created_at, updated_at]
+    output:
+      description: A page of invoices.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}
+        next: {type: string}
+
+  get_invoice:
+    title: Get an invoice
+    description: Read one invoice's totals, line items and payment state.
+    category: invoices
+    read_only: true
+    request:
+      method: GET
+      path: /invoices/${invoice_id}
+    input:
+      invoice_id:
+        type: string
+        description: Invoice id, or "number-<invoice-number>".
+    output:
+      description: The invoice.
+      type: object
+      properties:
+        id: {type: string}
+        number: {type: string}
+        state: {type: string}
+        total: {type: number}
+        balance: {type: number}
+
+  create_charge:
+    title: Add a one-off charge
+    description: >-
+      Add a charge to an account's pending invoice. It is billed on the next
+      invoice unless one is created immediately.
+    category: billing
+    request:
+      method: POST
+      path: /accounts/${account_id}/line_items
+      body:
+        currency: "${currency}"
+        unit_amount: "${unit_amount}"
+        type: "${type}"
+        description: "${description}"
+        quantity: "${quantity}"
+        product_code: "${product_code}"
+    input:
+      account_id:
+        type: string
+        description: Account id, or "code-<code>".
+      currency:
+        type: string
+        description: Three-letter currency code.
+      unit_amount:
+        type: number
+        description: Amount per unit, as a decimal.
+      type:
+        type: string
+        description: A charge bills the customer; a credit reduces what they owe.
+        optional: true
+        default: charge
+        enum: [charge, credit]
+      description:
+        type: string
+        description: What the charge is for, shown on the invoice.
+        optional: true
+      quantity:
+        type: integer
+        description: How many units.
+        optional: true
+        minimum: 1
+      product_code:
+        type: string
+        description: Your own product code for reporting.
+        optional: true
+    output:
+      description: The created line item.
+      type: object
+      properties:
+        id: {type: string}
+        amount: {type: number}
+        state: {type: string}
+
+  list_plans:
+    title: List plans
+    description: >-
+      List the site's plans with their codes and pricing, which
+      create_subscription takes.
+    category: catalogue
+    read_only: true
+    request:
+      method: GET
+      path: /plans
+      query:
+        limit: "${limit}"
+        cursor: "${cursor}"
+        state: "${state}"
+    input:
+      limit:
+        type: integer
+        description: How many plans per page (1-200).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 200
+      cursor:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+      state:
+        type: string
+        description: Only plans in this state.
+        optional: true
+        enum: [active, inactive]
+    output:
+      description: A page of plans.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}
+
+  list_account_transactions:
+    title: List an account's transactions
+    description: >-
+      Read the payments and refunds recorded against one account, newest first.
+    category: billing
+    read_only: true
+    request:
+      method: GET
+      path: /accounts/${account_id}/transactions
+      query:
+        limit: "${limit}"
+        cursor: "${cursor}"
+        type: "${type}"
+        success: "${success}"
+    input:
+      account_id:
+        type: string
+        description: Account id, or "code-<code>".
+      limit:
+        type: integer
+        description: How many transactions per page (1-200).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 200
+      cursor:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+      type:
+        type: string
+        description: Only transactions of this type.
+        optional: true
+        enum: [authorization, capture, purchase, refund, verify]
+      success:
+        type: string
+        description: Only successful or only failed transactions.
+        optional: true
+        enum: ["true", "false"]
+    output:
+      description: A page of transactions.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}

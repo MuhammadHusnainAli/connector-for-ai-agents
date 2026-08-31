@@ -1,0 +1,1682 @@
+# ADP tools.
+#
+# ADP's HCM APIs split cleanly in two, and the tools follow that split:
+#
+#   * **reads** are ordinary REST collections under a domain prefix --
+#     `/hr/v2/workers`, `/payroll/v1/payroll-outputs`,
+#     `/hcm/v1/validation-tables/...` -- and take OData-style `$filter`,
+#     `$select`, `$top` and `$skip`;
+#   * **writes are events**, not PUTs. Changing anything about a worker means
+#     posting to `/events/{domain}/{version}/{event-name}` with an event
+#     payload; there is no `PATCH /workers/{aoid}`. Each event also has a
+#     `/meta` sibling that describes the payload it accepts and the values its
+#     code fields will take on this client's configuration.
+#
+# Two consequences worth planning for:
+#
+#   * **read `/meta` before writing.** ADP code lists (job codes, reason codes,
+#     department ids) are per-client, and an event with a code the client does
+#     not define is rejected. `get_event_metadata` is that check;
+#   * **a worker is addressed by `aoid`**, the Associate OID, not by employee
+#     number or SSN. `list_workers` is how you resolve one.
+#
+# `post_event` and `get_event_metadata` are the general form of the write side:
+# ADP documents hundreds of event names across the HR, payroll, time and
+# recruiting domains, and those two tools reach any of them. The typed event
+# tools below cover the ones most integrations need.
+#
+# This connector authenticates with client credentials over mutual TLS -- the
+# certificate is part of the connection, so a 401 here usually means the
+# certificate rather than the token.
+#
+# Docs: https://developers.adp.com/
+
+connector_id: adp
+display_name: ADP
+docs_url: https://developers.adp.com/
+
+tools:
+
+  # -- workers ---------------------------------------------------------------
+
+  list_workers:
+    title: List workers
+    description: >-
+      The organisation's workers -- employees and contractors alike -- with
+      their personal, employment and assignment data. Narrow with an OData
+      `$filter` such as
+      `workers/workAssignments/assignmentStatus/statusCode/codeValue eq 'Active'`,
+      and page with `$top` and `$skip`. Worker records are large, so `$select`
+      is worth using.
+    category: workers
+    read_only: true
+    request:
+      method: GET
+      path: /hr/v2/workers
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      filter:
+        type: string
+        description: >-
+          OData filter over the worker collection, e.g. filtering on assignment
+          status or worker type.
+        optional: true
+      select:
+        type: string
+        description: Comma-separated fields to return, which cuts a large payload down sharply.
+        optional: true
+      top:
+        type: integer
+        description: How many workers to return.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: How many workers to skip, for paging.
+        optional: true
+        minimum: 0
+    output:
+      description: The matching workers.
+      type: object
+      properties:
+        workers: {type: array, description: "Each with associateOID, person, workAssignments and status."}
+        meta: {type: object, description: "Holds totalNumber where ADP returns it."}
+
+  get_worker:
+    title: Get a worker
+    description: >-
+      One worker by Associate OID, with their person record, work assignments,
+      business communication and status. This is the id every other worker call
+      takes.
+    category: workers
+    read_only: true
+    request:
+      method: GET
+      path: /hr/v2/workers/${aoid}
+      query:
+        $select: "${select}"
+    input:
+      aoid:
+        type: string
+        description: The worker's Associate OID (AOID).
+        example: G3349PZGZY9B7CVW
+      select:
+        type: string
+        description: Comma-separated fields to return.
+        optional: true
+    output:
+      description: The worker.
+      type: object
+      properties:
+        workers: {type: array, description: "A single-element collection holding the worker."}
+
+  get_worker_metadata:
+    title: Get the worker schema
+    description: >-
+      What the worker resource looks like on this client's configuration --
+      which fields exist and which code values they accept. Read this before
+      building a filter or an event payload, since ADP's code lists are
+      per-client.
+    category: workers
+    read_only: true
+    request:
+      method: GET
+      path: /hr/v2/workers/meta
+    input: {}
+    output:
+      description: The worker resource's metadata.
+      type: object
+      properties:
+        meta: {type: object}
+
+  list_worker_work_assignments:
+    title: List a worker's work assignments
+    description: >-
+      Every work assignment (position) a worker holds, with its job, department,
+      manager, pay rate and status. A worker can hold several, which is why this
+      is a collection rather than a field.
+    category: workers
+    read_only: true
+    request:
+      method: GET
+      path: /hr/v2/workers/${aoid}/work-assignments
+    input:
+      aoid:
+        type: string
+        description: The worker's Associate OID.
+    output:
+      description: The worker's work assignments.
+      type: object
+      properties:
+        workAssignments: {type: array}
+
+  get_worker_photo:
+    title: Get a worker's photo
+    description: >-
+      The worker's profile image as stored in ADP. Returns the image itself, not
+      a URL.
+    category: workers
+    read_only: true
+    request:
+      method: GET
+      path: /hr/v2/workers/${aoid}/worker-images/photo
+    input:
+      aoid:
+        type: string
+        description: The worker's Associate OID.
+    output:
+      description: The worker's photo.
+      type: string
+
+  # -- organisation and reference data ---------------------------------------
+
+  list_organization_departments:
+    title: List departments
+    description: >-
+      The company's departments and organisational units. Their ids are what a
+      work assignment's department field takes, so this is the list to validate
+      against before posting an assignment change.
+    category: organisation
+    read_only: true
+    request:
+      method: GET
+      path: /core/v1/organization-departments
+      query:
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      top:
+        type: integer
+        description: How many departments to return.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: How many departments to skip.
+        optional: true
+        minimum: 0
+    output:
+      description: The organisation's departments.
+      type: object
+      properties:
+        organizationDepartments: {type: array}
+
+  get_validation_tables_metadata:
+    title: List the validation tables
+    description: >-
+      Which validation tables this client has -- jobs, departments, cost
+      centres, business units, work locations and the custom-field tables. These
+      are ADP's code lists, and they are configured per client, so this is the
+      starting point for any lookup.
+    category: organisation
+    read_only: true
+    request:
+      method: GET
+      path: /hcm/v1/validation-tables/meta
+    input: {}
+    output:
+      description: The available validation tables.
+      type: object
+      properties:
+        meta: {type: object}
+
+  list_jobs:
+    title: List jobs
+    description: >-
+      The job codes defined for this client, with their titles. A hire or
+      assignment event must name a job that exists here.
+    category: organisation
+    read_only: true
+    request:
+      method: GET
+      path: /hcm/v1/validation-tables/jobs
+      query:
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      top:
+        type: integer
+        description: How many jobs to return.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: How many jobs to skip.
+        optional: true
+        minimum: 0
+    output:
+      description: The client's job codes.
+      type: object
+      properties:
+        validationTable: {type: object, description: "Holds the listItems for the jobs table."}
+
+  get_jobs_metadata:
+    title: Get the jobs table schema
+    description: >-
+      The shape of the jobs validation table -- which attributes each job
+      carries on this client's configuration.
+    category: organisation
+    read_only: true
+    request:
+      method: GET
+      path: /hcm/v1/validation-tables/jobs/meta
+    input: {}
+    output:
+      description: The jobs table's metadata.
+      type: object
+      properties:
+        meta: {type: object}
+
+  get_job:
+    title: Get a job
+    description: One job code by item id, with its title and attributes.
+    category: organisation
+    read_only: true
+    request:
+      method: GET
+      path: /hcm/v1/validation-tables/jobs/${item_id}
+    input:
+      item_id:
+        type: string
+        description: The job's item id within the validation table.
+    output:
+      description: The job.
+      type: object
+      properties:
+        validationTable: {type: object}
+
+  list_cost_centers:
+    title: List cost centres
+    description: >-
+      The cost centres defined for this client -- what payroll and expense
+      allocations are charged to.
+    category: organisation
+    read_only: true
+    request:
+      method: GET
+      path: /hcm/v1/validation-tables/cost-centers
+      query:
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      top:
+        type: integer
+        description: How many cost centres to return.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: How many cost centres to skip.
+        optional: true
+        minimum: 0
+    output:
+      description: The client's cost centres.
+      type: object
+      properties:
+        validationTable: {type: object}
+
+  list_worker_custom_fields:
+    title: List worker custom fields
+    description: >-
+      The custom fields this client defined on workers, with their codes and
+      allowed values -- the fields a generic integration would otherwise miss
+      entirely.
+    category: organisation
+    read_only: true
+    request:
+      method: GET
+      path: /hcm/v1/validation-tables/worker-custom-fields
+    input: {}
+    output:
+      description: The worker custom fields.
+      type: object
+      properties:
+        validationTable: {type: object}
+
+  get_worker_custom_field:
+    title: Get a worker custom field
+    description: One worker custom field by item id, with its type and permitted values.
+    category: organisation
+    read_only: true
+    request:
+      method: GET
+      path: /hcm/v1/validation-tables/worker-custom-fields/${item_id}
+    input:
+      item_id:
+        type: string
+        description: The custom field's item id.
+    output:
+      description: The custom field.
+      type: object
+      properties:
+        validationTable: {type: object}
+
+  list_person_custom_fields:
+    title: List person custom fields
+    description: >-
+      The custom fields defined on the person record, as distinct from the
+      worker record -- personal rather than employment data.
+    category: organisation
+    read_only: true
+    request:
+      method: GET
+      path: /hcm/v1/validation-tables/person-custom-fields
+    input: {}
+    output:
+      description: The person custom fields.
+      type: object
+      properties:
+        validationTable: {type: object}
+
+  get_person_custom_field:
+    title: Get a person custom field
+    description: One person custom field by item id, with its type and permitted values.
+    category: organisation
+    read_only: true
+    request:
+      method: GET
+      path: /hcm/v1/validation-tables/person-custom-fields/${item_id}
+    input:
+      item_id:
+        type: string
+        description: The custom field's item id.
+    output:
+      description: The custom field.
+      type: object
+      properties:
+        validationTable: {type: object}
+
+  create_department:
+    title: Create a department
+    description: >-
+      Add a department to the client's organisation structure. Departments are
+      referenced by work assignments, so create one before pointing assignments
+      at it.
+    category: organisation
+    request:
+      method: POST
+      path: /hcm/v1/validation-tables/departments
+      headers:
+        Content-Type: application/json
+      body: "${department}"
+    input:
+      department:
+        type: object
+        description: >-
+          The department to create, in the shape the departments validation
+          table declares -- read `get_validation_tables_metadata` first.
+    output:
+      description: The department that was created.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+
+  create_job:
+    title: Create a job
+    description: >-
+      Add a job code to the client's configuration. Hires and assignment
+      changes can then reference it; ADP rejects events naming a job that does
+      not exist.
+    category: organisation
+    request:
+      method: POST
+      path: /hcm/v1/validation-tables/jobs
+      headers:
+        Content-Type: application/json
+      body: "${job}"
+    input:
+      job:
+        type: object
+        description: The job to create, in the shape the jobs validation table declares.
+    output:
+      description: The job that was created.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+
+  create_business_unit:
+    title: Create a business unit
+    description: >-
+      Add a business unit to the client's organisation structure -- the level
+      above departments in most ADP configurations.
+    category: organisation
+    request:
+      method: POST
+      path: /hcm/v1/validation-tables/business-units
+      headers:
+        Content-Type: application/json
+      body: "${business_unit}"
+    input:
+      business_unit:
+        type: object
+        description: The business unit to create, as its validation table declares.
+    output:
+      description: The business unit that was created.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+
+  create_work_location:
+    title: Create a work location
+    description: >-
+      Add an associate work location. Locations drive tax jurisdiction in ADP,
+      so getting the address right matters beyond the record itself.
+    category: organisation
+    request:
+      method: POST
+      path: /hcm/v1/validation-tables/associate-work-locations
+      headers:
+        Content-Type: application/json
+      body: "${work_location}"
+    input:
+      work_location:
+        type: object
+        description: The work location to create, as its validation table declares.
+    output:
+      description: The work location that was created.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+
+  # -- payroll ---------------------------------------------------------------
+
+  list_payroll_outputs:
+    title: List payroll runs
+    description: >-
+      Payroll output summaries for completed runs, with their period dates,
+      totals and status. Filter with `$filter` on pay date or period to find the
+      run you want.
+    category: payroll
+    read_only: true
+    request:
+      method: GET
+      path: /payroll/v1/payroll-outputs
+      query:
+        $filter: "${filter}"
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      filter:
+        type: string
+        description: OData filter over the payroll output collection.
+        optional: true
+      top:
+        type: integer
+        description: How many runs to return.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: How many runs to skip.
+        optional: true
+        minimum: 0
+    output:
+      description: The payroll runs.
+      type: object
+      properties:
+        payrollOutputs: {type: array}
+
+  get_payroll_output:
+    title: Get a payroll run
+    description: >-
+      Full detail for one payroll run -- its totals, taxes and status. The
+      per-worker breakdown is a separate call, since it is much larger.
+    category: payroll
+    read_only: true
+    request:
+      method: GET
+      path: /payroll/v1/payroll-outputs/${payroll_output_id}
+    input:
+      payroll_output_id:
+        type: string
+        description: The payroll output's id.
+    output:
+      description: The payroll run.
+      type: object
+      properties:
+        payrollOutputs: {type: array}
+
+  list_worker_payroll_outputs:
+    title: Get a payroll run's worker pay data
+    description: >-
+      Per-worker pay statement data for one payroll run: earnings, deductions
+      and taxes for each person paid. This is payroll detail about identifiable
+      individuals -- handle what comes back accordingly.
+    category: payroll
+    read_only: true
+    request:
+      method: GET
+      path: /payroll/v1/payroll-outputs/${payroll_output_id}/worker-outputs
+      query:
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      payroll_output_id:
+        type: string
+        description: The payroll output's id.
+      top:
+        type: integer
+        description: How many worker records to return.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: How many worker records to skip.
+        optional: true
+        minimum: 0
+    output:
+      description: The run's per-worker pay data.
+      type: object
+      properties:
+        workerPayrollOutputs: {type: array}
+
+  list_payroll_instructions:
+    title: List pending payroll instructions
+    description: >-
+      Instructions and overrides queued for the next payroll run -- bonuses,
+      one-off deductions, garnishments. Read this before adding another, since
+      duplicates pay twice.
+    category: payroll
+    read_only: true
+    request:
+      method: GET
+      path: /payroll/v1/payroll-instructions
+      query:
+        $filter: "${filter}"
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      filter:
+        type: string
+        description: OData filter over the instruction collection.
+        optional: true
+      top:
+        type: integer
+        description: How many instructions to return.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: How many instructions to skip.
+        optional: true
+        minimum: 0
+    output:
+      description: The pending payroll instructions.
+      type: object
+      properties:
+        payrollInstructions: {type: array}
+
+  create_payroll_instruction:
+    title: Add a payroll instruction
+    description: >-
+      Queue a pay instruction for an upcoming run -- a bonus, a deduction
+      override, a garnishment. This is real money on a real payslip: once the
+      run processes it is paid, so check `list_payroll_instructions` first and
+      keep the request idempotent on your side.
+    category: payroll
+    request:
+      method: POST
+      path: /payroll/v1/payroll-instructions
+      headers:
+        Content-Type: application/json
+      body: "${instruction}"
+    input:
+      instruction:
+        type: object
+        description: >-
+          The instruction payload, naming the worker (by associateOID), the pay
+          item and the amount, as ADP's payroll instruction schema declares it.
+    output:
+      description: ADP's confirmation of the instruction.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+
+  # -- events: the general form ----------------------------------------------
+
+  post_event:
+    title: Post an ADP event
+    description: >-
+      ADP's universal write. Every change -- hiring, terminating, changing a
+      name, an address, a deduction -- is an event posted to
+      `/events/{domain}/{version}/{event-name}`, and this tool reaches any of
+      them. Domains are `hr`, `payroll`, `time` and `staffing`; event names look
+      like `worker.hire` or
+      `worker.business-communication.email.change`. Call
+      `get_event_metadata` for the same event first: it returns the payload
+      shape and the code values this client accepts.
+    category: events
+    request:
+      method: POST
+      path: /events/${domain}/${event_version}/${event_name}
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      domain:
+        type: string
+        description: The event domain, e.g. hr, payroll, time or staffing.
+        example: hr
+      event_name:
+        type: string
+        description: The event name, e.g. worker.hire or worker.legal-name.change.
+        example: worker.hire
+      event:
+        type: object
+        description: >-
+          The event payload -- typically {"events": [{"data": {...}}]} as the
+          event's own metadata describes.
+      event_version:
+        type: string
+        description: Version segment of the event, usually v1 or v2.
+        optional: true
+        default: v1
+    output:
+      description: ADP's confirmation, including any events it generated.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  get_event_metadata:
+    title: Get an event's payload schema
+    description: >-
+      What one event accepts on this client's configuration: its fields, which
+      are required, and the code values each code field permits. ADP's code
+      lists are per-client, so this is the check that stops an event being
+      rejected for an unknown reason code.
+    category: events
+    read_only: true
+    request:
+      method: GET
+      path: /events/${domain}/${event_version}/${event_name}/meta
+    input:
+      domain:
+        type: string
+        description: The event domain, e.g. hr or payroll.
+      event_name:
+        type: string
+        description: The event name, e.g. worker.hire.
+      event_version:
+        type: string
+        description: Version segment of the event, usually v1 or v2.
+        optional: true
+        default: v1
+    output:
+      description: The event's metadata.
+      type: object
+      properties:
+        meta: {type: object}
+
+  # -- events: worker lifecycle ----------------------------------------------
+
+  hire_worker:
+    title: Hire a worker
+    description: >-
+      Onboard a new employee or contractor, creating the worker record and its
+      first work assignment. The heaviest write in ADP: it starts payroll, tax
+      and benefits processing for a real person, so validate the payload against
+      `get_event_metadata` for `worker.hire` before sending it.
+    category: events
+    request:
+      method: POST
+      path: /events/hr/v1/worker.hire
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The hire event payload -- the person's legal name, birth date,
+          government id, hire date, and the work assignment's job, department,
+          location and pay rate, in the shape worker.hire's metadata declares.
+    output:
+      description: ADP's confirmation, including the new worker's associateOID.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  terminate_worker:
+    title: Terminate a worker
+    description: >-
+      End someone's employment. This stops pay, starts benefits offboarding and
+      is not something to send speculatively -- the effective date and reason
+      code drive final pay and statutory reporting. Reason codes are per-client;
+      check them with `get_event_metadata`.
+    category: events
+    destructive: true
+    request:
+      method: POST
+      path: /events/hr/v1/worker.terminate
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The termination event payload -- the worker's associateOID, the
+          termination date and the reason code, as worker.terminate's metadata
+          declares.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  change_worker_legal_name:
+    title: Change a worker's legal name
+    description: >-
+      Update the name ADP uses for payroll and tax filing. Distinct from a
+      preferred name: this one appears on the payslip and the W-2, so it should
+      match the worker's legal documents.
+    category: events
+    request:
+      method: POST
+      path: /events/hr/v1/worker.legal-name.change
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload -- the worker's associateOID and the new legal name
+          fields.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  change_worker_preferred_name:
+    title: Change a worker's preferred name
+    description: >-
+      Update the name the worker is known by in ADP's interfaces, leaving their
+      legal name for payroll and tax untouched.
+    category: events
+    request:
+      method: POST
+      path: /events/hr/v1/worker.preferred-name.change
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: The event payload -- the worker's associateOID and the new preferred name.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  change_worker_birth_name:
+    title: Change a worker's birth name
+    description: >-
+      Update the birth name held on the person record, which some jurisdictions
+      require alongside the legal name.
+    category: events
+    request:
+      method: POST
+      path: /events/hr/v1/worker.birth-name.change
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: The event payload -- the worker's associateOID and the new birth name.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  change_worker_marital_status:
+    title: Change a worker's marital status
+    description: >-
+      Update marital status. In the United States this can affect tax
+      withholding and benefits eligibility, so it is a payroll-relevant change
+      rather than a cosmetic one.
+    category: events
+    request:
+      method: POST
+      path: /events/hr/v1/worker.marital-status.change
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload -- the worker's associateOID, the new status code
+          and its effective date.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  add_worker_legal_address:
+    title: Add a worker's legal address
+    description: >-
+      Add the worker's legal address. This drives tax jurisdiction in the
+      United States, so an address change here can change withholding.
+    category: events
+    request:
+      method: POST
+      path: /events/hr/v1/worker.legal-address.add
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: The event payload -- the worker's associateOID and the address.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  change_worker_legal_address:
+    title: Change a worker's legal address
+    description: >-
+      Update the worker's legal address, with the effective date the change
+      applies from -- which is what tax calculations key on.
+    category: events
+    request:
+      method: POST
+      path: /events/hr/v1/worker.legal-address.change
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: The event payload -- the worker's associateOID and the new address.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  remove_worker_legal_address:
+    title: Remove a worker's legal address
+    description: >-
+      Remove a legal address from the worker's record. A worker with no legal
+      address can fail payroll validation, so this is normally paired with
+      adding a replacement.
+    category: events
+    destructive: true
+    request:
+      method: POST
+      path: /events/hr/v1/worker.legal-address.remove
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: The event payload -- the worker's associateOID and the address to remove.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  add_worker_personal_address:
+    title: Add a worker's personal address
+    description: >-
+      Add a personal (home) address, as distinct from the legal address used
+      for tax.
+    category: events
+    request:
+      method: POST
+      path: /events/hr/v1/worker.personal-address.add
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: The event payload -- the worker's associateOID and the address.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  change_worker_personal_address:
+    title: Change a worker's personal address
+    description: >-
+      Update a worker's personal (home) address. Unlike the legal address this
+      does not drive tax jurisdiction, so it is the safer field to sync from an
+      HR system of record.
+    category: events
+    request:
+      method: POST
+      path: /events/hr/v1/worker.personal-address.change
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: The event payload -- the worker's associateOID and the new address.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  remove_worker_personal_address:
+    title: Remove a worker's personal address
+    description: Remove a personal address from the worker's record.
+    category: events
+    destructive: true
+    request:
+      method: POST
+      path: /events/hr/v1/worker.personal-address.remove
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: The event payload -- the worker's associateOID and the address to remove.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  add_worker_business_email:
+    title: Add a worker's business email
+    description: >-
+      Add a business email address to a worker. This is often what ADP's own
+      notifications and self-service invitations are sent to.
+    category: events
+    request:
+      method: POST
+      path: /events/hr/v1/worker.business-communication.email.add
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: The event payload -- the worker's associateOID and the email address.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  change_worker_business_email:
+    title: Change a worker's business email
+    description: >-
+      Update a worker's business email address -- the usual write when an
+      identity system renames someone's mailbox.
+    category: events
+    request:
+      method: POST
+      path: /events/hr/v1/worker.business-communication.email.change
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: The event payload -- the worker's associateOID and the new email address.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  remove_worker_business_email:
+    title: Remove a worker's business email
+    description: >-
+      Remove a business email address from a worker. They stop receiving ADP
+      notifications at it, including self-service invitations.
+    category: events
+    destructive: true
+    request:
+      method: POST
+      path: /events/hr/v1/worker.business-communication.email.remove
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: The event payload -- the worker's associateOID and the address to remove.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  add_worker_business_mobile:
+    title: Add a worker's business mobile number
+    description: Add a business mobile number to a worker's record.
+    category: events
+    request:
+      method: POST
+      path: /events/hr/v1/worker.business-communication.mobile.add
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: The event payload -- the worker's associateOID and the number.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  change_worker_business_mobile:
+    title: Change a worker's business mobile number
+    description: Update a worker's business mobile number.
+    category: events
+    request:
+      method: POST
+      path: /events/hr/v1/worker.business-communication.mobile.change
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: The event payload -- the worker's associateOID and the new number.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  remove_worker_business_mobile:
+    title: Remove a worker's business mobile number
+    description: Remove a business mobile number from a worker's record.
+    category: events
+    destructive: true
+    request:
+      method: POST
+      path: /events/hr/v1/worker.business-communication.mobile.remove
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: The event payload -- the worker's associateOID and the number to remove.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  add_worker_personal_email:
+    title: Add a worker's personal email
+    description: >-
+      Add a personal email address. This is what offboarding communications and
+      W-2 access notices typically go to once a business address is gone.
+    category: events
+    request:
+      method: POST
+      path: /events/hr/v1/worker.personal-communication.email.add
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: The event payload -- the worker's associateOID and the email address.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  change_worker_personal_email:
+    title: Change a worker's personal email
+    description: Update a worker's personal email address.
+    category: events
+    request:
+      method: POST
+      path: /events/hr/v1/worker.personal-communication.email.change
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: The event payload -- the worker's associateOID and the new email address.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  add_worker_personal_mobile:
+    title: Add a worker's personal mobile number
+    description: Add a personal mobile number to a worker's record.
+    category: events
+    request:
+      method: POST
+      path: /events/hr/v1/worker.personal-communication.mobile.add
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: The event payload -- the worker's associateOID and the number.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  change_worker_personal_mobile:
+    title: Change a worker's personal mobile number
+    description: Update a worker's personal mobile number.
+    category: events
+    request:
+      method: POST
+      path: /events/hr/v1/worker.personal-communication.mobile.change
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: The event payload -- the worker's associateOID and the new number.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  upload_worker_photo:
+    title: Upload a worker's photo
+    description: >-
+      Set a worker's profile image. The payload carries the image as the event's
+      metadata describes, so read `get_event_metadata` for
+      `worker.photo.upload` before sending one.
+    category: events
+    request:
+      method: POST
+      path: /events/hr/v1/worker.photo.upload
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: The event payload -- the worker's associateOID and the encoded image.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  remove_worker_photo:
+    title: Remove a worker's photo
+    description: Remove a worker's profile image from ADP.
+    category: events
+    destructive: true
+    request:
+      method: POST
+      path: /events/hr/v1/worker.photo.remove
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: The event payload -- the worker's associateOID.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  change_worker_military_status:
+    title: Change a worker's military status
+    description: >-
+      Update military status, which United States employers report on and which
+      can affect eligibility for certain leave and benefits.
+    category: events
+    request:
+      method: POST
+      path: /events/hr/v1/worker.military-status.change
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: The event payload -- the worker's associateOID and the new status code.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  change_worker_military_classification:
+    title: Change a worker's military classification
+    description: >-
+      Update the worker's military classification, the companion field to
+      military status in ADP's veteran reporting.
+    category: events
+    request:
+      method: POST
+      path: /events/hr/v1/worker.military-classification.change
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: The event payload -- the worker's associateOID and the new classification code.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  # -- events: pay and tax ---------------------------------------------------
+
+  start_worker_deduction:
+    title: Start a worker deduction
+    description: >-
+      Begin a general deduction for a worker -- a benefit contribution, a
+      repayment, a charitable gift. It takes money off real pay from its
+      effective date, so the amount and the deduction code both need to be
+      right; the codes are per-client.
+    category: events
+    request:
+      method: POST
+      path: /events/payroll/v2/worker-general-deduction-instruction.start
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload -- the worker's associateOID, the deduction code,
+          the amount or rate and the effective date.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  change_worker_deduction:
+    title: Change a worker deduction
+    description: >-
+      Change an existing deduction's amount, rate or goal. Takes effect from the
+      date in the payload, which decides which payroll run first reflects it.
+    category: events
+    request:
+      method: POST
+      path: /events/payroll/v2/worker-general-deduction-instruction.change
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload -- the worker's associateOID, the deduction being
+          changed and its new terms.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  stop_worker_deduction:
+    title: Stop a worker deduction
+    description: >-
+      End a deduction from a given date. Stopping late means money already came
+      off a payslip, so the effective date matters as much as the call.
+    category: events
+    destructive: true
+    request:
+      method: POST
+      path: /events/payroll/v2/worker-general-deduction-instruction.stop
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload -- the worker's associateOID, the deduction and the
+          date it stops.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  change_federal_income_tax_instruction:
+    title: Change a worker's federal income tax instruction
+    description: >-
+      Update United States federal withholding for a worker -- the W-4 data.
+      This changes take-home pay directly, and ADP validates it against the
+      current form year.
+    category: events
+    request:
+      method: POST
+      path: /events/payroll/v1/us-tax-profile.federal-income-tax-instruction.change
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload -- the worker's associateOID and the federal
+          withholding settings.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  add_local_income_tax_instruction:
+    title: Add a worker's local income tax instruction
+    description: >-
+      Add a local (city or county) withholding instruction, which United States
+      payroll needs when a worker lives or works in a taxing locality.
+    category: events
+    request:
+      method: POST
+      path: /events/payroll/v1/us-tax-profile.local-income-tax-instruction.add
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload -- the worker's associateOID, the locality and the
+          withholding settings.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  change_local_income_tax_instruction:
+    title: Change a worker's local income tax instruction
+    description: Update an existing local withholding instruction for a worker.
+    category: events
+    request:
+      method: POST
+      path: /events/payroll/v1/us-tax-profile.local-income-tax-instruction.change
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: The event payload -- the worker's associateOID and the new settings.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  remove_local_income_tax_instruction:
+    title: Remove a worker's local income tax instruction
+    description: >-
+      Remove a local withholding instruction -- typically after a move out of
+      the locality. Removing one that still applies under-withholds tax.
+    category: events
+    destructive: true
+    request:
+      method: POST
+      path: /events/payroll/v1/us-tax-profile.local-income-tax-instruction.remove
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: The event payload -- the worker's associateOID and the locality to remove.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  # -- events: onboarding ----------------------------------------------------
+
+  onboard_applicant:
+    title: Onboard an applicant
+    description: >-
+      Hand a hired applicant over to ADP onboarding, which starts the new-hire
+      paperwork and creates the worker on completion. The alternative to
+      `hire_worker` when the person came through a recruiting system.
+    category: events
+    request:
+      method: POST
+      path: /hcm/v2/applicant.onboard
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The onboarding payload -- the applicant's details and the position
+          they are being onboarded into, as this endpoint's metadata declares.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+        events: {type: array}
+
+  get_applicant_onboard_metadata:
+    title: Get the applicant onboarding schema
+    description: >-
+      What the onboarding call accepts on this client's configuration --
+      required fields and permitted code values.
+    category: events
+    read_only: true
+    request:
+      method: GET
+      path: /hcm/v2/applicant.onboard/meta
+    input: {}
+    output:
+      description: The onboarding payload's metadata.
+      type: object
+      properties:
+        meta: {type: object}
+
+  # -- worker profile writes -------------------------------------------------
+
+  set_work_assignment_base_remuneration:
+    title: Set a work assignment's base pay
+    description: >-
+      Set the base remuneration on one work assignment -- a pay rise, a
+      re-band, a correction. It is a PUT rather than an event, and it changes
+      what the worker is paid from the effective date in the payload.
+    category: workers
+    request:
+      method: PUT
+      path: /hr/worker-profile/v1/workers/${aoid}/work-assignments/${assignment_id}/base-remuneration
+      headers:
+        Content-Type: application/json
+      body: "${remuneration}"
+    input:
+      aoid:
+        type: string
+        description: The worker's Associate OID.
+      assignment_id:
+        type: string
+        description: Id of the work assignment, from `list_worker_work_assignments`.
+      remuneration:
+        type: object
+        description: >-
+          The base pay to set -- amount, currency, rate basis and effective
+          date, as this endpoint's metadata declares.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+
+  get_base_remuneration_metadata:
+    title: Get the base pay schema
+    description: >-
+      What the base remuneration call accepts for this worker and assignment,
+      including the rate bases and currencies configured for the client.
+    category: workers
+    read_only: true
+    request:
+      method: GET
+      path: /hr/worker-profile/v1/workers/${aoid}/work-assignments/${assignment_id}/base-remuneration/meta
+    input:
+      aoid:
+        type: string
+        description: The worker's Associate OID.
+      assignment_id:
+        type: string
+        description: Id of the work assignment.
+    output:
+      description: The base pay payload's metadata.
+      type: object
+      properties:
+        meta: {type: object}
+
+  add_work_assignment_additional_remuneration:
+    title: Add additional pay to a work assignment
+    description: >-
+      Add a recurring additional remuneration -- a shift allowance, a car
+      allowance, a stipend -- to one assignment. Recurring by nature, so it
+      keeps paying until stopped.
+    category: workers
+    request:
+      method: POST
+      path: /hr/worker-profile/v1/workers/${aoid}/work-assignments/${assignment_id}/additional-remunerations
+      headers:
+        Content-Type: application/json
+      body: "${remuneration}"
+    input:
+      aoid:
+        type: string
+        description: The worker's Associate OID.
+      assignment_id:
+        type: string
+        description: Id of the work assignment.
+      remuneration:
+        type: object
+        description: >-
+          The additional pay to add -- its type code, amount, currency and
+          effective date.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}
+
+  get_additional_remunerations_metadata:
+    title: Get the additional pay schema
+    description: >-
+      Which additional remuneration types this client defines and what each
+      requires -- the check before adding one.
+    category: workers
+    read_only: true
+    request:
+      method: GET
+      path: /hr/worker-profile/v1/workers/${aoid}/work-assignments/${assignment_id}/additional-remunerations/meta
+    input:
+      aoid:
+        type: string
+        description: The worker's Associate OID.
+      assignment_id:
+        type: string
+        description: Id of the work assignment.
+    output:
+      description: The additional pay payload's metadata.
+      type: object
+      properties:
+        meta: {type: object}
+
+  add_work_assignment_corporate_group:
+    title: Add a corporate grouping to a work assignment
+    description: >-
+      Attach a corporate grouping -- ADP's flexible organisational dimension,
+      used for reporting lines, divisions or cost structures the standard fields
+      do not cover.
+    category: workers
+    request:
+      method: POST
+      path: /hr/worker-profile/v1/workers/${aoid}/work-assignments/${assignment_id}/corporate-groups
+      headers:
+        Content-Type: application/json
+      body: "${corporate_group}"
+    input:
+      aoid:
+        type: string
+        description: The worker's Associate OID.
+      assignment_id:
+        type: string
+        description: Id of the work assignment.
+      corporate_group:
+        type: object
+        description: The grouping to attach, with its code and effective date.
+    output:
+      description: ADP's confirmation.
+      type: object
+      properties:
+        confirmMessage: {type: object}

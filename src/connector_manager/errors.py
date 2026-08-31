@@ -55,3 +55,29 @@ class VerificationError(ConnectorError):
 
 class RequestError(ConnectorError):
     """An authenticated proxy request failed."""
+
+
+class ToolError(ConnectorError):
+    """Base class for the tool layer's failures."""
+
+
+class UnknownToolError(ToolError):
+    """The connector has no tool by that name (or ships no tool pack at all)."""
+
+
+class ToolValidationError(ToolError):
+    """Arguments supplied to a tool failed its input schema."""
+
+    def __init__(self, message: str, argument_errors: dict[str, str] | None = None) -> None:
+        super().__init__(message, argument_errors=argument_errors or {})
+        self.argument_errors = argument_errors or {}
+
+
+class ToolPermissionError(ToolError):
+    """The connection's granted scopes do not cover this tool."""
+
+    def __init__(
+        self, message: str, tool: str | None = None, missing_scopes: list[str] | None = None
+    ) -> None:
+        super().__init__(message, tool=tool, missing_scopes=missing_scopes or [])
+        self.missing_scopes = missing_scopes or []

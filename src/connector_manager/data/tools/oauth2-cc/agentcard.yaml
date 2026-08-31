@@ -1,0 +1,222 @@
+# Agentcard tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://docs.agentcard.sh/openapi.json
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: agentcard
+display_name: Agentcard
+docs_url: https://docs.agentcard.sh/openapi.json
+generated: true
+generated_from: https://docs.agentcard.sh/openapi.json
+tools:
+  buy:
+    title: Buy
+    description: Buy One conversational endpoint that places real orders. Send the user's request as plain
+      text in ask; thread follow-ups with conversationid; place a shown cart by echoing its hash in confirm
+      (or an array of hashes for several carts). Money only moves on a confirm, and only for exactly the
+      cart the hash Calls POST /buy on Agentcard's API.
+    category: buy
+    request:
+      method: POST
+      path: /buy
+      body:
+        ask: ${ask}
+        conversation_id: ${conversation_id}
+        confirm: ${confirm}
+    input:
+      ask:
+        type: string
+        description: What the user wants, in plain language. Required unless the call is a confirm.
+        optional: true
+      conversation_id:
+        type: string
+        description: The thread to continue. A confirm always requires it.
+        optional: true
+      confirm:
+        type: string
+        description: A cart hash from a previous response (16 hex characters), or an array of hashes to
+          place several carts. An array confirm cannot carry an ask in the same call.
+        optional: true
+    output:
+      description: One turn of the purchase conversation, in the fixed envelope.
+      type: object
+  introspect_credential:
+    title: Introspect credential
+    description: Introspect credential Returns the organization and mode your token acts as. Useful as
+      a health check and to confirm you're pointed at the right credential. Calls GET /api/v2 on Agentcard's
+      API.
+    category: api
+    request:
+      method: GET
+      path: /api/v2
+    input: {}
+    output:
+      description: The organization and mode behind the token.
+      type: object
+    read_only: true
+  member_attach_status:
+    title: Get the attachment (member token)
+    description: Get the attachment (member token) The member's latest attachment, with a fresh attachurl
+      while it is pending. Calls GET /api/v2/attach on Agentcard's API.
+    category: api
+    request:
+      method: GET
+      path: /api/v2/attach
+    input: {}
+    output:
+      description: The attachment.
+      type: object
+    read_only: true
+  member_cards_list:
+    title: List the member's cards
+    description: 'List the member''s cards The member''s wallet as this connection sees it: added cards
+      (attachments, pending included) and the cards created against them. Calls GET /api/v2/cards on Agentcard''s
+      API.'
+    category: api
+    request:
+      method: GET
+      path: /api/v2/cards
+    input: {}
+    output:
+      description: Added cards and created cards.
+      type: object
+    read_only: true
+  member_card_create:
+    title: Create a card
+    description: Create a card Create a one-time virtual card against the member's added card, then key
+      its credentials into your checkout and close it when you're done. Sandbox answers 201 with an open
+      test card. Production answers 202 approvalpending with an approvalurl the member confirms with a
+      passkey; retry with the SAME Id Calls POST /api/v2/cards on Agentcard's API.
+    category: api
+    request:
+      method: POST
+      path: /api/v2/cards
+      body:
+        amount_cents: ${amount_cents}
+        currency: ${currency}
+        connected_card_id: ${connected_card_id}
+        merchant: ${merchant}
+        description: ${description}
+        metadata: ${metadata}
+    input:
+      amount_cents:
+        type: integer
+        description: Exact amount in cents the card can spend, e.g. 2500 = $25.00.
+      currency:
+        type: string
+        description: The currency field of the request body.
+        optional: true
+        enum:
+        - usd
+      connected_card_id:
+        type: string
+        description: Draw on a specific added card. Omit to use the newest active one.
+        optional: true
+      merchant:
+        type: object
+        description: The merchant field of the request body.
+        optional: true
+      description:
+        type: string
+        description: The description field of the request body.
+        optional: true
+      metadata:
+        type: object
+        description: The metadata field of the request body.
+        optional: true
+    output:
+      description: The card is open (sandbox, and frictionless production mints).
+      type: object
+  member_flow_status:
+    title: Get the member flow status
+    description: 'Get the member flow status One read that answers "what should happen next for this member":
+      add a card, create a card, share an approval link, or fetch the open card. Authenticated with the
+      member''s connection token from Verify the code. Calls GET /api/v2/flow_status on Agentcard''s API.'
+    category: api
+    request:
+      method: GET
+      path: /api/v2/flow_status
+    input: {}
+    output:
+      description: The flow status.
+      type: object
+    read_only: true
+  kyc_get_status:
+    title: Get verification status
+    description: Get verification status Polls the current verification status — the alternative to the
+      identity.verification.updated webhook. Calls GET /api/v2/kyc on Agentcard's API.
+    category: api
+    request:
+      method: GET
+      path: /api/v2/kyc
+      query:
+        user_id: ${user_id}
+    input:
+      user_id:
+        type: string
+        description: The connected user's id.
+    output:
+      description: The current status.
+      type: object
+    read_only: true
+  create_v2_onboarding_attempts:
+    title: Start attested onboarding
+    description: 'Start attested onboarding Create an onboarding attempt for a phone number you already
+      hold and text the returned walleturl to the user. No Agentcard account exists yet: the user sees
+      the wallet instantly, and our one-time code fires exactly once, inside our page, at their first
+      money action. You never see or relay the code. Calls POST /api/v2/onboarding_attempts on Agentcard''s
+      API.'
+    category: api
+    request:
+      method: POST
+      path: /api/v2/onboarding_attempts
+      body:
+        phone: ${phone}
+        external_user_id: ${external_user_id}
+    input:
+      phone:
+        type: string
+        description: The user's phone. E.164 preferred; US local formats are normalized.
+      external_user_id:
+        type: string
+        description: Your own id for this person, echoed on connection.created and the exchange.
+        optional: true
+    output:
+      description: The attempt. Text walleturl to the user; listen for connection.created, then exchange.
+      type: object
+  platform_connect_create:
+    title: Create a connect session
+    description: Create a connect session Starts a hosted "Connect with Agentcard" flow for a company
+      you're onboarding. Redirect the company to the returned url; when they finish, we redirect them
+      to your returnurl with a one-time code (plus your state) that you exchange for the connected organization's
+      API credentials. Requires client-cre Calls POST /api/v2/platform_connect_sessions on Agentcard's
+      API.
+    category: api
+    request:
+      method: POST
+      path: /api/v2/platform_connect_sessions
+      body:
+        return_url: ${return_url}
+        state: ${state}
+    input:
+      return_url:
+        type: string
+        description: Where we send the company when the flow completes. Must exactly match (origin + path)
+          a redirect URI registered on your OAuth client. https required; http://localhost is allowed
+          in test mode.
+      state:
+        type: string
+        description: Opaque value echoed back on the redirect — bind it to the company's session on your
+          side to prevent CSRF.
+        optional: true
+    output:
+      description: The session, including the hosted url to send the company to.
+      type: object

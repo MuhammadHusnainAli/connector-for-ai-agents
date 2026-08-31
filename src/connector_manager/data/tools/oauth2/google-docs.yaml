@@ -1,0 +1,339 @@
+# Google Docs API tools.
+#
+# The Docs API edits a document as a stream of indexed characters: every
+# insertion names an index, and indexes shift as content is added. Applying
+# several requests in one batch_update call keeps them consistent, and working
+# back-to-front avoids invalidating later indexes.
+#
+# Docs: https://developers.google.com/docs/api/reference/rest
+
+connector_id: google-docs
+display_name: Google Docs
+docs_url: https://developers.google.com/docs/api/reference/rest
+
+scope_rules:
+  strip_prefixes:
+    - https://www.googleapis.com/auth/
+  implies:
+    documents: [documents.readonly]
+    drive: [drive.file, documents, documents.readonly]
+
+scope_discovery:
+  method: GET
+  base_url_override: https://oauth2.googleapis.com
+  endpoint: /tokeninfo
+  query:
+    access_token: ${credentials.access_token}
+  scopes_path: scope
+
+tools:
+
+  get_document:
+    title: Get a document
+    description: >-
+      Read a document's full structured content -- paragraphs, runs, tables,
+      lists -- along with the character indexes the editing tools need.
+    category: documents
+    scopes_any: [documents.readonly, documents]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/documents/${document_id}
+      query:
+        suggestionsViewMode: "${suggestions_view_mode}"
+    input:
+      document_id:
+        type: string
+        description: The document id, the long token in its URL.
+      suggestions_view_mode:
+        type: string
+        description: Whether to show suggested edits as accepted, rejected, or inline.
+        optional: true
+        enum: [DEFAULT_FOR_CURRENT_ACCESS, SUGGESTIONS_INLINE, PREVIEW_SUGGESTIONS_ACCEPTED, PREVIEW_WITHOUT_SUGGESTIONS]
+    output:
+      description: The document and its body.
+      type: object
+      properties:
+        documentId: {type: string}
+        title: "{type: string}"
+        body: {type: object, description: "content is an array of structural elements."}
+        revisionId: {type: string}
+
+  create_document:
+    title: Create a document
+    description: >-
+      Create an empty document with a title and return its id. Fill it with
+      append_text or insert_text.
+    category: documents
+    scopes_any: [documents, drive.file]
+    request:
+      method: POST
+      path: /v1/documents
+      body:
+        title: "${title}"
+    input:
+      title:
+        type: string
+        description: The document's title.
+    output:
+      description: The created document.
+      type: object
+      properties:
+        documentId: {type: string}
+        title: "{type: string}"
+        revisionId: {type: string}
+
+  append_text:
+    title: Append text to a document
+    description: >-
+      Add text at the end of the document, which avoids having to work out an
+      index. A trailing newline is not added automatically.
+    category: editing
+    scopes_any: [documents, drive.file]
+    request:
+      method: POST
+      path: /v1/documents/${document_id}:batchUpdate
+      body:
+        requests:
+          - insertText:
+              endOfSegmentLocation: {}
+              text: "${text}"
+    input:
+      document_id:
+        type: string
+        description: The document id.
+      text:
+        type: string
+        description: Text to append. Use \n for line breaks.
+    output:
+      description: The batch reply.
+      type: object
+      properties:
+        documentId: {type: string}
+        replies: {type: array}
+
+  insert_text:
+    title: Insert text at a position
+    description: >-
+      Insert text at a character index. Index 1 is the start of the body. Every
+      later index shifts by the length inserted, so apply several edits
+      back-to-front or in one batch_update.
+    category: editing
+    scopes_any: [documents, drive.file]
+    request:
+      method: POST
+      path: /v1/documents/${document_id}:batchUpdate
+      body:
+        requests:
+          - insertText:
+              location: {index: "${index}"}
+              text: "${text}"
+    input:
+      document_id:
+        type: string
+        description: The document id.
+      text:
+        type: string
+        description: Text to insert.
+      index:
+        type: integer
+        description: Character index to insert at. 1 is the start of the body.
+        minimum: 1
+    output:
+      description: The batch reply.
+      type: object
+      properties:
+        documentId: {type: string}
+        replies: {type: array}
+
+  replace_text:
+    title: Find and replace text
+    description: >-
+      Replace every occurrence of a string throughout the document. The
+      simplest safe edit, since it needs no index arithmetic.
+    category: editing
+    scopes_any: [documents, drive.file]
+    request:
+      method: POST
+      path: /v1/documents/${document_id}:batchUpdate
+      body:
+        requests:
+          - replaceAllText:
+              containsText:
+                text: "${find}"
+                matchCase: "${match_case}"
+              replaceText: "${replace}"
+    input:
+      document_id:
+        type: string
+        description: The document id.
+      find:
+        type: string
+        description: Text to look for.
+      replace:
+        type: string
+        description: Text to put in its place.
+      match_case:
+        type: boolean
+        description: Match the search text's capitalisation.
+        optional: true
+        default: true
+    output:
+      description: The batch reply, with how many occurrences changed.
+      type: object
+      properties:
+        documentId: {type: string}
+        replies: {type: array}
+
+  delete_range:
+    title: Delete a range of content
+    description: >-
+      Remove the content between two character indexes. Permanent, and it shifts
+      every later index down.
+    category: editing
+    scopes_any: [documents, drive.file]
+    destructive: true
+    request:
+      method: POST
+      path: /v1/documents/${document_id}:batchUpdate
+      body:
+        requests:
+          - deleteContentRange:
+              range:
+                startIndex: "${start_index}"
+                endIndex: "${end_index}"
+    input:
+      document_id:
+        type: string
+        description: The document id.
+      start_index:
+        type: integer
+        description: First character index to remove.
+        minimum: 1
+      end_index:
+        type: integer
+        description: Index just past the last character to remove.
+        minimum: 1
+    output:
+      description: The batch reply.
+      type: object
+      properties:
+        documentId: {type: string}
+        replies: {type: array}
+
+  insert_table:
+    title: Insert a table
+    description: >-
+      Insert an empty table of a given size at a character index. Fill its cells
+      afterwards with insert_text at the indexes get_document then reports.
+    category: editing
+    scopes_any: [documents, drive.file]
+    request:
+      method: POST
+      path: /v1/documents/${document_id}:batchUpdate
+      body:
+        requests:
+          - insertTable:
+              location: {index: "${index}"}
+              rows: "${rows}"
+              columns: "${columns}"
+    input:
+      document_id:
+        type: string
+        description: The document id.
+      index:
+        type: integer
+        description: Character index to insert the table at.
+        minimum: 1
+      rows:
+        type: integer
+        description: How many rows.
+        minimum: 1
+      columns:
+        type: integer
+        description: How many columns.
+        minimum: 1
+    output:
+      description: The batch reply.
+      type: object
+      properties:
+        documentId: {type: string}
+        replies: {type: array}
+
+  format_text:
+    title: Style a range of text
+    description: >-
+      Apply character formatting -- bold, italic, underline, font size, colour --
+      to a range. fields lists which of them to actually write.
+    category: editing
+    scopes_any: [documents, drive.file]
+    request:
+      method: POST
+      path: /v1/documents/${document_id}:batchUpdate
+      body:
+        requests:
+          - updateTextStyle:
+              range:
+                startIndex: "${start_index}"
+                endIndex: "${end_index}"
+              textStyle: "${text_style}"
+              fields: "${fields}"
+    input:
+      document_id:
+        type: string
+        description: The document id.
+      start_index:
+        type: integer
+        description: First character index to style.
+        minimum: 1
+      end_index:
+        type: integer
+        description: Index just past the last character to style.
+        minimum: 1
+      text_style:
+        type: object
+        description: "Style to apply, e.g. {\"bold\": true, \"fontSize\": {\"magnitude\": 14, \"unit\": \"PT\"}}."
+      fields:
+        type: string
+        description: Comma-separated style fields to write, e.g. "bold,fontSize".
+        example: bold
+    output:
+      description: The batch reply.
+      type: object
+      properties:
+        documentId: {type: string}
+        replies: {type: array}
+
+  batch_update:
+    title: Run raw document operations
+    description: >-
+      Send one or more Docs batchUpdate requests, applied atomically in order.
+      The escape hatch for headers, footers, lists, images, page breaks and
+      anything else the other tools do not cover.
+    category: editing
+    scopes_any: [documents, drive.file]
+    request:
+      method: POST
+      path: /v1/documents/${document_id}:batchUpdate
+      body:
+        requests: "${requests}"
+        writeControl: "${write_control}"
+    input:
+      document_id:
+        type: string
+        description: The document id.
+      requests:
+        type: array
+        description: Docs API Request objects, applied in order.
+        items: {type: object}
+      write_control:
+        type: object
+        description: "Optimistic concurrency, e.g. {\"requiredRevisionId\": \"...\"} to fail on a concurrent edit."
+        optional: true
+    output:
+      description: One reply per request.
+      type: object
+      properties:
+        documentId: {type: string}
+        replies: {type: array}
+        writeControl: {type: object}

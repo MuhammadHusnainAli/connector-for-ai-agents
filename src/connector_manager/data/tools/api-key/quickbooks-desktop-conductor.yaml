@@ -1,0 +1,1060 @@
+# QuickBooks Desktop (via Conductor) tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://docs.conductor.is/openapi.yaml
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: quickbooks-desktop-conductor
+display_name: QuickBooks Desktop (via Conductor)
+docs_url: https://docs.conductor.is/openapi.yaml
+generated: true
+generated_from: https://docs.conductor.is/openapi.yaml
+tools:
+  create_auth_sessions:
+    title: Create an auth session
+    description: 'Create an auth session To launch the authentication flow, create an auth session and
+      pass the returned session''s authFlowUrl to the client for your end-user to visit in their browser.
+      Demo: https://connect.conductor.is/qbd/demo Calls POST /v1/auth-sessions on the provider''s API.'
+    category: auth_sessions
+    request:
+      method: POST
+      path: /v1/auth-sessions
+      body:
+        publishableKey: ${publishable_key}
+        endUserId: ${end_user_id}
+        linkExpiryMins: ${link_expiry_mins}
+        redirectUrl: ${redirect_url}
+    input:
+      publishable_key:
+        type: string
+        description: Your Conductor publishable key, which we use to create the auth session's authFlowUrl.
+      end_user_id:
+        type: string
+        description: The ID of the end-user for whom to create the integration connection.
+      link_expiry_mins:
+        type: number
+        description: The number of minutes after which the auth session will expire. Must be at least
+          15 minutes and no more than 7 days. If not provided, defaults to 30 minutes.
+        optional: true
+      redirect_url:
+        type: string
+        description: The URL to which Conductor will redirect the end-user to return to your app after
+          they complete the authentication flow. If not provided, their browser tab will close instead.
+        optional: true
+    output:
+      description: Returns the auth session object.
+      type: object
+  get_end_users:
+    title: List all end-users
+    description: List all end-users Returns a list of your end-users. Calls GET /v1/end-users on the provider's
+      API.
+    category: end_users
+    request:
+      method: GET
+      path: /v1/end-users
+    input: {}
+    output:
+      description: Returns an object with a data property that contains an array of end-user objects.
+        Each entry in the array is a separate end-user object. If no more end-users are available, the
+        resulting array will be empty.
+      type: object
+    read_only: true
+  create_end_users:
+    title: Create an end-user
+    description: Create an end-user Creates an end-user. Calls POST /v1/end-users on the provider's API.
+    category: end_users
+    request:
+      method: POST
+      path: /v1/end-users
+      body:
+        companyName: ${company_name}
+        sourceId: ${source_id}
+        email: ${email}
+    input:
+      company_name:
+        type: string
+        description: The end-user's company name that will be shown elsewhere in Conductor.
+      source_id:
+        type: string
+        description: The end-user's unique identifier from your system. Maps users between your database
+          and Conductor. Must be unique for each user. If you have only one user, you may use any string
+          value.
+      email:
+        type: string
+        description: The end-user's email address for identification purposes. Setting this field will
+          not cause any emails to be sent.
+    output:
+      description: Returns the end-user object after successful end-user creation.
+      type: object
+  get_quickbooks_desktop_account_tax_lines:
+    title: List all account tax lines
+    description: 'List all account tax lines Returns a list of account tax lines. NOTE: QuickBooks Desktop
+      does not support pagination for account tax lines; hence, there is no cursor parameter. Users typically
+      have few account tax lines. Calls GET /v1/quickbooks-desktop/account-tax-lines on the provider''s
+      API.'
+    category: quickbooks_desktop
+    request:
+      method: GET
+      path: /v1/quickbooks-desktop/account-tax-lines
+    input: {}
+    output:
+      description: Returns a list of account tax lines.
+      type: object
+    read_only: true
+  get_quickbooks_desktop_accounts:
+    title: List all accounts
+    description: 'List all accounts Returns a list of accounts. NOTE: QuickBooks Desktop does not support
+      pagination for accounts; hence, there is no cursor parameter. Users typically have few accounts.
+      Calls GET /v1/quickbooks-desktop/accounts on the provider''s API.'
+    category: quickbooks_desktop
+    request:
+      method: GET
+      path: /v1/quickbooks-desktop/accounts
+      query:
+        ids: ${ids}
+        fullNames: ${full_names}
+        limit: ${limit}
+        status: ${status}
+        updatedAfter: ${updated_after}
+        updatedBefore: ${updated_before}
+        nameContains: ${name_contains}
+        nameStartsWith: ${name_starts_with}
+        nameEndsWith: ${name_ends_with}
+        nameFrom: ${name_from}
+        nameTo: ${name_to}
+        accountType: ${account_type}
+        currencyIds: ${currency_ids}
+    input:
+      ids:
+        type: array
+        description: 'Filter for specific accounts by their QuickBooks-assigned unique identifier(s).
+          IMPORTANT: If you include this parameter, QuickBooks will ignore all other query parameters
+          for this request. NOTE: If any of the values you specify in this parameter are not found, the
+          request will return an error.'
+        optional: true
+        items:
+          type: string
+      full_names:
+        type: array
+        description: 'Filter for specific accounts by their full-name(s), case-insensitive. Like id, fullName
+          is a unique identifier for an account, formed by by combining the names of its parent objects
+          with its own name, separated by colons. For example, if an account is under "Corporate" and
+          has the name "Accounts-Payable", its fullName would be "Corporate:Accounts-Payable". IMPORTANT:
+          If you include this parameter,'
+        optional: true
+        items:
+          type: string
+      limit:
+        type: integer
+        description: 'The maximum number of objects to return. IMPORTANT: QuickBooks Desktop does not
+          support cursor-based pagination for accounts. This parameter will limit the response size, but
+          you cannot fetch subsequent results using a cursor. For pagination, use the name-range parameters
+          instead (e.g., nameFrom=A&nameTo=B). When this parameter is omitted, the endpoint returns all
+          accounts without limit, unlike pa'
+        optional: true
+      status:
+        type: string
+        description: Filter for accounts that are active, inactive, or both.
+        optional: true
+        enum:
+        - active
+        - all
+        - inactive
+        default: active
+      updated_after:
+        type: string
+        description: 'Filter for accounts updated on or after this date/time. Accepts the following ISO
+          8601 formats: - date-only (YYYY-MM-DD) - QuickBooks Desktop interprets the date as the start
+          of the specified day in the local timezone of the end-user''s computer (e.g., 2025-01-01 → 2025-01-01T00:00:00).
+          - datetime without timezone (YYYY-MM-DDTHH:mm:ss) - QuickBooks Desktop interprets the timestamp
+          in the local time'
+        optional: true
+      updated_before:
+        type: string
+        description: 'Filter for accounts updated on or before this date/time. Accepts the following ISO
+          8601 formats: - date-only (YYYY-MM-DD) - QuickBooks Desktop interprets the date as the end of
+          the specified day in the local timezone of the end-user''s computer (e.g., 2025-01-01 → 2025-01-01T23:59:59).
+          - datetime without timezone (YYYY-MM-DDTHH:mm:ss) - QuickBooks Desktop interprets the timestamp
+          in the local timez'
+        optional: true
+      name_contains:
+        type: string
+        description: 'Filter for accounts whose name contains this substring, case-insensitive. NOTE:
+          If you use this parameter, you cannot also use nameStartsWith or nameEndsWith.'
+        optional: true
+      name_starts_with:
+        type: string
+        description: 'Filter for accounts whose name starts with this substring, case-insensitive. NOTE:
+          If you use this parameter, you cannot also use nameContains or nameEndsWith.'
+        optional: true
+      name_ends_with:
+        type: string
+        description: 'Filter for accounts whose name ends with this substring, case-insensitive. NOTE:
+          If you use this parameter, you cannot also use nameContains or nameStartsWith.'
+        optional: true
+      name_from:
+        type: string
+        description: Filter for accounts whose name is alphabetically greater than or equal to this value.
+        optional: true
+      name_to:
+        type: string
+        description: Filter for accounts whose name is alphabetically less than or equal to this value.
+        optional: true
+      account_type:
+        type: string
+        description: Filter for accounts of this type.
+        optional: true
+        enum:
+        - accounts_payable
+        - accounts_receivable
+        - bank
+        - cost_of_goods_sold
+        - credit_card
+        - equity
+        - expense
+        - fixed_asset
+        - income
+        - long_term_liability
+        - non_posting
+        - other_asset
+        - other_current_asset
+        - other_current_liability
+        - other_expense
+        - other_income
+      currency_ids:
+        type: array
+        description: Filter for accounts in these currencies.
+        optional: true
+        items:
+          type: string
+    output:
+      description: Returns a list of accounts.
+      type: object
+    read_only: true
+  create_quickbooks_desktop_accounts:
+    title: Create an account
+    description: Create an account Creates a new financial account. QuickBooks requires you to pick a
+      supported account type for the chart of accounts, and non-posting types can’t be created through
+      the API. Calls POST /v1/quickbooks-desktop/accounts on the provider's API.
+    category: quickbooks_desktop
+    request:
+      method: POST
+      path: /v1/quickbooks-desktop/accounts
+      body:
+        name: ${name}
+        isActive: ${is_active}
+        parentId: ${parent_id}
+        accountType: ${account_type}
+        accountNumber: ${account_number}
+        bankAccountNumber: ${bank_account_number}
+        description: ${description}
+        openingBalance: ${opening_balance}
+        openingBalanceDate: ${opening_balance_date}
+        salesTaxCodeId: ${sales_tax_code_id}
+        taxLineId: ${tax_line_id}
+        currencyId: ${currency_id}
+    input:
+      name:
+        type: string
+        description: 'The case-insensitive name of this account. Not guaranteed to be unique because it
+          does not include the names of its hierarchical parent objects like fullName does. For example,
+          two accounts could both have the name "Accounts-Payable", but they could have unique fullName
+          values, such as "Corporate:Accounts-Payable" and "Finance:Accounts-Payable". Maximum length:
+          31 characters.'
+      is_active:
+        type: boolean
+        description: Indicates whether this account is active. Inactive objects are typically hidden from
+          views and reports in QuickBooks. Defaults to true.
+        optional: true
+      parent_id:
+        type: string
+        description: The parent account one level above this one in the hierarchy. For example, if this
+          account has a fullName of "Corporate:Accounts-Payable", its parent has a fullName of "Corporate".
+          If this account is at the top level, this field will be null.
+        optional: true
+      account_type:
+        type: string
+        description: 'The classification of this account, indicating its purpose within the chart of accounts.
+          NOTE: You cannot create an account of type nonposting through the API because QuickBooks creates
+          these accounts behind the scenes.'
+        enum:
+        - accounts_payable
+        - accounts_receivable
+        - bank
+        - cost_of_goods_sold
+        - credit_card
+        - equity
+        - expense
+        - fixed_asset
+        - income
+        - long_term_liability
+        - non_posting
+        - other_asset
+        - other_current_asset
+        - other_current_liability
+        - other_expense
+        - other_income
+      account_number:
+        type: string
+        description: The account's account number, which appears in the QuickBooks chart of accounts,
+          reports, and graphs. Note that if the "Use Account Numbers" preference is turned off in QuickBooks,
+          the account number may not be visible in the user interface, but it can still be set and retrieved
+          through the API.
+        optional: true
+      bank_account_number:
+        type: string
+        description: The bank account number or identifying note for this account. Access to this field
+          may be restricted based on permissions.
+        optional: true
+      description:
+        type: string
+        description: A description of this account.
+        optional: true
+      opening_balance:
+        type: string
+        description: The amount of money in, or the value of, this account as of openingBalanceDate. On
+          a bank statement, this would be the amount of money in the account at the beginning of the statement
+          period.
+        optional: true
+      opening_balance_date:
+        type: string
+        description: The date of the opening balance of this account, in ISO 8601 format (YYYY-MM-DD).
+        optional: true
+      sales_tax_code_id:
+        type: string
+        description: The default sales-tax code for transactions with this account, determining whether
+          the transactions are taxable or non-taxable. This can be overridden at the transaction or transaction-line
+          level. Default codes include "Non" (non-taxable) and "Tax" (taxable), but custom codes can also
+          be created in QuickBooks. If QuickBooks is not set up to charge sales tax (via the "Do You Charge
+          Sales Tax?" pref
+        optional: true
+      tax_line_id:
+        type: number
+        description: The identifier of the tax line associated with this account. You can see a list of
+          all available values for this field by calling the endpoint for account tax lines.
+        optional: true
+      currency_id:
+        type: string
+        description: The account's currency. For built-in currencies, the name and code are standard international
+          values. For user-defined currencies, all values are editable.
+        optional: true
+    output:
+      description: Returns the newly created account.
+      type: object
+  get_quickbooks_desktop_bill_check_payments:
+    title: List all bill check payments
+    description: List all bill check payments Returns a list of bill check payments. Use the cursor parameter
+      to paginate through the results. Calls GET /v1/quickbooks-desktop/bill-check-payments on the provider's
+      API.
+    category: quickbooks_desktop
+    request:
+      method: GET
+      path: /v1/quickbooks-desktop/bill-check-payments
+      query:
+        ids: ${ids}
+        refNumbers: ${ref_numbers}
+        limit: ${limit}
+        cursor: ${cursor}
+        updatedAfter: ${updated_after}
+        updatedBefore: ${updated_before}
+        transactionDateFrom: ${transaction_date_from}
+        transactionDateTo: ${transaction_date_to}
+        vendorIds: ${vendor_ids}
+        accountIds: ${account_ids}
+        refNumberContains: ${ref_number_contains}
+        refNumberStartsWith: ${ref_number_starts_with}
+        refNumberEndsWith: ${ref_number_ends_with}
+        refNumberFrom: ${ref_number_from}
+        refNumberTo: ${ref_number_to}
+        currencyIds: ${currency_ids}
+        includeLineItems: ${include_line_items}
+    input:
+      ids:
+        type: array
+        description: 'Filter for specific bill check payments by their QuickBooks-assigned unique identifier(s).
+          IMPORTANT: If you include this parameter, QuickBooks will ignore all other query parameters
+          for this request. NOTE: If any of the values you specify in this parameter are not found, the
+          request will return an error.'
+        optional: true
+        items:
+          type: string
+      ref_numbers:
+        type: array
+        description: 'Filter for specific bill check payments by their ref-number(s), case-sensitive.
+          In QuickBooks, ref-numbers are not required to be unique and can be arbitrarily changed by the
+          QuickBooks user. IMPORTANT: If you include this parameter, QuickBooks will ignore all other
+          query parameters for this request. NOTE: If any of the values you specify in this parameter
+          are not found, the request will return an'
+        optional: true
+        items:
+          type: string
+      limit:
+        type: integer
+        description: The maximum number of objects to return. Accepts values ranging from 1 to 150, defaults
+          to 150. When used with cursor-based pagination, this parameter controls how many results are
+          returned per page. To paginate through results, combine this with the cursor parameter. Each
+          response will include a nextCursor value that can be passed to subsequent requests to retrieve
+          the next page of results.
+        optional: true
+        default: 150
+      cursor:
+        type: string
+        description: The pagination token to fetch the next set of results when paginating with the limit
+          parameter. Do not include this parameter on the first call. Use the nextCursor value returned
+          in the previous response to request subsequent results.
+        optional: true
+      updated_after:
+        type: string
+        description: 'Filter for bill check payments updated on or after this date/time. Accepts the following
+          ISO 8601 formats: - date-only (YYYY-MM-DD) - QuickBooks Desktop interprets the date as the start
+          of the specified day in the local timezone of the end-user''s computer (e.g., 2025-01-01 → 2025-01-01T00:00:00).
+          - datetime without timezone (YYYY-MM-DDTHH:mm:ss) - QuickBooks Desktop interprets the timestamp
+          in the'
+        optional: true
+      updated_before:
+        type: string
+        description: 'Filter for bill check payments updated on or before this date/time. Accepts the
+          following ISO 8601 formats: - date-only (YYYY-MM-DD) - QuickBooks Desktop interprets the date
+          as the end of the specified day in the local timezone of the end-user''s computer (e.g., 2025-01-01
+          → 2025-01-01T23:59:59). - datetime without timezone (YYYY-MM-DDTHH:mm:ss) - QuickBooks Desktop
+          interprets the timestamp in the'
+        optional: true
+      transaction_date_from:
+        type: string
+        description: 'Filter for bill check payments whose date field is on or after this date, in ISO
+          8601 format (YYYY-MM-DD). NOTE: QuickBooks Desktop interprets this date as the start of the
+          specified day in the local timezone of the end-user''s computer (e.g., 2025-01-01 → 2025-01-01T00:00:00).'
+        optional: true
+      transaction_date_to:
+        type: string
+        description: 'Filter for bill check payments whose date field is on or before this date, in ISO
+          8601 format (YYYY-MM-DD). NOTE: QuickBooks Desktop interprets this date as the end of the specified
+          day in the local timezone of the end-user''s computer (e.g., 2025-01-01 → 2025-01-01T23:59:59).'
+        optional: true
+      vendor_ids:
+        type: array
+        description: Filter for bill check payments sent to these vendors. These are the vendors who sent
+          the bills paid by these checks.
+        optional: true
+        items:
+          type: string
+      account_ids:
+        type: array
+        description: Filter for bill check payments associated with these accounts.
+        optional: true
+        items:
+          type: string
+      ref_number_contains:
+        type: string
+        description: 'Filter for bill check payments whose refNumber contains this substring. (For checks,
+          this field is the check number.) NOTE: If you use this parameter, you cannot also use refNumberStartsWith
+          or refNumberEndsWith.'
+        optional: true
+      ref_number_starts_with:
+        type: string
+        description: 'Filter for bill check payments whose refNumber starts with this substring. (For
+          checks, this field is the check number.) NOTE: If you use this parameter, you cannot also use
+          refNumberContains or refNumberEndsWith.'
+        optional: true
+      ref_number_ends_with:
+        type: string
+        description: 'Filter for bill check payments whose refNumber ends with this substring. (For checks,
+          this field is the check number.) NOTE: If you use this parameter, you cannot also use refNumberContains
+          or refNumberStartsWith.'
+        optional: true
+      ref_number_from:
+        type: string
+        description: Filter for bill check payments whose refNumber is greater than or equal to this value.
+          (For checks, this field is the check number.) If omitted, the range will begin with the first
+          number of the list. Uses a numerical comparison for values that contain only digits; otherwise,
+          uses a lexicographical comparison.
+        optional: true
+      ref_number_to:
+        type: string
+        description: Filter for bill check payments whose refNumber is less than or equal to this value.
+          (For checks, this field is the check number.) If omitted, the range will end with the last number
+          of the list. Uses a numerical comparison for values that contain only digits; otherwise, uses
+          a lexicographical comparison.
+        optional: true
+      currency_ids:
+        type: array
+        description: Filter for bill check payments in these currencies.
+        optional: true
+        items:
+          type: string
+      include_line_items:
+        type: boolean
+        description: Whether to include line items in the response. Defaults to true.
+        optional: true
+        default: true
+    output:
+      description: Returns a list of bill check payments.
+      type: object
+    read_only: true
+  create_quickbooks_desktop_bill_check_payments:
+    title: Create a bill check payment
+    description: Create a bill check payment Records a check payment against one vendor’s open bills.
+      Each bill allocation must include a payment amount, discount, or vendor credit, and the accounts
+      payable account has to match the one used on the bills you’re closing. Calls POST /v1/quickbooks-desktop/bill-check-payments
+      on the provider's API.
+    category: quickbooks_desktop
+    request:
+      method: POST
+      path: /v1/quickbooks-desktop/bill-check-payments
+      body:
+        vendorId: ${vendor_id}
+        payablesAccountId: ${payables_account_id}
+        transactionDate: ${transaction_date}
+        bankAccountId: ${bank_account_id}
+        isQueuedForPrint: ${is_queued_for_print}
+        refNumber: ${ref_number}
+        memo: ${memo}
+        exchangeRate: ${exchange_rate}
+        externalId: ${external_id}
+        applyToTransactions: ${apply_to_transactions}
+    input:
+      vendor_id:
+        type: string
+        description: 'The vendor who sent the bill(s) that this bill check payment is paying and who will
+          receive this payment. IMPORTANT: This vendor must match the vendor on the bill(s) specified
+          in applyToTransactions; otherwise, QuickBooks will say the transactionId in applyToTransactions
+          "does not exist".'
+      payables_account_id:
+        type: string
+        description: 'The Accounts-Payable (A/P) account to which this bill check payment is assigned,
+          used to track the amount owed. If not specified, QuickBooks Desktop will use its default A/P
+          account. IMPORTANT: If this bill check payment is linked to other transactions, this A/P account
+          must match the payablesAccount used in those other transactions.'
+        optional: true
+      transaction_date:
+        type: string
+        description: The date of this bill check payment, in ISO 8601 format (YYYY-MM-DD).
+      bank_account_id:
+        type: string
+        description: The bank account from which the funds are being drawn for this bill check payment;
+          e.g., Checking or Savings. This bill check payment will decrease the balance of this account.
+      is_queued_for_print:
+        type: boolean
+        description: Indicates whether this bill check payment is included in the queue of documents for
+          QuickBooks to print.
+        optional: true
+      ref_number:
+        type: string
+        description: 'The case-sensitive user-defined reference number for this bill check payment, which
+          can be used to identify the transaction in QuickBooks. This value is not required to be unique
+          and can be arbitrarily changed by the QuickBooks user. When left blank in this create request,
+          this field will be left blank in QuickBooks (i.e., it does not auto-increment). IMPORTANT: For
+          checks, this field is the check'
+        optional: true
+      memo:
+        type: string
+        description: A memo or note for this bill check payment.
+        optional: true
+      exchange_rate:
+        type: number
+        description: The market exchange rate between this bill check payment's currency and the home
+          currency in QuickBooks at the time of this transaction. Represented as a decimal value (e.g.,
+          1.2345 for 1 EUR = 1.2345 USD if USD is the home currency).
+        optional: true
+      external_id:
+        type: string
+        description: 'A globally unique identifier (GUID) you, the developer, can provide for tracking
+          this object in your external system. This field is immutable and can only be set during object
+          creation. IMPORTANT: This field must be formatted as a valid GUID; otherwise, QuickBooks will
+          return an error.'
+        optional: true
+      apply_to_transactions:
+        type: array
+        description: 'The bills to be paid by this bill check payment. This will create a link between
+          this bill check payment and the specified bills. IMPORTANT: In each applyToTransactions object,
+          you must specify either paymentAmount, applyCredits, discountAmount, or any combination of these;
+          if none of these are specified, you will receive an error for an empty transaction. IMPORTANT:
+          The target bill must have isPa'
+        items:
+          type: object
+    output:
+      description: Returns the newly created bill check payment.
+      type: object
+  get_quickbooks_desktop_bill_credit_card_payments:
+    title: List all bill credit card payments
+    description: List all bill credit card payments Returns a list of bill credit card payments. Use the
+      cursor parameter to paginate through the results. Calls GET /v1/quickbooks-desktop/bill-credit-card-payments
+      on the provider's API.
+    category: quickbooks_desktop
+    request:
+      method: GET
+      path: /v1/quickbooks-desktop/bill-credit-card-payments
+      query:
+        ids: ${ids}
+        refNumbers: ${ref_numbers}
+        limit: ${limit}
+        cursor: ${cursor}
+        updatedAfter: ${updated_after}
+        updatedBefore: ${updated_before}
+        transactionDateFrom: ${transaction_date_from}
+        transactionDateTo: ${transaction_date_to}
+        vendorIds: ${vendor_ids}
+        accountIds: ${account_ids}
+        refNumberContains: ${ref_number_contains}
+        refNumberStartsWith: ${ref_number_starts_with}
+        refNumberEndsWith: ${ref_number_ends_with}
+        refNumberFrom: ${ref_number_from}
+        refNumberTo: ${ref_number_to}
+        currencyIds: ${currency_ids}
+        includeLineItems: ${include_line_items}
+    input:
+      ids:
+        type: array
+        description: 'Filter for specific bill credit card payments by their QuickBooks-assigned unique
+          identifier(s). IMPORTANT: If you include this parameter, QuickBooks will ignore all other query
+          parameters for this request. NOTE: If any of the values you specify in this parameter are not
+          found, the request will return an error.'
+        optional: true
+        items:
+          type: string
+      ref_numbers:
+        type: array
+        description: 'Filter for specific bill credit card payments by their ref-number(s), case-sensitive.
+          In QuickBooks, ref-numbers are not required to be unique and can be arbitrarily changed by the
+          QuickBooks user. IMPORTANT: If you include this parameter, QuickBooks will ignore all other
+          query parameters for this request. NOTE: If any of the values you specify in this parameter
+          are not found, the request will ret'
+        optional: true
+        items:
+          type: string
+      limit:
+        type: integer
+        description: The maximum number of objects to return. Accepts values ranging from 1 to 150, defaults
+          to 150. When used with cursor-based pagination, this parameter controls how many results are
+          returned per page. To paginate through results, combine this with the cursor parameter. Each
+          response will include a nextCursor value that can be passed to subsequent requests to retrieve
+          the next page of results.
+        optional: true
+        default: 150
+      cursor:
+        type: string
+        description: The pagination token to fetch the next set of results when paginating with the limit
+          parameter. Do not include this parameter on the first call. Use the nextCursor value returned
+          in the previous response to request subsequent results.
+        optional: true
+      updated_after:
+        type: string
+        description: 'Filter for bill credit card payments updated on or after this date/time. Accepts
+          the following ISO 8601 formats: - date-only (YYYY-MM-DD) - QuickBooks Desktop interprets the
+          date as the start of the specified day in the local timezone of the end-user''s computer (e.g.,
+          2025-01-01 → 2025-01-01T00:00:00). - datetime without timezone (YYYY-MM-DDTHH:mm:ss) - QuickBooks
+          Desktop interprets the timestamp'
+        optional: true
+      updated_before:
+        type: string
+        description: 'Filter for bill credit card payments updated on or before this date/time. Accepts
+          the following ISO 8601 formats: - date-only (YYYY-MM-DD) - QuickBooks Desktop interprets the
+          date as the end of the specified day in the local timezone of the end-user''s computer (e.g.,
+          2025-01-01 → 2025-01-01T23:59:59). - datetime without timezone (YYYY-MM-DDTHH:mm:ss) - QuickBooks
+          Desktop interprets the timestamp i'
+        optional: true
+      transaction_date_from:
+        type: string
+        description: 'Filter for bill credit card payments whose date field is on or after this date,
+          in ISO 8601 format (YYYY-MM-DD). NOTE: QuickBooks Desktop interprets this date as the start
+          of the specified day in the local timezone of the end-user''s computer (e.g., 2025-01-01 → 2025-01-01T00:00:00).'
+        optional: true
+      transaction_date_to:
+        type: string
+        description: 'Filter for bill credit card payments whose date field is on or before this date,
+          in ISO 8601 format (YYYY-MM-DD). NOTE: QuickBooks Desktop interprets this date as the end of
+          the specified day in the local timezone of the end-user''s computer (e.g., 2025-01-01 → 2025-01-01T23:59:59).'
+        optional: true
+      vendor_ids:
+        type: array
+        description: Filter for bill credit card payments sent to these vendors. These are the vendors
+          who sent the bills paid by these credit card payments.
+        optional: true
+        items:
+          type: string
+      account_ids:
+        type: array
+        description: Filter for bill credit card payments associated with these accounts.
+        optional: true
+        items:
+          type: string
+      ref_number_contains:
+        type: string
+        description: 'Filter for bill credit card payments whose refNumber contains this substring. NOTE:
+          If you use this parameter, you cannot also use refNumberStartsWith or refNumberEndsWith.'
+        optional: true
+      ref_number_starts_with:
+        type: string
+        description: 'Filter for bill credit card payments whose refNumber starts with this substring.
+          NOTE: If you use this parameter, you cannot also use refNumberContains or refNumberEndsWith.'
+        optional: true
+      ref_number_ends_with:
+        type: string
+        description: 'Filter for bill credit card payments whose refNumber ends with this substring. NOTE:
+          If you use this parameter, you cannot also use refNumberContains or refNumberStartsWith.'
+        optional: true
+      ref_number_from:
+        type: string
+        description: Filter for bill credit card payments whose refNumber is greater than or equal to
+          this value. If omitted, the range will begin with the first number of the list. Uses a numerical
+          comparison for values that contain only digits; otherwise, uses a lexicographical comparison.
+        optional: true
+      ref_number_to:
+        type: string
+        description: Filter for bill credit card payments whose refNumber is less than or equal to this
+          value. If omitted, the range will end with the last number of the list. Uses a numerical comparison
+          for values that contain only digits; otherwise, uses a lexicographical comparison.
+        optional: true
+      currency_ids:
+        type: array
+        description: Filter for bill credit card payments in these currencies.
+        optional: true
+        items:
+          type: string
+      include_line_items:
+        type: boolean
+        description: Whether to include line items in the response. Defaults to true.
+        optional: true
+        default: true
+    output:
+      description: Returns a list of bill credit card payments.
+      type: object
+    read_only: true
+  create_quickbooks_desktop_bill_credit_card_payments:
+    title: Create a bill credit card payment
+    description: Create a bill credit card payment Charges one vendor’s bills to a credit card account.
+      Each bill allocation must supply a payment amount, discount, or credit, and you have to use the
+      same accounts payable account that’s on the bills being closed. Calls POST /v1/quickbooks-desktop/bill-credit-card-payments
+      on the provider's API.
+    category: quickbooks_desktop
+    request:
+      method: POST
+      path: /v1/quickbooks-desktop/bill-credit-card-payments
+      body:
+        vendorId: ${vendor_id}
+        payablesAccountId: ${payables_account_id}
+        transactionDate: ${transaction_date}
+        creditCardAccountId: ${credit_card_account_id}
+        refNumber: ${ref_number}
+        memo: ${memo}
+        exchangeRate: ${exchange_rate}
+        externalId: ${external_id}
+        applyToTransactions: ${apply_to_transactions}
+    input:
+      vendor_id:
+        type: string
+        description: 'The vendor who sent the bill(s) that this bill credit card payment is paying and
+          who will receive this payment. IMPORTANT: This vendor must match the vendor on the bill(s) specified
+          in applyToTransactions; otherwise, QuickBooks will say the transactionId in applyToTransactions
+          "does not exist".'
+      payables_account_id:
+        type: string
+        description: 'The Accounts-Payable (A/P) account to which this bill credit card payment is assigned,
+          used to track the amount owed. If not specified, QuickBooks Desktop will use its default A/P
+          account. IMPORTANT: If this bill credit card payment is linked to other transactions, this A/P
+          account must match the payablesAccount used in those other transactions.'
+        optional: true
+      transaction_date:
+        type: string
+        description: The date of this bill credit card payment, in ISO 8601 format (YYYY-MM-DD).
+      credit_card_account_id:
+        type: string
+        description: The credit card account to which this bill credit card payment is being charged.
+          This bill credit card payment will decrease the balance of this account.
+      ref_number:
+        type: string
+        description: The case-sensitive user-defined reference number for this bill credit card payment,
+          which can be used to identify the transaction in QuickBooks. This value is not required to be
+          unique and can be arbitrarily changed by the QuickBooks user. When left blank in this create
+          request, this field will be left blank in QuickBooks (i.e., it does not auto-increment).
+        optional: true
+      memo:
+        type: string
+        description: A memo or note for this bill credit card payment.
+        optional: true
+      exchange_rate:
+        type: number
+        description: The market exchange rate between this bill credit card payment's currency and the
+          home currency in QuickBooks at the time of this transaction. Represented as a decimal value
+          (e.g., 1.2345 for 1 EUR = 1.2345 USD if USD is the home currency).
+        optional: true
+      external_id:
+        type: string
+        description: 'A globally unique identifier (GUID) you, the developer, can provide for tracking
+          this object in your external system. This field is immutable and can only be set during object
+          creation. IMPORTANT: This field must be formatted as a valid GUID; otherwise, QuickBooks will
+          return an error.'
+        optional: true
+      apply_to_transactions:
+        type: array
+        description: 'The bills to be paid by this bill credit card payment. This will create a link between
+          this bill credit card payment and the specified bills. IMPORTANT: In each applyToTransactions
+          object, you must specify either paymentAmount, applyCredits, discountAmount, or any combination
+          of these; if none of these are specified, you will receive an error for an empty transaction.
+          IMPORTANT: The target bill mu'
+        items:
+          type: object
+    output:
+      description: Returns the newly created bill credit card payment.
+      type: object
+  get_quickbooks_desktop_bills:
+    title: List all bills
+    description: List all bills Returns a list of bills. Use the cursor parameter to paginate through
+      the results. Calls GET /v1/quickbooks-desktop/bills on the provider's API.
+    category: quickbooks_desktop
+    request:
+      method: GET
+      path: /v1/quickbooks-desktop/bills
+      query:
+        ids: ${ids}
+        refNumbers: ${ref_numbers}
+        limit: ${limit}
+        cursor: ${cursor}
+        updatedAfter: ${updated_after}
+        updatedBefore: ${updated_before}
+        transactionDateFrom: ${transaction_date_from}
+        transactionDateTo: ${transaction_date_to}
+        vendorIds: ${vendor_ids}
+        accountIds: ${account_ids}
+        refNumberContains: ${ref_number_contains}
+        refNumberStartsWith: ${ref_number_starts_with}
+        refNumberEndsWith: ${ref_number_ends_with}
+        refNumberFrom: ${ref_number_from}
+        refNumberTo: ${ref_number_to}
+        currencyIds: ${currency_ids}
+        paymentStatus: ${payment_status}
+        includeLineItems: ${include_line_items}
+        includeLinkedTransactions: ${include_linked_transactions}
+    input:
+      ids:
+        type: array
+        description: 'Filter for specific bills by their QuickBooks-assigned unique identifier(s). IMPORTANT:
+          If you include this parameter, QuickBooks will ignore all other query parameters for this request.
+          NOTE: If any of the values you specify in this parameter are not found, the request will return
+          an error.'
+        optional: true
+        items:
+          type: string
+      ref_numbers:
+        type: array
+        description: 'Filter for specific bills by their ref-number(s), case-sensitive. In QuickBooks,
+          ref-numbers are not required to be unique and can be arbitrarily changed by the QuickBooks user.
+          IMPORTANT: If you include this parameter, QuickBooks will ignore all other query parameters
+          for this request. NOTE: If any of the values you specify in this parameter are not found, the
+          request will return an error.'
+        optional: true
+        items:
+          type: string
+      limit:
+        type: integer
+        description: The maximum number of objects to return. Accepts values ranging from 1 to 150, defaults
+          to 150. When used with cursor-based pagination, this parameter controls how many results are
+          returned per page. To paginate through results, combine this with the cursor parameter. Each
+          response will include a nextCursor value that can be passed to subsequent requests to retrieve
+          the next page of results.
+        optional: true
+        default: 150
+      cursor:
+        type: string
+        description: The pagination token to fetch the next set of results when paginating with the limit
+          parameter. Do not include this parameter on the first call. Use the nextCursor value returned
+          in the previous response to request subsequent results.
+        optional: true
+      updated_after:
+        type: string
+        description: 'Filter for bills updated on or after this date/time. Accepts the following ISO 8601
+          formats: - date-only (YYYY-MM-DD) - QuickBooks Desktop interprets the date as the start of the
+          specified day in the local timezone of the end-user''s computer (e.g., 2025-01-01 → 2025-01-01T00:00:00).
+          - datetime without timezone (YYYY-MM-DDTHH:mm:ss) - QuickBooks Desktop interprets the timestamp
+          in the local timezon'
+        optional: true
+      updated_before:
+        type: string
+        description: 'Filter for bills updated on or before this date/time. Accepts the following ISO
+          8601 formats: - date-only (YYYY-MM-DD) - QuickBooks Desktop interprets the date as the end of
+          the specified day in the local timezone of the end-user''s computer (e.g., 2025-01-01 → 2025-01-01T23:59:59).
+          - datetime without timezone (YYYY-MM-DDTHH:mm:ss) - QuickBooks Desktop interprets the timestamp
+          in the local timezone'
+        optional: true
+      transaction_date_from:
+        type: string
+        description: 'Filter for bills whose date field is on or after this date, in ISO 8601 format (YYYY-MM-DD).
+          NOTE: QuickBooks Desktop interprets this date as the start of the specified day in the local
+          timezone of the end-user''s computer (e.g., 2025-01-01 → 2025-01-01T00:00:00).'
+        optional: true
+      transaction_date_to:
+        type: string
+        description: 'Filter for bills whose date field is on or before this date, in ISO 8601 format
+          (YYYY-MM-DD). NOTE: QuickBooks Desktop interprets this date as the end of the specified day
+          in the local timezone of the end-user''s computer (e.g., 2025-01-01 → 2025-01-01T23:59:59).'
+        optional: true
+      vendor_ids:
+        type: array
+        description: Filter for bills received from these vendors.
+        optional: true
+        items:
+          type: string
+      account_ids:
+        type: array
+        description: Filter for bills associated with these accounts.
+        optional: true
+        items:
+          type: string
+      ref_number_contains:
+        type: string
+        description: 'Filter for bills whose refNumber contains this substring. NOTE: If you use this
+          parameter, you cannot also use refNumberStartsWith or refNumberEndsWith.'
+        optional: true
+      ref_number_starts_with:
+        type: string
+        description: 'Filter for bills whose refNumber starts with this substring. NOTE: If you use this
+          parameter, you cannot also use refNumberContains or refNumberEndsWith.'
+        optional: true
+      ref_number_ends_with:
+        type: string
+        description: 'Filter for bills whose refNumber ends with this substring. NOTE: If you use this
+          parameter, you cannot also use refNumberContains or refNumberStartsWith.'
+        optional: true
+      ref_number_from:
+        type: string
+        description: Filter for bills whose refNumber is greater than or equal to this value. If omitted,
+          the range will begin with the first number of the list. Uses a numerical comparison for values
+          that contain only digits; otherwise, uses a lexicographical comparison.
+        optional: true
+      ref_number_to:
+        type: string
+        description: Filter for bills whose refNumber is less than or equal to this value. If omitted,
+          the range will end with the last number of the list. Uses a numerical comparison for values
+          that contain only digits; otherwise, uses a lexicographical comparison.
+        optional: true
+      currency_ids:
+        type: array
+        description: Filter for bills in these currencies.
+        optional: true
+        items:
+          type: string
+      payment_status:
+        type: string
+        description: Filter for bills that are paid, not paid, or both.
+        optional: true
+        enum:
+        - all
+        - paid
+        - not_paid
+        default: all
+      include_line_items:
+        type: boolean
+        description: Whether to include line items in the response. Defaults to true.
+        optional: true
+        default: true
+      include_linked_transactions:
+        type: boolean
+        description: Whether to include linked transactions in the response. Defaults to false. For example,
+          a payment linked to the corresponding bill.
+        optional: true
+        default: false
+    output:
+      description: Returns a list of bills.
+      type: object
+    read_only: true
+  create_quickbooks_desktop_bills:
+    title: Create a bill
+    description: Create a bill Creates a vendor bill and posts it to accounts payable. You can also link
+      eligible purchase orders so QuickBooks pulls their lines onto the bill before it's saved. Calls
+      POST /v1/quickbooks-desktop/bills on the provider's API.
+    category: quickbooks_desktop
+    request:
+      method: POST
+      path: /v1/quickbooks-desktop/bills
+      body:
+        vendorId: ${vendor_id}
+        vendorAddress: ${vendor_address}
+        payablesAccountId: ${payables_account_id}
+        transactionDate: ${transaction_date}
+        dueDate: ${due_date}
+        refNumber: ${ref_number}
+        termsId: ${terms_id}
+        memo: ${memo}
+        salesTaxCodeId: ${sales_tax_code_id}
+        exchangeRate: ${exchange_rate}
+        externalId: ${external_id}
+        linkToTransactionIds: ${link_to_transaction_ids}
+    input:
+      vendor_id:
+        type: string
+        description: The vendor who sent this bill for goods or services purchased.
+      vendor_address:
+        type: object
+        description: The address of the vendor who sent this bill.
+        optional: true
+      payables_account_id:
+        type: string
+        description: 'The Accounts-Payable (A/P) account to which this bill is assigned, used to track
+          the amount owed. If not specified, QuickBooks Desktop will use its default A/P account. IMPORTANT:
+          If this bill is linked to other transactions, this A/P account must match the payablesAccount
+          used in those other transactions.'
+        optional: true
+      transaction_date:
+        type: string
+        description: The date of this bill, in ISO 8601 format (YYYY-MM-DD).
+      due_date:
+        type: string
+        description: The date by which this bill must be paid, in ISO 8601 format (YYYY-MM-DD).
+        optional: true
+      ref_number:
+        type: string
+        description: The case-sensitive user-defined reference number for this bill, which can be used
+          to identify the transaction in QuickBooks. This value is not required to be unique and can be
+          arbitrarily changed by the QuickBooks user. When left blank in this create request, this field
+          will be left blank in QuickBooks (i.e., it does not auto-increment).
+        optional: true
+      terms_id:
+        type: string
+        description: The bill's payment terms, defining when payment is due and any applicable discounts.
+        optional: true
+      memo:
+        type: string
+        description: A memo or note for this bill that appears in the Accounts-Payable register and in
+          reports that include this bill.
+        optional: true
+      sales_tax_code_id:
+        type: string
+        description: The sales-tax code for this bill, determining whether it is taxable or non-taxable.
+          If set, this overrides any sales-tax codes defined on the vendor. This can be overridden on
+          the bill's individual lines. Default codes include "Non" (non-taxable) and "Tax" (taxable),
+          but custom codes can also be created in QuickBooks. If QuickBooks is not set up to charge sales
+          tax (via the "Do You Charge Sales Ta
+        optional: true
+      exchange_rate:
+        type: number
+        description: The market exchange rate between this bill's currency and the home currency in QuickBooks
+          at the time of this transaction. Represented as a decimal value (e.g., 1.2345 for 1 EUR = 1.2345
+          USD if USD is the home currency).
+        optional: true
+      external_id:
+        type: string
+        description: 'A globally unique identifier (GUID) you, the developer, can provide for tracking
+          this object in your external system. This field is immutable and can only be set during object
+          creation. IMPORTANT: This field must be formatted as a valid GUID; otherwise, QuickBooks will
+          return an error.'
+        optional: true
+      link_to_transaction_ids:
+        type: array
+        description: IDs of existing purchase orders that you wish to link to this bill. Note that this
+          links entire transactions, not individual transaction lines. If you want to link individual
+          lines in a transaction, instead use the field linkToTransactionLine on this bill's lines, if
+          available. Transactions can only be linked when creating this bill and cannot be unlinked later.
+          You can use both linkToTransactionI
+        optional: true
+        items:
+          type: string
+    output:
+      description: Returns the newly created bill.
+      type: object

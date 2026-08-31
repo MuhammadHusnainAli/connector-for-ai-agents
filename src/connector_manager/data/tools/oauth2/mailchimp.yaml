@@ -1,0 +1,542 @@
+# Mailchimp Marketing tools.
+#
+# The connection carries the account's data centre prefix (dc), which the base
+# url resolves from, so paths here start at /3.0.
+#
+# A subscriber is addressed by the MD5 hash of their lower-cased email address,
+# which Mailchimp calls the subscriber hash. get_list_member and the update
+# tools take that hash, not the raw address.
+#
+# Mailchimp's OAuth token carries no scopes -- an app has full access to the
+# account that authorised it -- so no tool declares any.
+#
+# Docs: https://mailchimp.com/developer/marketing/api/
+
+connector_id: mailchimp
+display_name: Mailchimp
+docs_url: https://mailchimp.com/developer/marketing/api/
+
+tools:
+
+  list_audiences:
+    title: List audiences
+    description: >-
+      List the account's audiences (Mailchimp still calls them lists) with their
+      ids and member counts. Every subscriber tool needs a list id from here.
+    category: audiences
+    read_only: true
+    request:
+      method: GET
+      path: /3.0/lists
+      query:
+        count: "${limit}"
+        offset: "${offset}"
+        fields: "${fields}"
+    input:
+      limit:
+        type: integer
+        description: How many audiences per page (1-1000).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 1000
+      offset:
+        type: integer
+        description: Zero-based index to start from.
+        optional: true
+        minimum: 0
+      fields:
+        type: array
+        description: Only return these fields, e.g. ["lists.id","lists.name"].
+        optional: true
+        items: {type: string}
+    output:
+      description: A page of audiences.
+      type: object
+      properties:
+        lists: {type: array, description: "Each with id, name and stats.member_count."}
+        total_items: {type: integer}
+
+  list_members:
+    title: List an audience's subscribers
+    description: >-
+      Page through an audience's contacts, optionally only the subscribed ones
+      or those changed since a given time.
+    category: subscribers
+    read_only: true
+    request:
+      method: GET
+      path: /3.0/lists/${list_id}/members
+      query:
+        count: "${limit}"
+        offset: "${offset}"
+        status: "${status}"
+        since_last_changed: "${since_last_changed}"
+        fields: "${fields}"
+    input:
+      list_id:
+        type: string
+        description: The audience id, from list_audiences.
+      limit:
+        type: integer
+        description: How many members per page (1-1000).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 1000
+      offset:
+        type: integer
+        description: Zero-based index to start from.
+        optional: true
+        minimum: 0
+      status:
+        type: string
+        description: Only members in this state.
+        optional: true
+        enum: [subscribed, unsubscribed, cleaned, pending, transactional, archived]
+      since_last_changed:
+        type: string
+        description: Only members changed at or after this ISO 8601 instant.
+        optional: true
+      fields:
+        type: array
+        description: Only return these fields.
+        optional: true
+        items: {type: string}
+    output:
+      description: A page of members.
+      type: object
+      properties:
+        members: {type: array}
+        total_items: {type: integer}
+
+  get_member:
+    title: Get a subscriber
+    description: >-
+      Read one contact's status, merge fields, tags and engagement stats. The
+      subscriber hash is the MD5 of their lower-cased email address.
+    category: subscribers
+    read_only: true
+    request:
+      method: GET
+      path: /3.0/lists/${list_id}/members/${subscriber_hash}
+    input:
+      list_id:
+        type: string
+        description: The audience id.
+      subscriber_hash:
+        type: string
+        description: MD5 hash of the lower-cased email address. Mailchimp also accepts the raw address.
+    output:
+      description: The subscriber.
+      type: object
+      properties:
+        id: {type: string}
+        email_address: {type: string}
+        status: {type: string}
+        merge_fields: {type: object}
+        tags: {type: array}
+
+  upsert_member:
+    title: Add or update a subscriber
+    description: >-
+      Add a contact to an audience, or update them if they already exist,
+      matched on the subscriber hash. Merge fields hold names and custom data,
+      e.g. {"FNAME": "Ada", "LNAME": "Lovelace"}.
+    category: subscribers
+    request:
+      method: PUT
+      path: /3.0/lists/${list_id}/members/${subscriber_hash}
+      body:
+        email_address: "${email}"
+        status_if_new: "${status_if_new}"
+        status: "${status}"
+        merge_fields: "${merge_fields}"
+        tags: "${tags}"
+        language: "${language}"
+        vip: "${vip}"
+    input:
+      list_id:
+        type: string
+        description: The audience id.
+      subscriber_hash:
+        type: string
+        description: MD5 hash of the lower-cased email address.
+      email:
+        type: string
+        description: The contact's email address.
+        format: email
+      status_if_new:
+        type: string
+        description: Status to use when the contact is new. Anything but subscribed skips a confirmation email.
+        optional: true
+        default: subscribed
+        enum: [subscribed, unsubscribed, cleaned, pending, transactional]
+      status:
+        type: string
+        description: Status to set on an existing contact.
+        optional: true
+        enum: [subscribed, unsubscribed, cleaned, pending, transactional]
+      merge_fields:
+        type: object
+        description: "Merge field values keyed by tag, e.g. {\"FNAME\": \"Ada\"}."
+        optional: true
+      tags:
+        type: array
+        description: Tags to apply when creating the contact.
+        optional: true
+        items: {type: string}
+      language:
+        type: string
+        description: Two-letter language code for the contact.
+        optional: true
+      vip:
+        type: boolean
+        description: Mark the contact as VIP.
+        optional: true
+    output:
+      description: The added or updated subscriber.
+      type: object
+      properties:
+        id: {type: string}
+        email_address: {type: string}
+        status: {type: string}
+
+  unsubscribe_member:
+    title: Unsubscribe a contact
+    description: >-
+      Set a contact's status to unsubscribed so they stop receiving campaigns.
+      Reversible with upsert_member, though Mailchimp requires the contact
+      themselves to re-subscribe in some regions.
+    category: subscribers
+    destructive: true
+    request:
+      method: PATCH
+      path: /3.0/lists/${list_id}/members/${subscriber_hash}
+      body:
+        status: unsubscribed
+    input:
+      list_id:
+        type: string
+        description: The audience id.
+      subscriber_hash:
+        type: string
+        description: MD5 hash of the lower-cased email address.
+    output:
+      description: The updated subscriber.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string}
+
+  delete_member:
+    title: Permanently delete a contact
+    description: >-
+      Erase a contact from an audience entirely. Mailchimp cannot re-add a
+      permanently deleted address, so archiving via unsubscribe_member is
+      usually the right choice.
+    category: subscribers
+    destructive: true
+    request:
+      method: POST
+      path: /3.0/lists/${list_id}/members/${subscriber_hash}/actions/delete-permanent
+      body: {}
+    input:
+      list_id:
+        type: string
+        description: The audience id.
+      subscriber_hash:
+        type: string
+        description: MD5 hash of the lower-cased email address.
+    output:
+      description: Empty on success -- Mailchimp answers 204 No Content.
+      type: object
+
+  update_member_tags:
+    title: Add or remove a contact's tags
+    description: >-
+      Change which tags a contact carries. Each entry is {"name": "vip",
+      "status": "active"} to add or "inactive" to remove.
+    category: subscribers
+    request:
+      method: POST
+      path: /3.0/lists/${list_id}/members/${subscriber_hash}/tags
+      body:
+        tags: "${tags}"
+        is_syncing: "${is_syncing}"
+    input:
+      list_id:
+        type: string
+        description: The audience id.
+      subscriber_hash:
+        type: string
+        description: MD5 hash of the lower-cased email address.
+      tags:
+        type: array
+        description: "Tag changes, each {\"name\": ..., \"status\": \"active\" or \"inactive\"}."
+        items: {type: object}
+      is_syncing:
+        type: boolean
+        description: Suppress automations that the tag change would otherwise trigger.
+        optional: true
+    output:
+      description: Empty on success -- Mailchimp answers 204 No Content.
+      type: object
+
+  list_campaigns:
+    title: List campaigns
+    description: >-
+      Page through the account's campaigns, filtered by status, type or
+      audience, with their send times and ids.
+    category: campaigns
+    read_only: true
+    request:
+      method: GET
+      path: /3.0/campaigns
+      query:
+        count: "${limit}"
+        offset: "${offset}"
+        status: "${status}"
+        type: "${type}"
+        list_id: "${list_id}"
+        since_send_time: "${since_send_time}"
+    input:
+      limit:
+        type: integer
+        description: How many campaigns per page (1-1000).
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 1000
+      offset:
+        type: integer
+        description: Zero-based index to start from.
+        optional: true
+        minimum: 0
+      status:
+        type: string
+        description: Only campaigns in this state.
+        optional: true
+        enum: [save, paused, schedule, sending, sent]
+      type:
+        type: string
+        description: Only campaigns of this type.
+        optional: true
+        enum: [regular, plaintext, absplit, rss, variate]
+      list_id:
+        type: string
+        description: Only campaigns for this audience.
+        optional: true
+      since_send_time:
+        type: string
+        description: Only campaigns sent at or after this ISO 8601 instant.
+        optional: true
+    output:
+      description: A page of campaigns.
+      type: object
+      properties:
+        campaigns: {type: array}
+        total_items: {type: integer}
+
+  create_campaign:
+    title: Create a campaign
+    description: >-
+      Create a draft campaign for an audience. It has no content until
+      set_campaign_content is called, and is not sent until send_campaign.
+    category: campaigns
+    request:
+      method: POST
+      path: /3.0/campaigns
+      body:
+        type: "${type}"
+        recipients:
+          list_id: "${list_id}"
+          segment_opts: "${segment_opts}"
+        settings:
+          subject_line: "${subject}"
+          preview_text: "${preview_text}"
+          title: "${title}"
+          from_name: "${from_name}"
+          reply_to: "${reply_to}"
+          to_name: "${to_name}"
+    input:
+      list_id:
+        type: string
+        description: Audience to send to.
+      subject:
+        type: string
+        description: Subject line.
+      from_name:
+        type: string
+        description: Display name shown for the sender.
+      reply_to:
+        type: string
+        description: Address replies go to. Must be verified in Mailchimp.
+        format: email
+      type:
+        type: string
+        description: Campaign type.
+        optional: true
+        default: regular
+        enum: [regular, plaintext, absplit, rss, variate]
+      title:
+        type: string
+        description: Internal name for the campaign, not shown to recipients.
+        optional: true
+      preview_text:
+        type: string
+        description: Preview line shown in the inbox under the subject.
+        optional: true
+      to_name:
+        type: string
+        description: Recipient greeting, e.g. "*|FNAME|*".
+        optional: true
+      segment_opts:
+        type: object
+        description: Segment conditions narrowing who inside the audience receives it.
+        optional: true
+    output:
+      description: The created draft campaign.
+      type: object
+      properties:
+        id: {type: string}
+        web_id: {type: integer}
+        status: {type: string}
+
+  set_campaign_content:
+    title: Set a campaign's content
+    description: >-
+      Fill a draft campaign with HTML, plain text, or a template plus its
+      section values.
+    category: campaigns
+    request:
+      method: PUT
+      path: /3.0/campaigns/${campaign_id}/content
+      body:
+        html: "${html}"
+        plain_text: "${plain_text}"
+        template: "${template}"
+    input:
+      campaign_id:
+        type: string
+        description: The campaign id.
+      html:
+        type: string
+        description: The campaign's HTML body.
+        optional: true
+      plain_text:
+        type: string
+        description: A plain-text alternative body.
+        optional: true
+      template:
+        type: object
+        description: "Template to render instead, e.g. {\"id\": 123, \"sections\": {\"body\": \"<p>Hi</p>\"}}."
+        optional: true
+    output:
+      description: The campaign's content.
+      type: object
+      properties:
+        html: {type: string}
+        plain_text: {type: string}
+
+  send_campaign:
+    title: Send a campaign
+    description: >-
+      Send a draft campaign to its audience immediately. This reaches real
+      recipients and cannot be recalled -- use send_test_email first.
+    category: campaigns
+    destructive: true
+    request:
+      method: POST
+      path: /3.0/campaigns/${campaign_id}/actions/send
+      body: {}
+    input:
+      campaign_id:
+        type: string
+        description: The campaign to send.
+    output:
+      description: Empty on success -- Mailchimp answers 204 No Content.
+      type: object
+
+  send_test_email:
+    title: Send a test of a campaign
+    description: >-
+      Send a campaign to a handful of test addresses without touching the
+      audience. Do this before send_campaign.
+    category: campaigns
+    request:
+      method: POST
+      path: /3.0/campaigns/${campaign_id}/actions/test
+      body:
+        test_emails: "${test_emails}"
+        send_type: "${send_type}"
+    input:
+      campaign_id:
+        type: string
+        description: The campaign to test.
+      test_emails:
+        type: array
+        description: Addresses to send the test to.
+        items: {type: string, format: email}
+      send_type:
+        type: string
+        description: Which version to send.
+        optional: true
+        default: html
+        enum: [html, plaintext]
+    output:
+      description: Empty on success -- Mailchimp answers 204 No Content.
+      type: object
+
+  get_campaign_report:
+    title: Get a campaign's report
+    description: >-
+      Read a sent campaign's performance -- opens, clicks, bounces, unsubscribes
+      and the click rate.
+    category: reports
+    read_only: true
+    request:
+      method: GET
+      path: /3.0/reports/${campaign_id}
+      query:
+        fields: "${fields}"
+    input:
+      campaign_id:
+        type: string
+        description: The campaign id.
+      fields:
+        type: array
+        description: Only return these fields.
+        optional: true
+        items: {type: string}
+    output:
+      description: The campaign report.
+      type: object
+      properties:
+        id: {type: string}
+        emails_sent: {type: integer}
+        opens: {type: object}
+        clicks: {type: object}
+        bounces: {type: object}
+        unsubscribed: {type: integer}
+
+  get_account:
+    title: Get the connected account
+    description: >-
+      Read the Mailchimp account the token belongs to -- name, plan, contact
+      details and total subscribers. The cheapest health check for the
+      connection.
+    category: account
+    read_only: true
+    request:
+      method: GET
+      path: /3.0/
+    input: {}
+    output:
+      description: The account.
+      type: object
+      properties:
+        account_id: {type: string}
+        account_name: {type: string}
+        email: {type: string}
+        total_subscribers: {type: integer}

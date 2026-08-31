@@ -1,0 +1,132 @@
+# Hastewire tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://hastewire.com/openapi.json
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: hastewire
+display_name: Hastewire
+docs_url: https://hastewire.com/developers
+generated: true
+generated_from: https://hastewire.com/openapi.json
+tools:
+  detect_aitext:
+    title: Detect AI-generated text
+    description: Detect AI-generated text Analyzes text and returns AI-detection results, including sentence-level
+      scoring. Calls POST /api/v1/detect on the provider's API.
+    category: api
+    request:
+      method: POST
+      path: /api/v1/detect
+      body:
+        text: ${text}
+    input:
+      text:
+        type: string
+        description: The text to analyze.
+    output:
+      description: Detection succeeded.
+      type: object
+  humanize_text:
+    title: Humanize AI-generated text
+    description: Humanize AI-generated text Rewrites AI-generated text into natural, human-sounding prose
+      while preserving meaning and formatting. Texts shorter than 4 words are returned unchanged at no
+      cost. Calls POST /api/v1/humanize on the provider's API.
+    category: api
+    request:
+      method: POST
+      path: /api/v1/humanize
+      body:
+        text: ${text}
+        style: ${style}
+        language: ${language}
+        strength: ${strength}
+    input:
+      text:
+        type: string
+        description: The text to humanize (minimum 4 words).
+      style:
+        type: string
+        description: Writing style for the humanized output.
+        optional: true
+        enum:
+        - standard
+        - academic
+        - reddit
+        - formal
+      language:
+        type: string
+        description: Output language, as a language name (e.g. "French") or locale code (en, es, pt, it,
+          fr, de, ca, va). Unrecognized values fall back to English.
+        optional: true
+      strength:
+        type: number
+        description: Humanization strength.
+        optional: true
+    output:
+      description: Humanization succeeded.
+      type: object
+  get_account:
+    title: Account behind the API key
+    description: 'Account behind the API key Returns the authenticated account: prepaid balance in cents
+      and USD, how many words that balance is worth at the current rates, the billing rates themselves,
+      and metadata about the calling key. Free — this call is not billed. Calls GET /api/v1/me on the
+      provider''s API.'
+    category: api
+    request:
+      method: GET
+      path: /api/v1/me
+    input: {}
+    output:
+      description: Account state.
+      type: object
+    read_only: true
+  get_api_status:
+    title: API service status
+    description: API service status Public health endpoint (no authentication). Returns overall and per-service
+      status, 7-day uptime, and infrastructure counts. Responds 503 when the platform is down. Calls GET
+      /api/v1/status on the provider's API.
+    category: api
+    request:
+      method: GET
+      path: /api/v1/status
+      query:
+        deep: ${deep}
+    input:
+      deep:
+        type: boolean
+        description: When true, actively re-checks all backend servers before reporting.
+        optional: true
+    output:
+      description: Current service status.
+      type: object
+    read_only: true
+  get_usage:
+    title: Billed usage for the account
+    description: 'Billed usage for the account Aggregated API usage across every key the account owns:
+      request counts, cents charged and words processed, split by operation and bucketed by UTC day. Never
+      returns the text of past requests. Free — this call is not billed. Calls GET /api/v1/usage on the
+      provider''s API.'
+    category: api
+    request:
+      method: GET
+      path: /api/v1/usage
+      query:
+        days: ${days}
+    input:
+      days:
+        type: integer
+        description: Look-back window in days. Defaults to 30, capped at 365.
+        optional: true
+        default: 30
+    output:
+      description: Usage summary.
+      type: object
+    read_only: true

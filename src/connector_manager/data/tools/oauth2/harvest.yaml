@@ -1,0 +1,536 @@
+# Harvest tools.
+#
+# A Harvest token can reach several accounts, so every call must name one in the
+# Harvest-Account-Id header -- that is the `account_id` argument on each tool.
+# list_accounts returns the ids.
+#
+# Durations are decimal hours: 1.5 is an hour and a half.
+#
+# Docs: https://help.getharvest.com/api-v2/
+
+connector_id: harvest
+display_name: Harvest
+docs_url: https://help.getharvest.com/api-v2/
+
+tools:
+
+  list_accounts:
+    title: List the accounts this token can reach
+    description: >-
+      List the Harvest accounts the token was granted, with the ids every other
+      tool needs in its Harvest-Account-Id header. Call this first.
+    category: accounts
+    read_only: true
+    request:
+      method: GET
+      base_url_override: https://id.getharvest.com
+      path: /api/v2/accounts
+    input: {}
+    output:
+      description: The accessible accounts.
+      type: array
+      response_path: accounts
+      items:
+        type: object
+        properties:
+          id: {type: integer, description: "Pass as `account_id` to every other tool."}
+          name: {type: string}
+          product: {type: string}
+
+  list_time_entries:
+    title: List time entries
+    description: >-
+      Read logged time, optionally for one user, project or date range. The main
+      way to pull timesheets out of Harvest.
+    category: time
+    read_only: true
+    request:
+      method: GET
+      path: /v2/time_entries
+      headers:
+        Harvest-Account-Id: "${account_id}"
+      query:
+        user_id: "${user_id}"
+        project_id: "${project_id}"
+        client_id: "${client_id}"
+        from: "${from_date}"
+        to: "${to_date}"
+        is_running: "${is_running}"
+        page: "${page}"
+        per_page: "${per_page}"
+    input:
+      account_id:
+        type: string
+        description: Harvest account id, from list_accounts.
+      user_id:
+        type: integer
+        description: Only entries logged by this user.
+        optional: true
+      project_id:
+        type: integer
+        description: Only entries on this project.
+        optional: true
+      client_id:
+        type: integer
+        description: Only entries for this client.
+        optional: true
+      from_date:
+        type: string
+        description: Only entries on or after this date, YYYY-MM-DD.
+        optional: true
+      to_date:
+        type: string
+        description: Only entries on or before this date, YYYY-MM-DD.
+        optional: true
+      is_running:
+        type: boolean
+        description: Only timers that are currently running.
+        optional: true
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      per_page:
+        type: integer
+        description: How many entries per page (1-2000).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 2000
+    output:
+      description: A page of time entries.
+      type: object
+      properties:
+        time_entries: {type: array, description: "Each with id, spent_date, hours, project and task."}
+        total_pages: {type: integer}
+
+  create_time_entry:
+    title: Log time
+    description: >-
+      Record time against a project and task. Give `hours` for a finished
+      entry, or leave it out to start a running timer.
+    category: time
+    request:
+      method: POST
+      path: /v2/time_entries
+      headers:
+        Harvest-Account-Id: "${account_id}"
+      body:
+        project_id: "${project_id}"
+        task_id: "${task_id}"
+        spent_date: "${spent_date}"
+        hours: "${hours}"
+        notes: "${notes}"
+        user_id: "${user_id}"
+        external_reference: "${external_reference}"
+    input:
+      account_id:
+        type: string
+        description: Harvest account id.
+      project_id:
+        type: integer
+        description: Project the time is against.
+      task_id:
+        type: integer
+        description: Task within the project, from list_project_task_assignments.
+      spent_date:
+        type: string
+        description: The day the work happened, YYYY-MM-DD.
+        example: "2026-08-27"
+      hours:
+        type: number
+        description: Decimal hours, e.g. 1.5. Omit to start a running timer instead.
+        optional: true
+        minimum: 0
+      notes:
+        type: string
+        description: What the time was spent on.
+        optional: true
+      user_id:
+        type: integer
+        description: Whose timesheet to log against. Defaults to the token's own user.
+        optional: true
+      external_reference:
+        type: object
+        description: Link to an outside record, e.g. {"id":"123","group_id":"1","permalink":"https://..."}.
+        optional: true
+    output:
+      description: The created time entry.
+      type: object
+      properties:
+        id: {type: integer}
+        hours: {type: number}
+        is_running: {type: boolean}
+        spent_date: {type: string}
+
+  stop_timer:
+    title: Stop a running timer
+    description: Stop a running time entry and fix its hours at the elapsed time.
+    category: time
+    request:
+      method: PATCH
+      path: /v2/time_entries/${time_entry_id}/stop
+      headers:
+        Harvest-Account-Id: "${account_id}"
+      body: {}
+    input:
+      account_id:
+        type: string
+        description: Harvest account id.
+      time_entry_id:
+        type: integer
+        description: The running time entry to stop.
+    output:
+      description: The stopped entry.
+      type: object
+      properties:
+        id: {type: integer}
+        hours: {type: number}
+        is_running: {type: boolean}
+
+  update_time_entry:
+    title: Update a time entry
+    description: Change a time entry's hours, notes, project or task.
+    category: time
+    request:
+      method: PATCH
+      path: /v2/time_entries/${time_entry_id}
+      headers:
+        Harvest-Account-Id: "${account_id}"
+      body:
+        project_id: "${project_id}"
+        task_id: "${task_id}"
+        spent_date: "${spent_date}"
+        hours: "${hours}"
+        notes: "${notes}"
+    input:
+      account_id:
+        type: string
+        description: Harvest account id.
+      time_entry_id:
+        type: integer
+        description: The time entry id.
+      project_id:
+        type: integer
+        description: Move it to this project.
+        optional: true
+      task_id:
+        type: integer
+        description: Move it to this task.
+        optional: true
+      spent_date:
+        type: string
+        description: New date, YYYY-MM-DD.
+        optional: true
+      hours:
+        type: number
+        description: New decimal hours.
+        optional: true
+        minimum: 0
+      notes:
+        type: string
+        description: New notes.
+        optional: true
+    output:
+      description: The updated time entry.
+      type: object
+      properties:
+        id: {type: integer}
+        hours: {type: number}
+
+  delete_time_entry:
+    title: Delete a time entry
+    description: >-
+      Permanently delete a logged time entry. Harvest refuses if it has already
+      been invoiced or locked.
+    category: time
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/time_entries/${time_entry_id}
+      headers:
+        Harvest-Account-Id: "${account_id}"
+    input:
+      account_id:
+        type: string
+        description: Harvest account id.
+      time_entry_id:
+        type: integer
+        description: The time entry to delete.
+    output:
+      description: Empty on success -- Harvest answers 200 with no body.
+      type: object
+
+  list_projects:
+    title: List projects
+    description: >-
+      List the account's projects with their ids, clients and billing settings.
+    category: projects
+    read_only: true
+    request:
+      method: GET
+      path: /v2/projects
+      headers:
+        Harvest-Account-Id: "${account_id}"
+      query:
+        is_active: "${is_active}"
+        client_id: "${client_id}"
+        updated_since: "${updated_since}"
+        page: "${page}"
+        per_page: "${per_page}"
+    input:
+      account_id:
+        type: string
+        description: Harvest account id.
+      is_active:
+        type: boolean
+        description: Only active projects.
+        optional: true
+      client_id:
+        type: integer
+        description: Only projects for this client.
+        optional: true
+      updated_since:
+        type: string
+        description: Only projects changed since this ISO 8601 instant.
+        optional: true
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      per_page:
+        type: integer
+        description: How many projects per page (1-2000).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 2000
+    output:
+      description: A page of projects.
+      type: object
+      properties:
+        projects: {type: array}
+        total_pages: {type: integer}
+
+  list_project_task_assignments:
+    title: List a project's tasks
+    description: >-
+      List the tasks that can be logged against a project, with the task ids
+      create_time_entry needs.
+    category: projects
+    read_only: true
+    request:
+      method: GET
+      path: /v2/projects/${project_id}/task_assignments
+      headers:
+        Harvest-Account-Id: "${account_id}"
+      query:
+        is_active: "${is_active}"
+        page: "${page}"
+        per_page: "${per_page}"
+    input:
+      account_id:
+        type: string
+        description: Harvest account id.
+      project_id:
+        type: integer
+        description: The project id.
+      is_active:
+        type: boolean
+        description: Only active task assignments.
+        optional: true
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      per_page:
+        type: integer
+        description: How many per page.
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 2000
+    output:
+      description: The project's task assignments.
+      type: object
+      properties:
+        task_assignments: {type: array, description: "Each holds a task object with its id."}
+
+  list_clients:
+    title: List clients
+    description: List the account's clients with their ids and currencies.
+    category: clients
+    read_only: true
+    request:
+      method: GET
+      path: /v2/clients
+      headers:
+        Harvest-Account-Id: "${account_id}"
+      query:
+        is_active: "${is_active}"
+        page: "${page}"
+        per_page: "${per_page}"
+    input:
+      account_id:
+        type: string
+        description: Harvest account id.
+      is_active:
+        type: boolean
+        description: Only active clients.
+        optional: true
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      per_page:
+        type: integer
+        description: How many clients per page.
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 2000
+    output:
+      description: A page of clients.
+      type: object
+      properties:
+        clients: {type: array}
+        total_pages: {type: integer}
+
+  list_invoices:
+    title: List invoices
+    description: >-
+      List the account's invoices with their state, totals and outstanding
+      amounts.
+    category: invoices
+    read_only: true
+    request:
+      method: GET
+      path: /v2/invoices
+      headers:
+        Harvest-Account-Id: "${account_id}"
+      query:
+        client_id: "${client_id}"
+        project_id: "${project_id}"
+        state: "${state}"
+        from: "${from_date}"
+        to: "${to_date}"
+        page: "${page}"
+        per_page: "${per_page}"
+    input:
+      account_id:
+        type: string
+        description: Harvest account id.
+      client_id:
+        type: integer
+        description: Only invoices for this client.
+        optional: true
+      project_id:
+        type: integer
+        description: Only invoices for this project.
+        optional: true
+      state:
+        type: string
+        description: Only invoices in this state.
+        optional: true
+        enum: [draft, open, paid, closed]
+      from_date:
+        type: string
+        description: Only invoices issued on or after this date, YYYY-MM-DD.
+        optional: true
+      to_date:
+        type: string
+        description: Only invoices issued on or before this date.
+        optional: true
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      per_page:
+        type: integer
+        description: How many invoices per page.
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 2000
+    output:
+      description: A page of invoices.
+      type: object
+      properties:
+        invoices: {type: array}
+        total_pages: {type: integer}
+
+  get_time_report:
+    title: Report time by project
+    description: >-
+      Summarise logged hours by project over a date range — billable and
+      non-billable, with amounts.
+    category: reports
+    read_only: true
+    request:
+      method: GET
+      path: /v2/reports/time/projects
+      headers:
+        Harvest-Account-Id: "${account_id}"
+      query:
+        from: "${from_date}"
+        to: "${to_date}"
+        page: "${page}"
+        per_page: "${per_page}"
+    input:
+      account_id:
+        type: string
+        description: Harvest account id.
+      from_date:
+        type: string
+        description: Start of the range, YYYY-MM-DD.
+      to_date:
+        type: string
+        description: End of the range, YYYY-MM-DD.
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      per_page:
+        type: integer
+        description: How many rows per page.
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 2000
+    output:
+      description: Hours and amounts per project.
+      type: object
+      properties:
+        results: {type: array}
+        total_pages: {type: integer}
+
+  get_current_user:
+    title: Get the authenticated user
+    description: >-
+      Read the Harvest user the token belongs to. The cheapest health check once
+      an account id is known.
+    category: accounts
+    read_only: true
+    request:
+      method: GET
+      path: /v2/users/me
+      headers:
+        Harvest-Account-Id: "${account_id}"
+    input:
+      account_id:
+        type: string
+        description: Harvest account id.
+    output:
+      description: The authenticated user.
+      type: object
+      properties:
+        id: {type: integer}
+        first_name: {type: string}
+        email: {type: string}
+        is_admin: {type: boolean}

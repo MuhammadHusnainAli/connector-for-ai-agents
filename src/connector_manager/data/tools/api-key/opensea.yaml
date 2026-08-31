@@ -1,0 +1,340 @@
+# Opensea tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://api.opensea.io/v2/openapi.json
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: opensea
+display_name: Opensea
+docs_url: https://api.opensea.io/v2/openapi.json
+generated: true
+generated_from: https://api.opensea.io/v2/openapi.json
+tools:
+  get_chains:
+    title: Get supported chains
+    description: Get supported chains Get all supported blockchain chains with metadata including name,
+      native currency symbol, swap support, and block explorer information. Calls GET /api/v2/chains on
+      Opensea's API.
+    category: api
+    request:
+      method: GET
+      path: /api/v2/chains
+    input: {}
+    output:
+      description: List of supported chains
+      type: object
+    read_only: true
+  list_collections:
+    title: Get multiple collections
+    description: Get multiple collections Get a list of collections with filters and sorting options.
+      Calls GET /api/v2/collections on Opensea's API.
+    category: api
+    request:
+      method: GET
+      path: /api/v2/collections
+      query:
+        limit: ${limit}
+        next: ${next}
+        chain: ${chain}
+        creator_username: ${creator_username}
+        include_hidden: ${include_hidden}
+        order_by: ${order_by}
+    input:
+      limit:
+        type: integer
+        description: Number of items to return per page
+        optional: true
+        default: 50
+      next:
+        type: string
+        description: The next parameter.
+        optional: true
+      chain:
+        type: string
+        description: Blockchain to filter by
+        optional: true
+        enum:
+        - blast
+        - base
+        - ethereum
+        - zora
+        - arbitrum
+        - sei
+        - avalanche
+        - polygon
+        - optimism
+        - ape_chain
+        - flow
+        - b3
+        - soneium
+        - ronin
+        - bera_chain
+        - solana
+        - shape
+        - unichain
+        - gunzilla
+        - abstract
+        default: ethereum
+      creator_username:
+        type: string
+        description: Username of collection creator to filter by
+        optional: true
+      include_hidden:
+        type: boolean
+        description: Include hidden collections in results
+        optional: true
+      order_by:
+        type: string
+        description: Field to order results by
+        optional: true
+    output:
+      description: OK
+      type: object
+    read_only: true
+  get_drops:
+    title: Get drops
+    description: 'Get drops Get a list of NFT drops (mints) by type: featured, upcoming, or recentlyminted.
+      Results may be fewer than the requested limit due to post-fetch filtering. Calls GET /api/v2/drops
+      on Opensea''s API.'
+    category: api
+    request:
+      method: GET
+      path: /api/v2/drops
+      query:
+        type: ${type}
+        limit: ${limit}
+        chains: ${chains}
+        cursor: ${cursor}
+    input:
+      type:
+        type: string
+        description: 'Drop calendar type: featured, upcoming, or recentlyminted'
+        optional: true
+        default: featured
+      limit:
+        type: integer
+        description: 'Number of results to return (1-100, default: 20)'
+        optional: true
+        default: 20
+      chains:
+        type: array
+        description: Comma-separated list of chains to filter by (e.g. ethereum, base). Omit to return
+          drops on all chains.
+        optional: true
+        items:
+          type: string
+      cursor:
+        type: string
+        description: Pagination cursor for next page
+        optional: true
+    output:
+      description: Paginated list of drops
+      type: object
+    read_only: true
+  list_events:
+    title: Get events
+    description: Get events Get a list of events, with optional filtering by event type and time range.
+      Calls GET /api/v2/events on Opensea's API.
+    category: api
+    request:
+      method: GET
+      path: /api/v2/events
+      query:
+        after: ${after}
+        before: ${before}
+        event_type: ${event_type}
+        limit: ${limit}
+        next: ${next}
+    input:
+      after:
+        type: integer
+        description: Only show events after this timestamp (Unix timestamp in seconds)
+        optional: true
+      before:
+        type: integer
+        description: Only show events before this timestamp (Unix timestamp in seconds)
+        optional: true
+      event_type:
+        type: array
+        description: Filter by event types. To get order invalidation and revalidation events, please
+          use the Stream API. The order status can also be checked on the Get Order endpoint.
+        optional: true
+        items:
+          type: string
+      limit:
+        type: integer
+        description: Number of items to return per page
+        optional: true
+      next:
+        type: string
+        description: The next parameter.
+        optional: true
+    output:
+      description: OK
+      type: object
+    read_only: true
+  post_criteria_offer:
+    title: Create a criteria offer
+    description: Create a criteria offer Create a criteria offer to purchase any NFT in a collection or
+      which matches the specified trait. For trait offers where the Build Offer endpoint returns identifierOrCriteria
+      '0', use that value directly — trait matching is validated server-side at fulfillment time rather
+      than via onchain merkle pro Calls POST /api/v2/offers on Opensea's API.
+    category: api
+    request:
+      method: POST
+      path: /api/v2/offers
+      body:
+        protocol_data: ${protocol_data}
+        criteria: ${criteria}
+        protocol_address: ${protocol_address}
+    input:
+      protocol_data:
+        type: object
+        description: The protocol_data field of the request body.
+      criteria:
+        type: object
+        description: Criteria for collection or trait offers. When traits are specified, the offer targets
+          NFTs matching those traits. For supported collections, the identifierOrCriteria (merkle root)
+          will be '0' and trait matching is validated server-side at fulfillment time.
+      protocol_address:
+        type: string
+        description: The protocol_address field of the request body.
+    output:
+      description: Criteria offer created successfully
+      type: object
+  update_profile_settings:
+    title: Update profile settings
+    description: Update profile settings Update the authenticated wallet's profile settings. Calls PATCH
+      /api/v2/profile on Opensea's API.
+    category: api
+    request:
+      method: PATCH
+      path: /api/v2/profile
+      body:
+        displayName: ${display_name}
+        bio: ${bio}
+        externalUrl: ${external_url}
+        profileImageToken: ${profile_image_token}
+        bannerImageToken: ${banner_image_token}
+    input:
+      display_name:
+        type: string
+        description: Profile display name
+        optional: true
+      bio:
+        type: string
+        description: Profile bio
+        optional: true
+      external_url:
+        type: string
+        description: Profile external URL
+        optional: true
+      profile_image_token:
+        type: string
+        description: Profile image upload token
+        optional: true
+      banner_image_token:
+        type: string
+        description: Banner image upload token
+        optional: true
+    output:
+      description: Profile settings updated successfully
+      type: object
+  unsave_tool:
+    title: '[Beta] Remove a saved tool'
+    description: '[Beta] Remove a saved tool Idempotently remove a registered tool from the authenticated
+      account''s saved tools. Removed is false when the tool was already absent. Calls DELETE /api/v2/saved-tools
+      on Opensea''s API.'
+    category: api
+    request:
+      method: DELETE
+      path: /api/v2/saved-tools
+      query:
+        tool_id: ${tool_id}
+        registry_chain: ${registry_chain}
+        registry_addr: ${registry_addr}
+        toolkit_name: ${toolkit_name}
+    input:
+      tool_id:
+        type: string
+        description: The tool_id parameter.
+      registry_chain:
+        type: string
+        description: The registry_chain parameter.
+      registry_addr:
+        type: string
+        description: The registry_addr parameter.
+      toolkit_name:
+        type: string
+        description: The toolkit_name parameter.
+        optional: true
+    output:
+      description: Saved-tool removal result
+      type: object
+    destructive: true
+  list_saved_tools:
+    title: '[Beta] List saved tools'
+    description: '[Beta] List saved tools List tools saved by the authenticated account. Calls GET /api/v2/saved-tools
+      on Opensea''s API.'
+    category: api
+    request:
+      method: GET
+      path: /api/v2/saved-tools
+      query:
+        toolkit_name: ${toolkit_name}
+        limit: ${limit}
+        cursor: ${cursor}
+    input:
+      toolkit_name:
+        type: string
+        description: The toolkit_name parameter.
+        optional: true
+      limit:
+        type: integer
+        description: Number of items to return per page
+        optional: true
+      cursor:
+        type: string
+        description: The cursor parameter.
+        optional: true
+    output:
+      description: Saved tools returned
+      type: object
+    read_only: true
+  save_tool:
+    title: '[Beta] Save a tool'
+    description: '[Beta] Save a tool Save a registered tool for the authenticated account. Calls POST
+      /api/v2/saved-tools on Opensea''s API.'
+    category: api
+    request:
+      method: POST
+      path: /api/v2/saved-tools
+      body:
+        tool_id: ${tool_id}
+        registry_chain: ${registry_chain}
+        registry_addr: ${registry_addr}
+        toolkit_name: ${toolkit_name}
+    input:
+      tool_id:
+        type: string
+        description: Numeric registered tool ID
+      registry_chain:
+        type: string
+        description: Numeric registry chain ID
+      registry_addr:
+        type: string
+        description: Registry contract address or supported x402 registry identifier
+      toolkit_name:
+        type: string
+        description: Saved-tools toolkit name
+        optional: true
+    output:
+      description: Tool saved
+      type: object

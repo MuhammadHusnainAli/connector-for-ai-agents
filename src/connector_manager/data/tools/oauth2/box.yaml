@@ -1,0 +1,424 @@
+# Box tools.
+#
+# Box scopes are configured on the application, not carried on the token, so no
+# tool declares them -- a 403 means the app's configured scopes or the user's
+# collaboration role is too narrow. Folder id "0" is always the account root.
+#
+# Docs: https://developer.box.com/reference/
+
+connector_id: box
+display_name: Box
+docs_url: https://developer.box.com/reference/
+
+tools:
+
+  list_folder_items:
+    title: List a folder's contents
+    description: >-
+      List the files and folders inside a folder. Use "0" for the account root.
+      Each entry's type field says whether it is a file or a folder.
+    category: files
+    read_only: true
+    request:
+      method: GET
+      path: /2.0/folders/${folder_id}/items
+      query:
+        limit: "${limit}"
+        offset: "${offset}"
+        fields: "${fields}"
+        sort: "${sort}"
+        direction: "${direction}"
+    input:
+      folder_id:
+        type: string
+        description: Folder id. "0" is the account root.
+        optional: true
+        default: "0"
+      limit:
+        type: integer
+        description: How many entries per page (1-1000).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 1000
+      offset:
+        type: integer
+        description: Zero-based index to start from.
+        optional: true
+        minimum: 0
+      fields:
+        type: array
+        description: Extra fields to return, e.g. ["name","size","modified_at"].
+        optional: true
+        items: {type: string}
+      sort:
+        type: string
+        description: Field to order by.
+        optional: true
+        enum: [id, name, date, size]
+      direction:
+        type: string
+        description: Sort direction.
+        optional: true
+        enum: [ASC, DESC]
+    output:
+      description: The folder's entries.
+      type: object
+      properties:
+        entries: {type: array, description: "Each with type, id and name."}
+        total_count: {type: integer}
+
+  search:
+    title: Search files and folders
+    description: >-
+      Search Box by file name and, on supported plans, content. Narrow by type,
+      file extension or the folders to look in.
+    category: files
+    read_only: true
+    request:
+      method: GET
+      path: /2.0/search
+      query:
+        query: "${query}"
+        type: "${type}"
+        file_extensions: "${file_extensions}"
+        ancestor_folder_ids: "${folder_ids}"
+        limit: "${limit}"
+        offset: "${offset}"
+        content_types: "${content_types}"
+    input:
+      query:
+        type: string
+        description: Words to search for.
+      type:
+        type: string
+        description: Restrict to one kind of item.
+        optional: true
+        enum: [file, folder, web_link]
+      file_extensions:
+        type: array
+        description: Only these extensions, e.g. ["pdf","docx"].
+        optional: true
+        items: {type: string}
+      folder_ids:
+        type: array
+        description: Only search inside these folders.
+        optional: true
+        items: {type: string}
+      content_types:
+        type: array
+        description: Where to match, e.g. ["name","description","file_content","tags"].
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: How many matches per page (1-200).
+        optional: true
+        default: 30
+        minimum: 1
+        maximum: 200
+      offset:
+        type: integer
+        description: Zero-based index to start from.
+        optional: true
+        minimum: 0
+    output:
+      description: Matching items.
+      type: object
+      properties:
+        entries: {type: array}
+        total_count: {type: integer}
+
+  get_file_info:
+    title: Get a file's details
+    description: Read one file's name, size, version, path and shared link, if it has one.
+    category: files
+    read_only: true
+    request:
+      method: GET
+      path: /2.0/files/${file_id}
+      query:
+        fields: "${fields}"
+    input:
+      file_id:
+        type: string
+        description: The file id.
+      fields:
+        type: array
+        description: Extra fields to return.
+        optional: true
+        items: {type: string}
+    output:
+      description: The file.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        size: {type: integer}
+        parent: {type: object}
+        shared_link: {type: object}
+
+  download_file:
+    title: Download a file
+    description: >-
+      Fetch a file's contents. Box answers with a redirect to a signed URL,
+      which the HTTP client follows.
+    category: files
+    read_only: true
+    request:
+      method: GET
+      path: /2.0/files/${file_id}/content
+      query:
+        version: "${version}"
+    input:
+      file_id:
+        type: string
+        description: The file id.
+      version:
+        type: string
+        description: File version id to fetch instead of the current one.
+        optional: true
+    output:
+      description: The file's contents.
+      type: string
+
+  create_folder:
+    title: Create a folder
+    description: Create a folder inside another folder. Use parent "0" for the account root.
+    category: files
+    request:
+      method: POST
+      path: /2.0/folders
+      body:
+        name: "${name}"
+        parent:
+          id: "${parent_id}"
+    input:
+      name:
+        type: string
+        description: Folder name.
+      parent_id:
+        type: string
+        description: Parent folder id. "0" is the account root.
+        optional: true
+        default: "0"
+    output:
+      description: The created folder.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+
+  update_file:
+    title: Rename, move or describe a file
+    description: >-
+      Change a file's name or description, or move it by naming a new parent
+      folder. Only what is supplied is written.
+    category: files
+    request:
+      method: PUT
+      path: /2.0/files/${file_id}
+      body:
+        name: "${name}"
+        description: "${description}"
+        parent:
+          id: "${parent_id}"
+        tags: "${tags}"
+    input:
+      file_id:
+        type: string
+        description: The file id.
+      name:
+        type: string
+        description: New file name.
+        optional: true
+      description:
+        type: string
+        description: New description.
+        optional: true
+      parent_id:
+        type: string
+        description: Folder id to move the file into.
+        optional: true
+      tags:
+        type: array
+        description: Replaces the tag set entirely.
+        optional: true
+        items: {type: string}
+    output:
+      description: The updated file.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        parent: {type: object}
+
+  copy_file:
+    title: Copy a file
+    description: Duplicate a file into another folder, optionally under a new name.
+    category: files
+    request:
+      method: POST
+      path: /2.0/files/${file_id}/copy
+      body:
+        parent:
+          id: "${parent_id}"
+        name: "${name}"
+        version: "${version}"
+    input:
+      file_id:
+        type: string
+        description: The file to copy.
+      parent_id:
+        type: string
+        description: Destination folder id.
+      name:
+        type: string
+        description: Name for the copy.
+        optional: true
+      version:
+        type: string
+        description: File version id to copy instead of the current one.
+        optional: true
+    output:
+      description: The new copy.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+
+  delete_file:
+    title: Delete a file
+    description: >-
+      Move a file to the Box trash, where it stays for the account's retention
+      window. This tool cannot restore it.
+    category: files
+    destructive: true
+    request:
+      method: DELETE
+      path: /2.0/files/${file_id}
+    input:
+      file_id:
+        type: string
+        description: The file to delete.
+    output:
+      description: Empty on success -- Box answers 204 No Content.
+      type: object
+
+  create_shared_link:
+    title: Create a shared link for a file
+    description: >-
+      Give a file a shareable URL. Access "open" works for anyone with the link,
+      "company" for the enterprise, "collaborators" for people already on it.
+    category: sharing
+    request:
+      method: PUT
+      path: /2.0/files/${file_id}
+      query:
+        fields: shared_link
+      body:
+        shared_link:
+          access: "${access}"
+          password: "${password}"
+          unshared_at: "${expires_at}"
+          permissions:
+            can_download: "${can_download}"
+    input:
+      file_id:
+        type: string
+        description: The file to share.
+      access:
+        type: string
+        description: Who the link works for.
+        optional: true
+        default: open
+        enum: [open, company, collaborators]
+      password:
+        type: string
+        description: Password required to open the link.
+        optional: true
+        secret: true
+      expires_at:
+        type: string
+        description: When the link stops working, ISO 8601.
+        optional: true
+      can_download:
+        type: boolean
+        description: Whether people with the link may download the file.
+        optional: true
+    output:
+      description: The file with its shared link.
+      type: object
+      properties:
+        id: {type: string}
+        shared_link: {type: object, description: "Holds url and download_url."}
+
+  invite_collaborator:
+    title: Invite someone to a file or folder
+    description: >-
+      Add a collaborator by email address with a chosen role -- editor, viewer,
+      uploader and so on -- on a file or folder.
+    category: sharing
+    request:
+      method: POST
+      path: /2.0/collaborations
+      query:
+        notify: "${notify}"
+      body:
+        item:
+          type: "${item_type}"
+          id: "${item_id}"
+        accessible_by:
+          type: user
+          login: "${email}"
+        role: "${role}"
+    input:
+      item_id:
+        type: string
+        description: Id of the file or folder to share.
+      email:
+        type: string
+        description: Email address of the person to invite.
+        format: email
+      role:
+        type: string
+        description: What they may do.
+        enum: [editor, viewer, previewer, uploader, previewer uploader, viewer uploader, co-owner, owner]
+      item_type:
+        type: string
+        description: Whether the item is a file or a folder.
+        optional: true
+        default: folder
+        enum: [file, folder]
+      notify:
+        type: boolean
+        description: Email the person about the invitation.
+        optional: true
+    output:
+      description: The collaboration that was created.
+      type: object
+      properties:
+        id: {type: string}
+        role: {type: string}
+        status: {type: string}
+
+  get_current_user:
+    title: Get the connected account
+    description: >-
+      Read the Box account the token belongs to, with its name, login and
+      storage use. The cheapest health check for a Box connection.
+    category: account
+    read_only: true
+    request:
+      method: GET
+      path: /2.0/users/me
+    input: {}
+    output:
+      description: The account.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        login: {type: string}
+        space_used: {type: integer}
+        space_amount: {type: integer}

@@ -1,0 +1,658 @@
+# Shopify Admin API tools.
+#
+# The connection carries the shop's subdomain, which the base url resolves from,
+# so tools address /admin/api/<version>/... only. The API version is pinned in
+# each path; bump it here when moving to a newer one.
+#
+# Docs: https://shopify.dev/docs/api/admin-rest
+
+connector_id: shopify
+display_name: Shopify
+docs_url: https://shopify.dev/docs/api/admin-rest
+
+scope_rules:
+  implies:
+    write_products: [read_products]
+    write_orders: [read_orders]
+    write_customers: [read_customers]
+    write_inventory: [read_inventory]
+    write_draft_orders: [read_draft_orders]
+    write_fulfillments: [read_fulfillments]
+
+tools:
+
+  list_products:
+    title: List products
+    description: >-
+      Page through the shop's products with their variants. Use page_info from
+      the Link response header to walk to the next page.
+    category: products
+    scopes: [read_products]
+    read_only: true
+    request:
+      method: GET
+      path: /admin/api/2024-10/products.json
+      query:
+        limit: "${limit}"
+        page_info: "${page_info}"
+        status: "${status}"
+        vendor: "${vendor}"
+        product_type: "${product_type}"
+        created_at_min: "${created_at_min}"
+    input:
+      limit:
+        type: integer
+        description: How many products per page (1-250).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 250
+      page_info:
+        type: string
+        description: Cursor from the previous response's Link header.
+        optional: true
+      status:
+        type: string
+        description: Only products in this state.
+        optional: true
+        enum: [active, archived, draft]
+      vendor:
+        type: string
+        description: Only products from this vendor.
+        optional: true
+      product_type:
+        type: string
+        description: Only products of this type.
+        optional: true
+      created_at_min:
+        type: string
+        description: Only products created at or after this ISO 8601 instant.
+        optional: true
+    output:
+      description: A page of products.
+      type: array
+      response_path: products
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          title: "{type: string}"
+          handle: {type: string}
+          status: {type: string}
+          variants: {type: array}
+
+  get_product:
+    title: Get a product
+    description: Read one product in full, with its variants, images and options.
+    category: products
+    scopes: [read_products]
+    read_only: true
+    request:
+      method: GET
+      path: /admin/api/2024-10/products/${product_id}.json
+      query:
+        fields: "${fields}"
+    input:
+      product_id:
+        type: integer
+        description: The product's numeric id.
+      fields:
+        type: array
+        description: Only return these fields.
+        optional: true
+        items: {type: string}
+    output:
+      description: The product.
+      type: object
+      response_path: product
+      properties:
+        id: {type: integer}
+        title: "{type: string}"
+        body_html: {type: string}
+        variants: {type: array}
+
+  create_product:
+    title: Create a product
+    description: >-
+      Add a product. Each variant is {"price": "19.99", "sku": "ABC",
+      "option1": "Small"}; a product with no variants supplied gets a default one.
+    category: products
+    scopes: [write_products]
+    request:
+      method: POST
+      path: /admin/api/2024-10/products.json
+      body:
+        product:
+          title: "${title}"
+          body_html: "${body_html}"
+          vendor: "${vendor}"
+          product_type: "${product_type}"
+          status: "${status}"
+          tags: "${tags}"
+          variants: "${variants}"
+          images: "${images}"
+    input:
+      title:
+        type: string
+        description: Product title.
+      body_html:
+        type: string
+        description: Product description, as HTML.
+        optional: true
+      vendor:
+        type: string
+        description: The vendor or brand.
+        optional: true
+      product_type:
+        type: string
+        description: Product category.
+        optional: true
+      status:
+        type: string
+        description: Whether it is published.
+        optional: true
+        enum: [active, draft, archived]
+      tags:
+        type: string
+        description: Comma-separated tags.
+        optional: true
+      variants:
+        type: array
+        description: Variants, each with price, sku and option values.
+        optional: true
+        items: {type: object}
+      images:
+        type: array
+        description: "Images, each {\"src\": \"https://...\"}."
+        optional: true
+        items: {type: object}
+    output:
+      description: The created product.
+      type: object
+      response_path: product
+      properties:
+        id: {type: integer}
+        title: "{type: string}"
+        handle: {type: string}
+
+  update_product:
+    title: Update a product
+    description: Change a product's title, description, status or tags; unsupplied fields are untouched.
+    category: products
+    scopes: [write_products]
+    request:
+      method: PUT
+      path: /admin/api/2024-10/products/${product_id}.json
+      body:
+        product:
+          id: "${product_id}"
+          title: "${title}"
+          body_html: "${body_html}"
+          status: "${status}"
+          tags: "${tags}"
+          vendor: "${vendor}"
+    input:
+      product_id:
+        type: integer
+        description: The product's numeric id.
+      title:
+        type: string
+        description: New title.
+        optional: true
+      body_html:
+        type: string
+        description: New description, as HTML.
+        optional: true
+      status:
+        type: string
+        description: New publication state.
+        optional: true
+        enum: [active, draft, archived]
+      tags:
+        type: string
+        description: Comma-separated tags, replacing the current set.
+        optional: true
+      vendor:
+        type: string
+        description: New vendor.
+        optional: true
+    output:
+      description: The updated product.
+      type: object
+      response_path: product
+      properties:
+        id: {type: integer}
+        title: "{type: string}"
+
+  delete_product:
+    title: Delete a product
+    description: >-
+      Permanently delete a product and its variants. Archiving with
+      update_product is usually the safer choice.
+    category: products
+    scopes: [write_products]
+    destructive: true
+    request:
+      method: DELETE
+      path: /admin/api/2024-10/products/${product_id}.json
+    input:
+      product_id:
+        type: integer
+        description: The product to delete.
+    output:
+      description: An empty object on success.
+      type: object
+
+  list_orders:
+    title: List orders
+    description: >-
+      Page through orders. Defaults to open orders only, so pass status "any"
+      to include closed and cancelled ones.
+    category: orders
+    scopes: [read_orders]
+    read_only: true
+    request:
+      method: GET
+      path: /admin/api/2024-10/orders.json
+      query:
+        limit: "${limit}"
+        page_info: "${page_info}"
+        status: "${status}"
+        financial_status: "${financial_status}"
+        fulfillment_status: "${fulfillment_status}"
+        created_at_min: "${created_at_min}"
+        created_at_max: "${created_at_max}"
+    input:
+      limit:
+        type: integer
+        description: How many orders per page (1-250).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 250
+      page_info:
+        type: string
+        description: Cursor from the previous response's Link header.
+        optional: true
+      status:
+        type: string
+        description: Order state. Defaults to open.
+        optional: true
+        enum: [open, closed, cancelled, any]
+      financial_status:
+        type: string
+        description: Only orders in this payment state.
+        optional: true
+        enum: [authorized, pending, paid, partially_paid, refunded, voided, partially_refunded, any, unpaid]
+      fulfillment_status:
+        type: string
+        description: Only orders in this fulfilment state.
+        optional: true
+        enum: [shipped, partial, unshipped, any, unfulfilled]
+      created_at_min:
+        type: string
+        description: Only orders placed at or after this ISO 8601 instant.
+        optional: true
+      created_at_max:
+        type: string
+        description: Only orders placed at or before this ISO 8601 instant.
+        optional: true
+    output:
+      description: A page of orders.
+      type: array
+      response_path: orders
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          order_number: {type: integer}
+          total_price: {type: string}
+          financial_status: {type: string}
+          customer: {type: object}
+
+  get_order:
+    title: Get an order
+    description: >-
+      Read one order in full -- line items, addresses, payment state,
+      fulfilments and refunds.
+    category: orders
+    scopes: [read_orders]
+    read_only: true
+    request:
+      method: GET
+      path: /admin/api/2024-10/orders/${order_id}.json
+      query:
+        fields: "${fields}"
+    input:
+      order_id:
+        type: integer
+        description: The order's numeric id.
+      fields:
+        type: array
+        description: Only return these fields.
+        optional: true
+        items: {type: string}
+    output:
+      description: The order.
+      type: object
+      response_path: order
+      properties:
+        id: {type: integer}
+        order_number: {type: integer}
+        line_items: {type: array}
+        shipping_address: {type: object}
+        total_price: {type: string}
+
+  update_order:
+    title: Update an order
+    description: >-
+      Change an order's note, tags, email or shipping address. Line items and
+      prices cannot be edited through this endpoint.
+    category: orders
+    scopes: [write_orders]
+    request:
+      method: PUT
+      path: /admin/api/2024-10/orders/${order_id}.json
+      body:
+        order:
+          id: "${order_id}"
+          note: "${note}"
+          tags: "${tags}"
+          email: "${email}"
+          phone: "${phone}"
+          shipping_address: "${shipping_address}"
+    input:
+      order_id:
+        type: integer
+        description: The order's numeric id.
+      note:
+        type: string
+        description: Internal note on the order.
+        optional: true
+      tags:
+        type: string
+        description: Comma-separated tags, replacing the current set.
+        optional: true
+      email:
+        type: string
+        description: Contact email for the order.
+        optional: true
+        format: email
+      phone:
+        type: string
+        description: Contact phone number.
+        optional: true
+      shipping_address:
+        type: object
+        description: Replacement shipping address.
+        optional: true
+    output:
+      description: The updated order.
+      type: object
+      response_path: order
+      properties:
+        id: {type: integer}
+        note: {type: string}
+
+  cancel_order:
+    title: Cancel an order
+    description: >-
+      Cancel an order, optionally refunding the payment and restocking the
+      items. Cancellation cannot be undone.
+    category: orders
+    scopes: [write_orders]
+    destructive: true
+    request:
+      method: POST
+      path: /admin/api/2024-10/orders/${order_id}/cancel.json
+      body:
+        reason: "${reason}"
+        email: "${notify_customer}"
+        refund: "${refund}"
+        restock: "${restock}"
+    input:
+      order_id:
+        type: integer
+        description: The order to cancel.
+      reason:
+        type: string
+        description: Why it is being cancelled.
+        optional: true
+        enum: [customer, inventory, fraud, declined, other]
+      notify_customer:
+        type: boolean
+        description: Email the customer about the cancellation.
+        optional: true
+      refund:
+        type: boolean
+        description: Refund the payment.
+        optional: true
+      restock:
+        type: boolean
+        description: Return the items to inventory.
+        optional: true
+    output:
+      description: The cancelled order.
+      type: object
+      response_path: order
+      properties:
+        id: {type: integer}
+        cancelled_at: {type: string}
+        cancel_reason: {type: string}
+
+  list_customers:
+    title: List customers
+    description: Page through the shop's customers with their contact details and order counts.
+    category: customers
+    scopes: [read_customers]
+    read_only: true
+    request:
+      method: GET
+      path: /admin/api/2024-10/customers.json
+      query:
+        limit: "${limit}"
+        page_info: "${page_info}"
+        created_at_min: "${created_at_min}"
+    input:
+      limit:
+        type: integer
+        description: How many customers per page (1-250).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 250
+      page_info:
+        type: string
+        description: Cursor from the previous response's Link header.
+        optional: true
+      created_at_min:
+        type: string
+        description: Only customers created at or after this ISO 8601 instant.
+        optional: true
+    output:
+      description: A page of customers.
+      type: array
+      response_path: customers
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          email: {type: string}
+          first_name: {type: string}
+          orders_count: {type: integer}
+
+  search_customers:
+    title: Search customers
+    description: >-
+      Find customers by Shopify's search syntax, e.g. "email:ada@example.com",
+      "country:Canada", or a bare name.
+    category: customers
+    scopes: [read_customers]
+    read_only: true
+    request:
+      method: GET
+      path: /admin/api/2024-10/customers/search.json
+      query:
+        query: "${query}"
+        limit: "${limit}"
+        order: "${order}"
+    input:
+      query:
+        type: string
+        description: Shopify customer search query.
+        example: "email:ada@example.com"
+      limit:
+        type: integer
+        description: How many customers to return (1-250).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 250
+      order:
+        type: string
+        description: Sort order, e.g. "last_order_date DESC".
+        optional: true
+    output:
+      description: Matching customers.
+      type: array
+      response_path: customers
+      items: {type: object}
+
+  create_customer:
+    title: Create a customer
+    description: >-
+      Add a customer. Set send_email_invite to have Shopify email them an
+      account activation link.
+    category: customers
+    scopes: [write_customers]
+    request:
+      method: POST
+      path: /admin/api/2024-10/customers.json
+      body:
+        customer:
+          first_name: "${first_name}"
+          last_name: "${last_name}"
+          email: "${email}"
+          phone: "${phone}"
+          tags: "${tags}"
+          note: "${note}"
+          addresses: "${addresses}"
+          send_email_invite: "${send_email_invite}"
+    input:
+      email:
+        type: string
+        description: The customer's email address.
+        format: email
+      first_name:
+        type: string
+        description: First name.
+        optional: true
+      last_name:
+        type: string
+        description: Last name.
+        optional: true
+      phone:
+        type: string
+        description: Phone number in E.164 format.
+        optional: true
+      tags:
+        type: string
+        description: Comma-separated tags.
+        optional: true
+      note:
+        type: string
+        description: Internal note about the customer.
+        optional: true
+      addresses:
+        type: array
+        description: Addresses, each with address1, city, province, country and zip.
+        optional: true
+        items: {type: object}
+      send_email_invite:
+        type: boolean
+        description: Email an account activation invitation.
+        optional: true
+    output:
+      description: The created customer.
+      type: object
+      response_path: customer
+      properties:
+        id: {type: integer}
+        email: {type: string}
+
+  adjust_inventory:
+    title: Adjust stock levels
+    description: >-
+      Change the available quantity of an inventory item at a location by a
+      delta -- negative to decrease. The inventory_item_id comes from a
+      product's variant, and location ids from list_locations.
+    category: inventory
+    scopes: [write_inventory]
+    request:
+      method: POST
+      path: /admin/api/2024-10/inventory_levels/adjust.json
+      body:
+        inventory_item_id: "${inventory_item_id}"
+        location_id: "${location_id}"
+        available_adjustment: "${adjustment}"
+    input:
+      inventory_item_id:
+        type: integer
+        description: Inventory item id, from a product variant's inventory_item_id.
+      location_id:
+        type: integer
+        description: Location id, from list_locations.
+      adjustment:
+        type: integer
+        description: How much to change the available quantity by. Negative decreases it.
+    output:
+      description: The inventory level after the change.
+      type: object
+      response_path: inventory_level
+      properties:
+        inventory_item_id: {type: integer}
+        location_id: {type: integer}
+        available: {type: integer}
+
+  list_locations:
+    title: List inventory locations
+    description: List the shop's locations with their ids, which the inventory tools take.
+    category: inventory
+    scopes: [read_locations]
+    read_only: true
+    request:
+      method: GET
+      path: /admin/api/2024-10/locations.json
+    input: {}
+    output:
+      description: The shop's locations.
+      type: array
+      response_path: locations
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          name: {type: string}
+          active: {type: boolean}
+
+  get_shop:
+    title: Get the shop
+    description: >-
+      Read the connected shop's name, domain, currency, time zone and plan. The
+      cheapest health check for a Shopify connection.
+    category: shop
+    read_only: true
+    request:
+      method: GET
+      path: /admin/api/2024-10/shop.json
+    input: {}
+    output:
+      description: The shop.
+      type: object
+      response_path: shop
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        myshopify_domain: {type: string}
+        currency: {type: string}
+        plan_name: {type: string}

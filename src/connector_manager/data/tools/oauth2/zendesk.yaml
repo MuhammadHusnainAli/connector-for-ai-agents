@@ -1,0 +1,668 @@
+# Zendesk Support tools.
+#
+# The connection carries the account's subdomain, which the base url resolves
+# from -- tools address paths under /api/v2 only.
+#
+# Docs: https://developer.zendesk.com/api-reference/ticketing/introduction/
+
+connector_id: zendesk
+display_name: Zendesk
+docs_url: https://developer.zendesk.com/api-reference/ticketing/introduction/
+
+scope_rules:
+  implies:
+    write: [read, "tickets:write", "users:write", "organizations:write"]
+    read: ["tickets:read", "users:read", "organizations:read"]
+    "tickets:write": ["tickets:read"]
+    "users:write": ["users:read"]
+
+tools:
+
+  list_tickets:
+    title: List tickets
+    description: >-
+      Page through the account's tickets, newest first. For anything narrower
+      than "all tickets", search_tickets is faster and more flexible.
+    category: tickets
+    scopes_any: [read, "tickets:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/tickets
+      query:
+        page[size]: "${limit}"
+        page[after]: "${after}"
+        sort: "${sort}"
+    input:
+      limit:
+        type: integer
+        description: How many tickets per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      after:
+        type: string
+        description: Cursor from the previous response's meta.after_cursor.
+        optional: true
+      sort:
+        type: string
+        description: Sort order, e.g. "updated_at" or "-created_at".
+        optional: true
+    output:
+      description: A page of tickets.
+      type: object
+      properties:
+        tickets: {type: array}
+        meta: {type: object, description: "Holds after_cursor and has_more."}
+
+  search_tickets:
+    title: Search tickets
+    description: >-
+      Search with Zendesk's query syntax, e.g. "type:ticket status:open
+      priority:urgent", "requester:ada@example.com created>2026-01-01".
+    category: tickets
+    scopes_any: [read, "tickets:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/search
+      query:
+        query: "${query}"
+        sort_by: "${sort_by}"
+        sort_order: "${sort_order}"
+        page: "${page}"
+        per_page: "${limit}"
+    input:
+      query:
+        type: string
+        description: Zendesk search query.
+        example: "type:ticket status:open priority:urgent"
+      sort_by:
+        type: string
+        description: Field to order by.
+        optional: true
+        enum: [created_at, updated_at, priority, status, ticket_type, relevance]
+      sort_order:
+        type: string
+        description: Sort direction.
+        optional: true
+        enum: [asc, desc]
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      limit:
+        type: integer
+        description: How many results per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+    output:
+      description: Matching records with the total count.
+      type: object
+      properties:
+        results: {type: array}
+        count: {type: integer}
+        next_page: {type: string}
+
+  get_ticket:
+    title: Get a ticket
+    description: Read one ticket in full -- subject, description, status, requester and assignee.
+    category: tickets
+    scopes_any: [read, "tickets:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/tickets/${ticket_id}
+    input:
+      ticket_id:
+        type: integer
+        description: The ticket's numeric id.
+    output:
+      description: The ticket.
+      type: object
+      response_path: ticket
+      properties:
+        id: {type: integer}
+        subject: {type: string}
+        status: {type: string}
+        priority: {type: string}
+        requester_id: {type: integer}
+        assignee_id: {type: integer}
+
+  create_ticket:
+    title: Create a ticket
+    description: >-
+      Open a ticket. The comment body becomes the ticket's first message; set
+      public false for an internal note the requester will not see.
+    category: tickets
+    scopes_any: [write, "tickets:write"]
+    request:
+      method: POST
+      path: /api/v2/tickets
+      body:
+        ticket:
+          subject: "${subject}"
+          comment:
+            body: "${body}"
+            html_body: "${html_body}"
+            public: "${public}"
+          requester:
+            name: "${requester_name}"
+            email: "${requester_email}"
+          priority: "${priority}"
+          type: "${type}"
+          status: "${status}"
+          tags: "${tags}"
+          assignee_id: "${assignee_id}"
+          group_id: "${group_id}"
+          custom_fields: "${custom_fields}"
+    input:
+      subject:
+        type: string
+        description: The ticket's subject line.
+      body:
+        type: string
+        description: The first comment, as plain text.
+      requester_email:
+        type: string
+        description: Email of the person the ticket is for. Creates the user if unknown.
+        optional: true
+        format: email
+      requester_name:
+        type: string
+        description: Name for a newly created requester.
+        optional: true
+      html_body:
+        type: string
+        description: The first comment as HTML, instead of plain text.
+        optional: true
+      public:
+        type: boolean
+        description: Whether the first comment is visible to the requester.
+        optional: true
+        default: true
+      priority:
+        type: string
+        description: Ticket priority.
+        optional: true
+        enum: [urgent, high, normal, low]
+      type:
+        type: string
+        description: Ticket type.
+        optional: true
+        enum: [problem, incident, question, task]
+      status:
+        type: string
+        description: Initial status.
+        optional: true
+        enum: [new, open, pending, hold, solved, closed]
+      tags:
+        type: array
+        description: Tags to apply.
+        optional: true
+        items: {type: string}
+      assignee_id:
+        type: integer
+        description: Agent id to assign it to.
+        optional: true
+      group_id:
+        type: integer
+        description: Group id to route it to.
+        optional: true
+      custom_fields:
+        type: array
+        description: "Custom field values, each {\"id\": 123, \"value\": \"...\"}."
+        optional: true
+        items: {type: object}
+    output:
+      description: The created ticket.
+      type: object
+      response_path: ticket
+      properties:
+        id: {type: integer}
+        subject: {type: string}
+        status: {type: string}
+        url: {type: string}
+
+  update_ticket:
+    title: Update a ticket
+    description: >-
+      Change a ticket's status, assignee, priority or tags, and optionally add a
+      comment in the same call. Only what is supplied is written.
+    category: tickets
+    scopes_any: [write, "tickets:write"]
+    request:
+      method: PUT
+      path: /api/v2/tickets/${ticket_id}
+      body:
+        ticket:
+          status: "${status}"
+          priority: "${priority}"
+          assignee_id: "${assignee_id}"
+          group_id: "${group_id}"
+          tags: "${tags}"
+          subject: "${subject}"
+          comment:
+            $when: "${comment}"
+            body: "${comment}"
+            public: "${public}"
+          custom_fields: "${custom_fields}"
+    input:
+      ticket_id:
+        type: integer
+        description: The ticket's numeric id.
+      status:
+        type: string
+        description: New status.
+        optional: true
+        enum: [new, open, pending, hold, solved, closed]
+      priority:
+        type: string
+        description: New priority.
+        optional: true
+        enum: [urgent, high, normal, low]
+      assignee_id:
+        type: integer
+        description: Agent id to reassign to.
+        optional: true
+      group_id:
+        type: integer
+        description: Group id to reroute to.
+        optional: true
+      tags:
+        type: array
+        description: Replaces the tag set entirely.
+        optional: true
+        items: {type: string}
+      subject:
+        type: string
+        description: New subject line.
+        optional: true
+      comment:
+        type: string
+        description: A comment to add alongside the change.
+        optional: true
+      public:
+        type: boolean
+        description: Whether that comment is visible to the requester.
+        optional: true
+        default: true
+      custom_fields:
+        type: array
+        description: Custom field values to write.
+        optional: true
+        items: {type: object}
+    output:
+      description: The updated ticket.
+      type: object
+      response_path: ticket
+      properties:
+        id: {type: integer}
+        status: {type: string}
+
+  add_ticket_comment:
+    title: Reply to a ticket
+    description: >-
+      Add a comment to a ticket. A public comment emails the requester; a
+      private one is an internal note only agents see.
+    category: tickets
+    scopes_any: [write, "tickets:write"]
+    request:
+      method: PUT
+      path: /api/v2/tickets/${ticket_id}
+      body:
+        ticket:
+          comment:
+            $when: "${body} || ${html_body}"
+            body: "${body}"
+            html_body: "${html_body}"
+            public: "${public}"
+            author_id: "${author_id}"
+          status: "${status}"
+    input:
+      ticket_id:
+        type: integer
+        description: The ticket's numeric id.
+      body:
+        type: string
+        description: The comment as plain text.
+        optional: true
+      html_body:
+        type: string
+        description: The comment as HTML, instead of plain text.
+        optional: true
+      public:
+        type: boolean
+        description: Visible to the requester, or an internal note.
+        optional: true
+        default: true
+      author_id:
+        type: integer
+        description: Agent id to attribute the comment to.
+        optional: true
+      status:
+        type: string
+        description: Also move the ticket to this status.
+        optional: true
+        enum: [new, open, pending, hold, solved, closed]
+    output:
+      description: The ticket with the new comment applied.
+      type: object
+      response_path: ticket
+      properties:
+        id: {type: integer}
+        status: {type: string}
+
+  list_ticket_comments:
+    title: List a ticket's comments
+    description: >-
+      Read a ticket's whole conversation, public replies and internal notes
+      alike, oldest first.
+    category: tickets
+    scopes_any: [read, "tickets:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/tickets/${ticket_id}/comments
+      query:
+        page[size]: "${limit}"
+        include_inline_images: "${include_inline_images}"
+    input:
+      ticket_id:
+        type: integer
+        description: The ticket's numeric id.
+      limit:
+        type: integer
+        description: How many comments per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      include_inline_images:
+        type: boolean
+        description: Include inline image attachments.
+        optional: true
+    output:
+      description: The ticket's comments.
+      type: object
+      properties:
+        comments: {type: array}
+        meta: {type: object}
+
+  delete_ticket:
+    title: Delete a ticket
+    description: >-
+      Move a ticket to the deleted tickets list. Zendesk keeps it there for 30
+      days before purging it; this tool cannot restore it.
+    category: tickets
+    scopes_any: [write, "tickets:write"]
+    destructive: true
+    request:
+      method: DELETE
+      path: /api/v2/tickets/${ticket_id}
+    input:
+      ticket_id:
+        type: integer
+        description: The ticket to delete.
+    output:
+      description: Empty on success -- Zendesk answers 204 No Content.
+      type: object
+
+  list_users:
+    title: List users
+    description: >-
+      Page through the account's users -- end users, agents and admins -- with
+      their ids, names and roles.
+    category: users
+    scopes_any: [read, "users:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/users
+      query:
+        role: "${role}"
+        page[size]: "${limit}"
+        page[after]: "${after}"
+    input:
+      role:
+        type: string
+        description: Only users in this role.
+        optional: true
+        enum: [end-user, agent, admin]
+      limit:
+        type: integer
+        description: How many users per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      after:
+        type: string
+        description: Cursor from the previous response's meta.after_cursor.
+        optional: true
+    output:
+      description: A page of users.
+      type: object
+      properties:
+        users: {type: array}
+        meta: {type: object}
+
+  search_users:
+    title: Search users
+    description: >-
+      Find users by name, email or phone number -- the way to turn a customer's
+      email address into the id the ticket tools take.
+    category: users
+    scopes_any: [read, "users:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/users/search
+      query:
+        query: "${query}"
+        page: "${page}"
+        per_page: "${limit}"
+    input:
+      query:
+        type: string
+        description: Name, email or phone fragment to match.
+        example: ada@example.com
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      limit:
+        type: integer
+        description: How many users per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+    output:
+      description: Matching users.
+      type: object
+      properties:
+        users: {type: array}
+        count: {type: integer}
+
+  create_user:
+    title: Create a user
+    description: >-
+      Add a user to the account. Role defaults to end-user; creating an agent or
+      admin needs an admin token and a seat.
+    category: users
+    scopes_any: [write, "users:write"]
+    request:
+      method: POST
+      path: /api/v2/users
+      body:
+        user:
+          name: "${name}"
+          email: "${email}"
+          phone: "${phone}"
+          role: "${role}"
+          organization_id: "${organization_id}"
+          tags: "${tags}"
+          verified: "${verified}"
+          user_fields: "${user_fields}"
+    input:
+      name:
+        type: string
+        description: The user's full name.
+      email:
+        type: string
+        description: The user's email address.
+        optional: true
+        format: email
+      phone:
+        type: string
+        description: The user's phone number.
+        optional: true
+      role:
+        type: string
+        description: What the user may do.
+        optional: true
+        enum: [end-user, agent, admin]
+      organization_id:
+        type: integer
+        description: Organisation to attach them to.
+        optional: true
+      tags:
+        type: array
+        description: Tags to apply.
+        optional: true
+        items: {type: string}
+      verified:
+        type: boolean
+        description: Skip the email verification step.
+        optional: true
+      user_fields:
+        type: object
+        description: Custom user field values, keyed by field key.
+        optional: true
+    output:
+      description: The created user.
+      type: object
+      response_path: user
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        email: {type: string}
+
+  update_user:
+    title: Update a user
+    description: Change a user's details, role, organisation or tags.
+    category: users
+    scopes_any: [write, "users:write"]
+    request:
+      method: PUT
+      path: /api/v2/users/${user_id}
+      body:
+        user:
+          name: "${name}"
+          email: "${email}"
+          phone: "${phone}"
+          role: "${role}"
+          organization_id: "${organization_id}"
+          tags: "${tags}"
+          user_fields: "${user_fields}"
+    input:
+      user_id:
+        type: integer
+        description: The user's numeric id.
+      name:
+        type: string
+        description: New name.
+        optional: true
+      email:
+        type: string
+        description: New email address.
+        optional: true
+        format: email
+      phone:
+        type: string
+        description: New phone number.
+        optional: true
+      role:
+        type: string
+        description: New role.
+        optional: true
+        enum: [end-user, agent, admin]
+      organization_id:
+        type: integer
+        description: New organisation.
+        optional: true
+      tags:
+        type: array
+        description: Replaces the tag set entirely.
+        optional: true
+        items: {type: string}
+      user_fields:
+        type: object
+        description: Custom user field values to write.
+        optional: true
+    output:
+      description: The updated user.
+      type: object
+      response_path: user
+      properties:
+        id: {type: integer}
+        name: {type: string}
+
+  list_organizations:
+    title: List organisations
+    description: Page through the account's organisations, with their ids and domains.
+    category: organizations
+    scopes_any: [read, "organizations:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/organizations
+      query:
+        page[size]: "${limit}"
+        page[after]: "${after}"
+    input:
+      limit:
+        type: integer
+        description: How many organisations per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      after:
+        type: string
+        description: Cursor from the previous response's meta.after_cursor.
+        optional: true
+    output:
+      description: A page of organisations.
+      type: object
+      properties:
+        organizations: {type: array}
+        meta: {type: object}
+
+  get_current_user:
+    title: Get the authenticated agent
+    description: >-
+      Read the Zendesk account the token belongs to, with its role and
+      permissions. The cheapest health check for a Zendesk connection.
+    category: users
+    scopes_any: [read, "users:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/users/me
+    input: {}
+    output:
+      description: The authenticated user.
+      type: object
+      response_path: user
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        email: {type: string}
+        role: {type: string}

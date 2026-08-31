@@ -1,0 +1,735 @@
+# Pipedrive tools.
+#
+# The connection carries the account's api_domain, which the base url resolves
+# from, so paths here start at /v1.
+#
+# Docs: https://developers.pipedrive.com/docs/api/v1
+
+connector_id: pipedrive
+display_name: Pipedrive
+docs_url: https://developers.pipedrive.com/docs/api/v1
+
+scope_rules:
+  implies:
+    "deals:full": ["deals:read"]
+    "contacts:full": ["contacts:read"]
+    "activities:full": ["activities:read"]
+    "products:full": ["products:read"]
+
+tools:
+
+  list_deals:
+    title: List deals
+    description: >-
+      Page through deals, optionally narrowed to one stage, status, user or
+      filter. Pipedrive pages with start and limit rather than a cursor.
+    category: deals
+    scopes: ["deals:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/deals
+      query:
+        start: "${start}"
+        limit: "${limit}"
+        status: "${status}"
+        stage_id: "${stage_id}"
+        user_id: "${user_id}"
+        filter_id: "${filter_id}"
+        sort: "${sort}"
+    input:
+      start:
+        type: integer
+        description: Zero-based index to start from.
+        optional: true
+        minimum: 0
+      limit:
+        type: integer
+        description: How many deals per page (1-500).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 500
+      status:
+        type: string
+        description: Only deals in this state.
+        optional: true
+        enum: [open, won, lost, deleted, all_not_deleted]
+      stage_id:
+        type: integer
+        description: Only deals in this pipeline stage.
+        optional: true
+      user_id:
+        type: integer
+        description: Only deals owned by this user.
+        optional: true
+      filter_id:
+        type: integer
+        description: Apply a saved filter.
+        optional: true
+      sort:
+        type: string
+        description: Sort order, e.g. "add_time DESC".
+        optional: true
+    output:
+      description: A page of deals.
+      type: array
+      response_path: data
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          title: "{type: string}"
+          value: {type: number}
+          currency: {type: string}
+          status: {type: string}
+          stage_id: {type: integer}
+
+  search_deals:
+    title: Search deals
+    description: >-
+      Find deals by title, notes or custom fields. Faster than listing and
+      filtering when there is a term to search for.
+    category: deals
+    scopes: ["deals:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/deals/search
+      query:
+        term: "${term}"
+        fields: "${fields}"
+        exact_match: "${exact_match}"
+        person_id: "${person_id}"
+        organization_id: "${organization_id}"
+        status: "${status}"
+        limit: "${limit}"
+    input:
+      term:
+        type: string
+        description: Words to search for. At least two characters, or one with exact_match.
+        min_length: 1
+      fields:
+        type: string
+        description: Comma-separated fields to search, e.g. "title,notes".
+        optional: true
+      exact_match:
+        type: boolean
+        description: Match the term exactly rather than as a prefix.
+        optional: true
+      person_id:
+        type: integer
+        description: Only deals linked to this person.
+        optional: true
+      organization_id:
+        type: integer
+        description: Only deals linked to this organisation.
+        optional: true
+      status:
+        type: string
+        description: Only deals in this state.
+        optional: true
+        enum: [open, won, lost]
+      limit:
+        type: integer
+        description: How many results to return (1-500).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 500
+    output:
+      description: Matching deals.
+      type: object
+      response_path: data
+      properties:
+        items: {type: array}
+
+  get_deal:
+    title: Get a deal
+    description: Read one deal in full, with its person, organisation, value and stage.
+    category: deals
+    scopes: ["deals:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/deals/${deal_id}
+    input:
+      deal_id:
+        type: integer
+        description: The deal's numeric id.
+    output:
+      description: The deal.
+      type: object
+      response_path: data
+      properties:
+        id: {type: integer}
+        title: "{type: string}"
+        value: {type: number}
+        status: {type: string}
+        person_id: {type: object}
+        org_id: {type: object}
+
+  create_deal:
+    title: Create a deal
+    description: >-
+      Create a deal, optionally linked to a person and an organisation. Omit
+      stage_id and it lands in the first stage of the default pipeline.
+    category: deals
+    scopes: ["deals:full"]
+    request:
+      method: POST
+      path: /v1/deals
+      body:
+        title: "${title}"
+        value: "${value}"
+        currency: "${currency}"
+        person_id: "${person_id}"
+        org_id: "${organization_id}"
+        stage_id: "${stage_id}"
+        pipeline_id: "${pipeline_id}"
+        user_id: "${owner_id}"
+        expected_close_date: "${expected_close_date}"
+        status: "${status}"
+    input:
+      title:
+        type: string
+        description: What the deal is.
+      value:
+        type: number
+        description: Deal value, in the currency given.
+        optional: true
+      currency:
+        type: string
+        description: Three-letter currency code. Defaults to the account's.
+        optional: true
+      person_id:
+        type: integer
+        description: Person to link the deal to.
+        optional: true
+      organization_id:
+        type: integer
+        description: Organisation to link the deal to.
+        optional: true
+      stage_id:
+        type: integer
+        description: Pipeline stage to place it in.
+        optional: true
+      pipeline_id:
+        type: integer
+        description: Pipeline to place it in, when stage_id is not given.
+        optional: true
+      owner_id:
+        type: integer
+        description: User who owns the deal.
+        optional: true
+      expected_close_date:
+        type: string
+        description: Expected close date as YYYY-MM-DD.
+        optional: true
+      status:
+        type: string
+        description: Initial status.
+        optional: true
+        enum: [open, won, lost]
+    output:
+      description: The created deal.
+      type: object
+      response_path: data
+      properties:
+        id: {type: integer}
+        title: "{type: string}"
+
+  update_deal:
+    title: Update a deal
+    description: >-
+      Change a deal -- move its stage, mark it won or lost, change its value or
+      owner. Only what is supplied is written.
+    category: deals
+    scopes: ["deals:full"]
+    request:
+      method: PUT
+      path: /v1/deals/${deal_id}
+      body:
+        title: "${title}"
+        value: "${value}"
+        currency: "${currency}"
+        stage_id: "${stage_id}"
+        status: "${status}"
+        user_id: "${owner_id}"
+        expected_close_date: "${expected_close_date}"
+        lost_reason: "${lost_reason}"
+    input:
+      deal_id:
+        type: integer
+        description: The deal's numeric id.
+      title:
+        type: string
+        description: New title.
+        optional: true
+      value:
+        type: number
+        description: New value.
+        optional: true
+      currency:
+        type: string
+        description: New currency code.
+        optional: true
+      stage_id:
+        type: integer
+        description: Stage to move it to.
+        optional: true
+      status:
+        type: string
+        description: New status.
+        optional: true
+        enum: [open, won, lost, deleted]
+      owner_id:
+        type: integer
+        description: New owner's user id.
+        optional: true
+      expected_close_date:
+        type: string
+        description: New expected close date as YYYY-MM-DD.
+        optional: true
+      lost_reason:
+        type: string
+        description: Why it was lost, when marking it lost.
+        optional: true
+    output:
+      description: The updated deal.
+      type: object
+      response_path: data
+      properties:
+        id: {type: integer}
+        status: {type: string}
+
+  delete_deal:
+    title: Delete a deal
+    description: >-
+      Mark a deal deleted. Pipedrive purges deleted deals after 30 days; this
+      tool cannot restore one.
+    category: deals
+    scopes: ["deals:full"]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/deals/${deal_id}
+    input:
+      deal_id:
+        type: integer
+        description: The deal to delete.
+    output:
+      description: Confirmation with the deleted id.
+      type: object
+      response_path: data
+      properties:
+        id: {type: integer}
+
+  list_persons:
+    title: List people
+    description: Page through the account's contacts with their emails and phone numbers.
+    category: contacts
+    scopes: ["contacts:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/persons
+      query:
+        start: "${start}"
+        limit: "${limit}"
+        user_id: "${user_id}"
+        filter_id: "${filter_id}"
+        sort: "${sort}"
+    input:
+      start:
+        type: integer
+        description: Zero-based index to start from.
+        optional: true
+        minimum: 0
+      limit:
+        type: integer
+        description: How many people per page (1-500).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 500
+      user_id:
+        type: integer
+        description: Only people owned by this user.
+        optional: true
+      filter_id:
+        type: integer
+        description: Apply a saved filter.
+        optional: true
+      sort:
+        type: string
+        description: Sort order, e.g. "add_time DESC".
+        optional: true
+    output:
+      description: A page of people.
+      type: array
+      response_path: data
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          name: {type: string}
+          email: {type: array}
+          phone: {type: array}
+
+  search_persons:
+    title: Search people
+    description: >-
+      Find contacts by name, email, phone or custom field -- the way to turn an
+      email address into the person id the deal tools take.
+    category: contacts
+    scopes: ["contacts:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/persons/search
+      query:
+        term: "${term}"
+        fields: "${fields}"
+        exact_match: "${exact_match}"
+        organization_id: "${organization_id}"
+        limit: "${limit}"
+    input:
+      term:
+        type: string
+        description: Words to search for.
+        example: ada@example.com
+      fields:
+        type: string
+        description: Comma-separated fields to search, e.g. "email,name,phone".
+        optional: true
+      exact_match:
+        type: boolean
+        description: Match the term exactly rather than as a prefix.
+        optional: true
+      organization_id:
+        type: integer
+        description: Only people at this organisation.
+        optional: true
+      limit:
+        type: integer
+        description: How many results to return (1-500).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 500
+    output:
+      description: Matching people.
+      type: object
+      response_path: data
+      properties:
+        items: {type: array}
+
+  create_person:
+    title: Create a person
+    description: >-
+      Add a contact. Email and phone take arrays of values so a person can hold
+      several of each, e.g. ["ada@example.com"].
+    category: contacts
+    scopes: ["contacts:full"]
+    request:
+      method: POST
+      path: /v1/persons
+      body:
+        name: "${name}"
+        email: "${emails}"
+        phone: "${phones}"
+        org_id: "${organization_id}"
+        owner_id: "${owner_id}"
+        visible_to: "${visible_to}"
+    input:
+      name:
+        type: string
+        description: The person's full name.
+      emails:
+        type: array
+        description: Email addresses.
+        optional: true
+        items: {type: string}
+      phones:
+        type: array
+        description: Phone numbers.
+        optional: true
+        items: {type: string}
+      organization_id:
+        type: integer
+        description: Organisation they belong to.
+        optional: true
+      owner_id:
+        type: integer
+        description: User who owns the contact.
+        optional: true
+      visible_to:
+        type: string
+        description: Visibility level, 1 owner only through 7 entire company.
+        optional: true
+        enum: ["1", "3", "5", "7"]
+    output:
+      description: The created person.
+      type: object
+      response_path: data
+      properties:
+        id: {type: integer}
+        name: {type: string}
+
+  update_person:
+    title: Update a person
+    description: Change a contact's name, contact details, organisation or owner.
+    category: contacts
+    scopes: ["contacts:full"]
+    request:
+      method: PUT
+      path: /v1/persons/${person_id}
+      body:
+        name: "${name}"
+        email: "${emails}"
+        phone: "${phones}"
+        org_id: "${organization_id}"
+        owner_id: "${owner_id}"
+    input:
+      person_id:
+        type: integer
+        description: The person's numeric id.
+      name:
+        type: string
+        description: New name.
+        optional: true
+      emails:
+        type: array
+        description: Replaces the email list entirely.
+        optional: true
+        items: {type: string}
+      phones:
+        type: array
+        description: Replaces the phone list entirely.
+        optional: true
+        items: {type: string}
+      organization_id:
+        type: integer
+        description: New organisation.
+        optional: true
+      owner_id:
+        type: integer
+        description: New owner's user id.
+        optional: true
+    output:
+      description: The updated person.
+      type: object
+      response_path: data
+      properties:
+        id: {type: integer}
+        name: {type: string}
+
+  create_organization:
+    title: Create an organisation
+    description: Add a company record that people and deals can be linked to.
+    category: organizations
+    scopes: ["contacts:full"]
+    request:
+      method: POST
+      path: /v1/organizations
+      body:
+        name: "${name}"
+        owner_id: "${owner_id}"
+        address: "${address}"
+        visible_to: "${visible_to}"
+    input:
+      name:
+        type: string
+        description: The organisation's name.
+      owner_id:
+        type: integer
+        description: User who owns the record.
+        optional: true
+      address:
+        type: string
+        description: Postal address.
+        optional: true
+      visible_to:
+        type: string
+        description: Visibility level, 1 owner only through 7 entire company.
+        optional: true
+        enum: ["1", "3", "5", "7"]
+    output:
+      description: The created organisation.
+      type: object
+      response_path: data
+      properties:
+        id: {type: integer}
+        name: {type: string}
+
+  create_activity:
+    title: Schedule an activity
+    description: >-
+      Create a call, meeting, task or email activity, optionally attached to a
+      deal or a person. Type takes an activity type key, e.g. call or meeting.
+    category: activities
+    scopes: ["activities:full"]
+    request:
+      method: POST
+      path: /v1/activities
+      body:
+        subject: "${subject}"
+        type: "${type}"
+        due_date: "${due_date}"
+        due_time: "${due_time}"
+        duration: "${duration}"
+        deal_id: "${deal_id}"
+        person_id: "${person_id}"
+        org_id: "${organization_id}"
+        user_id: "${owner_id}"
+        note: "${note}"
+        done: "${done}"
+    input:
+      subject:
+        type: string
+        description: What the activity is.
+      type:
+        type: string
+        description: Activity type key, e.g. call, meeting, task, deadline, email, lunch.
+        optional: true
+        default: task
+      due_date:
+        type: string
+        description: Due date as YYYY-MM-DD.
+        optional: true
+      due_time:
+        type: string
+        description: Due time as HH:MM.
+        optional: true
+      duration:
+        type: string
+        description: How long it lasts, as HH:MM.
+        optional: true
+      deal_id:
+        type: integer
+        description: Deal to attach it to.
+        optional: true
+      person_id:
+        type: integer
+        description: Person to attach it to.
+        optional: true
+      organization_id:
+        type: integer
+        description: Organisation to attach it to.
+        optional: true
+      owner_id:
+        type: integer
+        description: User the activity is for.
+        optional: true
+      note:
+        type: string
+        description: Note shown on the activity.
+        optional: true
+      done:
+        type: boolean
+        description: Create it already marked done.
+        optional: true
+    output:
+      description: The created activity.
+      type: object
+      response_path: data
+      properties:
+        id: {type: integer}
+        subject: {type: string}
+        due_date: {type: string}
+
+  list_pipelines:
+    title: List pipelines and stages
+    description: >-
+      List the account's pipelines, and separately its stages, so a deal can be
+      placed in the right stage by id.
+    category: deals
+    scopes: ["deals:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/stages
+      query:
+        pipeline_id: "${pipeline_id}"
+    input:
+      pipeline_id:
+        type: integer
+        description: Only stages in this pipeline. Omit for every stage.
+        optional: true
+    output:
+      description: The stages, each naming its pipeline.
+      type: array
+      response_path: data
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          name: {type: string}
+          pipeline_id: {type: integer}
+          order_nr: {type: integer}
+
+  add_note:
+    title: Add a note
+    description: >-
+      Attach a note to a deal, person or organisation. The content accepts basic
+      HTML.
+    category: notes
+    scopes: ["contacts:full"]
+    request:
+      method: POST
+      path: /v1/notes
+      body:
+        content: "${content}"
+        deal_id: "${deal_id}"
+        person_id: "${person_id}"
+        org_id: "${organization_id}"
+        pinned_to_deal_flag: "${pin_to_deal}"
+    input:
+      content:
+        type: string
+        description: The note text, which may contain basic HTML.
+      deal_id:
+        type: integer
+        description: Deal to attach it to.
+        optional: true
+      person_id:
+        type: integer
+        description: Person to attach it to.
+        optional: true
+      organization_id:
+        type: integer
+        description: Organisation to attach it to.
+        optional: true
+      pin_to_deal:
+        type: boolean
+        description: Pin the note to the top of the deal.
+        optional: true
+    output:
+      description: The created note.
+      type: object
+      response_path: data
+      properties:
+        id: {type: integer}
+        content: {type: string}
+
+  get_current_user:
+    title: Get the authenticated user
+    description: >-
+      Read the Pipedrive user the token belongs to and the company it is in. The
+      cheapest health check for a Pipedrive connection.
+    category: account
+    read_only: true
+    request:
+      method: GET
+      path: /v1/users/me
+    input: {}
+    output:
+      description: The authenticated user.
+      type: object
+      response_path: data
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        email: {type: string}
+        company_name: {type: string}

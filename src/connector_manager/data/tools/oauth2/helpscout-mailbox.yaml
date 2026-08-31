@@ -1,0 +1,473 @@
+# Help Scout Mailbox tools.
+#
+# Conversations belong to a mailbox; list_mailboxes returns the ids. Replies and
+# notes are appended as "threads" on a conversation.
+#
+# Docs: https://developer.helpscout.com/mailbox-api/
+
+connector_id: helpscout-mailbox
+display_name: Help Scout
+docs_url: https://developer.helpscout.com/mailbox-api/
+
+tools:
+
+  list_mailboxes:
+    title: List mailboxes
+    description: >-
+      List the account's mailboxes with the ids conversations are filed under.
+      Start here.
+    category: mailboxes
+    read_only: true
+    request:
+      method: GET
+      path: /v2/mailboxes
+      query:
+        page: "${page}"
+    input:
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+    output:
+      description: The account's mailboxes.
+      type: object
+      properties:
+        _embedded: {type: object, description: "Holds mailboxes, each with id and name."}
+        page: {type: object}
+
+  list_conversations:
+    title: List conversations
+    description: >-
+      Page through conversations, optionally in one mailbox, one status, or
+      matching a Help Scout query.
+    category: conversations
+    read_only: true
+    request:
+      method: GET
+      path: /v2/conversations
+      query:
+        mailbox: "${mailbox_id}"
+        status: "${status}"
+        query: "${query}"
+        tag: "${tag}"
+        assigned_to: "${assigned_to}"
+        page: "${page}"
+        sortField: "${sort_field}"
+        sortOrder: "${sort_order}"
+    input:
+      mailbox_id:
+        type: integer
+        description: Only conversations in this mailbox.
+        optional: true
+      status:
+        type: string
+        description: Only conversations in this state.
+        optional: true
+        enum: [active, all, closed, open, pending, spam]
+      query:
+        type: string
+        description: Help Scout query, e.g. (subject:"refund").
+        optional: true
+      tag:
+        type: string
+        description: Only conversations carrying this tag.
+        optional: true
+      assigned_to:
+        type: integer
+        description: Only conversations assigned to this user id.
+        optional: true
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      sort_field:
+        type: string
+        description: Field to sort by.
+        optional: true
+        enum: [createdAt, customerEmail, customerName, mailboxid, modifiedAt, number, score, status, subject]
+      sort_order:
+        type: string
+        description: Sort direction.
+        optional: true
+        enum: [asc, desc]
+    output:
+      description: A page of conversations.
+      type: object
+      properties:
+        _embedded: {type: object, description: "Holds conversations."}
+        page: {type: object}
+
+  get_conversation:
+    title: Get a conversation
+    description: >-
+      Read one conversation with its threads — the customer's messages, agent
+      replies and internal notes.
+    category: conversations
+    read_only: true
+    request:
+      method: GET
+      path: /v2/conversations/${conversation_id}
+      query:
+        embed: "${embed}"
+    input:
+      conversation_id:
+        type: integer
+        description: The conversation id.
+      embed:
+        type: string
+        description: Set to "threads" to inline the messages.
+        optional: true
+        default: threads
+        enum: [threads]
+    output:
+      description: The conversation.
+      type: object
+      properties:
+        id: {type: integer}
+        subject: {type: string}
+        status: {type: string}
+        assignee: {type: object}
+        _embedded: {type: object}
+
+  create_conversation:
+    title: Create a conversation
+    description: >-
+      Open a conversation in a mailbox. Status "active" emails the customer;
+      "closed" records it without sending.
+    category: conversations
+    destructive: true
+    request:
+      method: POST
+      path: /v2/conversations
+      body:
+        subject: "${subject}"
+        type: "${type}"
+        mailboxId: "${mailbox_id}"
+        status: "${status}"
+        customer:
+          email: "${customer_email}"
+          firstName: "${customer_first_name}"
+          lastName: "${customer_last_name}"
+        threads: "${threads}"
+        tags: "${tags}"
+        assignTo: "${assign_to}"
+    input:
+      subject:
+        type: string
+        description: The conversation's subject line.
+      mailbox_id:
+        type: integer
+        description: Mailbox to open it in.
+      customer_email:
+        type: string
+        description: The customer's email address.
+        format: email
+      threads:
+        type: array
+        description: >-
+          The opening message, e.g. [{"type": "customer", "customer":
+          {"email": "ada@example.com"}, "text": "My order is late"}].
+        items: {type: object}
+      type:
+        type: string
+        description: What kind of conversation this is.
+        optional: true
+        default: email
+        enum: [email, chat, phone]
+      status:
+        type: string
+        description: Initial status. "active" sends to the customer.
+        optional: true
+        default: active
+        enum: [active, closed, pending]
+      customer_first_name:
+        type: string
+        description: The customer's first name, for a new customer record.
+        optional: true
+      customer_last_name:
+        type: string
+        description: The customer's last name.
+        optional: true
+      tags:
+        type: array
+        description: Tags to apply.
+        optional: true
+        items: {type: string}
+      assign_to:
+        type: integer
+        description: User id to assign it to.
+        optional: true
+    output:
+      description: Empty on success -- Help Scout answers 201 with a Location header.
+      type: object
+
+  reply_to_conversation:
+    title: Reply to a customer
+    description: >-
+      Send a reply that reaches the customer by email. Use add_note for an
+      internal note instead.
+    category: conversations
+    destructive: true
+    request:
+      method: POST
+      path: /v2/conversations/${conversation_id}/reply
+      body:
+        text: "${text}"
+        user: "${user_id}"
+        customer:
+          $when: "${customer_id}"
+          id: "${customer_id}"
+        cc: "${cc}"
+        bcc: "${bcc}"
+        imported: "${imported}"
+    input:
+      conversation_id:
+        type: integer
+        description: The conversation to reply in.
+      text:
+        type: string
+        description: The reply body. HTML is allowed.
+      user_id:
+        type: integer
+        description: User id the reply is sent as.
+        optional: true
+      customer_id:
+        type: integer
+        description: Customer the reply goes to, when the conversation has several.
+        optional: true
+      cc:
+        type: array
+        description: Addresses to copy.
+        optional: true
+        items: {type: string, format: email}
+      bcc:
+        type: array
+        description: Addresses to blind-copy.
+        optional: true
+        items: {type: string, format: email}
+      imported:
+        type: boolean
+        description: Record the reply without actually emailing it.
+        optional: true
+    output:
+      description: Empty on success -- Help Scout answers 201 No Content.
+      type: object
+
+  add_note:
+    title: Add an internal note
+    description: >-
+      Add a note only teammates can see. The customer is never emailed about it.
+    category: conversations
+    request:
+      method: POST
+      path: /v2/conversations/${conversation_id}/notes
+      body:
+        text: "${text}"
+        user: "${user_id}"
+    input:
+      conversation_id:
+        type: integer
+        description: The conversation to annotate.
+      text:
+        type: string
+        description: The note body. HTML is allowed.
+      user_id:
+        type: integer
+        description: User id the note is attributed to.
+        optional: true
+    output:
+      description: Empty on success -- Help Scout answers 201 No Content.
+      type: object
+
+  update_conversation:
+    title: Change a conversation's status or assignee
+    description: >-
+      Move a conversation between statuses, reassign it, or move it to another
+      mailbox. Help Scout takes one JSON-Patch style operation per call.
+    category: conversations
+    request:
+      method: PATCH
+      path: /v2/conversations/${conversation_id}
+      body:
+        op: replace
+        path: "${field}"
+        value: "${value}"
+    input:
+      conversation_id:
+        type: integer
+        description: The conversation id.
+      field:
+        type: string
+        description: Which field to change.
+        enum: ["/status", "/assignTo", "/mailboxId", "/subject"]
+      value:
+        type: string
+        description: The new value -- a status name, a user id, a mailbox id or a subject.
+    output:
+      description: Empty on success -- Help Scout answers 204 No Content.
+      type: object
+
+  add_tags:
+    title: Set a conversation's tags
+    description: >-
+      Replace a conversation's tags. Include the tags already on it, or they are
+      removed.
+    category: conversations
+    request:
+      method: PUT
+      path: /v2/conversations/${conversation_id}/tags
+      body:
+        tags: "${tags}"
+    input:
+      conversation_id:
+        type: integer
+        description: The conversation id.
+      tags:
+        type: array
+        description: The complete tag list after the change.
+        items: {type: string}
+    output:
+      description: Empty on success -- Help Scout answers 204 No Content.
+      type: object
+
+  search_customers:
+    title: Search customers
+    description: >-
+      Find customers by email or name, to get the ids the conversation tools
+      take.
+    category: customers
+    read_only: true
+    request:
+      method: GET
+      path: /v2/customers
+      query:
+        query: "${query}"
+        mailbox: "${mailbox_id}"
+        page: "${page}"
+        sortField: "${sort_field}"
+    input:
+      query:
+        type: string
+        description: Help Scout query, e.g. (email:"ada@example.com").
+        optional: true
+      mailbox_id:
+        type: integer
+        description: Only customers who have written to this mailbox.
+        optional: true
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      sort_field:
+        type: string
+        description: Field to sort by.
+        optional: true
+        enum: [createdAt, firstName, lastName, modifiedAt, score]
+    output:
+      description: A page of customers.
+      type: object
+      properties:
+        _embedded: {type: object}
+        page: {type: object}
+
+  create_customer:
+    title: Create a customer
+    description: Add a customer record with one or more email addresses.
+    category: customers
+    request:
+      method: POST
+      path: /v2/customers
+      body:
+        firstName: "${first_name}"
+        lastName: "${last_name}"
+        emails: "${emails}"
+        phones: "${phones}"
+        organization: "${organization}"
+        jobTitle: "${job_title}"
+        background: "${background}"
+    input:
+      first_name:
+        type: string
+        description: First name.
+        optional: true
+      last_name:
+        type: string
+        description: Last name.
+        optional: true
+      emails:
+        type: array
+        description: "Email entries, each {\"type\": \"work\", \"value\": \"ada@example.com\"}."
+        optional: true
+        items: {type: object}
+      phones:
+        type: array
+        description: "Phone entries, each {\"type\": \"mobile\", \"value\": \"555 0100\"}."
+        optional: true
+        items: {type: object}
+      organization:
+        type: string
+        description: Company name.
+        optional: true
+      job_title:
+        type: string
+        description: Job title.
+        optional: true
+      background:
+        type: string
+        description: Free-text note about the customer.
+        optional: true
+    output:
+      description: Empty on success -- Help Scout answers 201 with a Location header.
+      type: object
+
+  list_users:
+    title: List users
+    description: >-
+      List the account's users with the ids the assignee and author arguments
+      take.
+    category: settings
+    read_only: true
+    request:
+      method: GET
+      path: /v2/users
+      query:
+        page: "${page}"
+        mailbox: "${mailbox_id}"
+    input:
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      mailbox_id:
+        type: integer
+        description: Only users with access to this mailbox.
+        optional: true
+    output:
+      description: A page of users.
+      type: object
+      properties:
+        _embedded: {type: object}
+
+  get_me:
+    title: Get the authenticated user
+    description: >-
+      Read the Help Scout user the token belongs to. The cheapest health check
+      for the connection.
+    category: settings
+    read_only: true
+    request:
+      method: GET
+      path: /v2/users/me
+    input: {}
+    output:
+      description: The authenticated user.
+      type: object
+      properties:
+        id: {type: integer}
+        email: {type: string}
+        firstName: {type: string}
+        role: {type: string}

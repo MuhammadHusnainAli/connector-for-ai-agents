@@ -1,0 +1,316 @@
+# TemplateFox tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://api.pdftemplateapi.com/openapi.json
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: templatefox
+display_name: TemplateFox
+docs_url: https://api.pdftemplateapi.com/openapi.json
+generated: true
+generated_from: https://api.pdftemplateapi.com/openapi.json
+tools:
+  get_account:
+    title: Get account info
+    description: 'Get account info Get account information including remaining credits. Authentication:
+      API Key required (x-api-key header) or JWT token Usage: Check credit balance before performing operations.
+      No credits consumed: This is a read-only endpoint. Rate Limits: 60 requests/min (free), 120 requests/min
+      (paid). Headers inc Calls GET /v1/account on the provider''s API.'
+    category: account
+    request:
+      method: GET
+      path: /v1/account
+    input: {}
+    output:
+      description: Account information
+      type: object
+    read_only: true
+  list_templates:
+    title: List templates
+    description: 'List templates List all templates for the authenticated user. Authentication: API Key
+      required (x-api-key header) or JWT token Usage: This endpoint is designed for no-code tools (Zapier,
+      Make, n8n) to populate template selection dropdowns. No credits consumed: This is a read-only endpoint.
+      Rate Limits: 60 requests Calls GET /v1/templates on the provider''s API.'
+    category: templates
+    request:
+      method: GET
+      path: /v1/templates
+      query:
+        kind: ${kind}
+    input:
+      kind:
+        type: string
+        description: 'Filter by product kind: pdf or image'
+        optional: true
+    output:
+      description: List of templates
+      type: object
+    read_only: true
+  list_transactions:
+    title: List transactions
+    description: 'List transactions List transaction history for the authenticated user. Authentication:
+      API Key required (x-api-key header) or JWT token Pagination: Use limit and offset query parameters.
+      Transaction types: - PDFGEN: PDF generation (consumes credits) - REFUND: Credit refund (on failed
+      generation) - PURCHASE: Credit pu Calls GET /v1/account/transactions on the provider''s API.'
+    category: account
+    request:
+      method: GET
+      path: /v1/account/transactions
+      query:
+        limit: ${limit}
+        offset: ${offset}
+    input:
+      limit:
+        type: integer
+        description: Number of records to return
+        optional: true
+        default: 300
+      offset:
+        type: integer
+        description: Number of records to skip
+        optional: true
+        default: 0
+    output:
+      description: Transaction history
+      type: object
+    read_only: true
+  create_agent_template:
+    title: Create a template with the authoring agent
+    description: 'Create a template with the authoring agent Describe the image template you want; the
+      TemplateFox agent authors it for you — valid HTML that renders deterministically AND stays editable
+      in the visual editor, with every layer named and drivable through /v1/image/create modifications.
+      The job is asynchronous: poll GET /v1/agent/jobs/{jobid}. Wh Calls POST /v1/agent/templates on the
+      provider''s API.'
+    category: agent
+    request:
+      method: POST
+      path: /v1/agent/templates
+      body:
+        instructions: ${instructions}
+        name: ${name}
+        preset: ${preset}
+        width: ${width}
+        height: ${height}
+        brand: ${brand}
+    input:
+      instructions:
+        type: string
+        description: What the template should look like and which layers it needs, in natural language.
+      name:
+        type: string
+        description: Template name
+      preset:
+        type: string
+        description: Canvas preset (or pass width + height)
+        optional: true
+      width:
+        type: string
+        description: Canvas width in px
+        optional: true
+      height:
+        type: string
+        description: Canvas height in px
+        optional: true
+      brand:
+        type: string
+        description: The brand field of the request body.
+        optional: true
+    output:
+      description: Job queued
+      type: object
+  create_image:
+    title: Generate image from template
+    description: 'Generate image from template Generate an image (PNG, JPEG or WebP) from an image template.
+      Authentication: API Key required (x-api-key header) Request Body | Field | Type | Required | Description
+      | |-------|------|----------|-------------| | templateid | string | ✅ Yes | Template short ID (12
+      characters) | | modifications | arr Calls POST /v1/image/create on the provider''s API.'
+    category: image
+    request:
+      method: POST
+      path: /v1/image/create
+      body:
+        template_id: ${template_id}
+        modifications: ${modifications}
+        data: ${data}
+        format: ${format}
+        width: ${width}
+        quality: ${quality}
+        export_type: ${export_type}
+        expiration: ${expiration}
+        filename: ${filename}
+        store_s3: ${store_s3}
+        s3_filepath: ${s3_filepath}
+        s3_bucket: ${s3_bucket}
+    input:
+      template_id:
+        type: string
+        description: Template short ID (12 characters)
+      modifications:
+        type: string
+        description: Modify template elements by their layer name (set in the editor's Layers panel).
+          Each item targets a layer and can set its text, image, colors, or visibility. Unknown layer
+          names are skipped and reported in the response warnings.
+        optional: true
+      data:
+        type: object
+        description: Optional key-value data merged into {{ }} template variables. For most image templates,
+          prefer modifications instead.
+        optional: true
+      format:
+        type: string
+        description: Image output format options
+        optional: true
+        enum:
+        - png
+        - jpeg
+        - webp
+      width:
+        type: string
+        description: Output width in pixels (height follows the template aspect ratio). Defaults to the
+          template's native pixel width.
+        optional: true
+      quality:
+        type: integer
+        description: Compression quality for jpeg/webp (1-100). Ignored for png.
+        optional: true
+      export_type:
+        type: string
+        description: Output delivery type options
+        optional: true
+        enum:
+        - url
+        - binary
+      expiration:
+        type: integer
+        description: 'URL expiration in seconds. Min: 60 (1 min), Max: 604800 (7 days). Only applies to
+          url export type.'
+        optional: true
+      filename:
+        type: string
+        description: Custom filename (without extension). If not provided, defaults to 'document'. Only
+          applies to url export type.
+        optional: true
+      store_s3:
+        type: boolean
+        description: Upload to your configured S3 bucket instead of CDN
+        optional: true
+      s3_filepath:
+        type: string
+        description: Custom path prefix in your S3 bucket. Uses default prefix if not provided.
+        optional: true
+      s3_bucket:
+        type: string
+        description: Override the default bucket configured in your S3 integration.
+        optional: true
+    output:
+      description: Image generated successfully
+      type: object
+  get_s3_config:
+    title: Get S3 configuration
+    description: 'Get S3 configuration Get current S3 storage configuration. Authentication: API Key required
+      (x-api-key header) Usage: Retrieve your S3 integration settings. Secret access key is masked for
+      security. Returns 404 if S3 is not configured. No credits consumed: This is a read-only endpoint.
+      Rate Limits: 60 requests/min (free Calls GET /v1/integrations/s3 on the provider''s API.'
+    category: integrations
+    request:
+      method: GET
+      path: /v1/integrations/s3
+    input: {}
+    output:
+      description: S3 configuration retrieved successfully
+      type: object
+    read_only: true
+  save_s3_config:
+    title: Save S3 configuration
+    description: 'Save S3 configuration Save or update S3-compatible storage configuration. Authentication:
+      API Key required (x-api-key header) Usage: Configure your S3-compatible storage to receive generated
+      PDFs directly in your own bucket instead of the default CDN. Supported providers: - Amazon S3 -
+      DigitalOcean Spaces - Cloudflare R2 Calls POST /v1/integrations/s3 on the provider''s API.'
+    category: integrations
+    request:
+      method: POST
+      path: /v1/integrations/s3
+      body:
+        endpoint_url: ${endpoint_url}
+        access_key_id: ${access_key_id}
+        secret_access_key: ${secret_access_key}
+        bucket_name: ${bucket_name}
+        default_prefix: ${default_prefix}
+    input:
+      endpoint_url:
+        type: string
+        description: S3-compatible endpoint URL. Must start with https://
+      access_key_id:
+        type: string
+        description: Access key ID for S3 authentication
+      secret_access_key:
+        type: string
+        description: Secret access key. Required for new configuration, optional for updates (keeps existing
+          if omitted)
+        optional: true
+      bucket_name:
+        type: string
+        description: S3 bucket name. Must follow S3 naming conventions (lowercase, no underscores)
+      default_prefix:
+        type: string
+        description: Default path prefix for uploaded files. Can include slashes for folder structure
+        optional: true
+    output:
+      description: Configuration saved successfully
+      type: object
+  extract_pdf_pages:
+    title: Extract pages from a PDF
+    description: 'Extract pages from a PDF Return a single PDF containing only the selected pages of the
+      input, in the order specified. Replaces the need for splitting + reassembling client-side. Pages
+      syntax: 1-indexed, comma-separated. Supports ranges (1-3) and singles (5). Order is preserved: 5,1,3
+      outputs those 3 pages in that order. Cre Calls POST /v1/pdf-tools/extract-pages on the provider''s
+      API.'
+    category: pdf_tools
+    request:
+      method: POST
+      path: /v1/pdf-tools/extract-pages
+      body:
+        export_type: ${export_type}
+        expiration: ${expiration}
+        filename: ${filename}
+        pdf_url: ${pdf_url}
+        pdf_base64: ${pdf_base64}
+        pages: ${pages}
+    input:
+      export_type:
+        type: string
+        description: The export_type field of the request body.
+        optional: true
+        enum:
+        - url
+        - binary
+      expiration:
+        type: integer
+        description: URL expiration in seconds. Min 60, max 604800. Only applies to url export type.
+        optional: true
+      filename:
+        type: string
+        description: Custom filename (without .pdf). Defaults to a generic name.
+        optional: true
+      pdf_url:
+        type: string
+        description: Public HTTPS URL to download the PDF from
+        optional: true
+      pdf_base64:
+        type: string
+        description: PDF file encoded as a base64 string
+        optional: true
+      pages:
+        type: string
+        description: 1-indexed page selection. Supports ranges and singles separated by commas, e.g. 1-3,
+          5, 7-9. Order is preserved (5,1,3 outputs those 3 pages in that order).
+    output:
+      description: Successful Response
+      type: object

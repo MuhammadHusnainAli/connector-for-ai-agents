@@ -1,0 +1,249 @@
+# Google Slides API tools.
+#
+# Built from Google's own discovery document for the API, which is the machine
+# readable contract its client libraries are generated from -- so every path,
+# parameter, enum, default and description here is Google's, and so are the
+# per-tool OAuth scopes. That last part is what makes `check_tools()` useful on
+# this connector: it can say which of these a given grant actually permits.
+#
+# The Slides API is deliberately small: create or read a presentation, read a
+# page or its thumbnail, and `batch_update_presentation`. That last one is not
+# a convenience -- it is how every edit is made. Adding a slide, inserting
+# text, moving a shape and applying a theme are all *requests* inside one
+# batchUpdate call, applied atomically in the order given.
+#
+# So the shape of real work here is: read the presentation to learn its object
+# ids, then send a batch of requests that reference them.
+#
+# Docs: https://developers.google.com/slides/api/reference/rest
+
+connector_id: google-slides
+display_name: Google Slides
+docs_url: https://developers.google.com/workspace/slides/
+scope_rules:
+  strip_prefixes:
+  - https://www.googleapis.com/auth/
+  implies:
+    drive:
+    - drive.readonly
+    presentations:
+    - presentations.readonly
+    spreadsheets:
+    - spreadsheets.readonly
+scope_discovery:
+  method: GET
+  base_url_override: https://oauth2.googleapis.com
+  endpoint: /tokeninfo
+  query:
+    access_token: ${credentials.access_token}
+  scopes_path: scope
+tools:
+  batch_update_presentation:
+    title: Batch update presentation
+    description: Applies one or more updates to the presentation. Each request is validated before being
+      applied. If any request is not valid, then the entire request will fail and nothing will be applied.
+      Some requests have replies to give you some information about how they are applied. Other requests
+      do not need to return information; these each return an empty reply. The order of replies matches
+      that of the requests. For example,
+    category: presentations
+    request:
+      method: POST
+      path: /v1/presentations/${presentation_id}:batchUpdate
+      body:
+        writeControl: ${write_control}
+        requests: ${requests}
+    input:
+      presentation_id:
+        type: string
+        description: The presentation to apply the updates to.
+      write_control:
+        type: string
+        description: Provides control over how write requests are executed.
+        optional: true
+      requests:
+        type: array
+        items:
+          type: string
+        description: A list of updates to apply to the presentation.
+        optional: true
+    output:
+      description: The BatchUpdatePresentationResponse resource.
+      type: object
+    scopes_any:
+    - drive
+    - drive.file
+    - drive.readonly
+    - presentations
+    - spreadsheets
+    - spreadsheets.readonly
+  create_presentation:
+    title: Create presentation
+    description: Creates a blank presentation using the title given in the request. If a presentationId
+      is provided, it is used as the ID of the new presentation. Otherwise, a new ID is generated. Other
+      fields in the request, including any provided content, are ignored. Returns the created presentation.
+    category: presentations
+    request:
+      method: POST
+      path: /v1/presentations
+      body:
+        masters: ${masters}
+        layouts: ${layouts}
+        presentationId: ${presentation_id}
+        title: ${title}
+        slides: ${slides}
+        locale: ${locale}
+        notesMaster: ${notes_master}
+        revisionId: ${revision_id}
+        pageSize: ${page_size}
+    input:
+      masters:
+        type: array
+        items:
+          type: string
+        description: 'The slide masters in the presentation. A slide master contains all common page elements
+          and the common properties for a set of layouts. They serve three purposes: - Placeholder shapes
+          on a master contain the default text styles and shape properties of all placeholder shapes on
+          pages that use that ma'
+        optional: true
+      layouts:
+        type: array
+        items:
+          type: string
+        description: The layouts in the presentation. A layout is a template that determines how content
+          is arranged and styled on the slides that inherit from that layout.
+        optional: true
+      presentation_id:
+        type: string
+        description: The ID of the presentation.
+        optional: true
+      title:
+        type: string
+        description: The title of the presentation.
+        optional: true
+      slides:
+        type: array
+        items:
+          type: string
+        description: The slides in the presentation. A slide inherits properties from a slide layout.
+        optional: true
+      locale:
+        type: string
+        description: The locale of the presentation, as an IETF BCP 47 language tag.
+        optional: true
+      notes_master:
+        type: string
+        description: 'The notes master in the presentation. It serves three purposes: - Placeholder shapes
+          on a notes master contain the default text styles and shape properties of all placeholder shapes
+          on notes pages. Specifically, a SLIDE_IMAGE placeholder shape contains the slide thumbnail,
+          and a BODY placeholder sha'
+        optional: true
+      revision_id:
+        type: string
+        description: Output only. The revision ID of the presentation. Can be used in update requests
+          to assert the presentation revision hasn't changed since the last read operation. Only populated
+          if the user has edit access to the presentation. The revision ID is not a sequential number
+          but a nebulous string. The for
+        optional: true
+      page_size:
+        type: string
+        description: The size of pages in the presentation.
+        optional: true
+    output:
+      description: The Presentation resource.
+      type: object
+    scopes_any:
+    - drive
+    - drive.file
+    - presentations
+  get_presentation:
+    title: Get presentation
+    description: Gets the latest version of the specified presentation.
+    category: presentations
+    request:
+      method: GET
+      path: /v1/presentations/${presentation_id}
+    input:
+      presentation_id:
+        type: string
+        description: The ID of the presentation to retrieve.
+    output:
+      description: The Presentation resource.
+      type: object
+    scopes_any:
+    - drive
+    - drive.file
+    - drive.readonly
+    - presentations
+    - presentations.readonly
+    read_only: true
+  get_page:
+    title: Get page
+    description: Gets the latest version of the specified page in the presentation.
+    category: presentations
+    request:
+      method: GET
+      path: /v1/presentations/${presentation_id}/pages/${page_object_id}
+    input:
+      page_object_id:
+        type: string
+        description: The object ID of the page to retrieve.
+      presentation_id:
+        type: string
+        description: The ID of the presentation to retrieve.
+    output:
+      description: The Page resource.
+      type: object
+    scopes_any:
+    - drive
+    - drive.file
+    - drive.readonly
+    - presentations
+    - presentations.readonly
+    read_only: true
+  get_thumbnail_page:
+    title: Get thumbnail page
+    description: Generates a thumbnail of the latest version of the specified page in the presentation
+      and returns a URL to the thumbnail image. This request counts as an expensive read request for quota
+      purposes.
+    category: presentations
+    request:
+      method: GET
+      path: /v1/presentations/${presentation_id}/pages/${page_object_id}/thumbnail
+      query:
+        thumbnailProperties.mimeType: ${thumbnail_properties_mime_type}
+        thumbnailProperties.thumbnailSize: ${thumbnail_properties_thumbnail_size}
+    input:
+      page_object_id:
+        type: string
+        description: The object ID of the page whose thumbnail to retrieve.
+      presentation_id:
+        type: string
+        description: The ID of the presentation to retrieve.
+      thumbnail_properties_mime_type:
+        type: string
+        description: The optional mime type of the thumbnail image. If you don't specify the mime type,
+          the mime type defaults to PNG.
+        optional: true
+        enum:
+        - PNG
+      thumbnail_properties_thumbnail_size:
+        type: string
+        description: The optional thumbnail image size. If you don't specify the size, the server chooses
+          a default size of the image.
+        optional: true
+        enum:
+        - THUMBNAIL_SIZE_UNSPECIFIED
+        - LARGE
+        - MEDIUM
+        - SMALL
+        - WIDTH2000_PX
+    output:
+      description: The Thumbnail resource.
+      type: object
+    scopes_any:
+    - drive
+    - drive.file
+    - drive.readonly
+    - presentations
+    - presentations.readonly
+    read_only: true

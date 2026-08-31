@@ -1,0 +1,370 @@
+# Dropbox tools.
+#
+# Dropbox's RPC endpoints are all POST with a JSON body, even the reads. Paths
+# are Dropbox paths ("/Reports/q3.pdf"), not URL paths, and the root is "".
+#
+# Docs: https://www.dropbox.com/developers/documentation/http/documentation
+
+connector_id: dropbox
+display_name: Dropbox
+docs_url: https://www.dropbox.com/developers/documentation/http/documentation
+
+scope_rules:
+  implies:
+    files.content.write: [files.content.read, files.metadata.write, files.metadata.read]
+    files.metadata.write: [files.metadata.read]
+    sharing.write: [sharing.read]
+
+tools:
+
+  list_folder:
+    title: List a folder's contents
+    description: >-
+      List the files and folders at a Dropbox path. Use "" for the root. Set
+      recursive to walk every subfolder in one call.
+    category: files
+    scopes: [files.metadata.read]
+    read_only: true
+    request:
+      method: POST
+      path: /2/files/list_folder
+      body:
+        path: "${path}"
+        recursive: "${recursive}"
+        limit: "${limit}"
+        include_deleted: "${include_deleted}"
+    input:
+      path:
+        type: string
+        description: Dropbox folder path, e.g. "/Reports". Use "" for the root.
+        optional: true
+        default: ""
+      recursive:
+        type: boolean
+        description: Include everything in subfolders too.
+        optional: true
+      limit:
+        type: integer
+        description: How many entries per page (1-2000).
+        optional: true
+        minimum: 1
+        maximum: 2000
+      include_deleted:
+        type: boolean
+        description: Include deleted entries.
+        optional: true
+    output:
+      description: The folder's entries with a cursor for the next page.
+      type: object
+      properties:
+        entries: {type: array, description: "Each with .tag (file or folder), name, path_lower and id."}
+        cursor: {type: string}
+        has_more: {type: boolean}
+
+  list_folder_continue:
+    title: Get the next page of a folder listing
+    description: >-
+      Continue a listing that came back with has_more true, using the cursor it
+      returned.
+    category: files
+    scopes: [files.metadata.read]
+    read_only: true
+    request:
+      method: POST
+      path: /2/files/list_folder/continue
+      body:
+        cursor: "${cursor}"
+    input:
+      cursor:
+        type: string
+        description: Cursor from the previous list_folder response.
+    output:
+      description: The next page of entries.
+      type: object
+      properties:
+        entries: {type: array}
+        cursor: {type: string}
+        has_more: {type: boolean}
+
+  search_files:
+    title: Search files
+    description: >-
+      Search Dropbox by file name, and by content on paid plans. Narrow with
+      path_filter to search inside one folder.
+    category: files
+    scopes: [files.metadata.read]
+    read_only: true
+    request:
+      method: POST
+      path: /2/files/search_v2
+      body:
+        query: "${query}"
+        options:
+          path: "${path_filter}"
+          max_results: "${limit}"
+          file_status: "${file_status}"
+          filename_only: "${filename_only}"
+    input:
+      query:
+        type: string
+        description: Words to search for.
+      path_filter:
+        type: string
+        description: Only search inside this folder path.
+        optional: true
+      limit:
+        type: integer
+        description: How many matches to return (1-1000).
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 1000
+      file_status:
+        type: string
+        description: Search live files or deleted ones.
+        optional: true
+        enum: [active, deleted]
+      filename_only:
+        type: boolean
+        description: Match file names only, skipping content.
+        optional: true
+    output:
+      description: Matching files.
+      type: object
+      properties:
+        matches: {type: array}
+        has_more: {type: boolean}
+
+  get_file_metadata:
+    title: Get a file's metadata
+    description: Read one file or folder's size, revision, modified time and id.
+    category: files
+    scopes: [files.metadata.read]
+    read_only: true
+    request:
+      method: POST
+      path: /2/files/get_metadata
+      body:
+        path: "${path}"
+        include_deleted: "${include_deleted}"
+    input:
+      path:
+        type: string
+        description: Dropbox path or file id.
+      include_deleted:
+        type: boolean
+        description: Return metadata even if the file is deleted.
+        optional: true
+    output:
+      description: The file or folder metadata.
+      type: object
+      properties:
+        name: {type: string}
+        path_lower: {type: string}
+        id: {type: string}
+        size: {type: integer}
+        rev: {type: string}
+
+  create_folder:
+    title: Create a folder
+    description: >-
+      Create a folder at a path. With autorename set, a name clash produces
+      "Reports (1)" instead of an error.
+    category: files
+    scopes: [files.content.write]
+    request:
+      method: POST
+      path: /2/files/create_folder_v2
+      body:
+        path: "${path}"
+        autorename: "${autorename}"
+    input:
+      path:
+        type: string
+        description: Dropbox path for the new folder, e.g. "/Reports/2026".
+      autorename:
+        type: boolean
+        description: Rename instead of failing when the name is taken.
+        optional: true
+    output:
+      description: The created folder.
+      type: object
+      response_path: metadata
+      properties:
+        name: {type: string}
+        path_lower: {type: string}
+        id: {type: string}
+
+  move_file:
+    title: Move or rename a file
+    description: >-
+      Move a file or folder to a new path, which is also how it gets renamed.
+      Set autorename to avoid failing on a clash.
+    category: files
+    scopes: [files.content.write]
+    request:
+      method: POST
+      path: /2/files/move_v2
+      body:
+        from_path: "${from_path}"
+        to_path: "${to_path}"
+        autorename: "${autorename}"
+    input:
+      from_path:
+        type: string
+        description: Current Dropbox path.
+      to_path:
+        type: string
+        description: New Dropbox path, including the file name.
+      autorename:
+        type: boolean
+        description: Rename instead of failing when the destination is taken.
+        optional: true
+    output:
+      description: The moved item at its new path.
+      type: object
+      response_path: metadata
+      properties:
+        name: {type: string}
+        path_lower: {type: string}
+
+  copy_file:
+    title: Copy a file
+    description: Duplicate a file or folder to another path, leaving the original in place.
+    category: files
+    scopes: [files.content.write]
+    request:
+      method: POST
+      path: /2/files/copy_v2
+      body:
+        from_path: "${from_path}"
+        to_path: "${to_path}"
+        autorename: "${autorename}"
+    input:
+      from_path:
+        type: string
+        description: Path of the item to copy.
+      to_path:
+        type: string
+        description: Destination path for the copy.
+      autorename:
+        type: boolean
+        description: Rename instead of failing when the destination is taken.
+        optional: true
+    output:
+      description: The new copy.
+      type: object
+      response_path: metadata
+      properties:
+        name: {type: string}
+        path_lower: {type: string}
+
+  delete_file:
+    title: Delete a file or folder
+    description: >-
+      Move an item to the Dropbox trash. Recoverable from the Dropbox UI for the
+      account's retention window, but not by this tool.
+    category: files
+    scopes: [files.content.write]
+    destructive: true
+    request:
+      method: POST
+      path: /2/files/delete_v2
+      body:
+        path: "${path}"
+    input:
+      path:
+        type: string
+        description: Dropbox path of the item to delete.
+    output:
+      description: The deleted item's last metadata.
+      type: object
+      response_path: metadata
+      properties:
+        name: {type: string}
+        path_lower: {type: string}
+
+  create_shared_link:
+    title: Create a shareable link
+    description: >-
+      Mint a public link to a file or folder. Visibility and expiry come from
+      settings, e.g. {"audience": "public", "access": "viewer"}.
+    category: sharing
+    scopes: [sharing.write]
+    request:
+      method: POST
+      path: /2/sharing/create_shared_link_with_settings
+      body:
+        path: "${path}"
+        settings: "${settings}"
+    input:
+      path:
+        type: string
+        description: Dropbox path to share.
+      settings:
+        type: object
+        description: >-
+          Link settings, e.g. {"audience": "public", "access": "viewer",
+          "expires": "2026-12-31T00:00:00Z"}.
+        optional: true
+    output:
+      description: The shared link.
+      type: object
+      properties:
+        url: {type: string}
+        name: {type: string}
+        id: {type: string}
+
+  list_shared_links:
+    title: List shared links
+    description: List the links that exist for a path, or all of the account's links.
+    category: sharing
+    scopes: [sharing.read]
+    read_only: true
+    request:
+      method: POST
+      path: /2/sharing/list_shared_links
+      body:
+        path: "${path}"
+        cursor: "${cursor}"
+        direct_only: "${direct_only}"
+    input:
+      path:
+        type: string
+        description: Only links for this path. Omit for every link on the account.
+        optional: true
+      cursor:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+      direct_only:
+        type: boolean
+        description: Only links pointing directly at the path, not at its parents.
+        optional: true
+    output:
+      description: The shared links.
+      type: object
+      properties:
+        links: {type: array}
+        has_more: {type: boolean}
+
+  get_current_account:
+    title: Get the connected account
+    description: >-
+      Read the Dropbox account the token belongs to -- name, email and account
+      type. The cheapest health check for a Dropbox connection.
+    category: account
+    scopes: [account_info.read]
+    request:
+      method: POST
+      path: /2/users/get_current_account
+      body: null
+    input: {}
+    output:
+      description: The account.
+      type: object
+      properties:
+        account_id: {type: string}
+        name: {type: object}
+        email: {type: string}
+        account_type: {type: object}

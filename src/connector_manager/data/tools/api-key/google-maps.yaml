@@ -1,0 +1,1081 @@
+# Google Maps Platform web service tools.
+#
+# These are the classic Maps web services on maps.googleapis.com -- the ones
+# that answer with JSON over a plain query string rather than the newer
+# resource-shaped APIs. Every path below was confirmed against the live host.
+#
+# Two conventions run through all of them:
+#
+#   * **the API key rides in the query string**, which the connector adds, and
+#     the key must have the specific API enabled in the Google Cloud project.
+#     A key that works for geocoding will fail for directions unless the
+#     Directions API is enabled too;
+#   * **errors arrive as HTTP 200 with a `status` field** -- `ZERO_RESULTS`,
+#     `OVER_QUERY_LIMIT`, `REQUEST_DENIED`, `INVALID_REQUEST`. Read `status`
+#     rather than trusting the status code, and `error_message` when it is set.
+#
+# Coordinates are `lat,lng` strings throughout, and most endpoints accept
+# `language` and `region` to localise what comes back.
+#
+# The newer Places API (New) lives on places.googleapis.com and is the
+# `google-maps-platform` connector; the Roads API lives on
+# roads.googleapis.com, which this connector's base url does not serve.
+#
+# Docs: https://developers.google.com/maps/documentation/webservices
+
+connector_id: google-maps
+display_name: Google Maps
+docs_url: https://developers.google.com/maps/documentation/webservices
+
+tools:
+
+  # -- geocoding ---------------------------------------------------------------
+
+  geocode_address:
+    title: Geocode an address
+    description: >-
+      Turn a postal address into coordinates, with the normalised address
+      components and place id Google matched. Narrow an ambiguous address with
+      `components` -- `country:GB|postal_code:SW1A` -- or with `bounds`, which
+      biases rather than restricts.
+    category: geocoding
+    read_only: true
+    request:
+      method: GET
+      path: /maps/api/geocode/json
+      query:
+        address: "${address}"
+        components: "${components}"
+        bounds: "${bounds}"
+        region: "${region}"
+        language: "${language}"
+    input:
+      address:
+        type: string
+        description: The address to geocode.
+        example: 1600 Amphitheatre Parkway, Mountain View, CA
+      components:
+        type: string
+        description: >-
+          Component filters, pipe-separated, e.g.
+          "country:US|administrative_area:CA". Restricts the result rather than
+          biasing it.
+        optional: true
+      bounds:
+        type: string
+        description: >-
+          Viewport to bias results towards, as "lat,lng|lat,lng" (southwest
+          then northeast).
+        optional: true
+      region:
+        type: string
+        description: Two-letter ccTLD to bias results towards, e.g. "uk".
+        optional: true
+      language:
+        type: string
+        description: Language to return results in, e.g. "en" or "fr".
+        optional: true
+    output:
+      description: The matched locations, with a status field to check first.
+      type: object
+      properties:
+        status: {type: string, description: "OK, ZERO_RESULTS, OVER_QUERY_LIMIT, REQUEST_DENIED or INVALID_REQUEST."}
+        results: {type: array, description: "Each with formatted_address, geometry.location, place_id and address_components."}
+        error_message: {type: string}
+
+  reverse_geocode:
+    title: Reverse geocode coordinates
+    description: >-
+      Turn coordinates into the addresses at that point, most specific first.
+      `result_type` and `location_type` narrow what comes back -- asking for
+      `ROOFTOP` only, for instance, rather than an interpolated street range.
+    category: geocoding
+    read_only: true
+    request:
+      method: GET
+      path: /maps/api/geocode/json
+      query:
+        latlng: "${latlng}"
+        result_type: "${result_type}"
+        location_type: "${location_type}"
+        language: "${language}"
+    input:
+      latlng:
+        type: string
+        description: The point to look up, as "lat,lng".
+        example: 37.4224,-122.0841
+      result_type:
+        type: string
+        description: >-
+          Pipe-separated address types to keep, e.g.
+          "street_address|postal_code".
+        optional: true
+      location_type:
+        type: string
+        description: >-
+          Pipe-separated precision levels to keep -- ROOFTOP,
+          RANGE_INTERPOLATED, GEOMETRIC_CENTER, APPROXIMATE.
+        optional: true
+      language:
+        type: string
+        description: Language to return results in.
+        optional: true
+    output:
+      description: The addresses at that point.
+      type: object
+      properties:
+        status: {type: string}
+        results: {type: array}
+        error_message: {type: string}
+
+  geocode_place_id:
+    title: Geocode a place id
+    description: >-
+      Resolve a Google place id to its address and coordinates -- the way to
+      turn an id from an autocomplete or search result into a location without
+      a full place details call.
+    category: geocoding
+    read_only: true
+    request:
+      method: GET
+      path: /maps/api/geocode/json
+      query:
+        place_id: "${place_id}"
+        language: "${language}"
+    input:
+      place_id:
+        type: string
+        description: The place id to resolve.
+        example: ChIJN1t_tDeuEmsRUsoyG83frY4
+      language:
+        type: string
+        description: Language to return results in.
+        optional: true
+    output:
+      description: The place's address and geometry.
+      type: object
+      properties:
+        status: {type: string}
+        results: {type: array}
+
+  # -- routing -----------------------------------------------------------------
+
+  get_directions:
+    title: Get directions
+    description: >-
+      Directions between two points, with the steps, distance and duration of
+      each leg. `waypoints` prefixed with `optimize:true` lets Google reorder
+      them, which is the closest this API comes to route optimisation. With
+      `departure_time` set and a driving mode, `duration_in_traffic` comes back
+      too.
+    category: routing
+    read_only: true
+    request:
+      method: GET
+      path: /maps/api/directions/json
+      query:
+        origin: "${origin}"
+        destination: "${destination}"
+        mode: "${mode}"
+        waypoints: "${waypoints}"
+        alternatives: "${alternatives}"
+        avoid: "${avoid}"
+        departure_time: "${departure_time}"
+        arrival_time: "${arrival_time}"
+        traffic_model: "${traffic_model}"
+        transit_mode: "${transit_mode}"
+        units: "${units}"
+        region: "${region}"
+        language: "${language}"
+    input:
+      origin:
+        type: string
+        description: >-
+          Where the route starts -- an address, "lat,lng", or "place_id:ChIJ...".
+        example: Trafalgar Square, London
+      destination:
+        type: string
+        description: Where the route ends, in the same forms as `origin`.
+        example: Tower Bridge, London
+      mode:
+        type: string
+        description: How the journey is made.
+        optional: true
+        default: driving
+        enum: [driving, walking, bicycling, transit]
+      waypoints:
+        type: string
+        description: >-
+          Points to route through, pipe-separated. Prefix with "optimize:true|"
+          to let Google reorder them.
+        optional: true
+      alternatives:
+        type: boolean
+        description: Return more than one route where alternatives exist.
+        optional: true
+      avoid:
+        type: string
+        description: Pipe-separated features to avoid -- tolls, highways, ferries, indoor.
+        optional: true
+      departure_time:
+        type: string
+        description: >-
+          Unix timestamp, or "now". Required for transit, and what enables
+          traffic-aware driving durations.
+        optional: true
+      arrival_time:
+        type: string
+        description: Unix timestamp to arrive by. Transit only, and exclusive with `departure_time`.
+        optional: true
+      traffic_model:
+        type: string
+        description: Which traffic estimate to use. Needs `departure_time`.
+        optional: true
+        enum: [best_guess, pessimistic, optimistic]
+      transit_mode:
+        type: string
+        description: Pipe-separated transit modes -- bus, subway, train, tram, rail.
+        optional: true
+      units:
+        type: string
+        description: Which unit system distances come back in.
+        optional: true
+        enum: [metric, imperial]
+      region:
+        type: string
+        description: Two-letter ccTLD to bias geocoding of the endpoints.
+        optional: true
+      language:
+        type: string
+        description: Language for the step instructions.
+        optional: true
+    output:
+      description: The routes found.
+      type: object
+      properties:
+        status: {type: string}
+        routes: {type: array, description: "Each with legs, overview_polyline, bounds and summary."}
+        geocoded_waypoints: {type: array}
+
+  get_distance_matrix:
+    title: Get a distance matrix
+    description: >-
+      Travel distance and time for every origin-destination pair at once --
+      what you want for "which of these depots is nearest", rather than one
+      directions call per pair. Origins and destinations are pipe-separated,
+      and the response is a row per origin.
+    category: routing
+    read_only: true
+    request:
+      method: GET
+      path: /maps/api/distancematrix/json
+      query:
+        origins: "${origins}"
+        destinations: "${destinations}"
+        mode: "${mode}"
+        avoid: "${avoid}"
+        departure_time: "${departure_time}"
+        traffic_model: "${traffic_model}"
+        transit_mode: "${transit_mode}"
+        units: "${units}"
+        region: "${region}"
+        language: "${language}"
+    input:
+      origins:
+        type: string
+        description: >-
+          Starting points, pipe-separated -- addresses, "lat,lng" or
+          "place_id:...".
+        example: Manchester|Leeds
+      destinations:
+        type: string
+        description: Destinations, pipe-separated, in the same forms.
+        example: Liverpool|Sheffield
+      mode:
+        type: string
+        description: How the journey is made.
+        optional: true
+        default: driving
+        enum: [driving, walking, bicycling, transit]
+      avoid:
+        type: string
+        description: Pipe-separated features to avoid -- tolls, highways, ferries, indoor.
+        optional: true
+      departure_time:
+        type: string
+        description: Unix timestamp or "now", which enables traffic-aware durations.
+        optional: true
+      traffic_model:
+        type: string
+        description: Which traffic estimate to use. Needs `departure_time`.
+        optional: true
+        enum: [best_guess, pessimistic, optimistic]
+      transit_mode:
+        type: string
+        description: Pipe-separated transit modes.
+        optional: true
+      units:
+        type: string
+        description: Which unit system distances come back in.
+        optional: true
+        enum: [metric, imperial]
+      region:
+        type: string
+        description: Two-letter ccTLD to bias geocoding.
+        optional: true
+      language:
+        type: string
+        description: Language for the returned text.
+        optional: true
+    output:
+      description: A row of results per origin.
+      type: object
+      properties:
+        status: {type: string}
+        origin_addresses: {type: array}
+        destination_addresses: {type: array}
+        rows: {type: array, description: "Each row's elements carry distance, duration and their own status."}
+
+  # -- places ------------------------------------------------------------------
+
+  search_places_by_text:
+    title: Search places by text
+    description: >-
+      Find places from a free-text query -- "pizza near Shoreditch", "Museum of
+      London". Returns the matches with their place ids, which
+      `get_place_details` expands. Narrow to a neighbourhood with `location`
+      plus `radius`.
+    category: places
+    read_only: true
+    request:
+      method: GET
+      path: /maps/api/place/textsearch/json
+      query:
+        query: "${query}"
+        location: "${location}"
+        radius: "${radius}"
+        type: "${type}"
+        minprice: "${min_price}"
+        maxprice: "${max_price}"
+        opennow: "${open_now}"
+        pagetoken: "${page_token}"
+        region: "${region}"
+        language: "${language}"
+    input:
+      query:
+        type: string
+        description: What to search for.
+        example: pizza near Shoreditch
+      location:
+        type: string
+        description: Point to bias results around, as "lat,lng".
+        optional: true
+      radius:
+        type: integer
+        description: Bias radius in metres, up to 50000.
+        optional: true
+        minimum: 1
+        maximum: 50000
+      type:
+        type: string
+        description: Restrict to one place type, e.g. "restaurant" or "pharmacy".
+        optional: true
+      min_price:
+        type: integer
+        description: Cheapest price level to include, 0 to 4.
+        optional: true
+        minimum: 0
+        maximum: 4
+      max_price:
+        type: integer
+        description: Dearest price level to include, 0 to 4.
+        optional: true
+        minimum: 0
+        maximum: 4
+      open_now:
+        type: boolean
+        description: Only places open at the time of the request.
+        optional: true
+      page_token:
+        type: string
+        description: >-
+          `next_page_token` from a previous response. Google needs a short
+          delay before a new token becomes valid.
+        optional: true
+      region:
+        type: string
+        description: Two-letter ccTLD to bias results towards.
+        optional: true
+      language:
+        type: string
+        description: Language to return results in.
+        optional: true
+    output:
+      description: The matching places.
+      type: object
+      properties:
+        status: {type: string}
+        results: {type: array, description: "Each with name, formatted_address, geometry, place_id and rating."}
+        next_page_token: {type: string}
+
+  search_places_nearby:
+    title: Search places nearby
+    description: >-
+      Places around a point, ranked by prominence or by distance. With
+      `rankby` set to "distance" the radius must be omitted and one of
+      `keyword`, `name` or `type` given -- Google's own constraint, and the
+      usual cause of an INVALID_REQUEST here.
+    category: places
+    read_only: true
+    request:
+      method: GET
+      path: /maps/api/place/nearbysearch/json
+      query:
+        location: "${location}"
+        radius: "${radius}"
+        keyword: "${keyword}"
+        type: "${type}"
+        rankby: "${rank_by}"
+        minprice: "${min_price}"
+        maxprice: "${max_price}"
+        opennow: "${open_now}"
+        pagetoken: "${page_token}"
+        language: "${language}"
+    input:
+      location:
+        type: string
+        description: Centre of the search, as "lat,lng".
+        example: 51.5074,-0.1278
+      radius:
+        type: integer
+        description: >-
+          Search radius in metres, up to 50000. Must be omitted when `rank_by`
+          is "distance".
+        optional: true
+        minimum: 1
+        maximum: 50000
+      keyword:
+        type: string
+        description: Term matched against all the fields Google indexes for a place.
+        optional: true
+      type:
+        type: string
+        description: Restrict to one place type, e.g. "cafe".
+        optional: true
+      rank_by:
+        type: string
+        description: >-
+          How results are ordered. "distance" requires a keyword, name or type
+          and forbids `radius`.
+        optional: true
+        default: prominence
+        enum: [prominence, distance]
+      min_price:
+        type: integer
+        description: Cheapest price level to include, 0 to 4.
+        optional: true
+        minimum: 0
+        maximum: 4
+      max_price:
+        type: integer
+        description: Dearest price level to include, 0 to 4.
+        optional: true
+        minimum: 0
+        maximum: 4
+      open_now:
+        type: boolean
+        description: Only places open at the time of the request.
+        optional: true
+      page_token:
+        type: string
+        description: Cursor from a previous response's next_page_token.
+        optional: true
+      language:
+        type: string
+        description: Language to return results in.
+        optional: true
+    output:
+      description: The nearby places.
+      type: object
+      properties:
+        status: {type: string}
+        results: {type: array}
+        next_page_token: {type: string}
+
+  find_place:
+    title: Find one place
+    description: >-
+      Resolve a name or phone number to a single best-matching place. Cheaper
+      and more decisive than a text search when you already know what you are
+      looking for -- `fields` controls both what comes back and what Google
+      charges for the call.
+    category: places
+    read_only: true
+    request:
+      method: GET
+      path: /maps/api/place/findplacefromtext/json
+      query:
+        input: "${input}"
+        inputtype: "${input_type}"
+        fields: "${fields}"
+        locationbias: "${location_bias}"
+        language: "${language}"
+    input:
+      input:
+        type: string
+        description: The text or phone number to match.
+        example: Museum of London
+      input_type:
+        type: string
+        description: Whether `input` is free text or a phone number.
+        optional: true
+        default: textquery
+        enum: [textquery, phonenumber]
+      fields:
+        type: string
+        description: >-
+          Comma-separated fields to return, e.g.
+          "place_id,name,formatted_address,geometry". This drives the billing
+          tier, so ask only for what you need.
+        optional: true
+      location_bias:
+        type: string
+        description: >-
+          Where to prefer results, as "point:lat,lng",
+          "circle:radius@lat,lng" or "rectangle:south,west|north,east".
+        optional: true
+      language:
+        type: string
+        description: Language to return results in.
+        optional: true
+    output:
+      description: The best matching candidates.
+      type: object
+      properties:
+        status: {type: string}
+        candidates: {type: array}
+
+  get_place_details:
+    title: Get place details
+    description: >-
+      Everything Google holds about one place -- opening hours, phone number,
+      website, reviews, photos and rating. `fields` is not optional in
+      practice: without it Google returns every field and bills at the highest
+      tier.
+    category: places
+    read_only: true
+    request:
+      method: GET
+      path: /maps/api/place/details/json
+      query:
+        place_id: "${place_id}"
+        fields: "${fields}"
+        sessiontoken: "${session_token}"
+        reviews_no_translations: "${reviews_no_translations}"
+        reviews_sort: "${reviews_sort}"
+        region: "${region}"
+        language: "${language}"
+    input:
+      place_id:
+        type: string
+        description: The place's id.
+        example: ChIJN1t_tDeuEmsRUsoyG83frY4
+      fields:
+        type: string
+        description: >-
+          Comma-separated fields to return, e.g.
+          "name,rating,opening_hours,website". Omitting this returns everything
+          and bills accordingly.
+        optional: true
+      session_token:
+        type: string
+        description: >-
+          The token from an autocomplete session, which bills the details call
+          as part of that session rather than separately.
+        optional: true
+      reviews_no_translations:
+        type: boolean
+        description: Return reviews in their original language rather than translated.
+        optional: true
+      reviews_sort:
+        type: string
+        description: How reviews are ordered.
+        optional: true
+        enum: [most_relevant, newest]
+      region:
+        type: string
+        description: Two-letter ccTLD, which affects address formatting.
+        optional: true
+      language:
+        type: string
+        description: Language to return details in.
+        optional: true
+    output:
+      description: The place's details.
+      type: object
+      properties:
+        status: {type: string}
+        result: {type: object, description: "name, formatted_address, geometry, opening_hours, reviews, photos and more."}
+
+  autocomplete_place:
+    title: Autocomplete a place
+    description: >-
+      Predictions for a partial query, as a search box would show. Pass a
+      `session_token` you keep for the whole typing session and reuse on the
+      following `get_place_details` call -- that is what makes Google bill the
+      session once rather than per keystroke.
+    category: places
+    read_only: true
+    request:
+      method: GET
+      path: /maps/api/place/autocomplete/json
+      query:
+        input: "${input}"
+        sessiontoken: "${session_token}"
+        types: "${types}"
+        components: "${components}"
+        location: "${location}"
+        radius: "${radius}"
+        locationbias: "${location_bias}"
+        locationrestriction: "${location_restriction}"
+        offset: "${offset}"
+        origin: "${origin}"
+        strictbounds: "${strict_bounds}"
+        region: "${region}"
+        language: "${language}"
+    input:
+      input:
+        type: string
+        description: What the user has typed so far.
+        example: 1600 Amphi
+      session_token:
+        type: string
+        description: >-
+          A token you generate and keep for one autocomplete session, then pass
+          to `get_place_details`.
+        optional: true
+      types:
+        type: string
+        description: >-
+          Restrict predictions to a type collection, e.g. "geocode",
+          "address", "establishment", "(cities)" or "(regions)".
+        optional: true
+      components:
+        type: string
+        description: Restrict to countries, e.g. "country:gb|country:ie".
+        optional: true
+      location:
+        type: string
+        description: Point to bias predictions around, as "lat,lng".
+        optional: true
+      radius:
+        type: integer
+        description: Bias radius in metres.
+        optional: true
+        minimum: 1
+      location_bias:
+        type: string
+        description: Area to prefer, as point, circle or rectangle.
+        optional: true
+      location_restriction:
+        type: string
+        description: Area to restrict predictions to, rather than merely prefer.
+        optional: true
+      offset:
+        type: integer
+        description: Where the cursor sits in `input`, so Google predicts from that point.
+        optional: true
+        minimum: 0
+      origin:
+        type: string
+        description: Point to measure straight-line distance from, as "lat,lng".
+        optional: true
+      strict_bounds:
+        type: boolean
+        description: Return only places strictly inside the given location and radius.
+        optional: true
+      region:
+        type: string
+        description: Two-letter ccTLD to bias predictions towards.
+        optional: true
+      language:
+        type: string
+        description: Language for the predictions.
+        optional: true
+    output:
+      description: The predictions.
+      type: object
+      properties:
+        status: {type: string}
+        predictions: {type: array, description: "Each with description, place_id and matched_substrings."}
+
+  autocomplete_query:
+    title: Autocomplete a search query
+    description: >-
+      Predictions for a partial *query* rather than a specific place -- it can
+      return category-style suggestions such as "pizza near London", where
+      place autocomplete only returns individual places.
+    category: places
+    read_only: true
+    request:
+      method: GET
+      path: /maps/api/place/queryautocomplete/json
+      query:
+        input: "${input}"
+        location: "${location}"
+        radius: "${radius}"
+        offset: "${offset}"
+        language: "${language}"
+    input:
+      input:
+        type: string
+        description: What the user has typed so far.
+        example: pizza near Lond
+      location:
+        type: string
+        description: Point to bias predictions around, as "lat,lng".
+        optional: true
+      radius:
+        type: integer
+        description: Bias radius in metres.
+        optional: true
+        minimum: 1
+      offset:
+        type: integer
+        description: Where the cursor sits in `input`.
+        optional: true
+        minimum: 0
+      language:
+        type: string
+        description: Language for the predictions.
+        optional: true
+    output:
+      description: The query predictions.
+      type: object
+      properties:
+        status: {type: string}
+        predictions: {type: array}
+
+  get_place_photo:
+    title: Get a place photo
+    description: >-
+      The image behind a `photo_reference` from a place result. Answers with
+      the image bytes, not JSON, and one of `max_width` or `max_height` is
+      required. Google's terms require the attribution that came with the photo
+      reference to be displayed alongside it.
+    category: places
+    read_only: true
+    request:
+      method: GET
+      path: /maps/api/place/photo
+      query:
+        photo_reference: "${photo_reference}"
+        maxwidth: "${max_width}"
+        maxheight: "${max_height}"
+    input:
+      photo_reference:
+        type: string
+        description: The photo reference from a place search or details result.
+      max_width:
+        type: integer
+        description: Largest width to return, 1 to 1600. Give this or `max_height`.
+        optional: true
+        minimum: 1
+        maximum: 1600
+      max_height:
+        type: integer
+        description: Largest height to return, 1 to 1600. Give this or `max_width`.
+        optional: true
+        minimum: 1
+        maximum: 1600
+    output:
+      description: The image itself.
+      type: string
+
+  # -- geometry and imagery ----------------------------------------------------
+
+  get_elevation:
+    title: Get elevation
+    description: >-
+      Height above sea level at one or more points. Give `locations` for
+      specific points, or `path` plus `samples` to profile a route -- which is
+      how a climb profile is produced.
+    category: geometry
+    read_only: true
+    request:
+      method: GET
+      path: /maps/api/elevation/json
+      query:
+        locations: "${locations}"
+        path: "${path}"
+        samples: "${samples}"
+    input:
+      locations:
+        type: string
+        description: >-
+          Points to measure, pipe-separated "lat,lng" values or an
+          "enc:" encoded polyline.
+        optional: true
+        example: 39.7391536,-104.9847034
+      path:
+        type: string
+        description: Path to sample along, as pipe-separated points. Needs `samples`.
+        optional: true
+      samples:
+        type: integer
+        description: How many evenly spaced samples to take along `path`.
+        optional: true
+        minimum: 2
+    output:
+      description: The elevations.
+      type: object
+      properties:
+        status: {type: string}
+        results: {type: array, description: "Each with elevation in metres, location and resolution."}
+
+  get_timezone:
+    title: Get a location's time zone
+    description: >-
+      The time zone at a point for a given moment, with its raw UTC offset and
+      any daylight-saving offset separately. The timestamp matters: the DST
+      offset depends on the time of year being asked about.
+    category: geometry
+    read_only: true
+    request:
+      method: GET
+      path: /maps/api/timezone/json
+      query:
+        location: "${location}"
+        timestamp: "${timestamp}"
+        language: "${language}"
+    input:
+      location:
+        type: string
+        description: The point to look up, as "lat,lng".
+        example: 51.5074,-0.1278
+      timestamp:
+        type: integer
+        description: >-
+          Seconds since the Unix epoch, which decides whether daylight saving
+          applies.
+        minimum: 0
+      language:
+        type: string
+        description: Language for the time zone's name.
+        optional: true
+    output:
+      description: The time zone.
+      type: object
+      properties:
+        status: {type: string}
+        timeZoneId: {type: string, description: "IANA name, e.g. Europe/London."}
+        timeZoneName: {type: string}
+        rawOffset: {type: integer}
+        dstOffset: {type: integer}
+
+  get_static_map:
+    title: Get a static map image
+    description: >-
+      A map image built from a query string -- centre, zoom and size, or a set
+      of markers and paths that Google fits the viewport around. Answers with
+      the image bytes rather than JSON.
+    category: imagery
+    read_only: true
+    request:
+      method: GET
+      path: /maps/api/staticmap
+      query:
+        center: "${center}"
+        zoom: "${zoom}"
+        size: "${size}"
+        scale: "${scale}"
+        format: "${format}"
+        maptype: "${map_type}"
+        markers: "${markers}"
+        path: "${path}"
+        visible: "${visible}"
+        style: "${style}"
+        region: "${region}"
+        language: "${language}"
+    input:
+      size:
+        type: string
+        description: Image size in pixels, as "widthxheight", e.g. "600x400".
+        example: 600x400
+      center:
+        type: string
+        description: >-
+          Where to centre the map -- an address or "lat,lng". Optional when
+          markers or a path define the viewport.
+        optional: true
+      zoom:
+        type: integer
+        description: Zoom level, 0 (whole world) to 21 (buildings).
+        optional: true
+        minimum: 0
+        maximum: 21
+      scale:
+        type: integer
+        description: Pixel density multiplier, for high-resolution screens.
+        optional: true
+        enum: [1, 2]
+      format:
+        type: string
+        description: Image format to return.
+        optional: true
+        enum: [png, png8, png32, gif, jpg, jpg-baseline]
+      map_type:
+        type: string
+        description: Which base map to render.
+        optional: true
+        enum: [roadmap, satellite, terrain, hybrid]
+      markers:
+        type: string
+        description: >-
+          A marker group, e.g.
+          "color:red|label:A|51.5074,-0.1278". Repeatable in the same string.
+        optional: true
+      path:
+        type: string
+        description: >-
+          A line to draw, e.g.
+          "color:0x0000ff|weight:5|51.5,-0.1|51.6,-0.2".
+        optional: true
+      visible:
+        type: string
+        description: Points that must remain within the viewport, pipe-separated.
+        optional: true
+      style:
+        type: string
+        description: A custom style rule, e.g. "feature:road|color:0xffffff".
+        optional: true
+      region:
+        type: string
+        description: Two-letter ccTLD, which affects borders and labels shown.
+        optional: true
+      language:
+        type: string
+        description: Language for map labels.
+        optional: true
+    output:
+      description: The map image.
+      type: string
+
+  get_street_view_image:
+    title: Get a Street View image
+    description: >-
+      A Street View photo at a location or panorama id, with the heading, pitch
+      and field of view you choose. Check availability with
+      `get_street_view_metadata` first -- that call is free, while this one is
+      billed even when it returns the grey "no imagery" placeholder.
+    category: imagery
+    read_only: true
+    request:
+      method: GET
+      path: /maps/api/streetview
+      query:
+        size: "${size}"
+        location: "${location}"
+        pano: "${pano}"
+        heading: "${heading}"
+        pitch: "${pitch}"
+        fov: "${fov}"
+        radius: "${radius}"
+        source: "${source}"
+        return_error_code: "${return_error_code}"
+    input:
+      size:
+        type: string
+        description: Image size in pixels, as "widthxheight", up to 640x640.
+        example: 600x400
+      location:
+        type: string
+        description: Where to look from -- an address or "lat,lng". Give this or `pano`.
+        optional: true
+      pano:
+        type: string
+        description: A specific panorama id. Give this or `location`.
+        optional: true
+      heading:
+        type: integer
+        description: Compass heading in degrees, 0 to 360, where 0 and 360 are north.
+        optional: true
+        minimum: 0
+        maximum: 360
+      pitch:
+        type: integer
+        description: Up or down angle in degrees, -90 to 90. 0 is level.
+        optional: true
+        minimum: -90
+        maximum: 90
+      fov:
+        type: integer
+        description: Field of view in degrees, up to 120. Smaller values zoom in.
+        optional: true
+        minimum: 10
+        maximum: 120
+      radius:
+        type: integer
+        description: How far from `location` to look for a panorama, in metres.
+        optional: true
+        minimum: 0
+      source:
+        type: string
+        description: Restrict to outdoor imagery rather than any panorama.
+        optional: true
+        enum: [default, outdoor]
+      return_error_code:
+        type: boolean
+        description: >-
+          Return an HTTP error instead of the grey placeholder when there is no
+          imagery.
+        optional: true
+    output:
+      description: The Street View image.
+      type: string
+
+  get_street_view_metadata:
+    title: Check Street View availability
+    description: >-
+      Whether Street View imagery exists at a location, with its panorama id,
+      capture date and exact coordinates. Free, unlike the image call, so this
+      is what to check before requesting a photo.
+    category: imagery
+    read_only: true
+    request:
+      method: GET
+      path: /maps/api/streetview/metadata
+      query:
+        location: "${location}"
+        pano: "${pano}"
+        radius: "${radius}"
+        source: "${source}"
+    input:
+      location:
+        type: string
+        description: Where to check -- an address or "lat,lng". Give this or `pano`.
+        optional: true
+        example: 51.5074,-0.1278
+      pano:
+        type: string
+        description: A specific panorama id to check. Give this or `location`.
+        optional: true
+      radius:
+        type: integer
+        description: How far from `location` to look, in metres.
+        optional: true
+        minimum: 0
+      source:
+        type: string
+        description: Restrict to outdoor imagery.
+        optional: true
+        enum: [default, outdoor]
+    output:
+      description: What imagery is available.
+      type: object
+      properties:
+        status: {type: string, description: "OK, ZERO_RESULTS or NOT_FOUND."}
+        pano_id: {type: string}
+        location: {type: object}
+        date: {type: string}
+        copyright: {type: string}

@@ -1,0 +1,668 @@
+# Capsule CRM tools.
+#
+# Capsule calls contacts and organisations "parties", distinguished by a `type`
+# of person or organisation. Cases are spelled "kases" in the URL.
+#
+# Docs: https://developer.capsulecrm.com/
+
+connector_id: capsule-crm
+display_name: Capsule CRM
+docs_url: https://developer.capsulecrm.com/
+
+scope_rules:
+  implies:
+    write: [read]
+
+tools:
+
+  list_parties:
+    title: List contacts and organisations
+    description: >-
+      Page through parties — people and organisations alike. Each carries a
+      `type` saying which it is.
+    category: parties
+    scopes: [read]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/parties
+      query:
+        page: "${page}"
+        perPage: "${per_page}"
+        embed: "${embed}"
+        since: "${since}"
+    input:
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      per_page:
+        type: integer
+        description: How many parties per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      embed:
+        type: array
+        description: Related data to inline, e.g. ["tags","fields","organisation"].
+        optional: true
+        items: {type: string}
+      since:
+        type: string
+        description: Only parties changed since this ISO 8601 instant.
+        optional: true
+    output:
+      description: A page of parties.
+      type: array
+      response_path: parties
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          type: {type: string}
+          firstName: {type: string}
+          name: {type: string}
+          emailAddresses: {type: array}
+
+  search_parties:
+    title: Search contacts and organisations
+    description: >-
+      Find parties by a free-text query across names, email addresses and phone
+      numbers.
+    category: parties
+    scopes: [read]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/parties/search
+      query:
+        q: "${query}"
+        page: "${page}"
+        perPage: "${per_page}"
+        embed: "${embed}"
+    input:
+      query:
+        type: string
+        description: Words to search for.
+        example: ada
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      per_page:
+        type: integer
+        description: How many results per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      embed:
+        type: array
+        description: Related data to inline.
+        optional: true
+        items: {type: string}
+    output:
+      description: The matching parties.
+      type: array
+      response_path: parties
+      items: {type: object}
+
+  get_party:
+    title: Get a contact or organisation
+    description: Read one party in full, with its addresses, phones and custom fields.
+    category: parties
+    scopes: [read]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/parties/${party_id}
+      query:
+        embed: "${embed}"
+    input:
+      party_id:
+        type: integer
+        description: The party's numeric id.
+      embed:
+        type: array
+        description: Related data to inline, e.g. ["tags","fields"].
+        optional: true
+        items: {type: string}
+    output:
+      description: The party.
+      type: object
+      response_path: party
+      properties:
+        id: {type: integer}
+        type: {type: string}
+        emailAddresses: {type: array}
+        phoneNumbers: {type: array}
+
+  create_person:
+    title: Create a contact
+    description: >-
+      Add a person. Emails and phones are typed entries, e.g. [{"type": "Work",
+      "address": "ada@example.com"}].
+    category: parties
+    scopes: [write]
+    request:
+      method: POST
+      path: /api/v2/parties
+      body:
+        party:
+          type: person
+          firstName: "${first_name}"
+          lastName: "${last_name}"
+          jobTitle: "${job_title}"
+          organisation:
+            $when: "${organisation_id}"
+            id: "${organisation_id}"
+          emailAddresses: "${emails}"
+          phoneNumbers: "${phones}"
+          addresses: "${addresses}"
+          about: "${about}"
+          tags: "${tags}"
+    input:
+      first_name:
+        type: string
+        description: First name.
+      last_name:
+        type: string
+        description: Last name.
+        optional: true
+      job_title:
+        type: string
+        description: Their job title.
+        optional: true
+      organisation_id:
+        type: integer
+        description: Party id of the organisation they work for.
+        optional: true
+      emails:
+        type: array
+        description: Typed emails, e.g. [{"type":"Work","address":"ada@example.com"}].
+        optional: true
+        items: {type: object}
+      phones:
+        type: array
+        description: Typed phones, e.g. [{"type":"Mobile","number":"555 0100"}].
+        optional: true
+        items: {type: object}
+      addresses:
+        type: array
+        description: Address objects, each with street, city, country.
+        optional: true
+        items: {type: object}
+      about:
+        type: string
+        description: Free-text note about the person.
+        optional: true
+      tags:
+        type: array
+        description: "Tags to apply, each {\"name\": \"VIP\"}."
+        optional: true
+        items: {type: object}
+    output:
+      description: The created person.
+      type: object
+      response_path: party
+      properties:
+        id: {type: integer}
+        firstName: {type: string}
+
+  create_organisation:
+    title: Create an organisation
+    description: Add a company that people and opportunities can be linked to.
+    category: parties
+    scopes: [write]
+    request:
+      method: POST
+      path: /api/v2/parties
+      body:
+        party:
+          type: organisation
+          name: "${name}"
+          about: "${about}"
+          emailAddresses: "${emails}"
+          phoneNumbers: "${phones}"
+          websites: "${websites}"
+          addresses: "${addresses}"
+    input:
+      name:
+        type: string
+        description: The organisation's name.
+      about:
+        type: string
+        description: Free-text note about it.
+        optional: true
+      emails:
+        type: array
+        description: Typed emails.
+        optional: true
+        items: {type: object}
+      phones:
+        type: array
+        description: Typed phones.
+        optional: true
+        items: {type: object}
+      websites:
+        type: array
+        description: Websites, each {"service":"URL","address":"https://acme.com"}.
+        optional: true
+        items: {type: object}
+      addresses:
+        type: array
+        description: Address objects.
+        optional: true
+        items: {type: object}
+    output:
+      description: The created organisation.
+      type: object
+      response_path: party
+      properties:
+        id: {type: integer}
+        name: {type: string}
+
+  update_party:
+    title: Update a contact or organisation
+    description: Change a party's details. Only what is supplied is written.
+    category: parties
+    scopes: [write]
+    request:
+      method: PUT
+      path: /api/v2/parties/${party_id}
+      body:
+        party:
+          firstName: "${first_name}"
+          lastName: "${last_name}"
+          name: "${name}"
+          jobTitle: "${job_title}"
+          about: "${about}"
+          emailAddresses: "${emails}"
+          phoneNumbers: "${phones}"
+    input:
+      party_id:
+        type: integer
+        description: The party's numeric id.
+      first_name:
+        type: string
+        description: New first name, for a person.
+        optional: true
+      last_name:
+        type: string
+        description: New last name, for a person.
+        optional: true
+      name:
+        type: string
+        description: New name, for an organisation.
+        optional: true
+      job_title:
+        type: string
+        description: New job title.
+        optional: true
+      about:
+        type: string
+        description: New note.
+        optional: true
+      emails:
+        type: array
+        description: Replaces the email list. Include ids to edit existing entries.
+        optional: true
+        items: {type: object}
+      phones:
+        type: array
+        description: Replaces the phone list.
+        optional: true
+        items: {type: object}
+    output:
+      description: The updated party.
+      type: object
+      response_path: party
+      properties:
+        id: {type: integer}
+
+  list_opportunities:
+    title: List opportunities
+    description: >-
+      Page through deals with their value, milestone and expected close date.
+    category: opportunities
+    scopes: [read]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/opportunities
+      query:
+        page: "${page}"
+        perPage: "${per_page}"
+        embed: "${embed}"
+        since: "${since}"
+    input:
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      per_page:
+        type: integer
+        description: How many opportunities per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      embed:
+        type: array
+        description: Related data to inline, e.g. ["party","milestone","tags"].
+        optional: true
+        items: {type: string}
+      since:
+        type: string
+        description: Only opportunities changed since this ISO 8601 instant.
+        optional: true
+    output:
+      description: A page of opportunities.
+      type: array
+      response_path: opportunities
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          name: {type: string}
+          value: {type: object}
+          milestone: {type: object}
+          expectedCloseOn: {type: string}
+
+  create_opportunity:
+    title: Create an opportunity
+    description: >-
+      Open a deal against a party. Value is {"amount": 5000, "currency": "GBP"},
+      and the milestone sets its pipeline stage.
+    category: opportunities
+    scopes: [write]
+    request:
+      method: POST
+      path: /api/v2/opportunities
+      body:
+        opportunity:
+          name: "${name}"
+          party:
+            id: "${party_id}"
+          milestone:
+            $when: "${milestone_id}"
+            id: "${milestone_id}"
+          value: "${value}"
+          expectedCloseOn: "${expected_close_on}"
+          description: "${description}"
+          owner:
+            $when: "${owner_id}"
+            id: "${owner_id}"
+    input:
+      name:
+        type: string
+        description: What the deal is called.
+      party_id:
+        type: integer
+        description: Party the deal is with.
+      milestone_id:
+        type: integer
+        description: Milestone id setting the pipeline stage, from list_milestones.
+        optional: true
+      value:
+        type: object
+        description: "Deal value, e.g. {\"amount\": 5000, \"currency\": \"GBP\"}."
+        optional: true
+      expected_close_on:
+        type: string
+        description: Expected close date as YYYY-MM-DD.
+        optional: true
+      description:
+        type: string
+        description: Notes about the deal.
+        optional: true
+      owner_id:
+        type: integer
+        description: Capsule user who owns the deal.
+        optional: true
+    output:
+      description: The created opportunity.
+      type: object
+      response_path: opportunity
+      properties:
+        id: {type: integer}
+        name: {type: string}
+
+  update_opportunity:
+    title: Update an opportunity
+    description: >-
+      Change a deal — move its milestone, adjust its value, or close it by
+      setting a lost reason or a won milestone.
+    category: opportunities
+    scopes: [write]
+    request:
+      method: PUT
+      path: /api/v2/opportunities/${opportunity_id}
+      body:
+        opportunity:
+          name: "${name}"
+          milestone:
+            $when: "${milestone_id}"
+            id: "${milestone_id}"
+          value: "${value}"
+          expectedCloseOn: "${expected_close_on}"
+          description: "${description}"
+          lostReason:
+            $when: "${lost_reason_id}"
+            id: "${lost_reason_id}"
+    input:
+      opportunity_id:
+        type: integer
+        description: The opportunity's numeric id.
+      name:
+        type: string
+        description: New name.
+        optional: true
+      milestone_id:
+        type: integer
+        description: Milestone to move it to.
+        optional: true
+      value:
+        type: object
+        description: "New value, e.g. {\"amount\": 7500, \"currency\": \"GBP\"}."
+        optional: true
+      expected_close_on:
+        type: string
+        description: New expected close date as YYYY-MM-DD.
+        optional: true
+      description:
+        type: string
+        description: New notes.
+        optional: true
+      lost_reason_id:
+        type: integer
+        description: Lost reason id, when marking the deal lost.
+        optional: true
+    output:
+      description: The updated opportunity.
+      type: object
+      response_path: opportunity
+      properties:
+        id: {type: integer}
+        milestone: {type: object}
+
+  create_task:
+    title: Create a task
+    description: >-
+      Create a task, optionally attached to a party, opportunity or case.
+    category: tasks
+    scopes: [write]
+    request:
+      method: POST
+      path: /api/v2/tasks
+      body:
+        task:
+          description: "${description}"
+          detail: "${detail}"
+          dueOn: "${due_on}"
+          party:
+            $when: "${party_id}"
+            id: "${party_id}"
+          opportunity:
+            $when: "${opportunity_id}"
+            id: "${opportunity_id}"
+          owner:
+            $when: "${owner_id}"
+            id: "${owner_id}"
+    input:
+      description:
+        type: string
+        description: What needs doing.
+      detail:
+        type: string
+        description: Longer description.
+        optional: true
+      due_on:
+        type: string
+        description: Due date as YYYY-MM-DD.
+        optional: true
+      party_id:
+        type: integer
+        description: Party the task relates to.
+        optional: true
+      opportunity_id:
+        type: integer
+        description: Opportunity the task relates to.
+        optional: true
+      owner_id:
+        type: integer
+        description: Capsule user the task is for.
+        optional: true
+    output:
+      description: The created task.
+      type: object
+      response_path: task
+      properties:
+        id: {type: integer}
+        description: "{type: string}"
+        dueOn: {type: string}
+
+  add_note:
+    title: Add a note to a record
+    description: >-
+      Record a note on a party, opportunity or case. Capsule calls these entries
+      and they appear on the record's history.
+    category: notes
+    scopes: [write]
+    request:
+      method: POST
+      path: /api/v2/entries
+      body:
+        entry:
+          type: note
+          content: "${content}"
+          party:
+            $when: "${party_id}"
+            id: "${party_id}"
+          opportunity:
+            $when: "${opportunity_id}"
+            id: "${opportunity_id}"
+    input:
+      content:
+        type: string
+        description: The note text.
+      party_id:
+        type: integer
+        description: Party to attach the note to.
+        optional: true
+      opportunity_id:
+        type: integer
+        description: Opportunity to attach the note to.
+        optional: true
+    output:
+      description: The created note entry.
+      type: object
+      response_path: entry
+      properties:
+        id: {type: integer}
+        content: {type: string}
+        createdAt: {type: string}
+
+  list_milestones:
+    title: List pipeline milestones
+    description: >-
+      List the milestones deals move through, with the ids the opportunity tools
+      take.
+    category: metadata
+    scopes: [read]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/milestones
+    input: {}
+    output:
+      description: The account's milestones, in pipeline order.
+      type: array
+      response_path: milestones
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          name: {type: string}
+          probability: {type: integer}
+
+  list_users:
+    title: List Capsule users
+    description: List the account's users with the ids that owner fields take.
+    category: metadata
+    scopes: [read]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/users
+      query:
+        page: "${page}"
+        perPage: "${per_page}"
+    input:
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      per_page:
+        type: integer
+        description: How many users per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+    output:
+      description: The account's users.
+      type: array
+      response_path: users
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          name: {type: string}
+          username: {type: string}
+
+  get_current_user:
+    title: Get the authenticated user
+    description: >-
+      Read the Capsule user the token belongs to. The cheapest health check for
+      the connection.
+    category: metadata
+    scopes: [read]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/users/current
+    input: {}
+    output:
+      description: The authenticated user.
+      type: object
+      response_path: user
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        username: {type: string}

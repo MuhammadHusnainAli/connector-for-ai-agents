@@ -1,0 +1,903 @@
+# Slack Web API tools.
+#
+# Scopes are bot-token scopes unless a tool's `notes` says otherwise. Slack
+# returns the token's real scope list in the x-oauth-scopes response header,
+# which is what scope_discovery reads.
+#
+# Docs: https://api.slack.com/methods
+
+connector_id: slack
+display_name: Slack
+docs_url: https://api.slack.com/methods
+
+scope_rules:
+  implies:
+    channels:manage: [channels:read, channels:write]
+    groups:write: [groups:read]
+    chat:write.public: [chat:write]
+    chat:write.customize: [chat:write]
+
+scope_discovery:
+  method: GET
+  endpoint: /auth.test
+  scopes_path: "header:x-oauth-scopes"
+  separator: ","
+
+tools:
+
+  # -- messages --------------------------------------------------------------
+
+  send_message:
+    title: Post a message to a channel
+    description: >-
+      Post a message into a channel, private group or DM. Pass a channel id
+      (C0123ABCD) or a channel name. Use blocks for rich layout and text as the
+      notification fallback.
+    category: chat
+    scopes: [chat:write]
+    destructive: true
+    request:
+      method: POST
+      path: /chat.postMessage
+      body:
+        channel: "${channel}"
+        text: "${text}"
+        blocks: "${blocks}"
+        thread_ts: "${thread_ts}"
+        reply_broadcast: "${reply_broadcast}"
+        unfurl_links: "${unfurl_links}"
+        username: "${username}"
+        icon_emoji: "${icon_emoji}"
+    input:
+      channel:
+        type: string
+        description: Channel id, or a name like #general. DMs take a user id or a DM channel id.
+        example: C0123ABCD
+      text:
+        type: string
+        description: The message text, in Slack's mrkdwn. Used as the notification preview when blocks are set.
+      blocks:
+        type: array
+        description: Block Kit blocks for rich layout. When set, text is only the fallback.
+        optional: true
+        items: {type: object}
+      thread_ts:
+        type: string
+        description: Timestamp of a parent message, to reply in its thread.
+        optional: true
+      reply_broadcast:
+        type: boolean
+        description: Also show the threaded reply in the channel.
+        optional: true
+      unfurl_links:
+        type: boolean
+        description: Expand link previews.
+        optional: true
+      username:
+        type: string
+        description: Override the bot's display name for this message. Needs chat:write.customize.
+        optional: true
+      icon_emoji:
+        type: string
+        description: Override the bot's avatar with an emoji, e.g. :robot_face:. Needs chat:write.customize.
+        optional: true
+    output:
+      description: Confirmation with the posted message's timestamp, which identifies it later.
+      type: object
+      properties:
+        ok: {type: boolean}
+        channel: {type: string}
+        ts: {type: string, description: "Message timestamp -- the id for updates, replies and reactions."}
+        message: {type: object}
+
+  send_ephemeral_message:
+    title: Post a message only one user can see
+    description: >-
+      Post a message into a channel that is visible only to one user and
+      disappears when they reload. Good for confirmations and prompts that
+      should not clutter the channel.
+    category: chat
+    scopes: [chat:write]
+    request:
+      method: POST
+      path: /chat.postEphemeral
+      body:
+        channel: "${channel}"
+        user: "${user}"
+        text: "${text}"
+        blocks: "${blocks}"
+        thread_ts: "${thread_ts}"
+    input:
+      channel:
+        type: string
+        description: Channel id the message appears in.
+      user:
+        type: string
+        description: User id who will see it.
+      text:
+        type: string
+        description: The message text, in Slack's mrkdwn.
+      blocks:
+        type: array
+        description: Block Kit blocks for rich layout.
+        optional: true
+        items: {type: object}
+      thread_ts:
+        type: string
+        description: Timestamp of a parent message, to place it in a thread.
+        optional: true
+    output:
+      description: Confirmation with the delivery timestamp.
+      type: object
+      properties:
+        ok: {type: boolean}
+        message_ts: {type: string}
+
+  schedule_message:
+    title: Schedule a message for later
+    description: >-
+      Queue a message to post at a future time, up to 120 days ahead. Returns a
+      scheduled_message_id that can be cancelled before it fires.
+    category: chat
+    scopes: [chat:write]
+    request:
+      method: POST
+      path: /chat.scheduleMessage
+      body:
+        channel: "${channel}"
+        text: "${text}"
+        post_at: "${post_at}"
+        blocks: "${blocks}"
+        thread_ts: "${thread_ts}"
+    input:
+      channel:
+        type: string
+        description: Channel id to post into.
+      text:
+        type: string
+        description: The message text.
+      post_at:
+        type: integer
+        description: When to post, as a Unix epoch in seconds.
+        example: 1790000000
+      blocks:
+        type: array
+        description: Block Kit blocks for rich layout.
+        optional: true
+        items: {type: object}
+      thread_ts:
+        type: string
+        description: Timestamp of a parent message, to schedule a threaded reply.
+        optional: true
+    output:
+      description: The scheduled message's id and time.
+      type: object
+      properties:
+        ok: {type: boolean}
+        scheduled_message_id: {type: string}
+        post_at: {type: integer}
+
+  update_message:
+    title: Edit a posted message
+    description: >-
+      Replace the text or blocks of a message the app posted. Identify it by the
+      channel and the ts returned when it was sent.
+    category: chat
+    scopes: [chat:write]
+    request:
+      method: POST
+      path: /chat.update
+      body:
+        channel: "${channel}"
+        ts: "${ts}"
+        text: "${text}"
+        blocks: "${blocks}"
+    input:
+      channel:
+        type: string
+        description: Channel id the message is in.
+      ts:
+        type: string
+        description: The message's timestamp, from send_message.
+      text:
+        type: string
+        description: Replacement text.
+      blocks:
+        type: array
+        description: Replacement Block Kit blocks.
+        optional: true
+        items: {type: object}
+    output:
+      description: Confirmation with the edited message.
+      type: object
+      properties:
+        ok: {type: boolean}
+        ts: {type: string}
+        text: {type: string}
+
+  delete_message:
+    title: Delete a message
+    description: Permanently remove a message the app posted. It cannot be recovered.
+    category: chat
+    scopes: [chat:write]
+    destructive: true
+    request:
+      method: POST
+      path: /chat.delete
+      body:
+        channel: "${channel}"
+        ts: "${ts}"
+    input:
+      channel:
+        type: string
+        description: Channel id the message is in.
+      ts:
+        type: string
+        description: The message's timestamp.
+    output:
+      description: Confirmation that it is gone.
+      type: object
+      properties:
+        ok: {type: boolean}
+        ts: {type: string}
+
+  get_permalink:
+    title: Get a permanent link to a message
+    description: Build the shareable https://slack.com link for one message.
+    category: chat
+    scopes: [chat:write]
+    read_only: true
+    request:
+      method: GET
+      path: /chat.getPermalink
+      query:
+        channel: "${channel}"
+        message_ts: "${message_ts}"
+    input:
+      channel:
+        type: string
+        description: Channel id the message is in.
+      message_ts:
+        type: string
+        description: The message's timestamp.
+    output:
+      description: The message's permalink.
+      type: object
+      properties:
+        ok: {type: boolean}
+        permalink: {type: string}
+
+  # -- conversations ---------------------------------------------------------
+
+  list_channels:
+    title: List channels
+    description: >-
+      List conversations in the workspace, filtered by type. Only channels the
+      token can see are returned; a bot sees public channels plus the private
+      ones it has been invited to.
+    category: conversations
+    scopes_any: [channels:read, groups:read]
+    read_only: true
+    request:
+      method: GET
+      path: /conversations.list
+      query:
+        types: "${types}"
+        limit: "${limit}"
+        cursor: "${cursor}"
+        exclude_archived: "${exclude_archived}"
+    input:
+      types:
+        type: array
+        description: Conversation types to include.
+        optional: true
+        default: "[public_channel]"
+        items: {type: string, enum: [public_channel, private_channel, mpim, im]}
+      limit:
+        type: integer
+        description: How many conversations per page (1-1000).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 1000
+      cursor:
+        type: string
+        description: Paging cursor from response_metadata.next_cursor.
+        optional: true
+      exclude_archived:
+        type: boolean
+        description: Leave out archived channels.
+        optional: true
+        default: true
+    output:
+      description: A page of conversations.
+      type: object
+      properties:
+        ok: {type: boolean}
+        channels: {type: array, description: "Each with id, name, is_private and topic."}
+        response_metadata: {type: object}
+
+  get_channel_history:
+    title: Read a channel's messages
+    description: >-
+      Read recent messages in a conversation, newest first. Bound the window
+      with oldest and latest Unix timestamps to read a specific period.
+    category: conversations
+    scopes_any: [channels:history, groups:history]
+    read_only: true
+    request:
+      method: GET
+      path: /conversations.history
+      query:
+        channel: "${channel}"
+        limit: "${limit}"
+        cursor: "${cursor}"
+        oldest: "${oldest}"
+        latest: "${latest}"
+    input:
+      channel:
+        type: string
+        description: Channel id to read.
+      limit:
+        type: integer
+        description: How many messages per page (1-1000).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 1000
+      cursor:
+        type: string
+        description: Paging cursor from response_metadata.next_cursor.
+        optional: true
+      oldest:
+        type: string
+        description: Only messages at or after this Unix timestamp.
+        optional: true
+      latest:
+        type: string
+        description: Only messages at or before this Unix timestamp.
+        optional: true
+    output:
+      description: A page of messages.
+      type: object
+      properties:
+        ok: {type: boolean}
+        messages: {type: array}
+        has_more: {type: boolean}
+        response_metadata: {type: object}
+
+  get_thread_replies:
+    title: Read a thread
+    description: >-
+      Read every reply under a parent message, including the parent itself, so a
+      whole conversation thread can be summarised.
+    category: conversations
+    scopes_any: [channels:history, groups:history]
+    read_only: true
+    request:
+      method: GET
+      path: /conversations.replies
+      query:
+        channel: "${channel}"
+        ts: "${ts}"
+        limit: "${limit}"
+        cursor: "${cursor}"
+    input:
+      channel:
+        type: string
+        description: Channel id the thread is in.
+      ts:
+        type: string
+        description: Timestamp of the thread's parent message.
+      limit:
+        type: integer
+        description: How many replies per page.
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 1000
+      cursor:
+        type: string
+        description: Paging cursor from response_metadata.next_cursor.
+        optional: true
+    output:
+      description: The parent message and its replies.
+      type: object
+      properties:
+        ok: {type: boolean}
+        messages: {type: array}
+        has_more: {type: boolean}
+
+  get_channel_info:
+    title: Get a channel's details
+    description: >-
+      Read one conversation's name, topic, purpose, member count and creation
+      time.
+    category: conversations
+    scopes_any: [channels:read, groups:read]
+    read_only: true
+    request:
+      method: GET
+      path: /conversations.info
+      query:
+        channel: "${channel}"
+        include_num_members: "${include_num_members}"
+    input:
+      channel:
+        type: string
+        description: Channel id to look up.
+      include_num_members:
+        type: boolean
+        description: Include the member count.
+        optional: true
+        default: true
+    output:
+      description: The conversation.
+      type: object
+      properties:
+        ok: {type: boolean}
+        channel: {type: object}
+
+  list_channel_members:
+    title: List a channel's members
+    description: List the user ids in a conversation, a page at a time.
+    category: conversations
+    scopes_any: [channels:read, groups:read]
+    read_only: true
+    request:
+      method: GET
+      path: /conversations.members
+      query:
+        channel: "${channel}"
+        limit: "${limit}"
+        cursor: "${cursor}"
+    input:
+      channel:
+        type: string
+        description: Channel id to inspect.
+      limit:
+        type: integer
+        description: How many members per page.
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 1000
+      cursor:
+        type: string
+        description: Paging cursor from response_metadata.next_cursor.
+        optional: true
+    output:
+      description: The member user ids.
+      type: object
+      properties:
+        ok: {type: boolean}
+        members: {type: array}
+
+  create_channel:
+    title: Create a channel
+    description: >-
+      Create a public or private channel. Names are lower-case, up to 80
+      characters, and may contain letters, numbers, hyphens and underscores.
+    category: conversations
+    scopes: [channels:manage]
+    request:
+      method: POST
+      path: /conversations.create
+      body:
+        name: "${name}"
+        is_private: "${is_private}"
+    input:
+      name:
+        type: string
+        description: Channel name, without the leading #.
+        pattern: "^[a-z0-9_-]{1,80}$"
+        example: project-atlas
+      is_private:
+        type: boolean
+        description: Create it as a private channel.
+        optional: true
+        default: false
+    output:
+      description: The created channel.
+      type: object
+      properties:
+        ok: {type: boolean}
+        channel: {type: object}
+
+  invite_to_channel:
+    title: Invite users to a channel
+    description: Add up to 1000 users to a channel in one call.
+    category: conversations
+    scopes: [channels:manage]
+    request:
+      method: POST
+      path: /conversations.invite
+      body:
+        channel: "${channel}"
+        users: "${users}"
+    input:
+      channel:
+        type: string
+        description: Channel id to add them to.
+      users:
+        type: array
+        description: User ids to invite.
+        items: {type: string}
+        max_length: 1000
+    output:
+      description: The channel, with its new membership.
+      type: object
+      properties:
+        ok: {type: boolean}
+        channel: {type: object}
+
+  set_channel_topic:
+    title: Set a channel's topic
+    description: Replace a channel's topic line, which appears in its header.
+    category: conversations
+    scopes: [channels:manage]
+    request:
+      method: POST
+      path: /conversations.setTopic
+      body:
+        channel: "${channel}"
+        topic: "${topic}"
+    input:
+      channel:
+        type: string
+        description: Channel id to change.
+      topic:
+        type: string
+        description: The new topic, up to 250 characters.
+        max_length: 250
+    output:
+      description: The channel with its new topic.
+      type: object
+      properties:
+        ok: {type: boolean}
+        channel: {type: object}
+
+  archive_channel:
+    title: Archive a channel
+    description: >-
+      Archive a channel, making it read-only and hiding it from the sidebar.
+      Members lose the ability to post; the history is kept.
+    category: conversations
+    scopes: [channels:manage]
+    destructive: true
+    request:
+      method: POST
+      path: /conversations.archive
+      body:
+        channel: "${channel}"
+    input:
+      channel:
+        type: string
+        description: Channel id to archive.
+    output:
+      description: Confirmation that it is archived.
+      type: object
+      properties:
+        ok: {type: boolean}
+
+  open_dm:
+    title: Open a direct message conversation
+    description: >-
+      Open (or find) a DM or group DM with one or more users and return its
+      channel id, which send_message then posts to.
+    category: conversations
+    scopes: [im:write]
+    request:
+      method: POST
+      path: /conversations.open
+      body:
+        users: "${users}"
+        return_im: "${return_im}"
+    input:
+      users:
+        type: array
+        description: User ids to open a conversation with. More than one makes a group DM.
+        items: {type: string}
+      return_im:
+        type: boolean
+        description: Return the full conversation object rather than just its id.
+        optional: true
+        default: true
+    output:
+      description: The DM conversation.
+      type: object
+      properties:
+        ok: {type: boolean}
+        channel: {type: object, description: "Holds id -- the channel to post to."}
+
+  # -- users -----------------------------------------------------------------
+
+  list_users:
+    title: List workspace members
+    description: >-
+      List the workspace's members with their ids, display names and bot flags.
+      Email addresses only appear when the token holds users:read.email.
+    category: users
+    scopes: [users:read]
+    read_only: true
+    request:
+      method: GET
+      path: /users.list
+      query:
+        limit: "${limit}"
+        cursor: "${cursor}"
+    input:
+      limit:
+        type: integer
+        description: How many members per page.
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 1000
+      cursor:
+        type: string
+        description: Paging cursor from response_metadata.next_cursor.
+        optional: true
+    output:
+      description: A page of members.
+      type: object
+      properties:
+        ok: {type: boolean}
+        members: {type: array}
+        response_metadata: {type: object}
+
+  get_user_info:
+    title: Get a user's profile
+    description: Read one member's profile -- name, title, time zone and avatar.
+    category: users
+    scopes: [users:read]
+    read_only: true
+    request:
+      method: GET
+      path: /users.info
+      query:
+        user: "${user}"
+    input:
+      user:
+        type: string
+        description: The user id to look up.
+    output:
+      description: The member.
+      type: object
+      properties:
+        ok: {type: boolean}
+        user: {type: object}
+
+  find_user_by_email:
+    title: Find a user by email address
+    description: >-
+      Look up a workspace member by their email address, which is how an
+      external record gets mapped to a Slack user id.
+    category: users
+    scopes: [users:read.email]
+    read_only: true
+    request:
+      method: GET
+      path: /users.lookupByEmail
+      query:
+        email: "${email}"
+    input:
+      email:
+        type: string
+        description: The email address to search for.
+        format: email
+    output:
+      description: The matching member.
+      type: object
+      properties:
+        ok: {type: boolean}
+        user: {type: object}
+
+  # -- reactions, pins and files ---------------------------------------------
+
+  add_reaction:
+    title: React to a message
+    description: Add an emoji reaction to a message, by its channel and timestamp.
+    category: reactions
+    scopes: [reactions:write]
+    request:
+      method: POST
+      path: /reactions.add
+      body:
+        channel: "${channel}"
+        timestamp: "${timestamp}"
+        name: "${name}"
+    input:
+      channel:
+        type: string
+        description: Channel id the message is in.
+      timestamp:
+        type: string
+        description: The message's timestamp.
+      name:
+        type: string
+        description: Emoji name without colons, e.g. thumbsup.
+        example: white_check_mark
+    output:
+      description: Confirmation the reaction was added.
+      type: object
+      properties:
+        ok: {type: boolean}
+
+  remove_reaction:
+    title: Remove a reaction from a message
+    description: Take back an emoji reaction the app added to a message.
+    category: reactions
+    scopes: [reactions:write]
+    request:
+      method: POST
+      path: /reactions.remove
+      body:
+        channel: "${channel}"
+        timestamp: "${timestamp}"
+        name: "${name}"
+    input:
+      channel:
+        type: string
+        description: Channel id the message is in.
+      timestamp:
+        type: string
+        description: The message's timestamp.
+      name:
+        type: string
+        description: Emoji name without colons.
+    output:
+      description: Confirmation the reaction was removed.
+      type: object
+      properties:
+        ok: {type: boolean}
+
+  pin_message:
+    title: Pin a message to a channel
+    description: Pin a message so it appears in the channel's pinned items.
+    category: pins
+    scopes: [pins:write]
+    request:
+      method: POST
+      path: /pins.add
+      body:
+        channel: "${channel}"
+        timestamp: "${timestamp}"
+    input:
+      channel:
+        type: string
+        description: Channel id the message is in.
+      timestamp:
+        type: string
+        description: The message's timestamp.
+    output:
+      description: Confirmation the message is pinned.
+      type: object
+      properties:
+        ok: {type: boolean}
+
+  upload_file:
+    title: Upload a text file to a channel
+    description: >-
+      Create a file from inline text content and share it into channels. For
+      binary files Slack requires its two-step upload URL flow, which this tool
+      does not cover.
+    category: files
+    scopes: [files:write]
+    request:
+      method: POST
+      path: /files.upload
+      body:
+        channels: "${channels}"
+        content: "${content}"
+        filename: "${filename}"
+        title: "${title}"
+        initial_comment: "${initial_comment}"
+        thread_ts: "${thread_ts}"
+        filetype: "${filetype}"
+    input:
+      content:
+        type: string
+        description: The file's text content.
+      channels:
+        type: array
+        description: Channel ids to share the file into.
+        optional: true
+        items: {type: string}
+      filename:
+        type: string
+        description: File name, which decides the syntax highlighting.
+        optional: true
+      title:
+        type: string
+        description: Title shown above the file.
+        optional: true
+      initial_comment:
+        type: string
+        description: Message posted alongside the file.
+        optional: true
+      thread_ts:
+        type: string
+        description: Share it as a reply in this thread.
+        optional: true
+      filetype:
+        type: string
+        description: Slack file type code, e.g. text, javascript, csv.
+        optional: true
+    output:
+      description: The uploaded file.
+      type: object
+      properties:
+        ok: {type: boolean}
+        file: {type: object}
+
+  # -- search and identity ---------------------------------------------------
+
+  search_messages:
+    title: Search messages
+    description: >-
+      Search the workspace's message history. This needs a user token with
+      search:read -- bot tokens cannot search.
+    category: search
+    scopes: [search:read]
+    read_only: true
+    notes: User-token only; Slack does not grant search:read to bot tokens.
+    request:
+      method: GET
+      path: /search.messages
+      query:
+        query: "${query}"
+        count: "${count}"
+        page: "${page}"
+        sort: "${sort}"
+    input:
+      query:
+        type: string
+        description: Search terms, supporting Slack modifiers like in:#channel and from:@user.
+        example: "in:#general deploy"
+      count:
+        type: integer
+        description: Results per page.
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      sort:
+        type: string
+        description: Order results by relevance or recency.
+        optional: true
+        enum: [score, timestamp]
+    output:
+      description: Matching messages with paging information.
+      type: object
+      properties:
+        ok: {type: boolean}
+        messages: {type: object}
+
+  test_auth:
+    title: Check who the token is
+    description: >-
+      Confirm the token works and report the workspace, the user or bot it
+      belongs to and its ids. The cheapest health check for a Slack connection.
+    category: auth
+    read_only: true
+    request:
+      method: GET
+      path: /auth.test
+    input: {}
+    output:
+      description: The identity behind the token.
+      type: object
+      properties:
+        ok: {type: boolean}
+        url: {type: string}
+        team: {type: string}
+        user: {type: string}
+        team_id: {type: string}
+        user_id: {type: string}
+        bot_id: {type: string}

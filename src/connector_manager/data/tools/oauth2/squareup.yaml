@@ -1,0 +1,660 @@
+# Square tools.
+#
+# Money is an object of an integer amount in the currency's smallest unit plus a
+# currency code: {"amount": 1000, "currency": "USD"} is $10.00.
+#
+# Most writes take an idempotency_key so a retry cannot duplicate the effect;
+# generate a fresh UUID per logical operation.
+#
+# Docs: https://developer.squareup.com/reference/square
+
+connector_id: squareup
+display_name: Square
+docs_url: https://developer.squareup.com/reference/square
+applies_to:
+  - squareup-sandbox
+
+scope_rules:
+  implies:
+    PAYMENTS_WRITE: [PAYMENTS_READ]
+    CUSTOMERS_WRITE: [CUSTOMERS_READ]
+    ITEMS_WRITE: [ITEMS_READ]
+    ORDERS_WRITE: [ORDERS_READ]
+    INVOICES_WRITE: [INVOICES_READ]
+    MERCHANT_PROFILE_WRITE: [MERCHANT_PROFILE_READ]
+
+tools:
+
+  list_locations:
+    title: List locations
+    description: >-
+      List the merchant's locations with their ids. Payments, orders and
+      catalogue calls are scoped to a location, so start here.
+    category: locations
+    scopes: [MERCHANT_PROFILE_READ]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/locations
+    input: {}
+    output:
+      description: The merchant's locations.
+      type: array
+      response_path: locations
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          name: {type: string}
+          currency: {type: string}
+          status: {type: string}
+
+  list_payments:
+    title: List payments
+    description: >-
+      Page through payments taken, optionally for one location or within a date
+      range.
+    category: payments
+    scopes: [PAYMENTS_READ]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/payments
+      query:
+        location_id: "${location_id}"
+        begin_time: "${begin_time}"
+        end_time: "${end_time}"
+        sort_order: "${sort_order}"
+        cursor: "${cursor}"
+        limit: "${limit}"
+    input:
+      location_id:
+        type: string
+        description: Only payments taken at this location.
+        optional: true
+      begin_time:
+        type: string
+        description: Only payments at or after this RFC 3339 instant.
+        optional: true
+      end_time:
+        type: string
+        description: Only payments at or before this RFC 3339 instant.
+        optional: true
+      sort_order:
+        type: string
+        description: Order by creation time.
+        optional: true
+        enum: [ASC, DESC]
+      cursor:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+      limit:
+        type: integer
+        description: How many payments per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+    output:
+      description: A page of payments.
+      type: object
+      properties:
+        payments: {type: array}
+        cursor: {type: string}
+
+  get_payment:
+    title: Get a payment
+    description: Read one payment's status, amount, fees and the card used.
+    category: payments
+    scopes: [PAYMENTS_READ]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/payments/${payment_id}
+    input:
+      payment_id:
+        type: string
+        description: The payment id.
+    output:
+      description: The payment.
+      type: object
+      response_path: payment
+      properties:
+        id: {type: string}
+        status: {type: string}
+        amount_money: {type: object}
+        card_details: {type: object}
+
+  create_payment:
+    title: Take a payment
+    description: >-
+      Charge a payment source — a card nonce from the Web Payments SDK, or a
+      stored card id. Amount is in the currency's smallest unit, so 1000 is
+      $10.00.
+    category: payments
+    scopes: [PAYMENTS_WRITE]
+    destructive: true
+    request:
+      method: POST
+      path: /v2/payments
+      body:
+        source_id: "${source_id}"
+        idempotency_key: "${idempotency_key}"
+        amount_money:
+          amount: "${amount}"
+          currency: "${currency}"
+        location_id: "${location_id}"
+        customer_id: "${customer_id}"
+        reference_id: "${reference_id}"
+        note: "${note}"
+        autocomplete: "${autocomplete}"
+    input:
+      source_id:
+        type: string
+        description: Card nonce from the Web Payments SDK, or a stored card id.
+      idempotency_key:
+        type: string
+        description: A fresh UUID, so a retry cannot charge twice.
+      amount:
+        type: integer
+        description: Amount in the currency's smallest unit, e.g. 1000 for $10.00.
+        minimum: 1
+      currency:
+        type: string
+        description: Three-letter ISO currency code.
+        optional: true
+        default: USD
+      location_id:
+        type: string
+        description: Location the payment belongs to.
+        optional: true
+      customer_id:
+        type: string
+        description: Customer to attach the payment to.
+        optional: true
+      reference_id:
+        type: string
+        description: Your own reference for the payment.
+        optional: true
+      note:
+        type: string
+        description: Note shown in the Square dashboard.
+        optional: true
+      autocomplete:
+        type: boolean
+        description: Capture immediately. False authorises only, for later completion.
+        optional: true
+    output:
+      description: The payment.
+      type: object
+      response_path: payment
+      properties:
+        id: {type: string}
+        status: {type: string}
+        amount_money: {type: object}
+
+  refund_payment:
+    title: Refund a payment
+    description: >-
+      Refund a payment in full or in part. Refunds cannot be reversed, and the
+      amount may not exceed what remains unrefunded.
+    category: payments
+    scopes: [PAYMENTS_WRITE]
+    destructive: true
+    request:
+      method: POST
+      path: /v2/refunds
+      body:
+        idempotency_key: "${idempotency_key}"
+        payment_id: "${payment_id}"
+        amount_money:
+          amount: "${amount}"
+          currency: "${currency}"
+        reason: "${reason}"
+    input:
+      payment_id:
+        type: string
+        description: The payment to refund.
+      idempotency_key:
+        type: string
+        description: A fresh UUID, so a retry cannot double-refund.
+      amount:
+        type: integer
+        description: Amount to refund in the smallest currency unit.
+        minimum: 1
+      currency:
+        type: string
+        description: Three-letter ISO currency code.
+        optional: true
+        default: USD
+      reason:
+        type: string
+        description: Why it is being refunded, shown in the dashboard.
+        optional: true
+    output:
+      description: The refund.
+      type: object
+      response_path: refund
+      properties:
+        id: {type: string}
+        status: {type: string}
+        amount_money: {type: object}
+
+  search_customers:
+    title: Search customers
+    description: >-
+      Find customers by email, phone, reference id or creation date, using
+      Square's query filter shape.
+    category: customers
+    scopes: [CUSTOMERS_READ]
+    read_only: true
+    request:
+      method: POST
+      path: /v2/customers/search
+      body:
+        query:
+          $when: "${filter}"
+          filter: "${filter}"
+          sort: "${sort}"
+        limit: "${limit}"
+        cursor: "${cursor}"
+    input:
+      filter:
+        type: object
+        description: >-
+          Square customer filter, e.g. {"email_address": {"exact":
+          "ada@example.com"}}.
+        optional: true
+      sort:
+        type: object
+        description: "Sort order, e.g. {\"field\": \"CREATED_AT\", \"order\": \"DESC\"}."
+        optional: true
+      limit:
+        type: integer
+        description: How many customers per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      cursor:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+    output:
+      description: Matching customers.
+      type: object
+      properties:
+        customers: {type: array}
+        cursor: {type: string}
+
+  create_customer:
+    title: Create a customer
+    description: Add a customer record that payments, orders and invoices can refer to.
+    category: customers
+    scopes: [CUSTOMERS_WRITE]
+    request:
+      method: POST
+      path: /v2/customers
+      body:
+        idempotency_key: "${idempotency_key}"
+        given_name: "${given_name}"
+        family_name: "${family_name}"
+        email_address: "${email}"
+        phone_number: "${phone}"
+        company_name: "${company_name}"
+        reference_id: "${reference_id}"
+        note: "${note}"
+        address: "${address}"
+    input:
+      given_name:
+        type: string
+        description: First name.
+        optional: true
+      family_name:
+        type: string
+        description: Last name.
+        optional: true
+      email:
+        type: string
+        description: Email address.
+        optional: true
+        format: email
+      phone:
+        type: string
+        description: Phone number in E.164 format.
+        optional: true
+      company_name:
+        type: string
+        description: Company name.
+        optional: true
+      reference_id:
+        type: string
+        description: Your own id for this customer.
+        optional: true
+      note:
+        type: string
+        description: Internal note.
+        optional: true
+      address:
+        type: object
+        description: Address object, e.g. {"address_line_1":"1 Main St","locality":"Austin"}.
+        optional: true
+      idempotency_key:
+        type: string
+        description: A fresh UUID, so a retry cannot create a duplicate.
+        optional: true
+    output:
+      description: The created customer.
+      type: object
+      response_path: customer
+      properties:
+        id: {type: string}
+        email_address: {type: string}
+        created_at: {type: string}
+
+  update_customer:
+    title: Update a customer
+    description: Change a customer's details. Only what is supplied is written.
+    category: customers
+    scopes: [CUSTOMERS_WRITE]
+    request:
+      method: PUT
+      path: /v2/customers/${customer_id}
+      body:
+        given_name: "${given_name}"
+        family_name: "${family_name}"
+        email_address: "${email}"
+        phone_number: "${phone}"
+        company_name: "${company_name}"
+        note: "${note}"
+    input:
+      customer_id:
+        type: string
+        description: The customer id.
+      given_name:
+        type: string
+        description: New first name.
+        optional: true
+      family_name:
+        type: string
+        description: New last name.
+        optional: true
+      email:
+        type: string
+        description: New email address.
+        optional: true
+        format: email
+      phone:
+        type: string
+        description: New phone number.
+        optional: true
+      company_name:
+        type: string
+        description: New company name.
+        optional: true
+      note:
+        type: string
+        description: New internal note.
+        optional: true
+    output:
+      description: The updated customer.
+      type: object
+      response_path: customer
+      properties:
+        id: {type: string}
+        updated_at: {type: string}
+
+  search_catalog:
+    title: Search the catalogue
+    description: >-
+      Find catalogue objects — items, variations, categories, taxes, discounts —
+      by type and optional text.
+    category: catalogue
+    scopes: [ITEMS_READ]
+    read_only: true
+    request:
+      method: POST
+      path: /v2/catalog/search
+      body:
+        object_types: "${object_types}"
+        query:
+          $when: "${text_query}"
+          text_query:
+            keywords: "${text_query}"
+        limit: "${limit}"
+        cursor: "${cursor}"
+    input:
+      object_types:
+        type: array
+        description: Which kinds to return, e.g. ["ITEM","ITEM_VARIATION","CATEGORY"].
+        optional: true
+        default: "[ITEM]"
+        items: {type: string}
+      text_query:
+        type: array
+        description: Keywords to match against names and descriptions.
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: How many objects per page (1-1000).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 1000
+      cursor:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+    output:
+      description: Matching catalogue objects.
+      type: object
+      properties:
+        objects: {type: array}
+        cursor: {type: string}
+
+  create_catalog_item:
+    title: Create a catalogue item
+    description: >-
+      Add an item to the catalogue. Every item needs at least one variation,
+      which carries the price. Use "#temp-id" style ids to link the two within
+      one call.
+    category: catalogue
+    scopes: [ITEMS_WRITE]
+    request:
+      method: POST
+      path: /v2/catalog/object
+      body:
+        idempotency_key: "${idempotency_key}"
+        object:
+          type: ITEM
+          id: "${temp_id}"
+          item_data:
+            name: "${name}"
+            description: "${description}"
+            category_id: "${category_id}"
+            variations: "${variations}"
+    input:
+      name:
+        type: string
+        description: Item name.
+      variations:
+        type: array
+        description: >-
+          Variations, each {"type": "ITEM_VARIATION", "id": "#var1",
+          "item_variation_data": {"name": "Regular", "pricing_type":
+          "FIXED_PRICING", "price_money": {"amount": 500, "currency": "USD"}}}.
+        items: {type: object}
+      idempotency_key:
+        type: string
+        description: A fresh UUID, so a retry cannot create a duplicate.
+      temp_id:
+        type: string
+        description: Temporary id for the new item, starting with #.
+        optional: true
+        default: "#item"
+      description:
+        type: string
+        description: Item description.
+        optional: true
+      category_id:
+        type: string
+        description: Catalogue category to file it under.
+        optional: true
+    output:
+      description: The created catalogue object.
+      type: object
+      properties:
+        catalog_object: {type: object}
+        id_mappings: {type: array, description: "Maps your temp ids to the real ones."}
+
+  create_invoice:
+    title: Create a draft invoice
+    description: >-
+      Create an invoice against an existing order. It stays a draft until
+      publish_invoice is called.
+    category: invoices
+    scopes: [INVOICES_WRITE]
+    request:
+      method: POST
+      path: /v2/invoices
+      body:
+        idempotency_key: "${idempotency_key}"
+        invoice:
+          location_id: "${location_id}"
+          order_id: "${order_id}"
+          primary_recipient:
+            customer_id: "${customer_id}"
+          payment_requests: "${payment_requests}"
+          delivery_method: "${delivery_method}"
+          title: "${title}"
+          description: "${description}"
+    input:
+      location_id:
+        type: string
+        description: Location the invoice belongs to.
+      order_id:
+        type: string
+        description: Order the invoice bills for.
+      customer_id:
+        type: string
+        description: Customer being invoiced.
+      payment_requests:
+        type: array
+        description: >-
+          When payment is due, each {"request_type": "BALANCE",
+          "due_date": "2026-09-30", "automatic_payment_source": "NONE"}.
+        optional: true
+        items: {type: object}
+      delivery_method:
+        type: string
+        description: How the invoice reaches the customer.
+        optional: true
+        enum: [EMAIL, SHARE_MANUALLY, SMS]
+      title:
+        type: string
+        description: Invoice title.
+        optional: true
+      description:
+        type: string
+        description: Message shown on the invoice.
+        optional: true
+      idempotency_key:
+        type: string
+        description: A fresh UUID, so a retry cannot create a duplicate.
+        optional: true
+    output:
+      description: The draft invoice.
+      type: object
+      response_path: invoice
+      properties:
+        id: {type: string}
+        status: {type: string}
+        version: {type: integer, description: "Pass to publish_invoice."}
+
+  publish_invoice:
+    title: Send an invoice
+    description: >-
+      Publish a draft invoice, which delivers it by the chosen method. Needs the
+      invoice's current version, from create_invoice.
+    category: invoices
+    scopes: [INVOICES_WRITE]
+    destructive: true
+    request:
+      method: POST
+      path: /v2/invoices/${invoice_id}/publish
+      body:
+        version: "${version}"
+        idempotency_key: "${idempotency_key}"
+    input:
+      invoice_id:
+        type: string
+        description: The draft invoice to publish.
+      version:
+        type: integer
+        description: The invoice's current version number.
+      idempotency_key:
+        type: string
+        description: A fresh UUID, so a retry cannot send twice.
+        optional: true
+    output:
+      description: The published invoice.
+      type: object
+      response_path: invoice
+      properties:
+        id: {type: string}
+        status: {type: string}
+        public_url: {type: string}
+
+  search_orders:
+    title: Search orders
+    description: >-
+      Find orders across locations, filtered by state and date, using Square's
+      order query shape.
+    category: orders
+    scopes: [ORDERS_READ]
+    read_only: true
+    request:
+      method: POST
+      path: /v2/orders/search
+      body:
+        location_ids: "${location_ids}"
+        query:
+          $when: "${filter}"
+          filter: "${filter}"
+        limit: "${limit}"
+        cursor: "${cursor}"
+        return_entries: "${return_entries}"
+    input:
+      location_ids:
+        type: array
+        description: Locations to search, from list_locations.
+        items: {type: string}
+      filter:
+        type: object
+        description: >-
+          Order filter, e.g. {"state_filter": {"states": ["COMPLETED"]},
+          "date_time_filter": {"created_at": {"start_at": "2026-01-01T00:00:00Z"}}}.
+        optional: true
+      limit:
+        type: integer
+        description: How many orders per page (1-1000).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 1000
+      cursor:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+      return_entries:
+        type: boolean
+        description: Return light order entries rather than full orders.
+        optional: true
+    output:
+      description: Matching orders.
+      type: object
+      properties:
+        orders: {type: array}
+        cursor: {type: string}

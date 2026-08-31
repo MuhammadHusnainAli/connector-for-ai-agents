@@ -1,0 +1,564 @@
+# Plunk tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://docs.useplunk.com/openapi.json
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: plunk
+display_name: Plunk
+docs_url: https://docs.useplunk.com/openapi.json
+generated: true
+generated_from: https://docs.useplunk.com/openapi.json
+tools:
+  list_campaigns:
+    title: List campaigns
+    description: List campaigns Get a paginated list of email campaigns. This endpoint uses offset pagination
+      (page / pageSize), not the cursor pagination used by GET /contacts. Calls GET /campaigns on the
+      provider's API.
+    category: campaigns
+    request:
+      method: GET
+      path: /campaigns
+      query:
+        page: ${page}
+        pageSize: ${page_size}
+        status: ${status}
+        search: ${search}
+        sort: ${sort}
+        dir: ${dir}
+    input:
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        default: 1
+      page_size:
+        type: integer
+        description: Items per page.
+        optional: true
+        default: 20
+      status:
+        type: string
+        description: Filter by campaign status. An unrecognised value returns 400.
+        optional: true
+        enum:
+        - DRAFT
+        - SCHEDULED
+        - SENDING
+        - SENT
+        - CANCELLED
+      search:
+        type: string
+        description: Case-insensitive match on name, subject, or sender address.
+        optional: true
+      sort:
+        type: string
+        description: Column to sort by. Unrecognised values fall back to createdAt.
+        optional: true
+        enum:
+        - name
+        - createdAt
+        - updatedAt
+        default: createdAt
+      dir:
+        type: string
+        description: Sort direction. Unrecognised values fall back to the default.
+        optional: true
+        enum:
+        - asc
+        - desc
+        default: desc
+    output:
+      description: List of campaigns
+      type: object
+    read_only: true
+  create_campaign:
+    title: Create campaign
+    description: 'Create campaign Create a new email campaign. Campaigns are created as DRAFT; use POST
+      /campaigns/{id}/send to send or schedule one. The sender domain must already be verified for this
+      project. Audience: audienceType decides which companion field is required — SEGMENT requires segmentId,
+      FILTERED requires audienceCo Calls POST /campaigns on the provider''s API.'
+    category: campaigns
+    request:
+      method: POST
+      path: /campaigns
+      body:
+        name: ${name}
+        description: ${description}
+        subject: ${subject}
+        body: ${body}
+        from: ${from}
+        fromName: ${from_name}
+        replyTo: ${reply_to}
+        type: ${type}
+        audienceType: ${audience_type}
+        segmentId: ${segment_id}
+        audienceCondition: ${audience_condition}
+    input:
+      name:
+        type: string
+        description: Campaign name
+      description:
+        type: string
+        description: Campaign description
+        optional: true
+      subject:
+        type: string
+        description: Email subject line
+      body:
+        type: string
+        description: HTML email body
+      from:
+        type: string
+        description: Sender email address (must be from verified domain)
+      from_name:
+        type: string
+        description: Sender name
+        optional: true
+      reply_to:
+        type: string
+        description: Reply-to email address
+        optional: true
+      type:
+        type: string
+        description: Content type of the campaign email. Defaults to MARKETING.
+        optional: true
+        enum:
+        - TRANSACTIONAL
+        - MARKETING
+        - HEADLESS
+      audience_type:
+        type: string
+        description: Target audience type
+        enum:
+        - ALL
+        - SEGMENT
+        - FILTERED
+      segment_id:
+        type: string
+        description: Segment ID. Required when audienceType is SEGMENT.
+        optional: true
+      audience_condition:
+        type: string
+        description: Audience filter tree. Required when audienceType is FILTERED. Same structure as a
+          segment's condition.
+        optional: true
+    output:
+      description: Campaign created
+      type: object
+  list_contacts:
+    title: List contacts
+    description: List contacts Get a paginated list of contacts with cursor-based pagination. Calls GET
+      /contacts on the provider's API.
+    category: contacts
+    request:
+      method: GET
+      path: /contacts
+      query:
+        limit: ${limit}
+        cursor: ${cursor}
+        search: ${search}
+        subscribed: ${subscribed}
+        sort: ${sort}
+        dir: ${dir}
+    input:
+      limit:
+        type: integer
+        description: Maximum items per page. Values above 100 are clamped to 100.
+        optional: true
+        default: 20
+      cursor:
+        type: string
+        description: Pagination cursor. Pass the cursor returned by the previous page.
+        optional: true
+      search:
+        type: string
+        description: Case-insensitive substring match on email.
+        optional: true
+      subscribed:
+        type: boolean
+        description: Filter by subscription state. Omit to return both subscribed and unsubscribed contacts.
+        optional: true
+      sort:
+        type: string
+        description: Column to sort by. Unrecognised values fall back to createdAt.
+        optional: true
+        enum:
+        - email
+        - createdAt
+        default: createdAt
+      dir:
+        type: string
+        description: Sort direction. Unrecognised values fall back to the default.
+        optional: true
+        enum:
+        - asc
+        - desc
+        default: desc
+    output:
+      description: List of contacts
+      type: object
+    read_only: true
+  create_contact:
+    title: Create or update contact
+    description: Create or update contact Create a new contact or update existing (upsert by email) Calls
+      POST /contacts on the provider's API.
+    category: contacts
+    request:
+      method: POST
+      path: /contacts
+      body:
+        email: ${email}
+        subscribed: ${subscribed}
+        data: ${data}
+    input:
+      email:
+        type: string
+        description: The email field of the request body.
+      subscribed:
+        type: boolean
+        description: The subscribed field of the request body.
+        optional: true
+      data:
+        type: object
+        description: The data field of the request body.
+        optional: true
+    output:
+      description: Contact updated
+      type: object
+  list_segments:
+    title: List segments
+    description: List segments Get all audience segments for the project, newest first. This endpoint
+      is not paginated — it returns a bare array of every segment. Calls GET /segments on the provider's
+      API.
+    category: segments
+    request:
+      method: GET
+      path: /segments
+    input: {}
+    output:
+      description: List of segments
+      type: object
+    read_only: true
+  create_segment:
+    title: Create segment
+    description: Create segment Create a new audience segment. DYNAMIC segments (the default) are defined
+      by a condition — a boolean tree that is re-evaluated against your contacts, so membership changes
+      on its own as contact data changes. condition is required for these. STATIC segments hold a manually
+      managed member list; condit Calls POST /segments on the provider's API.
+    category: segments
+    request:
+      method: POST
+      path: /segments
+      body:
+        name: ${name}
+        description: ${description}
+        type: ${type}
+        condition: ${condition}
+        trackMembership: ${track_membership}
+    input:
+      name:
+        type: string
+        description: The name field of the request body.
+      description:
+        type: string
+        description: The description field of the request body.
+        optional: true
+      type:
+        type: string
+        description: Defaults to DYNAMIC when omitted.
+        optional: true
+        enum:
+        - DYNAMIC
+        - STATIC
+      condition:
+        type: string
+        description: Required for DYNAMIC segments; ignored for STATIC ones.
+        optional: true
+      track_membership:
+        type: boolean
+        description: Emit segment. .entry / segment. .exit events as contacts join and leave. These can
+          be used as workflow triggers.
+        optional: true
+    output:
+      description: Segment created
+      type: object
+  list_templates:
+    title: List templates
+    description: List templates Get a paginated list of email templates. This endpoint uses offset pagination
+      (page / pageSize), not the cursor pagination used by GET /contacts. Calls GET /templates on the
+      provider's API.
+    category: templates
+    request:
+      method: GET
+      path: /templates
+      query:
+        page: ${page}
+        pageSize: ${page_size}
+        type: ${type}
+        search: ${search}
+        sort: ${sort}
+        dir: ${dir}
+    input:
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        default: 1
+      page_size:
+        type: integer
+        description: Items per page.
+        optional: true
+        default: 20
+      type:
+        type: string
+        description: Filter by template type.
+        optional: true
+        enum:
+        - TRANSACTIONAL
+        - MARKETING
+        - HEADLESS
+      search:
+        type: string
+        description: Case-insensitive match on name, description, or subject.
+        optional: true
+      sort:
+        type: string
+        description: Column to sort by. Unrecognised values fall back to createdAt.
+        optional: true
+        enum:
+        - name
+        - createdAt
+        - updatedAt
+        default: createdAt
+      dir:
+        type: string
+        description: Sort direction. Unrecognised values fall back to the default.
+        optional: true
+        enum:
+        - asc
+        - desc
+        default: desc
+    output:
+      description: List of templates
+      type: object
+    read_only: true
+  create_template:
+    title: Create template
+    description: Create template Create a new email template. from is required and its domain must already
+      be verified for this project, otherwise the request is rejected. Calls POST /templates on the provider's
+      API.
+    category: templates
+    request:
+      method: POST
+      path: /templates
+      body:
+        name: ${name}
+        description: ${description}
+        subject: ${subject}
+        body: ${body}
+        from: ${from}
+        fromName: ${from_name}
+        replyTo: ${reply_to}
+        type: ${type}
+    input:
+      name:
+        type: string
+        description: Internal name for the template.
+      description:
+        type: string
+        description: Optional internal note. Not sent to recipients.
+        optional: true
+      subject:
+        type: string
+        description: The subject field of the request body.
+      body:
+        type: string
+        description: HTML body. Use {{variable}} placeholders to interpolate contact data at send time.
+      from:
+        type: string
+        description: Sender address. Must belong to a domain verified for this project.
+      from_name:
+        type: string
+        description: Sender display name.
+        optional: true
+      reply_to:
+        type: string
+        description: The replyTo field of the request body.
+        optional: true
+      type:
+        type: string
+        description: Optional. Defaults to MARKETING when omitted.
+        optional: true
+        enum:
+        - TRANSACTIONAL
+        - MARKETING
+        - HEADLESS
+    output:
+      description: Template created
+      type: object
+  send_email:
+    title: Send transactional email
+    description: 'Send transactional email Send a transactional email via the public API. Automatically
+      creates or updates the recipient contact. Required content: either a template ID, or both subject
+      and body. Template fields can be overridden by explicit request fields. Sender: from is required
+      unless using a template that already has a f Calls POST /v1/send on the provider''s API.'
+    category: send
+    request:
+      method: POST
+      path: /v1/send
+      body:
+        to: ${to}
+        subject: ${subject}
+        body: ${body}
+        template: ${template}
+        from: ${from}
+        name: ${name}
+        subscribed: ${subscribed}
+        data: ${data}
+        headers: ${headers}
+        reply: ${reply}
+        attachments: ${attachments}
+    input:
+      to:
+        type: string
+        description: Recipient email(s). Can be a string, an object with {name, email}, or an array of
+          either.
+      subject:
+        type: string
+        description: Email subject. Required if no template is provided. Cannot contain newline characters.
+        optional: true
+      body:
+        type: string
+        description: Email body (HTML). Required if no template is provided.
+        optional: true
+      template:
+        type: string
+        description: Template ID to use for this email. When provided, uses the template's subject, body,
+          from, and reply-to settings. You can override these by explicitly providing subject, body, from,
+          or reply fields in the request. Template variables are populated from the data field.
+        optional: true
+      from:
+        type: string
+        description: 'Sender email address (requires verified domain). Required unless using a template
+          that has a ''from'' address configured. Can be a string (e.g., ''hello@example.com'') or an
+          object with {name, email} (e.g., {name: ''My App'', email: ''hello@example.com''}).'
+        optional: true
+      name:
+        type: string
+        description: 'Deprecated. Sender display name. Prefer from: { name, email }. Used only as a fallback
+          when from is a string and no name is set there.'
+        optional: true
+      subscribed:
+        type: boolean
+        description: Subscription state to apply to the recipient. For new contacts, defaults to false
+          on /v1/send. For existing contacts, omitting this preserves their current state — pass true
+          or false to explicitly change it. A change emits contact.subscribed or contact.unsubscribed.
+        optional: true
+      data:
+        type: object
+        description: 'Variables for template rendering and contact data updates. Each value can be: -
+          A primitive (string, number, boolean) — saved on the contact and available as a template variable.
+          - null — deletes the field from the contact. - An empty string — skipped (does not overwrite
+          existing data). - An object { value, persistent: false } — used for this send only, not stored
+          on the contact (good for one-shot'
+        optional: true
+      headers:
+        type: object
+        description: Custom email headers. Header names cannot contain \r\n. Header values are limited
+          to 998 characters and cannot contain \r\n (header injection is rejected).
+        optional: true
+      reply:
+        type: string
+        description: Reply-to address.
+        optional: true
+      attachments:
+        type: array
+        description: 'Email attachments. Default cap: 10 attachments and 10 MB total. The full message
+          size cannot exceed 40 MB.'
+        optional: true
+        items:
+          type: object
+    output:
+      description: Email queued successfully
+      type: object
+  track_event:
+    title: Track event
+    description: 'Track event Track an event for a contact. Automatically creates or upserts the contact,
+      then records the event. Tracked events can be used as workflow triggers, segment filters, and audience
+      filters. Reserved event names (rejected with VALIDATIONERROR and code reservedevent): anything matching
+      email., contact.s Calls POST /v1/track on the provider''s API.'
+    category: track
+    request:
+      method: POST
+      path: /v1/track
+      body:
+        email: ${email}
+        event: ${event}
+        subscribed: ${subscribed}
+        data: ${data}
+    input:
+      email:
+        type: string
+        description: Contact email. The contact is auto-created if it doesn't exist.
+      event:
+        type: string
+        description: Event name. Cannot match the reserved patterns above.
+      subscribed:
+        type: boolean
+        description: Subscription state to apply to the contact. New contacts default to subscribed (true).
+          Existing contacts keep their current state unless you pass an explicit value here. Pass false
+          to track an event without resubscribing an unsubscribed contact.
+        optional: true
+      data:
+        type: object
+        description: 'Contact data and one-off event variables. Persistent values (primitives, plain objects)
+          are saved on the contact and become available as template variables. Pass { value, persistent:
+          false } for one-shot variables that should not be stored on the contact (e.g. order IDs, transaction
+          details). null deletes a field. Empty strings are ignored. Reserved keys are filtered out —
+          see the contacts concept'
+        optional: true
+    output:
+      description: Event tracked successfully
+      type: object
+  verify_email:
+    title: Verify email address
+    description: Verify email address Verify an email address for validity, check if it's from a disposable
+      domain or personal email provider, verify MX records, and detect potential typos with suggestions.
+      Calls POST /v1/verify on the provider's API.
+    category: verify
+    request:
+      method: POST
+      path: /v1/verify
+      body:
+        email: ${email}
+    input:
+      email:
+        type: string
+        description: Email address to verify
+    output:
+      description: Email verification completed successfully
+      type: object
+  delete_contact:
+    title: Delete contact
+    description: Delete contact Permanently delete a contact Calls DELETE /contacts/{id} on the provider's
+      API.
+    category: contacts
+    request:
+      method: DELETE
+      path: /contacts/${id}
+    input:
+      id:
+        type: string
+        description: The id parameter.
+    output:
+      description: Contact deleted successfully (no content returned)
+      type: object
+    destructive: true

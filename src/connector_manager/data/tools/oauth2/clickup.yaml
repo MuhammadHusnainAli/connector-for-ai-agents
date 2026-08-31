@@ -1,0 +1,518 @@
+# ClickUp tools.
+#
+# ClickUp's OAuth grants an app access to the workspaces the user picked at
+# install time rather than per-endpoint scopes, so no tool declares scopes. The
+# hierarchy is team (workspace) -> space -> folder -> list -> task, and most
+# tools take the list id that get_lists returns.
+#
+# Docs: https://developer.clickup.com/reference
+
+connector_id: clickup
+display_name: ClickUp
+docs_url: https://developer.clickup.com/reference
+
+tools:
+
+  list_workspaces:
+    title: List workspaces
+    description: >-
+      List the workspaces (ClickUp calls them teams) the token can reach. Every
+      other lookup starts from a workspace id.
+    category: hierarchy
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/team
+    input: {}
+    output:
+      description: The accessible workspaces.
+      type: object
+      properties:
+        teams: {type: array, description: "Each with id, name and members."}
+
+  list_spaces:
+    title: List spaces in a workspace
+    description: List a workspace's spaces, with their ids, statuses and enabled features.
+    category: hierarchy
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/team/${team_id}/space
+      query:
+        archived: "${archived}"
+    input:
+      team_id:
+        type: string
+        description: Workspace id, from list_workspaces.
+      archived:
+        type: boolean
+        description: Return archived spaces instead of active ones.
+        optional: true
+    output:
+      description: The workspace's spaces.
+      type: object
+      properties:
+        spaces: {type: array}
+
+  list_lists:
+    title: List the lists in a space or folder
+    description: >-
+      List the task lists in a folder, or the folderless lists in a space. The
+      list id is what the task tools take.
+    category: hierarchy
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/${container_type}/${container_id}/list
+      query:
+        archived: "${archived}"
+    input:
+      container_type:
+        type: string
+        description: Whether the container is a folder or a space.
+        enum: [folder, space]
+      container_id:
+        type: string
+        description: Id of the folder or space.
+      archived:
+        type: boolean
+        description: Return archived lists instead of active ones.
+        optional: true
+    output:
+      description: The lists.
+      type: object
+      properties:
+        lists: {type: array, description: "Each with id, name, statuses and task_count."}
+
+  list_tasks:
+    title: List tasks in a list
+    description: >-
+      Page through a list's tasks, filtered by status, assignee, tag or due
+      date. Pages are 100 tasks and page numbers are zero-based.
+    category: tasks
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/list/${list_id}/task
+      query:
+        page: "${page}"
+        archived: "${archived}"
+        include_closed: "${include_closed}"
+        statuses: "${statuses}"
+        assignees: "${assignees}"
+        tags: "${tags}"
+        due_date_lt: "${due_before}"
+        due_date_gt: "${due_after}"
+        order_by: "${order_by}"
+        subtasks: "${include_subtasks}"
+    input:
+      list_id:
+        type: string
+        description: The list id.
+      page:
+        type: integer
+        description: Zero-based page number; each page holds 100 tasks.
+        optional: true
+        minimum: 0
+      archived:
+        type: boolean
+        description: Include archived tasks.
+        optional: true
+      include_closed:
+        type: boolean
+        description: Include tasks in a closed status.
+        optional: true
+      statuses:
+        type: array
+        description: Only tasks in these statuses.
+        optional: true
+        items: {type: string}
+      assignees:
+        type: array
+        description: Only tasks assigned to these user ids.
+        optional: true
+        items: {type: string}
+      tags:
+        type: array
+        description: Only tasks carrying these tags.
+        optional: true
+        items: {type: string}
+      due_before:
+        type: integer
+        description: Only tasks due before this Unix epoch in milliseconds.
+        optional: true
+      due_after:
+        type: integer
+        description: Only tasks due after this Unix epoch in milliseconds.
+        optional: true
+      order_by:
+        type: string
+        description: Field to order by.
+        optional: true
+        enum: [id, created, updated, due_date]
+      include_subtasks:
+        type: boolean
+        description: Include subtasks in the results.
+        optional: true
+    output:
+      description: A page of tasks.
+      type: object
+      properties:
+        tasks: {type: array}
+        last_page: {type: boolean}
+
+  get_task:
+    title: Get a task
+    description: >-
+      Read one task in full -- description, status, assignees, due date, tags,
+      custom fields and subtasks.
+    category: tasks
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/task/${task_id}
+      query:
+        include_subtasks: "${include_subtasks}"
+        custom_task_ids: "${custom_task_ids}"
+        team_id: "${team_id}"
+    input:
+      task_id:
+        type: string
+        description: The task id, or a custom task id when custom_task_ids is set.
+      include_subtasks:
+        type: boolean
+        description: Include the task's subtasks.
+        optional: true
+      custom_task_ids:
+        type: boolean
+        description: Treat task_id as a custom task id. Requires team_id.
+        optional: true
+      team_id:
+        type: string
+        description: Workspace id, required alongside custom_task_ids.
+        optional: true
+    output:
+      description: The task.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        description: "{type: string}"
+        status: {type: object}
+        assignees: {type: array}
+        due_date: {type: string}
+        url: {type: string}
+
+  create_task:
+    title: Create a task
+    description: >-
+      Create a task in a list. Dates are Unix epochs in milliseconds. Priority is
+      1 urgent, 2 high, 3 normal, 4 low.
+    category: tasks
+    request:
+      method: POST
+      path: /api/v2/list/${list_id}/task
+      body:
+        name: "${name}"
+        description: "${description}"
+        markdown_description: "${markdown_description}"
+        assignees: "${assignees}"
+        status: "${status}"
+        priority: "${priority}"
+        due_date: "${due_date}"
+        start_date: "${start_date}"
+        tags: "${tags}"
+        parent: "${parent_task_id}"
+        custom_fields: "${custom_fields}"
+    input:
+      list_id:
+        type: string
+        description: The list to create the task in.
+      name:
+        type: string
+        description: What the task is.
+      description:
+        type: string
+        description: Task description, as plain text.
+        optional: true
+      markdown_description:
+        type: string
+        description: Task description in Markdown, instead of plain text.
+        optional: true
+      assignees:
+        type: array
+        description: User ids to assign it to.
+        optional: true
+        items: {type: integer}
+      status:
+        type: string
+        description: Status name, which must exist on the list.
+        optional: true
+      priority:
+        type: integer
+        description: "Priority: 1 urgent, 2 high, 3 normal, 4 low."
+        optional: true
+        minimum: 1
+        maximum: 4
+      due_date:
+        type: integer
+        description: Due date as a Unix epoch in milliseconds.
+        optional: true
+      start_date:
+        type: integer
+        description: Start date as a Unix epoch in milliseconds.
+        optional: true
+      tags:
+        type: array
+        description: Tag names to apply.
+        optional: true
+        items: {type: string}
+      parent_task_id:
+        type: string
+        description: Make this a subtask of that task.
+        optional: true
+      custom_fields:
+        type: array
+        description: "Custom field values, each {\"id\": \"...\", \"value\": ...}."
+        optional: true
+        items: {type: object}
+    output:
+      description: The created task.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        url: {type: string}
+
+  update_task:
+    title: Update a task
+    description: >-
+      Change a task -- rename it, move its status, reassign it or shift its due
+      date. Assignee changes use add and remove lists, not a replacement set.
+    category: tasks
+    request:
+      method: PUT
+      path: /api/v2/task/${task_id}
+      body:
+        name: "${name}"
+        description: "${description}"
+        status: "${status}"
+        priority: "${priority}"
+        due_date: "${due_date}"
+        assignees:
+          add: "${add_assignees}"
+          rem: "${remove_assignees}"
+        archived: "${archived}"
+    input:
+      task_id:
+        type: string
+        description: The task id.
+      name:
+        type: string
+        description: New name.
+        optional: true
+      description:
+        type: string
+        description: New description.
+        optional: true
+      status:
+        type: string
+        description: New status name.
+        optional: true
+      priority:
+        type: integer
+        description: "New priority: 1 urgent, 2 high, 3 normal, 4 low."
+        optional: true
+        minimum: 1
+        maximum: 4
+      due_date:
+        type: integer
+        description: New due date as a Unix epoch in milliseconds.
+        optional: true
+      add_assignees:
+        type: array
+        description: User ids to add as assignees.
+        optional: true
+        items: {type: integer}
+      remove_assignees:
+        type: array
+        description: User ids to remove from the assignees.
+        optional: true
+        items: {type: integer}
+      archived:
+        type: boolean
+        description: Archive or unarchive the task.
+        optional: true
+    output:
+      description: The updated task.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        status: {type: object}
+
+  delete_task:
+    title: Delete a task
+    description: Permanently delete a task and its subtasks. This cannot be undone.
+    category: tasks
+    destructive: true
+    request:
+      method: DELETE
+      path: /api/v2/task/${task_id}
+    input:
+      task_id:
+        type: string
+        description: The task to delete.
+    output:
+      description: An empty object on success.
+      type: object
+
+  comment_on_task:
+    title: Comment on a task
+    description: >-
+      Add a comment to a task, optionally assigning it to someone so it shows up
+      as an action for them.
+    category: tasks
+    request:
+      method: POST
+      path: /api/v2/task/${task_id}/comment
+      body:
+        comment_text: "${comment_text}"
+        assignee: "${assignee}"
+        notify_all: "${notify_all}"
+    input:
+      task_id:
+        type: string
+        description: The task id.
+      comment_text:
+        type: string
+        description: The comment text.
+      assignee:
+        type: integer
+        description: User id to assign the comment to.
+        optional: true
+      notify_all:
+        type: boolean
+        description: Notify everyone watching the task.
+        optional: true
+    output:
+      description: The created comment.
+      type: object
+      properties:
+        id: {type: string}
+        date: {type: string}
+
+  list_task_comments:
+    title: List a task's comments
+    description: Read a task's comment thread, newest first.
+    category: tasks
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/task/${task_id}/comment
+      query:
+        start: "${start}"
+        start_id: "${start_id}"
+    input:
+      task_id:
+        type: string
+        description: The task id.
+      start:
+        type: integer
+        description: Unix epoch in milliseconds to page back from.
+        optional: true
+      start_id:
+        type: string
+        description: Comment id to page back from, paired with start.
+        optional: true
+    output:
+      description: The task's comments.
+      type: object
+      properties:
+        comments: {type: array}
+
+  search_tasks:
+    title: Search tasks across a workspace
+    description: >-
+      Find tasks anywhere in a workspace, filtered by space, list, assignee,
+      status or tag -- rather than list by list.
+    category: tasks
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/team/${team_id}/task
+      query:
+        page: "${page}"
+        space_ids: "${space_ids}"
+        list_ids: "${list_ids}"
+        assignees: "${assignees}"
+        statuses: "${statuses}"
+        tags: "${tags}"
+        include_closed: "${include_closed}"
+        order_by: "${order_by}"
+    input:
+      team_id:
+        type: string
+        description: Workspace id, from list_workspaces.
+      page:
+        type: integer
+        description: Zero-based page number; each page holds 100 tasks.
+        optional: true
+        minimum: 0
+      space_ids:
+        type: array
+        description: Only tasks in these spaces.
+        optional: true
+        items: {type: string}
+      list_ids:
+        type: array
+        description: Only tasks in these lists.
+        optional: true
+        items: {type: string}
+      assignees:
+        type: array
+        description: Only tasks assigned to these user ids.
+        optional: true
+        items: {type: string}
+      statuses:
+        type: array
+        description: Only tasks in these statuses.
+        optional: true
+        items: {type: string}
+      tags:
+        type: array
+        description: Only tasks carrying these tags.
+        optional: true
+        items: {type: string}
+      include_closed:
+        type: boolean
+        description: Include tasks in a closed status.
+        optional: true
+      order_by:
+        type: string
+        description: Field to order by.
+        optional: true
+        enum: [id, created, updated, due_date]
+    output:
+      description: A page of matching tasks.
+      type: object
+      properties:
+        tasks: {type: array}
+        last_page: {type: boolean}
+
+  get_authorized_user:
+    title: Get the authenticated user
+    description: >-
+      Read the ClickUp account the token belongs to. The cheapest health check
+      for a ClickUp connection.
+    category: account
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/user
+    input: {}
+    output:
+      description: The authenticated user.
+      type: object
+      properties:
+        user: {type: object, description: "Holds id, username, email and color."}

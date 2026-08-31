@@ -1,0 +1,440 @@
+# SharePoint Online tools (Microsoft Graph).
+#
+# Everything hangs off a site id, which search_sites returns. A site's document
+# library is a drive, so the file tools mirror OneDrive's; its lists are
+# addressed separately, and list item values live under a `fields` object.
+#
+# Docs: https://learn.microsoft.com/graph/api/resources/sharepoint
+
+connector_id: sharepoint-online
+display_name: SharePoint Online
+docs_url: https://learn.microsoft.com/graph/api/resources/sharepoint
+
+scope_rules:
+  case_insensitive: true
+  implies:
+    Sites.FullControl.All: [Sites.Manage.All, Sites.ReadWrite.All, Sites.Read.All]
+    Sites.Manage.All: [Sites.ReadWrite.All, Sites.Read.All]
+    Sites.ReadWrite.All: [Sites.Read.All]
+    Files.ReadWrite.All: [Files.Read.All]
+
+scope_discovery:
+  jwt_claim: scp
+
+tools:
+
+  search_sites:
+    title: Find sites
+    description: >-
+      Search the tenant's SharePoint sites by name and return their ids, which
+      every other tool takes. Pass "*" to list them all.
+    category: sites
+    scopes: [Sites.Read.All]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/sites
+      query:
+        search: "${query}"
+        $top: "${limit}"
+    input:
+      query:
+        type: string
+        description: Words to match against site names. Use "*" for every site.
+        optional: true
+        default: "*"
+      limit:
+        type: integer
+        description: How many sites to return.
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 999
+    output:
+      description: The matching sites.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string, description: "Site id -- what the other tools take."}
+          displayName: {type: string}
+          webUrl: {type: string}
+
+  get_site:
+    title: Get a site
+    description: >-
+      Read one site's name, description and web URL. Accepts a site id, or a
+      hostname and path in the form "contoso.sharepoint.com:/sites/Marketing".
+    category: sites
+    scopes: [Sites.Read.All]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/sites/${site_id}
+    input:
+      site_id:
+        type: string
+        description: Site id, or "hostname:/sites/Name".
+    output:
+      description: The site.
+      type: object
+      properties:
+        id: {type: string}
+        displayName: {type: string}
+        webUrl: {type: string}
+        createdDateTime: {type: string}
+
+  list_lists:
+    title: List a site's lists
+    description: >-
+      List the SharePoint lists and document libraries on a site, with the ids
+      the list item tools take.
+    category: lists
+    scopes: [Sites.Read.All]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/sites/${site_id}/lists
+      query:
+        $top: "${limit}"
+        $filter: "${filter}"
+    input:
+      site_id:
+        type: string
+        description: The site id.
+      limit:
+        type: integer
+        description: How many lists to return.
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 999
+      filter:
+        type: string
+        description: OData $filter expression.
+        optional: true
+    output:
+      description: The site's lists.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          displayName: {type: string}
+          list: {type: object, description: "Holds template -- genericList, documentLibrary and so on."}
+
+  list_list_items:
+    title: List a list's items
+    description: >-
+      Read the rows of a SharePoint list. Column values live under `fields`, so
+      expand it unless only ids are wanted.
+    category: lists
+    scopes: [Sites.Read.All]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/sites/${site_id}/lists/${list_id}/items
+      query:
+        $expand: "${expand}"
+        $top: "${limit}"
+        $filter: "${filter}"
+        $orderby: "${order_by}"
+    input:
+      site_id:
+        type: string
+        description: The site id.
+      list_id:
+        type: string
+        description: The list id, from list_lists.
+      expand:
+        type: array
+        description: Related data to inline. Include "fields" to get the column values.
+        optional: true
+        default: "[fields]"
+        items: {type: string}
+      limit:
+        type: integer
+        description: How many items per page.
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 999
+      filter:
+        type: string
+        description: OData $filter over the fields, e.g. "fields/Status eq 'Open'".
+        optional: true
+      order_by:
+        type: string
+        description: OData $orderby expression.
+        optional: true
+    output:
+      description: A page of list items.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          fields: {type: object, description: "Column internal name to value."}
+
+  create_list_item:
+    title: Add an item to a list
+    description: >-
+      Create a row in a SharePoint list. `fields` is keyed by each column's
+      internal name — get_list_columns returns them.
+    category: lists
+    scopes: [Sites.ReadWrite.All]
+    request:
+      method: POST
+      path: /v1.0/sites/${site_id}/lists/${list_id}/items
+      body:
+        fields: "${fields}"
+    input:
+      site_id:
+        type: string
+        description: The site id.
+      list_id:
+        type: string
+        description: The list id.
+      fields:
+        type: object
+        description: "Column internal name to value, e.g. {\"Title\": \"Q3 review\", \"Status\": \"Open\"}."
+    output:
+      description: The created item.
+      type: object
+      properties:
+        id: {type: string}
+        fields: {type: object}
+        webUrl: {type: string}
+
+  update_list_item:
+    title: Update a list item
+    description: >-
+      Change column values on an existing row. Only the columns supplied are
+      written; the rest keep their values.
+    category: lists
+    scopes: [Sites.ReadWrite.All]
+    request:
+      method: PATCH
+      path: /v1.0/sites/${site_id}/lists/${list_id}/items/${item_id}/fields
+      body: "${fields}"
+    input:
+      site_id:
+        type: string
+        description: The site id.
+      list_id:
+        type: string
+        description: The list id.
+      item_id:
+        type: string
+        description: The item id.
+      fields:
+        type: object
+        description: Column internal name to new value.
+    output:
+      description: The item's fields after the change.
+      type: object
+
+  delete_list_item:
+    title: Delete a list item
+    description: >-
+      Move a list row to the site's recycle bin. Restorable from SharePoint, but
+      not by this tool.
+    category: lists
+    scopes: [Sites.ReadWrite.All]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1.0/sites/${site_id}/lists/${list_id}/items/${item_id}
+    input:
+      site_id:
+        type: string
+        description: The site id.
+      list_id:
+        type: string
+        description: The list id.
+      item_id:
+        type: string
+        description: The item to delete.
+    output:
+      description: Empty on success -- Graph answers 204 No Content.
+      type: object
+
+  get_list_columns:
+    title: Get a list's columns
+    description: >-
+      Read a list's column definitions — internal names, display names and
+      types. Read this before writing fields you did not name yourself.
+    category: lists
+    scopes: [Sites.Read.All]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/sites/${site_id}/lists/${list_id}/columns
+    input:
+      site_id:
+        type: string
+        description: The site id.
+      list_id:
+        type: string
+        description: The list id.
+    output:
+      description: The list's columns.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          name: {type: string, description: "Internal name -- the key `fields` uses."}
+          displayName: {type: string}
+          text: {type: object}
+          choice: {type: object}
+
+  create_list:
+    title: Create a list
+    description: >-
+      Create a SharePoint list on a site, defining its columns. Each column is
+      {"name": "Status", "text": {}} or another column-type object.
+    category: lists
+    scopes: [Sites.Manage.All]
+    request:
+      method: POST
+      path: /v1.0/sites/${site_id}/lists
+      body:
+        displayName: "${name}"
+        columns: "${columns}"
+        list:
+          template: "${template}"
+    input:
+      site_id:
+        type: string
+        description: The site to create the list on.
+      name:
+        type: string
+        description: List name.
+      columns:
+        type: array
+        description: Column definitions, each with a name and a type object.
+        optional: true
+        items: {type: object}
+      template:
+        type: string
+        description: List template, e.g. genericList or documentLibrary.
+        optional: true
+        default: genericList
+    output:
+      description: The created list.
+      type: object
+      properties:
+        id: {type: string}
+        displayName: {type: string}
+        webUrl: {type: string}
+
+  list_site_files:
+    title: List a site's documents
+    description: >-
+      List the files and folders in a site's default document library. Use
+      "root" for the top of the library.
+    category: files
+    scopes: [Sites.Read.All]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/sites/${site_id}/drive/items/${folder_id}/children
+      query:
+        $top: "${limit}"
+        $orderby: "${order_by}"
+    input:
+      site_id:
+        type: string
+        description: The site id.
+      folder_id:
+        type: string
+        description: Folder id. Use "root" for the top of the library.
+        optional: true
+        default: root
+      limit:
+        type: integer
+        description: How many entries to return.
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 999
+      order_by:
+        type: string
+        description: OData $orderby expression.
+        optional: true
+    output:
+      description: The library's contents.
+      type: array
+      response_path: value
+      items: {type: object}
+
+  upload_site_file:
+    title: Upload a file to a site
+    description: >-
+      Create or replace a file in a site's default document library. Graph
+      accepts up to 4 MB this way.
+    category: files
+    scopes: [Sites.ReadWrite.All]
+    request:
+      method: PUT
+      path: "/v1.0/sites/${site_id}/drive/root:/${path}:/content"
+      content: "${content}"
+      headers:
+        content-type: "${content_type}"
+    input:
+      site_id:
+        type: string
+        description: The site id.
+      path:
+        type: string
+        description: Destination path inside the library, e.g. "Reports/q3.txt".
+      content:
+        type: string
+        description: The file's contents, as text.
+      content_type:
+        type: string
+        description: MIME type of the content.
+        optional: true
+        default: text/plain
+    output:
+      description: The created or updated file.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        webUrl: {type: string}
+
+  search_site_files:
+    title: Search a site's documents
+    description: Search a site's document library by file name and content.
+    category: files
+    scopes: [Sites.Read.All]
+    read_only: true
+    request:
+      method: GET
+      path: "/v1.0/sites/${site_id}/drive/root/search(q='${query}')"
+      query:
+        $top: "${limit}"
+    input:
+      site_id:
+        type: string
+        description: The site id.
+      query:
+        type: string
+        description: Words to search for.
+      limit:
+        type: integer
+        description: How many matches to return.
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 999
+    output:
+      description: Matching files.
+      type: array
+      response_path: value
+      items: {type: object}

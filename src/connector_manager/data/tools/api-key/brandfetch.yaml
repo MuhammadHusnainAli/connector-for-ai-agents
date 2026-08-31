@@ -1,0 +1,245 @@
+# Brandfetch tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://docs.brandfetch.io/openapi.json
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: brandfetch
+display_name: Brandfetch
+docs_url: https://docs.brandfetch.io/openapi.json
+generated: true
+generated_from: https://docs.brandfetch.io/openapi.json
+tools:
+  get_viewer:
+    title: Get the authenticated viewer
+    description: 'Get the authenticated viewer Returns the identity of the credential used to authenticate
+      the request: an API key or a user session token (JWT). Use it to verify a credential during integration
+      setup (a 200 response means the credential is valid; 401/403 means it is missing, unknown, or revoked)
+      and to display which API key and Calls GET /v2/viewer on the provider''s API.'
+    category: viewer
+    request:
+      method: GET
+      path: /v2/viewer
+    input: {}
+    output:
+      description: The presented credential is valid. The type property indicates which kind of credential
+        authenticated the request and determines the response shape.
+      type: object
+    read_only: true
+  get_brand_from_transaction:
+    title: Get brand data from a transaction
+    description: Get brand data from a transaction Turn payment transactions into merchant data Calls
+      POST /v2/brands/transaction on the provider's API.
+    category: brands
+    request:
+      method: POST
+      path: /v2/brands/transaction
+      body:
+        transactionLabel: ${transaction_label}
+        countryCode: ${country_code}
+    input:
+      transaction_label:
+        type: string
+        description: The raw transaction text.
+      country_code:
+        type: string
+        description: An ISO 3166-1 alpha-2 country code indicating the country where the transaction took
+          place.
+    output:
+      description: Successful request.
+      type: object
+  get_brand_data:
+    title: Get brand data
+    description: Get brand data Get brand data using a Domain, Brand ID, ISIN, Stock/ETF ticker, or Crypto
+      symbol Calls GET /v2/brands/{identifier} on the provider's API.
+    category: brands
+    request:
+      method: GET
+      path: /v2/brands/${identifier}
+      query:
+        allowNsfw: ${allow_nsfw}
+    input:
+      identifier:
+        type: string
+        description: 'Identifier to retrieve brand data. Accepted formats: - Domain: nike.com - Brand
+          ID: id0dwKPKT - Stock or ETF ticker: NKE - ISIN: US6541061031 - Crypto symbol: BTC, ETH Note:
+          When using this generic endpoint, the identifier is resolved in the following order: domain
+          → ticker → isin → crypto. To avoid naming collisions, use explicit type routes: /v2/brands/{type}/{identifier}
+          where type can be domai'
+      allow_nsfw:
+        type: boolean
+        description: 'Brandfetch evaluates brands for NSFW content and reserves the right to not return
+          inappropriate brands. Depending on the severity, a brand may either not be returned at all (404),
+          or be returned with its isNsfw property set to true. The allowNsfw query parameter lets you
+          control this behavior: - Not set (default) — Some NSFW brands are not returned (404), others
+          are returned with isNsfw: true. - t'
+        optional: true
+    output:
+      description: Successful request.
+      type: object
+    read_only: true
+  get_brand_context:
+    title: Get brand context by domain
+    description: Get brand context by domain Get a structured, narrative-rich brand context for a domain
+      — including identity, positioning, voice, and visual style. Calls GET /v2/context/{domain} on the
+      provider's API.
+    category: context
+    request:
+      method: GET
+      path: /v2/context/${domain}
+      query:
+        cachedOnly: ${cached_only}
+    input:
+      domain:
+        type: string
+        description: Domain name (e.g., brandfetch.com)
+      cached_only:
+        type: boolean
+        description: When true, return a brand context only if one is already cached, responding instantly
+          without crawling the domain. If no cached context exists, the API responds with 204 No Content
+          instead of resolving the domain live (which can take several seconds). Useful for latency-sensitive
+          use cases. Any value other than true (including omitting the parameter) keeps the default behaviour
+          of resolving the do
+        optional: true
+        default: false
+    output:
+      description: 'Successful request. The response format is determined by the Accept header: application/json
+        returns a structured JSON object, while text/markdown returns the brand context as Markdown.'
+      type: object
+    read_only: true
+  search_brands:
+    title: Search brands
+    description: Search brands Search for brands by name, login to get a clientId Calls GET /v2/search/{name}?c={clientId}
+      on the provider's API.
+    category: search
+    request:
+      method: GET
+      path: /v2/search/${name}?c=${client_id}
+      query:
+        c: ${c}
+    input:
+      name:
+        type: string
+        description: The name of the company you are searching for.
+      c:
+        type: string
+        description: A clientId is a unique identifier assigned to your application that allows it to
+          authenticate and interact with our service. Get your client ID here
+      client_id:
+        type: string
+        description: The clientId identifying the resource in the path.
+    output:
+      description: Returns brand data
+      type: object
+    read_only: true
+  get_brand_data_by_crypto:
+    title: Get brand data by crypto symbol
+    description: Get brand data by crypto symbol Get brand data using a crypto symbol Calls GET /v2/brands/crypto/{symbol}
+      on the provider's API.
+    category: brands
+    request:
+      method: GET
+      path: /v2/brands/crypto/${symbol}
+      query:
+        allowNsfw: ${allow_nsfw}
+    input:
+      symbol:
+        type: string
+        description: Crypto symbol (e.g., BTC, ETH). Uppercase preferred.
+      allow_nsfw:
+        type: boolean
+        description: 'Brandfetch evaluates brands for NSFW content and reserves the right to not return
+          inappropriate brands. Depending on the severity, a brand may either not be returned at all (404),
+          or be returned with its isNsfw property set to true. The allowNsfw query parameter lets you
+          control this behavior: - Not set (default) — Some NSFW brands are not returned (404), others
+          are returned with isNsfw: true. - t'
+        optional: true
+    output:
+      description: Successful request.
+      type: object
+    read_only: true
+  get_brand_data_by_domain:
+    title: Get brand data by domain
+    description: Get brand data by domain Get brand data using a domain name Calls GET /v2/brands/domain/{domain}
+      on the provider's API.
+    category: brands
+    request:
+      method: GET
+      path: /v2/brands/domain/${domain}
+      query:
+        allowNsfw: ${allow_nsfw}
+    input:
+      domain:
+        type: string
+        description: Domain name (e.g., nike.com)
+      allow_nsfw:
+        type: boolean
+        description: 'Brandfetch evaluates brands for NSFW content and reserves the right to not return
+          inappropriate brands. Depending on the severity, a brand may either not be returned at all (404),
+          or be returned with its isNsfw property set to true. The allowNsfw query parameter lets you
+          control this behavior: - Not set (default) — Some NSFW brands are not returned (404), others
+          are returned with isNsfw: true. - t'
+        optional: true
+    output:
+      description: Successful request.
+      type: object
+    read_only: true
+  get_brand_data_by_isin:
+    title: Get brand data by ISIN
+    description: Get brand data by ISIN Get brand data using an ISIN code Calls GET /v2/brands/isin/{isin}
+      on the provider's API.
+    category: brands
+    request:
+      method: GET
+      path: /v2/brands/isin/${isin}
+      query:
+        allowNsfw: ${allow_nsfw}
+    input:
+      isin:
+        type: string
+        description: ISIN code (e.g., US6541061031)
+      allow_nsfw:
+        type: boolean
+        description: 'Brandfetch evaluates brands for NSFW content and reserves the right to not return
+          inappropriate brands. Depending on the severity, a brand may either not be returned at all (404),
+          or be returned with its isNsfw property set to true. The allowNsfw query parameter lets you
+          control this behavior: - Not set (default) — Some NSFW brands are not returned (404), others
+          are returned with isNsfw: true. - t'
+        optional: true
+    output:
+      description: Successful request.
+      type: object
+    read_only: true
+  get_brand_data_by_ticker:
+    title: Get brand data by Stock or ETF ticker
+    description: Get brand data by Stock or ETF ticker Get brand data using a Stock or ETF ticker Calls
+      GET /v2/brands/ticker/{ticker} on the provider's API.
+    category: brands
+    request:
+      method: GET
+      path: /v2/brands/ticker/${ticker}
+      query:
+        allowNsfw: ${allow_nsfw}
+    input:
+      ticker:
+        type: string
+        description: Stock or ETF ticker (e.g., NKE, QQQ)
+      allow_nsfw:
+        type: boolean
+        description: 'Brandfetch evaluates brands for NSFW content and reserves the right to not return
+          inappropriate brands. Depending on the severity, a brand may either not be returned at all (404),
+          or be returned with its isNsfw property set to true. The allowNsfw query parameter lets you
+          control this behavior: - Not set (default) — Some NSFW brands are not returned (404), others
+          are returned with isNsfw: true. - t'
+        optional: true
+    output:
+      description: Successful request.
+      type: object
+    read_only: true

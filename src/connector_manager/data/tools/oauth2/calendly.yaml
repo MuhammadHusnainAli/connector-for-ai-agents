@@ -1,0 +1,387 @@
+# Calendly tools.
+#
+# Calendly's API addresses everything by URI rather than by bare id -- a user is
+# "https://api.calendly.com/users/AAAA", not "AAAA". get_current_user returns the
+# user and organisation URIs the other tools take.
+#
+# Calendly's OAuth grants an app the authorising user's own access rather than
+# per-endpoint scopes, so no tool declares scopes.
+#
+# Docs: https://developer.calendly.com/api-docs
+
+connector_id: calendly
+display_name: Calendly
+docs_url: https://developer.calendly.com/api-docs
+
+tools:
+
+  get_current_user:
+    title: Get the authenticated user
+    description: >-
+      Read who the token belongs to, including the user and organisation URIs
+      every other tool needs. Start here.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /users/me
+    input: {}
+    output:
+      description: The authenticated user.
+      type: object
+      response_path: resource
+      properties:
+        uri: {type: string, description: "The user URI other tools take."}
+        name: {type: string}
+        email: {type: string}
+        scheduling_url: {type: string}
+        current_organization: {type: string}
+        timezone: {type: string}
+
+  list_event_types:
+    title: List event types
+    description: >-
+      List the bookable event types (meeting templates) for a user or
+      organisation, with the scheduling URL for each.
+    category: event_types
+    read_only: true
+    request:
+      method: GET
+      path: /event_types
+      query:
+        user: "${user_uri}"
+        organization: "${organization_uri}"
+        active: "${active}"
+        count: "${limit}"
+        page_token: "${page_token}"
+    input:
+      user_uri:
+        type: string
+        description: User URI from get_current_user. One of user_uri or organization_uri is required.
+        optional: true
+      organization_uri:
+        type: string
+        description: Organisation URI from get_current_user.
+        optional: true
+      active:
+        type: boolean
+        description: Only active event types.
+        optional: true
+      limit:
+        type: integer
+        description: How many event types per page (1-100).
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 100
+      page_token:
+        type: string
+        description: Cursor from the previous response's pagination.next_page_token.
+        optional: true
+    output:
+      description: A page of event types.
+      type: object
+      properties:
+        collection: {type: array, description: "Each with uri, name, duration and scheduling_url."}
+        pagination: {type: object}
+
+  list_scheduled_events:
+    title: List scheduled meetings
+    description: >-
+      List booked meetings for a user or organisation, optionally within a date
+      range and filtered by status.
+    category: events
+    read_only: true
+    request:
+      method: GET
+      path: /scheduled_events
+      query:
+        user: "${user_uri}"
+        organization: "${organization_uri}"
+        status: "${status}"
+        min_start_time: "${min_start_time}"
+        max_start_time: "${max_start_time}"
+        count: "${limit}"
+        page_token: "${page_token}"
+        sort: "${sort}"
+    input:
+      user_uri:
+        type: string
+        description: User URI whose meetings to list.
+        optional: true
+      organization_uri:
+        type: string
+        description: Organisation URI whose meetings to list.
+        optional: true
+      status:
+        type: string
+        description: Only meetings in this state.
+        optional: true
+        enum: [active, canceled]
+      min_start_time:
+        type: string
+        description: Only meetings starting at or after this ISO 8601 instant.
+        optional: true
+      max_start_time:
+        type: string
+        description: Only meetings starting at or before this ISO 8601 instant.
+        optional: true
+      limit:
+        type: integer
+        description: How many meetings per page (1-100).
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 100
+      page_token:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+      sort:
+        type: string
+        description: Sort order, e.g. "start_time:asc".
+        optional: true
+    output:
+      description: A page of scheduled meetings.
+      type: object
+      properties:
+        collection: {type: array}
+        pagination: {type: object}
+
+  get_scheduled_event:
+    title: Get a scheduled meeting
+    description: Read one booked meeting -- its time, location, host and status.
+    category: events
+    read_only: true
+    request:
+      method: GET
+      path: /scheduled_events/${event_uuid}
+    input:
+      event_uuid:
+        type: string
+        description: The meeting's UUID, the last segment of its URI.
+    output:
+      description: The meeting.
+      type: object
+      response_path: resource
+      properties:
+        uri: {type: string}
+        name: {type: string}
+        start_time: {type: string}
+        end_time: {type: string}
+        status: {type: string}
+        location: {type: object}
+
+  list_event_invitees:
+    title: List a meeting's invitees
+    description: >-
+      List who booked a meeting, with their answers to the booking questions and
+      any tracking parameters.
+    category: events
+    read_only: true
+    request:
+      method: GET
+      path: /scheduled_events/${event_uuid}/invitees
+      query:
+        status: "${status}"
+        email: "${email}"
+        count: "${limit}"
+        page_token: "${page_token}"
+    input:
+      event_uuid:
+        type: string
+        description: The meeting's UUID.
+      status:
+        type: string
+        description: Only invitees in this state.
+        optional: true
+        enum: [active, canceled]
+      email:
+        type: string
+        description: Only the invitee with this email address.
+        optional: true
+        format: email
+      limit:
+        type: integer
+        description: How many invitees per page (1-100).
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 100
+      page_token:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+    output:
+      description: The meeting's invitees.
+      type: object
+      properties:
+        collection: {type: array, description: "Each with name, email, questions_and_answers and status."}
+        pagination: {type: object}
+
+  cancel_scheduled_event:
+    title: Cancel a meeting
+    description: >-
+      Cancel a booked meeting and notify the invitee, with an optional reason.
+      Cancellation cannot be undone.
+    category: events
+    destructive: true
+    request:
+      method: POST
+      path: /scheduled_events/${event_uuid}/cancellation
+      body:
+        reason: "${reason}"
+    input:
+      event_uuid:
+        type: string
+        description: The meeting's UUID.
+      reason:
+        type: string
+        description: Why it is being cancelled, shown to the invitee.
+        optional: true
+    output:
+      description: The cancellation.
+      type: object
+      response_path: resource
+      properties:
+        canceled_by: {type: string}
+        reason: {type: string}
+        canceled_at: {type: string}
+
+  create_scheduling_link:
+    title: Create a single-use scheduling link
+    description: >-
+      Mint a one-time booking link for an event type, which stops working once
+      someone books with it. Useful for sending a specific person a slot.
+    category: scheduling
+    request:
+      method: POST
+      path: /scheduling_links
+      body:
+        max_event_count: "${max_event_count}"
+        owner: "${event_type_uri}"
+        owner_type: EventType
+    input:
+      event_type_uri:
+        type: string
+        description: Event type URI from list_event_types.
+      max_event_count:
+        type: integer
+        description: How many bookings the link allows. Calendly currently supports 1.
+        optional: true
+        default: 1
+        minimum: 1
+        maximum: 1
+    output:
+      description: The scheduling link.
+      type: object
+      response_path: resource
+      properties:
+        booking_url: {type: string}
+        owner: {type: string}
+
+  list_event_type_availability:
+    title: List open slots for an event type
+    description: >-
+      List the bookable times for an event type over a window. Calendly allows a
+      range of at most seven days per call.
+    category: scheduling
+    read_only: true
+    request:
+      method: GET
+      path: /event_type_available_times
+      query:
+        event_type: "${event_type_uri}"
+        start_time: "${start_time}"
+        end_time: "${end_time}"
+    input:
+      event_type_uri:
+        type: string
+        description: Event type URI from list_event_types.
+      start_time:
+        type: string
+        description: Start of the window, ISO 8601. Must be in the future.
+      end_time:
+        type: string
+        description: End of the window, ISO 8601. At most seven days after start_time.
+    output:
+      description: The open slots.
+      type: object
+      properties:
+        collection: {type: array, description: "Each with start_time, status and scheduling_url."}
+
+  list_organization_members:
+    title: List organisation members
+    description: >-
+      List the people in the Calendly organisation with their user URIs and
+      roles. Needs an owner or admin token.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /organization_memberships
+      query:
+        organization: "${organization_uri}"
+        user: "${user_uri}"
+        email: "${email}"
+        count: "${limit}"
+        page_token: "${page_token}"
+    input:
+      organization_uri:
+        type: string
+        description: Organisation URI from get_current_user.
+        optional: true
+      user_uri:
+        type: string
+        description: Only the membership for this user URI.
+        optional: true
+      email:
+        type: string
+        description: Only the member with this email address.
+        optional: true
+        format: email
+      limit:
+        type: integer
+        description: How many members per page (1-100).
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 100
+      page_token:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+    output:
+      description: A page of organisation memberships.
+      type: object
+      properties:
+        collection: {type: array}
+        pagination: {type: object}
+
+  invite_to_organization:
+    title: Invite someone to the organisation
+    description: >-
+      Send a Calendly organisation invitation to an email address. Needs an
+      owner or admin token.
+    category: users
+    request:
+      method: POST
+      path: /organizations/${organization_uuid}/invitations
+      body:
+        email: "${email}"
+    input:
+      organization_uuid:
+        type: string
+        description: The organisation's UUID, the last segment of its URI.
+      email:
+        type: string
+        description: Who to invite.
+        format: email
+    output:
+      description: The invitation.
+      type: object
+      response_path: resource
+      properties:
+        uri: {type: string}
+        email: {type: string}
+        status: {type: string}

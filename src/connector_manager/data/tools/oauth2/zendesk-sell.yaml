@@ -1,0 +1,679 @@
+# Zendesk Sell tools.
+#
+# Sell wraps everything in an envelope: reads come back as
+# {"items": [{"data": {...}}], "meta": {...}} and writes take {"data": {...}}.
+# The response_path on each tool unwraps the outer layer.
+#
+# Docs: https://developer.zendesk.com/api-reference/sales-crm/introduction/
+
+connector_id: zendesk-sell
+display_name: Zendesk Sell
+docs_url: https://developer.zendesk.com/api-reference/sales-crm/introduction/
+
+tools:
+
+  list_contacts:
+    title: List contacts
+    description: >-
+      Page through contacts — people and companies alike, distinguished by
+      is_organization.
+    category: contacts
+    read_only: true
+    request:
+      method: GET
+      path: /v2/contacts
+      query:
+        page: "${page}"
+        per_page: "${per_page}"
+        sort_by: "${sort_by}"
+        email: "${email}"
+        name: "${name}"
+        is_organization: "${is_organization}"
+    input:
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      per_page:
+        type: integer
+        description: How many contacts per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      sort_by:
+        type: string
+        description: Sort order, e.g. "created_at:desc".
+        optional: true
+      email:
+        type: string
+        description: Only the contact with this email address.
+        optional: true
+        format: email
+      name:
+        type: string
+        description: Only contacts with this exact name.
+        optional: true
+      is_organization:
+        type: boolean
+        description: True for companies, false for people.
+        optional: true
+    output:
+      description: A page of contacts.
+      type: array
+      response_path: items
+      items:
+        type: object
+        properties:
+          data: {type: object, description: "Holds id, name, email and is_organization."}
+
+  create_contact:
+    title: Create a contact
+    description: >-
+      Add a person or a company. Set is_organization true and give `name` for a
+      company; give first_name and last_name for a person.
+    category: contacts
+    request:
+      method: POST
+      path: /v2/contacts
+      body:
+        data:
+          is_organization: "${is_organization}"
+          name: "${name}"
+          first_name: "${first_name}"
+          last_name: "${last_name}"
+          email: "${email}"
+          phone: "${phone}"
+          title: "${title}"
+          contact_id: "${parent_contact_id}"
+          owner_id: "${owner_id}"
+          description: "${description}"
+          tags: "${tags}"
+          custom_fields: "${custom_fields}"
+    input:
+      is_organization:
+        type: boolean
+        description: True for a company, false for a person.
+        optional: true
+        default: false
+      name:
+        type: string
+        description: Company name, when is_organization is true.
+        optional: true
+      first_name:
+        type: string
+        description: First name, for a person.
+        optional: true
+      last_name:
+        type: string
+        description: Last name, for a person.
+        optional: true
+      email:
+        type: string
+        description: Email address.
+        optional: true
+        format: email
+      phone:
+        type: string
+        description: Phone number.
+        optional: true
+      title:
+        type: string
+        description: Job title.
+        optional: true
+      parent_contact_id:
+        type: integer
+        description: Company contact id this person works for.
+        optional: true
+      owner_id:
+        type: integer
+        description: Sell user who owns the record.
+        optional: true
+      description:
+        type: string
+        description: Free-text note.
+        optional: true
+      tags:
+        type: array
+        description: Tags to apply.
+        optional: true
+        items: {type: string}
+      custom_fields:
+        type: object
+        description: Custom field values keyed by field name.
+        optional: true
+    output:
+      description: The created contact.
+      type: object
+      response_path: data
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        created_at: {type: string}
+
+  update_contact:
+    title: Update a contact
+    description: Change a contact's details. Only what is supplied is written.
+    category: contacts
+    request:
+      method: PUT
+      path: /v2/contacts/${contact_id}
+      body:
+        data:
+          first_name: "${first_name}"
+          last_name: "${last_name}"
+          name: "${name}"
+          email: "${email}"
+          phone: "${phone}"
+          title: "${title}"
+          owner_id: "${owner_id}"
+          description: "${description}"
+          tags: "${tags}"
+          custom_fields: "${custom_fields}"
+    input:
+      contact_id:
+        type: integer
+        description: The contact's numeric id.
+      first_name:
+        type: string
+        description: New first name.
+        optional: true
+      last_name:
+        type: string
+        description: New last name.
+        optional: true
+      name:
+        type: string
+        description: New company name.
+        optional: true
+      email:
+        type: string
+        description: New email address.
+        optional: true
+        format: email
+      phone:
+        type: string
+        description: New phone number.
+        optional: true
+      title:
+        type: string
+        description: New job title.
+        optional: true
+      owner_id:
+        type: integer
+        description: New owner's user id.
+        optional: true
+      description:
+        type: string
+        description: New note.
+        optional: true
+      tags:
+        type: array
+        description: Replaces the tag set entirely.
+        optional: true
+        items: {type: string}
+      custom_fields:
+        type: object
+        description: Custom field values to write.
+        optional: true
+    output:
+      description: The updated contact.
+      type: object
+      response_path: data
+      properties:
+        id: {type: integer}
+        updated_at: {type: string}
+
+  list_deals:
+    title: List deals
+    description: >-
+      Page through deals, optionally filtered by stage, owner or contact — the
+      way to read a Sell pipeline.
+    category: deals
+    read_only: true
+    request:
+      method: GET
+      path: /v2/deals
+      query:
+        page: "${page}"
+        per_page: "${per_page}"
+        stage_id: "${stage_id}"
+        owner_id: "${owner_id}"
+        contact_id: "${contact_id}"
+        hot: "${hot}"
+        sort_by: "${sort_by}"
+    input:
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      per_page:
+        type: integer
+        description: How many deals per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      stage_id:
+        type: integer
+        description: Only deals at this stage.
+        optional: true
+      owner_id:
+        type: integer
+        description: Only deals owned by this user.
+        optional: true
+      contact_id:
+        type: integer
+        description: Only deals with this contact.
+        optional: true
+      hot:
+        type: boolean
+        description: Only deals flagged hot.
+        optional: true
+      sort_by:
+        type: string
+        description: Sort order, e.g. "value:desc".
+        optional: true
+    output:
+      description: A page of deals.
+      type: array
+      response_path: items
+      items:
+        type: object
+        properties:
+          data: {type: object, description: "Holds id, name, value and stage_id."}
+
+  create_deal:
+    title: Create a deal
+    description: >-
+      Open a deal against a contact. `value` is a decimal string in the deal's
+      currency; stage ids come from list_stages.
+    category: deals
+    request:
+      method: POST
+      path: /v2/deals
+      body:
+        data:
+          name: "${name}"
+          contact_id: "${contact_id}"
+          value: "${value}"
+          currency: "${currency}"
+          stage_id: "${stage_id}"
+          owner_id: "${owner_id}"
+          hot: "${hot}"
+          estimated_close_date: "${estimated_close_date}"
+          tags: "${tags}"
+          custom_fields: "${custom_fields}"
+    input:
+      name:
+        type: string
+        description: What the deal is called.
+      contact_id:
+        type: integer
+        description: Contact the deal is with.
+      value:
+        type: string
+        description: Deal value as a decimal string, e.g. "5000.00".
+        optional: true
+      currency:
+        type: string
+        description: Three-letter currency code.
+        optional: true
+      stage_id:
+        type: integer
+        description: Pipeline stage to place it in.
+        optional: true
+      owner_id:
+        type: integer
+        description: Sell user who owns the deal.
+        optional: true
+      hot:
+        type: boolean
+        description: Flag it as a hot deal.
+        optional: true
+      estimated_close_date:
+        type: string
+        description: Expected close date as YYYY-MM-DD.
+        optional: true
+      tags:
+        type: array
+        description: Tags to apply.
+        optional: true
+        items: {type: string}
+      custom_fields:
+        type: object
+        description: Custom field values keyed by field name.
+        optional: true
+    output:
+      description: The created deal.
+      type: object
+      response_path: data
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        stage_id: {type: integer}
+
+  update_deal:
+    title: Update a deal
+    description: >-
+      Change a deal — move its stage, adjust its value, or reassign it. Won and
+      lost are stages, so closing a deal means moving it.
+    category: deals
+    request:
+      method: PUT
+      path: /v2/deals/${deal_id}
+      body:
+        data:
+          name: "${name}"
+          value: "${value}"
+          stage_id: "${stage_id}"
+          owner_id: "${owner_id}"
+          hot: "${hot}"
+          estimated_close_date: "${estimated_close_date}"
+          tags: "${tags}"
+    input:
+      deal_id:
+        type: integer
+        description: The deal's numeric id.
+      name:
+        type: string
+        description: New name.
+        optional: true
+      value:
+        type: string
+        description: New value as a decimal string.
+        optional: true
+      stage_id:
+        type: integer
+        description: Stage to move it to.
+        optional: true
+      owner_id:
+        type: integer
+        description: New owner's user id.
+        optional: true
+      hot:
+        type: boolean
+        description: Flag or unflag it as hot.
+        optional: true
+      estimated_close_date:
+        type: string
+        description: New expected close date as YYYY-MM-DD.
+        optional: true
+      tags:
+        type: array
+        description: Replaces the tag set entirely.
+        optional: true
+        items: {type: string}
+    output:
+      description: The updated deal.
+      type: object
+      response_path: data
+      properties:
+        id: {type: integer}
+        stage_id: {type: integer}
+
+  list_leads:
+    title: List leads
+    description: >-
+      Page through leads — people not yet converted into contacts and deals.
+    category: leads
+    read_only: true
+    request:
+      method: GET
+      path: /v2/leads
+      query:
+        page: "${page}"
+        per_page: "${per_page}"
+        email: "${email}"
+        owner_id: "${owner_id}"
+        status: "${status}"
+        sort_by: "${sort_by}"
+    input:
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      per_page:
+        type: integer
+        description: How many leads per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      email:
+        type: string
+        description: Only the lead with this email address.
+        optional: true
+        format: email
+      owner_id:
+        type: integer
+        description: Only leads owned by this user.
+        optional: true
+      status:
+        type: string
+        description: Only leads with this status.
+        optional: true
+      sort_by:
+        type: string
+        description: Sort order, e.g. "created_at:desc".
+        optional: true
+    output:
+      description: A page of leads.
+      type: array
+      response_path: items
+      items: {type: object}
+
+  create_lead:
+    title: Create a lead
+    description: >-
+      Add a lead. Sell requires either last_name for a person or
+      organization_name for a company.
+    category: leads
+    request:
+      method: POST
+      path: /v2/leads
+      body:
+        data:
+          first_name: "${first_name}"
+          last_name: "${last_name}"
+          organization_name: "${organization_name}"
+          email: "${email}"
+          phone: "${phone}"
+          title: "${title}"
+          status: "${status}"
+          source_id: "${source_id}"
+          owner_id: "${owner_id}"
+          description: "${description}"
+          tags: "${tags}"
+    input:
+      last_name:
+        type: string
+        description: Last name. Required unless organization_name is given.
+        optional: true
+      organization_name:
+        type: string
+        description: Company name. Required unless last_name is given.
+        optional: true
+      first_name:
+        type: string
+        description: First name.
+        optional: true
+      email:
+        type: string
+        description: Email address.
+        optional: true
+        format: email
+      phone:
+        type: string
+        description: Phone number.
+        optional: true
+      title:
+        type: string
+        description: Job title.
+        optional: true
+      status:
+        type: string
+        description: Lead status, e.g. "New" or "Working".
+        optional: true
+      source_id:
+        type: integer
+        description: Where the lead came from.
+        optional: true
+      owner_id:
+        type: integer
+        description: Sell user who owns the lead.
+        optional: true
+      description:
+        type: string
+        description: Free-text note.
+        optional: true
+      tags:
+        type: array
+        description: Tags to apply.
+        optional: true
+        items: {type: string}
+    output:
+      description: The created lead.
+      type: object
+      response_path: data
+      properties:
+        id: {type: integer}
+        status: {type: string}
+
+  create_note:
+    title: Add a note to a record
+    description: >-
+      Attach a note to a lead, contact or deal, naming which through
+      resource_type.
+    category: notes
+    request:
+      method: POST
+      path: /v2/notes
+      body:
+        data:
+          content: "${content}"
+          resource_type: "${resource_type}"
+          resource_id: "${resource_id}"
+    input:
+      content:
+        type: string
+        description: The note text.
+      resource_type:
+        type: string
+        description: What kind of record the note is on.
+        enum: [lead, contact, deal]
+      resource_id:
+        type: integer
+        description: Id of the record to annotate.
+    output:
+      description: The created note.
+      type: object
+      response_path: data
+      properties:
+        id: {type: integer}
+        content: {type: string}
+        created_at: {type: string}
+
+  create_task:
+    title: Create a task
+    description: Create a follow-up task, optionally attached to a lead, contact or deal.
+    category: tasks
+    request:
+      method: POST
+      path: /v2/tasks
+      body:
+        data:
+          content: "${content}"
+          due_date: "${due_date}"
+          owner_id: "${owner_id}"
+          resource_type: "${resource_type}"
+          resource_id: "${resource_id}"
+          completed: "${completed}"
+    input:
+      content:
+        type: string
+        description: What needs doing.
+      due_date:
+        type: string
+        description: Due date and time, ISO 8601.
+        optional: true
+      owner_id:
+        type: integer
+        description: Sell user the task is for.
+        optional: true
+      resource_type:
+        type: string
+        description: What kind of record the task is about.
+        optional: true
+        enum: [lead, contact, deal]
+      resource_id:
+        type: integer
+        description: Id of that record.
+        optional: true
+      completed:
+        type: boolean
+        description: Create it already done.
+        optional: true
+    output:
+      description: The created task.
+      type: object
+      response_path: data
+      properties:
+        id: {type: integer}
+        content: {type: string}
+        due_date: {type: string}
+
+  list_stages:
+    title: List pipeline stages
+    description: >-
+      List the stages deals move through, with the ids the deal tools take.
+    category: metadata
+    read_only: true
+    request:
+      method: GET
+      path: /v2/stages
+      query:
+        page: "${page}"
+        per_page: "${per_page}"
+    input:
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      per_page:
+        type: integer
+        description: How many stages per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+    output:
+      description: The account's pipeline stages.
+      type: array
+      response_path: items
+      items: {type: object}
+
+  get_current_user:
+    title: Get the authenticated user
+    description: >-
+      Read the Sell user the token belongs to. The cheapest health check for the
+      connection.
+    category: metadata
+    read_only: true
+    request:
+      method: GET
+      path: /v2/users/self
+    input: {}
+    output:
+      description: The authenticated user.
+      type: object
+      response_path: data
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        email: {type: string}
+        role: {type: string}

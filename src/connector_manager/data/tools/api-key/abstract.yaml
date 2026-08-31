@@ -1,0 +1,61 @@
+# Abstract email validation tools.
+#
+# Abstract sells a family of APIs, each on its own hostname with its own key.
+# This connector is wired to the email validation one -- its base url is
+# emailvalidation.abstractapi.com and the key is sent as the api_key query
+# parameter -- so that is the whole surface: a single GET.
+#
+# The other Abstract products (phone validation, IP geolocation, VAT, company
+# enrichment) live on different hosts and need their own keys, so they are not
+# reachable through this connection.
+#
+# Docs: https://docs.abstractapi.com/api/email-validation
+
+connector_id: abstract
+display_name: Abstract
+docs_url: https://docs.abstractapi.com/api/email-validation
+
+tools:
+
+  validate_email:
+    title: Validate an email address
+    description: >-
+      Check whether an address can actually receive mail. Answers with a
+      deliverability verdict, a quality score, and the checks behind it --
+      format, MX records, SMTP, and whether the address is free, disposable,
+      role-based or on a catch-all domain. Typos come back as a suggested
+      correction.
+    category: verification
+    read_only: true
+    request:
+      method: GET
+      path: /v1/
+      query:
+        email: "${email}"
+        auto_correct: "${auto_correct}"
+    input:
+      email:
+        type: string
+        description: The address to validate.
+        example: john@acme.com
+      auto_correct:
+        type: boolean
+        description: >-
+          Whether to suggest a correction for a likely typo, such as
+          gmial.com for gmail.com. On unless you turn it off.
+        optional: true
+    output:
+      description: The verdict and the checks behind it.
+      type: object
+      properties:
+        email: {type: string}
+        autocorrect: {type: string}
+        deliverability: {type: string}
+        quality_score: {type: string}
+        is_valid_format: {type: object}
+        is_free_email: {type: object}
+        is_disposable_email: {type: object}
+        is_role_email: {type: object}
+        is_catchall_email: {type: object}
+        is_mx_found: {type: object}
+        is_smtp_valid: {type: object}

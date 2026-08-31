@@ -1,9 +1,14 @@
-"""CLI for exploring the catalogue and creating connections.
+"""CLI for exploring the catalogue, creating connections and running tools.
 
     python -m connector_manager list --search slack
     python -m connector_manager show affinity-v2
     python -m connector_manager connect affinity-v2 -c apiKey=... -o conn.json
     python -m connector_manager request conn.json GET /v2/persons
+
+    python -m connector_manager tools outlook
+    python -m connector_manager tool outlook send_email
+    python -m connector_manager check-tools conn.json --live
+    python -m connector_manager call conn.json send_email -a to:='["a@b.com"]' -a subject=Hi
 """
 
 from __future__ import annotations
@@ -87,6 +92,40 @@ def _kv(pairs: Sequence[str] | None) -> dict[str, str]:
             raise SystemExit(f"expected key=value, got '{pair}'")
         out[key.strip()] = value
     return out
+
+
+def _args(pairs: Sequence[str] | None) -> dict[str, Any]:
+    """Tool arguments from the command line, typed where asked.
+
+    ``-a subject=Hello`` is the string "Hello"; ``-a to:='["a@b.com"]'`` parses
+    the value as JSON, which is how lists, objects, numbers and booleans get in.
+    """
+    out: dict[str, Any] = {}
+    for pair in pairs or []:
+        key, sep, value = pair.partition(":=")
+        if sep:
+            try:
+                out[key.strip()] = json.loads(value)
+            except ValueError as err:
+                raise SystemExit(f"invalid JSON for '{key.strip()}': {err}") from None
+            continue
+        key, sep, value = pair.partition("=")
+        if not sep:
+            raise SystemExit(f"expected key=value or key:=<json>, got '{pair}'")
+        out[key.strip()] = value
+    return out
+
+
+def _tool_row(tool) -> str:
+    marks = ",".join(filter(None, ["read-only" if tool.read_only else "", "destructive" if tool.destructive else ""]))
+    scopes = " ".join(tool.scopes) or (" | ".join(tool.scopes_any) if tool.scopes_any else "-")
+    return f"{tool.name:<38} {tool.request.method:<7} {scopes:<45} {marks}"
+
+
+def _status_row(status) -> str:
+    mark = {"enabled": "+", "disabled": "-", "unknown": "?"}[status.availability.value]
+    detail = f"needs {', '.join(status.missing_scopes)}" if status.missing_scopes else status.tool.title
+    return f" {mark} {status.tool.name:<38} {detail}"
 
 
 def _dump(value: Any, *, redact: bool = False) -> None:
@@ -208,6 +247,45 @@ def build_parser() -> argparse.ArgumentParser:
         action.add_argument("-o", "--output")
         _add_show_secrets(action)
 
+    tools = sub.add_parser("tools", help="list the tools a connector has")
+    tools.add_argument("connector_id")
+    tools.add_argument("--search", help="only tools whose name or description mentions this")
+    tools.add_argument("--category", help="only tools in this category")
+    tools.add_argument(
+        "--format",
+        choices=["anthropic", "openai", "mcp"],
+        help="emit LLM tool definitions in this format instead of a listing",
+    )
+    tools.add_argument("--json", action="store_true")
+
+    tool = sub.add_parser("tool", help="show one tool: what it takes and what it returns")
+    tool.add_argument("connector_id")
+    tool.add_argument("name")
+    tool.add_argument("--json", action="store_true")
+
+    check_tools = sub.add_parser(
+        "check-tools", help="which of a connector's tools a stored connection may call"
+    )
+    check_tools.add_argument("connection_file")
+    check_tools.add_argument(
+        "--live", action="store_true", help="ask the provider which scopes the credential really holds"
+    )
+    check_tools.add_argument("--scope", action="append", help="judge against these scopes instead")
+    check_tools.add_argument("--json", action="store_true")
+
+    call = sub.add_parser("call", help="run one of a connector's tools")
+    call.add_argument("connection_file")
+    call.add_argument("name")
+    call.add_argument(
+        "-a", "--arg", action="append", metavar="KEY=VALUE",
+        help="tool argument; use KEY:=<json> for lists, objects, numbers and booleans",
+    )
+    call.add_argument("--dry-run", action="store_true", help="print the prepared request only")
+    call.add_argument(
+        "--no-scope-check", action="store_true", help="call even when the recorded grant rules it out"
+    )
+    _add_show_secrets(call)
+
     request = sub.add_parser("request", help="make an authenticated API call")
     request.add_argument("connection_file")
     request.add_argument("method")
@@ -303,9 +381,112 @@ def _run(manager: ConnectorManager, args: argparse.Namespace) -> int:
                 "connectors": len(manager),
                 "auth_modes": manager.auth_modes(),
                 "categories": manager.categories(),
+                "tools": manager.tool_stats(),
             }
         )
         return 0
+
+    if args.command == "tools":
+        pack = manager.tool_pack(args.connector_id)
+        needle = (args.search or "").strip().lower()
+        listing = [
+            t for t in pack.tools.values()
+            if (not needle or needle in f"{t.name} {t.title} {t.description} {t.category}".lower())
+            and (not args.category or t.category == args.category)
+        ]
+        if args.format:
+            _dump([t.spec(format=args.format) for t in listing])
+            return 0
+        if args.json:
+            _dump({**pack.to_dict(), "tools": [t.to_dict() for t in listing]})
+            return 0
+        print(f"{pack.display_name}  [{pack.connector_id}]  {len(listing)} tool(s)")
+        if pack.generated:
+            print(
+                "  note        : generated from this connector's own verification endpoint; "
+                "no hand-authored tool pack yet"
+            )
+        if pack.applies_to:
+            print(f"  also serves : {', '.join(pack.applies_to)}")
+        if pack.docs_url:
+            print(f"  docs        : {pack.docs_url}")
+        print(f"  scopes      : {' '.join(pack.scopes()) or '-'}")
+        current = None
+        for tool in sorted(listing, key=lambda t: (t.category, t.name)):
+            if tool.category != current:
+                current = tool.category
+                print(f"\n  [{current}]")
+            print(f"  {_tool_row(tool)}")
+        return 0
+
+    if args.command == "tool":
+        tool = manager.get_tool(args.connector_id, args.name)
+        if args.json:
+            _dump(tool.to_dict())
+            return 0
+        print(f"{tool.title}  [{tool.qualified_name}]")
+        print(f"  {tool.description}")
+        print(f"  call        : {tool.request.method} {tool.request.path}")
+        print(f"  category    : {tool.category}")
+        print(f"  scopes      : {' '.join(tool.scopes) or '-'}")
+        if tool.scopes_any:
+            print(f"  any one of  : {' | '.join(tool.scopes_any)}")
+        print(f"  read-only   : {tool.read_only}    destructive: {tool.destructive}")
+        if tool.notes:
+            print(f"  note        : {tool.notes}")
+        print("  arguments:")
+        for param in tool.input:
+            marks = ",".join(filter(None, [
+                "required" if param.required else "optional",
+                f"default={param.default!r}" if param.default is not None else "",
+            ]))
+            print(f"    - {param.name} ({param.type}, {marks})")
+            print(f"        {param.description}")
+            if param.enum:
+                print(f"        one of: {', '.join(str(e) for e in param.enum)}")
+            if param.example is not None:
+                print(f"        e.g. {param.example}")
+        print(f"  returns     : {tool.output.description}")
+        if tool.docs_url:
+            print(f"  docs        : {tool.docs_url}")
+        return 0
+
+    if args.command == "check-tools":
+        connection = _load_connection(args.connection_file)
+        if args.live:
+            report = manager.check_tools_live(connection)
+        else:
+            report = manager.check_tools(connection, granted_scopes=args.scope or None)
+        if args.json:
+            _dump(report.to_dict())
+            return 0
+        print(report.summary())
+        if report.granted_scopes is not None:
+            print(f"granted: {' '.join(report.granted_scopes) or '(none)'}")
+        for status in report.statuses:
+            print(_status_row(status))
+        missing = report.missing_scopes()
+        if missing:
+            print(f"\nrequest these scopes to unlock the rest: {' '.join(missing)}", file=sys.stderr)
+        return 0
+
+    if args.command == "call":
+        connection = _load_connection(args.connection_file)
+        arguments = _args(args.arg)
+        if args.dry_run:
+            _dump(
+                manager.prepare_tool_request(connection, args.name, arguments).to_dict(),
+                redact=not args.show_secrets,
+            )
+            return 0
+        result = manager.call_tool(
+            connection, args.name, arguments, enforce_scopes=not args.no_scope_check
+        )
+        print(f"HTTP {result.status}", file=sys.stderr)
+        _dump(result.data)
+        if result.error:
+            print(result.error, file=sys.stderr)
+        return 0 if result.ok else 2
 
     if args.command == "connect":
         connection = manager.connect(

@@ -1,0 +1,257 @@
+# Microsoft People tools (Microsoft Graph).
+#
+# "People" is Graph's relevance-ranked view of who a user works with, drawn from
+# their mail, meetings and the directory — distinct from their saved Outlook
+# contacts and from the raw directory listing.
+#
+# Docs: https://learn.microsoft.com/graph/api/resources/social-overview
+
+connector_id: microsoft-people
+display_name: Microsoft People
+docs_url: https://learn.microsoft.com/graph/api/resources/social-overview
+
+scope_rules:
+  case_insensitive: true
+  implies:
+    People.Read.All: [People.Read]
+    User.Read.All: [User.ReadBasic.All, User.Read]
+    Contacts.ReadWrite: [Contacts.Read]
+
+scope_discovery:
+  jwt_claim: scp
+
+tools:
+
+  list_relevant_people:
+    title: List the people I work with
+    description: >-
+      List the people most relevant to the signed-in user, ranked by how much
+      they interact. The best way to resolve "email Bob" to an address without
+      searching the whole directory.
+    category: people
+    scopes: [People.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/people
+      query:
+        $top: "${limit}"
+        $select: "${select}"
+        $filter: "${filter}"
+    input:
+      limit:
+        type: integer
+        description: How many people to return.
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 999
+      select:
+        type: array
+        description: Fields to return, e.g. ["displayName","scoredEmailAddresses"].
+        optional: true
+        items: {type: string}
+      filter:
+        type: string
+        description: OData $filter, e.g. "personType/class eq 'Person'".
+        optional: true
+    output:
+      description: Relevant people, most relevant first.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          displayName: {type: string}
+          scoredEmailAddresses: {type: array}
+          jobTitle: {type: string}
+          companyName: {type: string}
+
+  search_people:
+    title: Search people by name
+    description: >-
+      Search the signed-in user's relevant people by name, alias or email, which
+      matches colleagues and recent correspondents before the wider directory.
+    category: people
+    scopes: [People.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/people
+      query:
+        $search: '"${query}"'
+        $top: "${limit}"
+        $select: "${select}"
+    input:
+      query:
+        type: string
+        description: Name, alias or email fragment to match.
+        example: ada
+      limit:
+        type: integer
+        description: How many people to return.
+        optional: true
+        default: 10
+        minimum: 1
+        maximum: 999
+      select:
+        type: array
+        description: Fields to return.
+        optional: true
+        items: {type: string}
+    output:
+      description: Matching people, most relevant first.
+      type: array
+      response_path: value
+      items: {type: object}
+
+  find_directory_user:
+    title: Find someone in the directory
+    description: >-
+      Search the whole organisation's directory by display name or mail, for
+      people the signed-in user has never interacted with.
+    category: directory
+    scopes_any: [User.ReadBasic.All, User.Read.All]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/users
+      query:
+        $search: '"displayName:${query}" OR "mail:${query}"'
+        $top: "${limit}"
+        $select: "${select}"
+      headers:
+        ConsistencyLevel: eventual
+    input:
+      query:
+        type: string
+        description: Name or email fragment to match.
+      limit:
+        type: integer
+        description: How many users to return.
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 999
+      select:
+        type: array
+        description: Fields to return, e.g. ["id","displayName","mail","jobTitle"].
+        optional: true
+        items: {type: string}
+    output:
+      description: Matching directory users.
+      type: array
+      response_path: value
+      items: {type: object}
+
+  get_person_profile:
+    title: Get someone's profile
+    description: >-
+      Read a colleague's directory profile — job title, department, office,
+      phone and manager chain position.
+    category: directory
+    scopes_any: [User.ReadBasic.All, User.Read.All]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/users/${user_id}
+      query:
+        $select: "${select}"
+    input:
+      user_id:
+        type: string
+        description: Object id or userPrincipalName.
+      select:
+        type: array
+        description: Fields to return.
+        optional: true
+        items: {type: string}
+    output:
+      description: The person's directory profile.
+      type: object
+      properties:
+        id: {type: string}
+        displayName: {type: string}
+        mail: {type: string}
+        jobTitle: {type: string}
+        department: {type: string}
+        officeLocation: {type: string}
+
+  get_person_photo:
+    title: Get someone's photo
+    description: >-
+      Fetch a person's profile picture as image bytes. Graph answers 404 when
+      they have not set one.
+    category: directory
+    scopes_any: [User.ReadBasic.All, User.Read.All]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/users/${user_id}/photo/$value
+    input:
+      user_id:
+        type: string
+        description: Object id or userPrincipalName.
+    output:
+      description: The photo's raw bytes.
+      type: string
+
+  list_my_contacts:
+    title: List my saved contacts
+    description: >-
+      List the signed-in user's own Outlook contacts, as distinct from the
+      relevance-ranked people list.
+    category: contacts
+    scopes: [Contacts.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/contacts
+      query:
+        $top: "${limit}"
+        $filter: "${filter}"
+        $select: "${select}"
+    input:
+      limit:
+        type: integer
+        description: How many contacts to return.
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 999
+      filter:
+        type: string
+        description: OData $filter expression.
+        optional: true
+      select:
+        type: array
+        description: Fields to return.
+        optional: true
+        items: {type: string}
+    output:
+      description: The user's saved contacts.
+      type: array
+      response_path: value
+      items: {type: object}
+
+  get_my_profile:
+    title: Get the signed-in user
+    description: >-
+      Read the account the token belongs to. The cheapest health check for this
+      connection.
+    category: directory
+    scopes_any: [User.Read, User.ReadBasic.All]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me
+    input: {}
+    output:
+      description: The signed-in user.
+      type: object
+      properties:
+        id: {type: string}
+        displayName: {type: string}
+        mail: {type: string}
+        jobTitle: {type: string}

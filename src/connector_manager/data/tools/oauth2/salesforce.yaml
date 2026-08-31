@@ -1,0 +1,359 @@
+# Salesforce tools.
+#
+# Every path is relative to the org's instance_url, which the connection carries
+# and the base url resolves from. The API version is pinned in each path.
+#
+# Salesforce's OAuth scopes are coarse -- `api` covers the whole REST surface --
+# so what actually limits a token is the user's profile, object permissions and
+# field-level security. A tool reported as enabled can still be refused per
+# object.
+#
+# Docs: https://developer.salesforce.com/docs/atlas.en-us.api_rest.meta/api_rest/
+
+connector_id: salesforce
+display_name: Salesforce
+docs_url: https://developer.salesforce.com/docs/atlas.en-us.api_rest.meta/api_rest/
+
+applies_to:
+  - salesforce-sandbox
+  - salesforce-experience-cloud
+
+scope_rules:
+  implies:
+    full: [api, chatter_api, id, web, refresh_token]
+
+tools:
+
+  soql_query:
+    title: Run a SOQL query
+    description: >-
+      Run a SOQL query, e.g. "SELECT Id, Name, Email FROM Contact WHERE
+      CreatedDate = LAST_N_DAYS:30 LIMIT 50". The main way to read data out of
+      Salesforce; fields must be named explicitly, there is no SELECT *.
+    category: query
+    scopes: [api]
+    read_only: true
+    request:
+      method: GET
+      path: /services/data/v60.0/query
+      query:
+        q: "${query}"
+    input:
+      query:
+        type: string
+        description: The SOQL query.
+        example: SELECT Id, Name FROM Account LIMIT 10
+    output:
+      description: The query results.
+      type: object
+      properties:
+        totalSize: {type: integer}
+        done: {type: boolean}
+        records: {type: array}
+        nextRecordsUrl: {type: string, description: "Pass to query_more for the next batch."}
+
+  query_more:
+    title: Get the next batch of query results
+    description: >-
+      Continue a SOQL query that came back with done false, using the
+      nextRecordsUrl it returned.
+    category: query
+    scopes: [api]
+    read_only: true
+    request:
+      method: GET
+      path: /services/data/v60.0/query/${locator}
+    input:
+      locator:
+        type: string
+        description: The last path segment of nextRecordsUrl, e.g. 01g5000000abcdeAAA-2000.
+    output:
+      description: The next batch of records.
+      type: object
+      properties:
+        totalSize: {type: integer}
+        done: {type: boolean}
+        records: {type: array}
+
+  search_records:
+    title: Search across objects with SOSL
+    description: >-
+      Run a SOSL search across several objects at once, e.g.
+      "FIND {Acme} IN ALL FIELDS RETURNING Account(Id, Name), Contact(Id, Email)".
+      Use this for free-text lookup where SOQL needs a field.
+    category: query
+    scopes: [api]
+    read_only: true
+    request:
+      method: GET
+      path: /services/data/v60.0/search
+      query:
+        q: "${search}"
+    input:
+      search:
+        type: string
+        description: The SOSL search string.
+        example: FIND {Acme} IN ALL FIELDS RETURNING Account(Id, Name)
+    output:
+      description: The matching records, grouped by object.
+      type: object
+      properties:
+        searchRecords: {type: array}
+
+  get_record:
+    title: Get a record
+    description: >-
+      Read one record by object and id, optionally only the fields named. Works
+      for standard and custom objects alike.
+    category: records
+    scopes: [api]
+    read_only: true
+    request:
+      method: GET
+      path: /services/data/v60.0/sobjects/${object}/${record_id}
+      query:
+        fields: "${fields}"
+    input:
+      object:
+        type: string
+        description: API name of the object, e.g. Account, Contact, Opportunity, MyThing__c.
+        example: Account
+      record_id:
+        type: string
+        description: The record's 15 or 18 character id.
+      fields:
+        type: array
+        description: Only return these fields. Omit for everything the user can see.
+        optional: true
+        items: {type: string}
+    output:
+      description: The record.
+      type: object
+      properties:
+        Id: {type: string}
+        attributes: {type: object}
+
+  create_record:
+    title: Create a record
+    description: >-
+      Create a record of any object. Fields are keyed by API name, e.g.
+      {"LastName": "Lovelace", "Email": "ada@example.com"} for a Contact.
+    category: records
+    scopes: [api]
+    request:
+      method: POST
+      path: /services/data/v60.0/sobjects/${object}
+      body: "${fields}"
+    input:
+      object:
+        type: string
+        description: API name of the object to create.
+      fields:
+        type: object
+        description: Field API name to value.
+    output:
+      description: The created record's id.
+      type: object
+      properties:
+        id: {type: string}
+        success: {type: boolean}
+        errors: {type: array}
+
+  update_record:
+    title: Update a record
+    description: >-
+      Change fields on an existing record. Only the fields supplied are written;
+      Salesforce answers with no body on success.
+    category: records
+    scopes: [api]
+    request:
+      method: PATCH
+      path: /services/data/v60.0/sobjects/${object}/${record_id}
+      body: "${fields}"
+    input:
+      object:
+        type: string
+        description: API name of the object.
+      record_id:
+        type: string
+        description: The record's id.
+      fields:
+        type: object
+        description: Field API name to new value.
+    output:
+      description: Empty on success -- Salesforce answers 204 No Content.
+      type: object
+
+  upsert_record:
+    title: Create or update a record by an external id
+    description: >-
+      Match on an external id field, updating the record if it exists and
+      creating it if not -- the idempotent way to sync records in from another
+      system.
+    category: records
+    scopes: [api]
+    request:
+      method: PATCH
+      path: /services/data/v60.0/sobjects/${object}/${external_id_field}/${external_id}
+      body: "${fields}"
+    input:
+      object:
+        type: string
+        description: API name of the object.
+      external_id_field:
+        type: string
+        description: API name of the external id field, e.g. External_Id__c.
+      external_id:
+        type: string
+        description: The external id value to match on.
+      fields:
+        type: object
+        description: Field API name to value.
+    output:
+      description: What happened to the record.
+      type: object
+      properties:
+        id: {type: string}
+        success: {type: boolean}
+        created: {type: boolean}
+
+  delete_record:
+    title: Delete a record
+    description: >-
+      Move a record to the org's recycle bin, where it stays for 15 days. This
+      tool cannot restore it.
+    category: records
+    scopes: [api]
+    destructive: true
+    request:
+      method: DELETE
+      path: /services/data/v60.0/sobjects/${object}/${record_id}
+    input:
+      object:
+        type: string
+        description: API name of the object.
+      record_id:
+        type: string
+        description: The record's id.
+    output:
+      description: Empty on success -- Salesforce answers 204 No Content.
+      type: object
+
+  describe_object:
+    title: Describe an object's fields
+    description: >-
+      Read an object's field definitions -- API names, types, picklist values,
+      whether each is required, createable and updateable. Read this before
+      writing fields you did not name yourself.
+    category: schema
+    scopes: [api]
+    read_only: true
+    request:
+      method: GET
+      path: /services/data/v60.0/sobjects/${object}/describe
+    input:
+      object:
+        type: string
+        description: API name of the object.
+    output:
+      description: The object's metadata.
+      type: object
+      properties:
+        name: {type: string}
+        label: {type: string}
+        fields: {type: array, description: "Each with name, label, type and picklistValues."}
+
+  list_objects:
+    title: List the org's objects
+    description: >-
+      List every object in the org, standard and custom, with its API name and
+      label -- how to discover what is available to query.
+    category: schema
+    scopes: [api]
+    read_only: true
+    request:
+      method: GET
+      path: /services/data/v60.0/sobjects
+    input: {}
+    output:
+      description: The org's objects.
+      type: object
+      properties:
+        sobjects: {type: array, description: "Each with name, label, queryable and createable."}
+
+  create_records_bulk:
+    title: Create up to 200 records at once
+    description: >-
+      Create many records in a single composite call, which is far cheaper
+      against the API limits than a loop. all_or_none decides whether one bad
+      record rolls the whole batch back.
+    category: records
+    scopes: [api]
+    request:
+      method: POST
+      path: /services/data/v60.0/composite/sobjects
+      body:
+        allOrNone: "${all_or_none}"
+        records: "${records}"
+    input:
+      records:
+        type: array
+        description: >-
+          Up to 200 records, each with an attributes block naming the object,
+          e.g. {"attributes": {"type": "Contact"}, "LastName": "Lovelace"}.
+        max_length: 200
+        items: {type: object}
+      all_or_none:
+        type: boolean
+        description: Roll the whole batch back if any record fails.
+        optional: true
+        default: false
+    output:
+      description: One result per record.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          success: {type: boolean}
+          errors: {type: array}
+
+  get_user_info:
+    title: Get the authenticated user
+    description: >-
+      Read the Salesforce user the token belongs to, with their org id, username
+      and profile. The cheapest health check for a Salesforce connection.
+    category: identity
+    scopes_any: [id, api]
+    read_only: true
+    request:
+      method: GET
+      path: /services/oauth2/userinfo
+    input: {}
+    output:
+      description: The authenticated user.
+      type: object
+      properties:
+        user_id: {type: string}
+        organization_id: {type: string}
+        preferred_username: {type: string}
+        email: {type: string}
+
+  get_org_limits:
+    title: Get the org's API limits
+    description: >-
+      Read the org's remaining daily API calls and other governor limits --
+      worth checking before a large batch of writes.
+    category: identity
+    scopes: [api]
+    read_only: true
+    request:
+      method: GET
+      path: /services/data/v60.0/limits
+    input: {}
+    output:
+      description: The org's limits, each with Max and Remaining.
+      type: object
+      properties:
+        DailyApiRequests: {type: object}
+        DataStorageMB: {type: object}

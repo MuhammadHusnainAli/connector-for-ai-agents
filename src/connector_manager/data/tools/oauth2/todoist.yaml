@@ -1,0 +1,428 @@
+# Todoist tools.
+#
+# Due dates can be given either as an explicit date/datetime or as plain English
+# in `due_string` ("tomorrow at 9am", "every Monday"), which Todoist parses.
+#
+# Docs: https://developer.todoist.com/rest/v2/
+
+connector_id: todoist
+display_name: Todoist
+docs_url: https://developer.todoist.com/rest/v2/
+
+scope_rules:
+  implies:
+    data:read_write: ["data:read", "task:add"]
+    data:delete: ["data:read_write", "data:read", "task:add"]
+    data:read: []
+
+tools:
+
+  list_tasks:
+    title: List active tasks
+    description: >-
+      List open tasks, optionally narrowed to a project, section, label, or a
+      Todoist filter such as "today | overdue" or "@work & p1".
+    category: tasks
+    scopes_any: ["data:read", "data:read_write"]
+    read_only: true
+    request:
+      method: GET
+      path: /rest/v2/tasks
+      query:
+        project_id: "${project_id}"
+        section_id: "${section_id}"
+        label: "${label}"
+        filter: "${filter}"
+        ids: "${ids}"
+    input:
+      project_id:
+        type: string
+        description: Only tasks in this project.
+        optional: true
+      section_id:
+        type: string
+        description: Only tasks in this section.
+        optional: true
+      label:
+        type: string
+        description: Only tasks carrying this label.
+        optional: true
+      filter:
+        type: string
+        description: Todoist filter query, e.g. "today | overdue".
+        optional: true
+        example: today | overdue
+      ids:
+        type: array
+        description: Only these specific task ids.
+        optional: true
+        items: {type: string}
+    output:
+      description: The matching active tasks.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          content: {type: string}
+          project_id: {type: string}
+          due: {type: object}
+          priority: {type: integer}
+          url: {type: string}
+
+  get_task:
+    title: Get a task
+    description: Read one active task in full, including its due date and labels.
+    category: tasks
+    scopes_any: ["data:read", "data:read_write"]
+    read_only: true
+    request:
+      method: GET
+      path: /rest/v2/tasks/${task_id}
+    input:
+      task_id:
+        type: string
+        description: The task id.
+    output:
+      description: The task.
+      type: object
+      properties:
+        id: {type: string}
+        content: {type: string}
+        description: "{type: string}"
+        due: {type: object}
+        priority: {type: integer}
+
+  create_task:
+    title: Create a task
+    description: >-
+      Add a task. Priority runs 4 (urgent) down to 1 (normal) — the opposite of
+      the UI's p1-p4 labels. Give either due_string or due_date, not both.
+    category: tasks
+    scopes_any: ["task:add", "data:read_write"]
+    request:
+      method: POST
+      path: /rest/v2/tasks
+      body:
+        content: "${content}"
+        description: "${description}"
+        project_id: "${project_id}"
+        section_id: "${section_id}"
+        parent_id: "${parent_id}"
+        labels: "${labels}"
+        priority: "${priority}"
+        due_string: "${due_string}"
+        due_date: "${due_date}"
+        due_datetime: "${due_datetime}"
+        assignee_id: "${assignee_id}"
+    input:
+      content:
+        type: string
+        description: What the task is. Supports Todoist Markdown.
+      description:
+        type: string
+        description: Longer note under the task.
+        optional: true
+      project_id:
+        type: string
+        description: Project to add it to. Defaults to Inbox.
+        optional: true
+      section_id:
+        type: string
+        description: Section within the project.
+        optional: true
+      parent_id:
+        type: string
+        description: Make this a subtask of that task.
+        optional: true
+      labels:
+        type: array
+        description: Label names to apply.
+        optional: true
+        items: {type: string}
+      priority:
+        type: integer
+        description: "Priority: 4 urgent, 3 high, 2 medium, 1 normal."
+        optional: true
+        minimum: 1
+        maximum: 4
+      due_string:
+        type: string
+        description: Due date in plain English, e.g. "tomorrow at 9am" or "every Monday".
+        optional: true
+      due_date:
+        type: string
+        description: Due date as YYYY-MM-DD. Use instead of due_string, not with it.
+        optional: true
+      due_datetime:
+        type: string
+        description: Due date and time, RFC 3339 in UTC.
+        optional: true
+      assignee_id:
+        type: string
+        description: Collaborator id to assign it to, in a shared project.
+        optional: true
+    output:
+      description: The created task.
+      type: object
+      properties:
+        id: {type: string}
+        content: {type: string}
+        url: {type: string}
+
+  update_task:
+    title: Update a task
+    description: >-
+      Change a task's content, description, labels, priority or due date. Only
+      what is supplied is written.
+    category: tasks
+    scopes: ["data:read_write"]
+    request:
+      method: POST
+      path: /rest/v2/tasks/${task_id}
+      body:
+        content: "${content}"
+        description: "${description}"
+        labels: "${labels}"
+        priority: "${priority}"
+        due_string: "${due_string}"
+        due_date: "${due_date}"
+        assignee_id: "${assignee_id}"
+    input:
+      task_id:
+        type: string
+        description: The task id.
+      content:
+        type: string
+        description: New task text.
+        optional: true
+      description:
+        type: string
+        description: New note.
+        optional: true
+      labels:
+        type: array
+        description: Replaces the label set entirely.
+        optional: true
+        items: {type: string}
+      priority:
+        type: integer
+        description: "New priority: 4 urgent down to 1 normal."
+        optional: true
+        minimum: 1
+        maximum: 4
+      due_string:
+        type: string
+        description: New due date in plain English. "no date" clears it.
+        optional: true
+      due_date:
+        type: string
+        description: New due date as YYYY-MM-DD.
+        optional: true
+      assignee_id:
+        type: string
+        description: New assignee's collaborator id.
+        optional: true
+    output:
+      description: The updated task.
+      type: object
+      properties:
+        id: {type: string}
+        content: {type: string}
+        due: {type: object}
+
+  complete_task:
+    title: Complete a task
+    description: >-
+      Tick a task off. A recurring task rolls forward to its next occurrence
+      rather than disappearing.
+    category: tasks
+    scopes: ["data:read_write"]
+    request:
+      method: POST
+      path: /rest/v2/tasks/${task_id}/close
+      body: {}
+    input:
+      task_id:
+        type: string
+        description: The task to complete.
+    output:
+      description: Empty on success -- Todoist answers 204 No Content.
+      type: object
+
+  reopen_task:
+    title: Reopen a completed task
+    description: Bring a completed task back to the active list, in its original project.
+    category: tasks
+    scopes: ["data:read_write"]
+    request:
+      method: POST
+      path: /rest/v2/tasks/${task_id}/reopen
+      body: {}
+    input:
+      task_id:
+        type: string
+        description: The task to reopen.
+    output:
+      description: Empty on success -- Todoist answers 204 No Content.
+      type: object
+
+  delete_task:
+    title: Delete a task
+    description: Permanently delete a task and its subtasks. This cannot be undone.
+    category: tasks
+    scopes: ["data:delete"]
+    destructive: true
+    request:
+      method: DELETE
+      path: /rest/v2/tasks/${task_id}
+    input:
+      task_id:
+        type: string
+        description: The task to delete.
+    output:
+      description: Empty on success -- Todoist answers 204 No Content.
+      type: object
+
+  list_projects:
+    title: List projects
+    description: List the user's projects with the ids the task tools take.
+    category: projects
+    scopes_any: ["data:read", "data:read_write"]
+    read_only: true
+    request:
+      method: GET
+      path: /rest/v2/projects
+    input: {}
+    output:
+      description: The user's projects.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          name: {type: string}
+          is_inbox_project: {type: boolean}
+          url: {type: string}
+
+  create_project:
+    title: Create a project
+    description: Create a project, optionally nested under another one.
+    category: projects
+    scopes: ["data:read_write"]
+    request:
+      method: POST
+      path: /rest/v2/projects
+      body:
+        name: "${name}"
+        parent_id: "${parent_id}"
+        color: "${color}"
+        is_favorite: "${is_favorite}"
+        view_style: "${view_style}"
+    input:
+      name:
+        type: string
+        description: Project name.
+      parent_id:
+        type: string
+        description: Parent project id, to nest it.
+        optional: true
+      color:
+        type: string
+        description: Todoist colour name, e.g. berry_red, charcoal, sky_blue.
+        optional: true
+      is_favorite:
+        type: boolean
+        description: Pin the project to the favourites list.
+        optional: true
+      view_style:
+        type: string
+        description: Whether it opens as a list or a board.
+        optional: true
+        enum: [list, board]
+    output:
+      description: The created project.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        url: {type: string}
+
+  list_sections:
+    title: List a project's sections
+    description: List the sections in a project, with the ids create_task takes.
+    category: projects
+    scopes_any: ["data:read", "data:read_write"]
+    read_only: true
+    request:
+      method: GET
+      path: /rest/v2/sections
+      query:
+        project_id: "${project_id}"
+    input:
+      project_id:
+        type: string
+        description: The project id.
+    output:
+      description: The project's sections.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          name: {type: string}
+          order: {type: integer}
+
+  add_comment:
+    title: Comment on a task or project
+    description: >-
+      Attach a comment to a task, or to a project. Exactly one of task_id and
+      project_id must be given.
+    category: comments
+    scopes: ["data:read_write"]
+    request:
+      method: POST
+      path: /rest/v2/comments
+      body:
+        content: "${content}"
+        task_id: "${task_id}"
+        project_id: "${project_id}"
+    input:
+      content:
+        type: string
+        description: The comment, in Todoist Markdown.
+      task_id:
+        type: string
+        description: Task to comment on.
+        optional: true
+      project_id:
+        type: string
+        description: Project to comment on, instead of a task.
+        optional: true
+    output:
+      description: The created comment.
+      type: object
+      properties:
+        id: {type: string}
+        content: {type: string}
+        posted_at: {type: string}
+
+  list_labels:
+    title: List labels
+    description: List the user's personal labels, with the names create_task applies.
+    category: labels
+    scopes_any: ["data:read", "data:read_write"]
+    read_only: true
+    request:
+      method: GET
+      path: /rest/v2/labels
+    input: {}
+    output:
+      description: The user's labels.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          name: {type: string}
+          color: {type: string}

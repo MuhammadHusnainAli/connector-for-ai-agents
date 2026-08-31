@@ -1,0 +1,396 @@
+# Twilio tools.
+#
+# Twilio authenticates with HTTP Basic, the Account SID as the username and the
+# Auth Token as the password, so ${username} in a path resolves to the Account
+# SID from the connection's credentials -- it is not a tool argument.
+#
+# Twilio takes form-encoded bodies, not JSON, which `encoding: form` handles.
+# Permissions come from the key's own grants rather than scopes, so no tool
+# declares any.
+#
+# Docs: https://www.twilio.com/docs/api
+
+connector_id: twilio
+display_name: Twilio
+docs_url: https://www.twilio.com/docs/api
+
+tools:
+
+  send_sms:
+    title: Send an SMS or MMS
+    description: >-
+      Send a text message. `from_number` must be a Twilio number on the account,
+      or a messaging service SID. Attach images by passing media URLs, which
+      makes it an MMS.
+    category: messaging
+    destructive: true
+    request:
+      method: POST
+      path: /2010-04-01/Accounts/${username}/Messages.json
+      encoding: form
+      body:
+        To: "${to}"
+        From: "${from_number}"
+        MessagingServiceSid: "${messaging_service_sid}"
+        Body: "${body}"
+        MediaUrl: "${media_urls}"
+        StatusCallback: "${status_callback}"
+    input:
+      to:
+        type: string
+        description: Destination number in E.164 format, e.g. +14155552671.
+        example: "+14155552671"
+      body:
+        type: string
+        description: The message text, up to 1600 characters.
+        max_length: 1600
+      from_number:
+        type: string
+        description: A Twilio number on the account, in E.164 format. Use this or messaging_service_sid.
+        optional: true
+      messaging_service_sid:
+        type: string
+        description: Messaging Service SID to send from instead of a single number.
+        optional: true
+      media_urls:
+        type: array
+        description: Publicly reachable URLs of images to attach, which makes it an MMS.
+        optional: true
+        items: {type: string}
+      status_callback:
+        type: string
+        description: URL Twilio posts delivery status updates to.
+        optional: true
+        format: uri
+    output:
+      description: The queued message.
+      type: object
+      properties:
+        sid: {type: string, description: "Message SID -- pass to get_message for its delivery status."}
+        status: {type: string}
+        to: {type: string}
+        num_segments: {type: string}
+
+  list_messages:
+    title: List messages
+    description: >-
+      Page through the account's sent and received messages, optionally filtered
+      by number or date.
+    category: messaging
+    read_only: true
+    request:
+      method: GET
+      path: /2010-04-01/Accounts/${username}/Messages.json
+      query:
+        To: "${to}"
+        From: "${from_number}"
+        DateSent: "${date_sent}"
+        PageSize: "${limit}"
+        Page: "${page}"
+    input:
+      to:
+        type: string
+        description: Only messages sent to this number.
+        optional: true
+      from_number:
+        type: string
+        description: Only messages sent from this number.
+        optional: true
+      date_sent:
+        type: string
+        description: Only messages sent on this date, as YYYY-MM-DD.
+        optional: true
+      limit:
+        type: integer
+        description: How many messages per page (1-1000).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 1000
+      page:
+        type: integer
+        description: Zero-based page number.
+        optional: true
+        minimum: 0
+    output:
+      description: A page of messages.
+      type: object
+      properties:
+        messages: {type: array}
+        next_page_uri: {type: string}
+
+  get_message:
+    title: Get a message
+    description: >-
+      Read one message's delivery status, price and any error code -- how to
+      find out whether an SMS actually arrived.
+    category: messaging
+    read_only: true
+    request:
+      method: GET
+      path: /2010-04-01/Accounts/${username}/Messages/${message_sid}.json
+    input:
+      message_sid:
+        type: string
+        description: The message SID, starting SM or MM.
+    output:
+      description: The message.
+      type: object
+      properties:
+        sid: {type: string}
+        status: {type: string}
+        error_code: {type: integer}
+        price: {type: string}
+        date_sent: {type: string}
+
+  make_call:
+    title: Place a phone call
+    description: >-
+      Start an outbound call. Twilio needs instructions for what to say: either
+      a TwiML URL it fetches when the call connects, or inline TwiML.
+    category: voice
+    destructive: true
+    request:
+      method: POST
+      path: /2010-04-01/Accounts/${username}/Calls.json
+      encoding: form
+      body:
+        To: "${to}"
+        From: "${from_number}"
+        Url: "${twiml_url}"
+        Twiml: "${twiml}"
+        StatusCallback: "${status_callback}"
+        Timeout: "${timeout}"
+        Record: "${record}"
+    input:
+      to:
+        type: string
+        description: Number to call, in E.164 format.
+      from_number:
+        type: string
+        description: A Twilio number on the account to call from.
+      twiml_url:
+        type: string
+        description: URL returning TwiML that drives the call. Use this or twiml.
+        optional: true
+        format: uri
+      twiml:
+        type: string
+        description: Inline TwiML, e.g. <Response><Say>Hello</Say></Response>.
+        optional: true
+      status_callback:
+        type: string
+        description: URL Twilio posts call status updates to.
+        optional: true
+        format: uri
+      timeout:
+        type: integer
+        description: Seconds to ring before giving up.
+        optional: true
+        minimum: 5
+        maximum: 600
+      record:
+        type: boolean
+        description: Record the call.
+        optional: true
+    output:
+      description: The call as it was queued.
+      type: object
+      properties:
+        sid: {type: string}
+        status: {type: string}
+        to: {type: string}
+
+  list_calls:
+    title: List calls
+    description: Page through the account's calls with their status, duration and price.
+    category: voice
+    read_only: true
+    request:
+      method: GET
+      path: /2010-04-01/Accounts/${username}/Calls.json
+      query:
+        To: "${to}"
+        From: "${from_number}"
+        Status: "${status}"
+        StartTime: "${start_time}"
+        PageSize: "${limit}"
+        Page: "${page}"
+    input:
+      to:
+        type: string
+        description: Only calls to this number.
+        optional: true
+      from_number:
+        type: string
+        description: Only calls from this number.
+        optional: true
+      status:
+        type: string
+        description: Only calls in this state.
+        optional: true
+        enum: [queued, ringing, in-progress, completed, busy, failed, no-answer, canceled]
+      start_time:
+        type: string
+        description: Only calls started on this date, as YYYY-MM-DD.
+        optional: true
+      limit:
+        type: integer
+        description: How many calls per page (1-1000).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 1000
+      page:
+        type: integer
+        description: Zero-based page number.
+        optional: true
+        minimum: 0
+    output:
+      description: A page of calls.
+      type: object
+      properties:
+        calls: {type: array}
+        next_page_uri: {type: string}
+
+  list_phone_numbers:
+    title: List the account's phone numbers
+    description: >-
+      List the Twilio numbers on the account with their capabilities -- which
+      can send SMS, MMS or place voice calls.
+    category: numbers
+    read_only: true
+    request:
+      method: GET
+      path: /2010-04-01/Accounts/${username}/IncomingPhoneNumbers.json
+      query:
+        PhoneNumber: "${phone_number}"
+        FriendlyName: "${friendly_name}"
+        PageSize: "${limit}"
+    input:
+      phone_number:
+        type: string
+        description: Only the number matching this E.164 value.
+        optional: true
+      friendly_name:
+        type: string
+        description: Only numbers with this friendly name.
+        optional: true
+      limit:
+        type: integer
+        description: How many numbers per page (1-1000).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 1000
+    output:
+      description: The account's numbers.
+      type: object
+      properties:
+        incoming_phone_numbers: {type: array}
+
+  search_available_numbers:
+    title: Search for numbers to buy
+    description: >-
+      Find Twilio numbers available for purchase in a country, filtered by area
+      code, pattern or capability.
+    category: numbers
+    read_only: true
+    request:
+      method: GET
+      path: /2010-04-01/Accounts/${username}/AvailablePhoneNumbers/${country}/${number_type}.json
+      query:
+        AreaCode: "${area_code}"
+        Contains: "${contains}"
+        SmsEnabled: "${sms_enabled}"
+        VoiceEnabled: "${voice_enabled}"
+        PageSize: "${limit}"
+    input:
+      country:
+        type: string
+        description: Two-letter ISO country code, e.g. US or GB.
+        example: US
+      number_type:
+        type: string
+        description: What kind of number to search for.
+        optional: true
+        default: Local
+        enum: [Local, TollFree, Mobile]
+      area_code:
+        type: integer
+        description: Area code to search within.
+        optional: true
+      contains:
+        type: string
+        description: Digit or letter pattern the number should contain, e.g. 415*****.
+        optional: true
+      sms_enabled:
+        type: boolean
+        description: Only numbers that can send SMS.
+        optional: true
+      voice_enabled:
+        type: boolean
+        description: Only numbers that can take voice calls.
+        optional: true
+      limit:
+        type: integer
+        description: How many numbers to return.
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 1000
+    output:
+      description: Numbers available to buy.
+      type: object
+      properties:
+        available_phone_numbers: {type: array}
+
+  lookup_phone_number:
+    title: Look up a phone number
+    description: >-
+      Validate a number and read its country, carrier and line type. The way to
+      check a number is real and SMS-capable before sending to it.
+    category: lookup
+    read_only: true
+    request:
+      method: GET
+      base_url_override: https://lookups.twilio.com
+      path: /v2/PhoneNumbers/${phone_number}
+      query:
+        Fields: "${fields}"
+    input:
+      phone_number:
+        type: string
+        description: The number to look up, in E.164 format.
+      fields:
+        type: array
+        description: Extra data packages, e.g. ["line_type_intelligence","caller_name"].
+        optional: true
+        items: {type: string}
+    output:
+      description: What Twilio knows about the number.
+      type: object
+      properties:
+        phone_number: {type: string}
+        valid: {type: boolean}
+        country_code: {type: string}
+        line_type_intelligence: {type: object}
+
+  get_account_balance:
+    title: Get the account balance
+    description: >-
+      Read the account's remaining balance and currency. The cheapest health
+      check for a Twilio connection.
+    category: account
+    read_only: true
+    request:
+      method: GET
+      path: /2010-04-01/Accounts/${username}/Balance.json
+    input: {}
+    output:
+      description: The account balance.
+      type: object
+      properties:
+        balance: {type: string}
+        currency: {type: string}
+        account_sid: {type: string}

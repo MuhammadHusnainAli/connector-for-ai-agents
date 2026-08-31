@@ -1,0 +1,410 @@
+# Typeform tools.
+#
+# A form is identified by its short id, the token in its URL
+# (https://form.typeform.com/to/<form-id>). Responses come back as a list of
+# answers keyed by field ref, so read the form's definition to interpret them.
+#
+# Docs: https://www.typeform.com/developers/create/reference/
+
+connector_id: typeform
+display_name: Typeform
+docs_url: https://www.typeform.com/developers/create/reference/
+
+scope_rules:
+  implies:
+    forms:write: ["forms:read"]
+    responses:write: ["responses:read"]
+    webhooks:write: ["webhooks:read"]
+    workspaces:write: ["workspaces:read"]
+
+tools:
+
+  list_forms:
+    title: List forms
+    description: >-
+      List the account's forms with their ids and links. Search narrows by
+      title.
+    category: forms
+    scopes: ["forms:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /forms
+      query:
+        page: "${page}"
+        page_size: "${page_size}"
+        search: "${search}"
+        workspace_id: "${workspace_id}"
+    input:
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      page_size:
+        type: integer
+        description: How many forms per page (1-200).
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 200
+      search:
+        type: string
+        description: Match against form titles.
+        optional: true
+      workspace_id:
+        type: string
+        description: Only forms in this workspace.
+        optional: true
+    output:
+      description: A page of forms.
+      type: object
+      properties:
+        items: {type: array, description: "Each with id, title and _links."}
+        total_items: {type: integer}
+        page_count: {type: integer}
+
+  get_form:
+    title: Get a form's definition
+    description: >-
+      Read a form's fields, their types and their refs. Read this before
+      interpreting responses, since answers are keyed by field ref.
+    category: forms
+    scopes: ["forms:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /forms/${form_id}
+    input:
+      form_id:
+        type: string
+        description: The form's short id, from its URL.
+        example: abc123XY
+    output:
+      description: The form definition.
+      type: object
+      properties:
+        id: {type: string}
+        title: "{type: string}"
+        fields: {type: array, description: "Each with id, ref, type and title."}
+        settings: {type: object}
+
+  list_responses:
+    title: List a form's responses
+    description: >-
+      Read the submissions to a form. Narrow by date, completion state, or a
+      full-text query over the answers.
+    category: responses
+    scopes: ["responses:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /forms/${form_id}/responses
+      query:
+        page_size: "${page_size}"
+        since: "${since}"
+        until: "${until}"
+        after: "${after}"
+        completed: "${completed}"
+        query: "${query}"
+        sort: "${sort}"
+    input:
+      form_id:
+        type: string
+        description: The form's short id.
+      page_size:
+        type: integer
+        description: How many responses per page (1-1000).
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 1000
+      since:
+        type: string
+        description: Only responses submitted at or after this ISO 8601 instant.
+        optional: true
+      until:
+        type: string
+        description: Only responses submitted at or before this ISO 8601 instant.
+        optional: true
+      after:
+        type: string
+        description: Cursor token of the last response on the previous page.
+        optional: true
+      completed:
+        type: boolean
+        description: Only completed responses, or only partial ones.
+        optional: true
+      query:
+        type: string
+        description: Full-text search across the answers.
+        optional: true
+      sort:
+        type: string
+        description: Sort order, e.g. "submitted_at,desc".
+        optional: true
+    output:
+      description: A page of responses.
+      type: object
+      properties:
+        items: {type: array, description: "Each with response_id, submitted_at and answers."}
+        total_items: {type: integer}
+
+  delete_responses:
+    title: Delete responses
+    description: >-
+      Permanently delete specific responses from a form. Used to honour a
+      deletion request; it cannot be undone.
+    category: responses
+    scopes: ["responses:write"]
+    destructive: true
+    request:
+      method: DELETE
+      path: /forms/${form_id}/responses
+      query:
+        included_tokens: "${response_tokens}"
+    input:
+      form_id:
+        type: string
+        description: The form's short id.
+      response_tokens:
+        type: array
+        description: Response tokens to delete, from list_responses.
+        items: {type: string}
+    output:
+      description: Empty on success -- Typeform answers 204 No Content.
+      type: object
+
+  create_form:
+    title: Create a form
+    description: >-
+      Create a form from a field definition. Each field is
+      {"title": "Your name", "type": "short_text", "ref": "name"}; types include
+      short_text, long_text, email, multiple_choice, rating and number.
+    category: forms
+    scopes: ["forms:write"]
+    request:
+      method: POST
+      path: /forms
+      body:
+        title: "${title}"
+        fields: "${fields}"
+        workspace:
+          $when: "${workspace_href}"
+          href: "${workspace_href}"
+        settings: "${settings}"
+        welcome_screens: "${welcome_screens}"
+        thankyou_screens: "${thankyou_screens}"
+    input:
+      title:
+        type: string
+        description: The form's title.
+      fields:
+        type: array
+        description: Field definitions, each with a title, a type and optionally a ref.
+        optional: true
+        items: {type: object}
+      workspace_href:
+        type: string
+        description: Workspace link to create it in, e.g. https://api.typeform.com/workspaces/abc.
+        optional: true
+      settings:
+        type: object
+        description: "Form settings, e.g. {\"is_public\": true, \"progress_bar\": \"percentage\"}."
+        optional: true
+      welcome_screens:
+        type: array
+        description: Welcome screen definitions.
+        optional: true
+        items: {type: object}
+      thankyou_screens:
+        type: array
+        description: Thank-you screen definitions.
+        optional: true
+        items: {type: object}
+    output:
+      description: The created form.
+      type: object
+      properties:
+        id: {type: string}
+        title: "{type: string}"
+        _links: {type: object, description: "Holds display -- the public form URL."}
+
+  update_form:
+    title: Update a form
+    description: >-
+      Replace a form's definition. This is a full replacement, so send the
+      complete field list from get_form with your changes applied.
+    category: forms
+    scopes: ["forms:write"]
+    request:
+      method: PUT
+      path: /forms/${form_id}
+      body:
+        title: "${title}"
+        fields: "${fields}"
+        settings: "${settings}"
+    input:
+      form_id:
+        type: string
+        description: The form's short id.
+      title:
+        type: string
+        description: The form's title.
+      fields:
+        type: array
+        description: The complete field list. Fields not included are removed.
+        optional: true
+        items: {type: object}
+      settings:
+        type: object
+        description: Form settings.
+        optional: true
+    output:
+      description: The updated form.
+      type: object
+      properties:
+        id: {type: string}
+        title: "{type: string}"
+
+  delete_form:
+    title: Delete a form
+    description: >-
+      Permanently delete a form and every response to it. This cannot be undone.
+    category: forms
+    scopes: ["forms:write"]
+    destructive: true
+    request:
+      method: DELETE
+      path: /forms/${form_id}
+    input:
+      form_id:
+        type: string
+        description: The form to delete.
+    output:
+      description: Empty on success -- Typeform answers 204 No Content.
+      type: object
+
+  list_webhooks:
+    title: List a form's webhooks
+    description: List the webhooks Typeform will call when the form is submitted.
+    category: webhooks
+    scopes: ["webhooks:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /forms/${form_id}/webhooks
+    input:
+      form_id:
+        type: string
+        description: The form's short id.
+    output:
+      description: The form's webhooks.
+      type: object
+      properties:
+        items: {type: array}
+
+  create_webhook:
+    title: Create or update a webhook
+    description: >-
+      Point a form's submissions at a URL. The tag names the webhook, and
+      re-using a tag replaces the existing one.
+    category: webhooks
+    scopes: ["webhooks:write"]
+    request:
+      method: PUT
+      path: /forms/${form_id}/webhooks/${tag}
+      body:
+        url: "${url}"
+        enabled: "${enabled}"
+        secret: "${secret}"
+        verify_ssl: "${verify_ssl}"
+    input:
+      form_id:
+        type: string
+        description: The form's short id.
+      tag:
+        type: string
+        description: Your own name for this webhook. Re-using it replaces the webhook.
+      url:
+        type: string
+        description: Where Typeform should POST each submission.
+        format: uri
+      enabled:
+        type: boolean
+        description: Whether the webhook fires.
+        optional: true
+        default: true
+      secret:
+        type: string
+        description: Shared secret Typeform signs the payload with.
+        optional: true
+        secret: true
+      verify_ssl:
+        type: boolean
+        description: Require a valid TLS certificate on the destination.
+        optional: true
+    output:
+      description: The webhook.
+      type: object
+      properties:
+        id: {type: string}
+        url: {type: string}
+        enabled: {type: boolean}
+
+  list_workspaces:
+    title: List workspaces
+    description: List the account's workspaces, which forms are grouped into.
+    category: workspaces
+    scopes: ["workspaces:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /workspaces
+      query:
+        page: "${page}"
+        page_size: "${page_size}"
+        search: "${search}"
+    input:
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      page_size:
+        type: integer
+        description: How many workspaces per page (1-200).
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 200
+      search:
+        type: string
+        description: Match against workspace names.
+        optional: true
+    output:
+      description: A page of workspaces.
+      type: object
+      properties:
+        items: {type: array}
+        total_items: {type: integer}
+
+  get_me:
+    title: Get the authenticated account
+    description: >-
+      Read the Typeform account the token belongs to. The cheapest health check
+      for a Typeform connection.
+    category: account
+    read_only: true
+    request:
+      method: GET
+      path: /me
+    input: {}
+    output:
+      description: The authenticated account.
+      type: object
+      properties:
+        user_id: {type: string}
+        email: {type: string}
+        alias: {type: string}
+        language: {type: string}

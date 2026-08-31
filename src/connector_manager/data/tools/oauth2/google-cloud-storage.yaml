@@ -1,0 +1,4615 @@
+# Google Cloud Storage tools.
+#
+# Built from Google's own discovery document for the API, which is the machine
+# readable contract its client libraries are generated from -- so every path,
+# parameter, enum, default and description here is Google's, and so are the
+# per-tool OAuth scopes. That last part is what makes `check_tools()` useful on
+# this connector: it can say which of these a given grant actually permits.
+#
+# The complete JSON API: buckets, objects, their access control lists, HMAC
+# keys, notifications, anywhere caches, folders, managed folders, operations
+# and the project service account.
+#
+# Worth knowing:
+#
+#   * this is the JSON metadata API. Reading or writing an object's *bytes*
+#     goes through the media endpoints (`alt=media` on a get, the upload host
+#     on a write), which is a different shape from the metadata calls here;
+#   * deleting a bucket requires it to be empty first, and object deletes are
+#     permanent unless the bucket has versioning or a retention policy;
+#   * `list_object` takes `prefix` and `delimiter`, which is how the flat
+#     object namespace is browsed as though it had folders.
+#
+# Docs: https://cloud.google.com/storage/docs/json_api/v1
+
+connector_id: google-cloud-storage
+display_name: Google Cloud Storage
+docs_url: https://developers.google.com/storage/docs/json_api/
+scope_rules:
+  strip_prefixes:
+  - https://www.googleapis.com/auth/
+scope_discovery:
+  method: GET
+  base_url_override: https://oauth2.googleapis.com
+  endpoint: /tokeninfo
+  query:
+    access_token: ${credentials.access_token}
+  scopes_path: scope
+tools:
+  disable_anywhere_cach:
+    title: Disable anywhere cach
+    description: Disables an Anywhere Cache instance. Calls anywhereCaches.disable on the Cloud Storage
+      JSON API.
+    category: anywhere_caches
+    request:
+      method: POST
+      path: /storage/v1/b/${bucket}/anywhereCaches/${anywhere_cache_id}/disable
+    input:
+      anywhere_cache_id:
+        type: string
+        description: The ID of requested Anywhere Cache instance.
+      bucket:
+        type: string
+        description: Name of the parent bucket.
+    output:
+      description: The AnywhereCache resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+  get_anywhere_cach:
+    title: Get anywhere cach
+    description: Returns the metadata of an Anywhere Cache instance.
+    category: anywhere_caches
+    request:
+      method: GET
+      path: /storage/v1/b/${bucket}/anywhereCaches/${anywhere_cache_id}
+    input:
+      anywhere_cache_id:
+        type: string
+        description: The ID of requested Anywhere Cache instance.
+      bucket:
+        type: string
+        description: Name of the parent bucket.
+    output:
+      description: The AnywhereCache resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - cloud-platform.read-only
+    - devstorage.full_control
+    - devstorage.read_only
+    - devstorage.read_write
+    read_only: true
+  create_anywhere_cach:
+    title: Create anywhere cach
+    description: Creates an Anywhere Cache instance. Calls anywhereCaches.insert on the Cloud Storage
+      JSON API.
+    category: anywhere_caches
+    request:
+      method: POST
+      path: /storage/v1/b/${bucket}/anywhereCaches
+      body:
+        selfLink: ${self_link}
+        bucket: ${body_bucket}
+        anywhereCacheId: ${anywhere_cache_id}
+        zone: ${zone}
+        state: ${state}
+        createTime: ${create_time}
+        updateTime: ${update_time}
+        ttl: ${ttl}
+        admissionPolicy: ${admission_policy}
+        pendingUpdate: ${pending_update}
+        ingestOnWrite: ${ingest_on_write}
+    input:
+      bucket:
+        type: string
+        description: Name of the parent bucket.
+      self_link:
+        type: string
+        description: The link to this cache instance.
+        optional: true
+      body_bucket:
+        type: string
+        description: The name of the bucket containing this cache instance.
+        optional: true
+      anywhere_cache_id:
+        type: string
+        description: The ID of the Anywhere cache instance.
+        optional: true
+      zone:
+        type: string
+        description: The zone in which the cache instance is running. For example, us-central1-a.
+        optional: true
+      state:
+        type: string
+        description: The current state of the cache instance.
+        optional: true
+      create_time:
+        type: string
+        description: The creation time of the cache instance in RFC 3339 format.
+        optional: true
+      update_time:
+        type: string
+        description: The modification time of the cache instance metadata in RFC 3339 format.
+        optional: true
+      ttl:
+        type: string
+        description: The TTL of all cache entries in whole seconds. e.g., "7200s".
+        optional: true
+      admission_policy:
+        type: string
+        description: The cache-level entry admission policy.
+        optional: true
+      pending_update:
+        type: boolean
+        description: True if the cache instance has an active Update long-running operation.
+        optional: true
+      ingest_on_write:
+        type: boolean
+        description: Specifies whether objects are ingested into the cache upon write.
+        optional: true
+    output:
+      description: The GoogleLongrunningOperation resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+  list_anywhere_caches:
+    title: List anywhere caches
+    description: Returns a list of Anywhere Cache instances of the bucket matching the criteria.
+    category: anywhere_caches
+    request:
+      method: GET
+      path: /storage/v1/b/${bucket}/anywhereCaches
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      bucket:
+        type: string
+        description: Name of the parent bucket.
+      page_size:
+        type: integer
+        description: Maximum number of items to return in a single page of responses. Maximum 1000.
+        optional: true
+      page_token:
+        type: string
+        description: A previously-returned page token representing part of the larger set of results to
+          view.
+        optional: true
+    output:
+      description: The AnywhereCaches resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - cloud-platform.read-only
+    - devstorage.full_control
+    - devstorage.read_only
+    - devstorage.read_write
+    read_only: true
+  pause_anywhere_cach:
+    title: Pause anywhere cach
+    description: Pauses an Anywhere Cache instance. Calls anywhereCaches.pause on the Cloud Storage JSON
+      API.
+    category: anywhere_caches
+    request:
+      method: POST
+      path: /storage/v1/b/${bucket}/anywhereCaches/${anywhere_cache_id}/pause
+    input:
+      anywhere_cache_id:
+        type: string
+        description: The ID of requested Anywhere Cache instance.
+      bucket:
+        type: string
+        description: Name of the parent bucket.
+    output:
+      description: The AnywhereCache resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+  resume_anywhere_cach:
+    title: Resume anywhere cach
+    description: Resumes a paused or disabled Anywhere Cache instance.
+    category: anywhere_caches
+    request:
+      method: POST
+      path: /storage/v1/b/${bucket}/anywhereCaches/${anywhere_cache_id}/resume
+    input:
+      anywhere_cache_id:
+        type: string
+        description: The ID of requested Anywhere Cache instance.
+      bucket:
+        type: string
+        description: Name of the parent bucket.
+    output:
+      description: The AnywhereCache resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+  replace_anywhere_cach:
+    title: Replace anywhere cach
+    description: Updates the config of an Anywhere Cache instance.
+    category: anywhere_caches
+    request:
+      method: PATCH
+      path: /storage/v1/b/${bucket}/anywhereCaches/${anywhere_cache_id}
+      body:
+        selfLink: ${self_link}
+        bucket: ${body_bucket}
+        anywhereCacheId: ${body_anywhere_cache_id}
+        zone: ${zone}
+        state: ${state}
+        createTime: ${create_time}
+        updateTime: ${update_time}
+        ttl: ${ttl}
+        admissionPolicy: ${admission_policy}
+        pendingUpdate: ${pending_update}
+        ingestOnWrite: ${ingest_on_write}
+    input:
+      anywhere_cache_id:
+        type: string
+        description: The ID of requested Anywhere Cache instance.
+      bucket:
+        type: string
+        description: Name of the parent bucket.
+      self_link:
+        type: string
+        description: The link to this cache instance.
+        optional: true
+      body_bucket:
+        type: string
+        description: The name of the bucket containing this cache instance.
+        optional: true
+      body_anywhere_cache_id:
+        type: string
+        description: The ID of the Anywhere cache instance.
+        optional: true
+      zone:
+        type: string
+        description: The zone in which the cache instance is running. For example, us-central1-a.
+        optional: true
+      state:
+        type: string
+        description: The current state of the cache instance.
+        optional: true
+      create_time:
+        type: string
+        description: The creation time of the cache instance in RFC 3339 format.
+        optional: true
+      update_time:
+        type: string
+        description: The modification time of the cache instance metadata in RFC 3339 format.
+        optional: true
+      ttl:
+        type: string
+        description: The TTL of all cache entries in whole seconds. e.g., "7200s".
+        optional: true
+      admission_policy:
+        type: string
+        description: The cache-level entry admission policy.
+        optional: true
+      pending_update:
+        type: boolean
+        description: True if the cache instance has an active Update long-running operation.
+        optional: true
+      ingest_on_write:
+        type: boolean
+        description: Specifies whether objects are ingested into the cache upon write.
+        optional: true
+    output:
+      description: The GoogleLongrunningOperation resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+  delete_bucket_access_control:
+    title: Delete bucket access control
+    description: Permanently deletes the ACL entry for the specified entity on the specified bucket.
+    category: bucket_access_controls
+    request:
+      method: DELETE
+      path: /storage/v1/b/${bucket}/acl/${entity}
+      query:
+        userProject: ${user_project}
+    input:
+      bucket:
+        type: string
+        description: Name of a bucket.
+      entity:
+        type: string
+        description: The entity holding the permission. Can be user-userId, user-emailAddress, group-groupId,
+          group-emailAddress, allUsers, or allAuthenticatedUsers.
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+    output:
+      description: What the API returned.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    destructive: true
+  get_bucket_access_control:
+    title: Get bucket access control
+    description: Returns the ACL entry for the specified entity on the specified bucket.
+    category: bucket_access_controls
+    request:
+      method: GET
+      path: /storage/v1/b/${bucket}/acl/${entity}
+      query:
+        userProject: ${user_project}
+    input:
+      bucket:
+        type: string
+        description: Name of a bucket.
+      entity:
+        type: string
+        description: The entity holding the permission. Can be user-userId, user-emailAddress, group-groupId,
+          group-emailAddress, allUsers, or allAuthenticatedUsers.
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+    output:
+      description: The BucketAccessControl resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    read_only: true
+  create_bucket_access_control:
+    title: Create bucket access control
+    description: Creates a new ACL entry on the specified bucket.
+    category: bucket_access_controls
+    request:
+      method: POST
+      path: /storage/v1/b/${bucket}/acl
+      query:
+        userProject: ${user_project}
+      body:
+        bucket: ${body_bucket}
+        domain: ${domain}
+        email: ${email}
+        entity: ${entity}
+        entityId: ${entity_id}
+        projectTeam: ${project_team}
+        role: ${role}
+        selfLink: ${self_link}
+    input:
+      bucket:
+        type: string
+        description: Name of a bucket.
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+      body_bucket:
+        type: string
+        description: The name of the bucket.
+        optional: true
+      domain:
+        type: string
+        description: The domain associated with the entity, if any.
+        optional: true
+      email:
+        type: string
+        description: The email address associated with the entity, if any.
+        optional: true
+      entity:
+        type: string
+        description: 'The entity holding the permission, in one of the following forms: - user-userId
+          - user-email - group-groupId - group-email - domain-domain - project-team-projectId - allUsers
+          - allAuthenticatedUsers Examples: - The user liz@example.com would be user-liz@example.com.
+          - The group example@googlegroups.'
+        optional: true
+      entity_id:
+        type: string
+        description: The ID for the entity, if any.
+        optional: true
+      project_team:
+        type: object
+        description: The project team associated with the entity, if any.
+        optional: true
+      role:
+        type: string
+        description: The access permission for the entity.
+        optional: true
+      self_link:
+        type: string
+        description: The link to this access-control entry.
+        optional: true
+    output:
+      description: The BucketAccessControl resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+  list_bucket_access_controls:
+    title: List bucket access controls
+    description: Retrieves ACL entries on the specified bucket.
+    category: bucket_access_controls
+    request:
+      method: GET
+      path: /storage/v1/b/${bucket}/acl
+      query:
+        userProject: ${user_project}
+    input:
+      bucket:
+        type: string
+        description: Name of a bucket.
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+    output:
+      description: The BucketAccessControls resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    read_only: true
+  update_bucket_access_control:
+    title: Update bucket access control
+    description: Patches an ACL entry on the specified bucket.
+    category: bucket_access_controls
+    request:
+      method: PATCH
+      path: /storage/v1/b/${bucket}/acl/${entity}
+      query:
+        userProject: ${user_project}
+      body:
+        bucket: ${body_bucket}
+        domain: ${domain}
+        email: ${email}
+        entity: ${body_entity}
+        entityId: ${entity_id}
+        projectTeam: ${project_team}
+        role: ${role}
+        selfLink: ${self_link}
+    input:
+      bucket:
+        type: string
+        description: Name of a bucket.
+      entity:
+        type: string
+        description: The entity holding the permission. Can be user-userId, user-emailAddress, group-groupId,
+          group-emailAddress, allUsers, or allAuthenticatedUsers.
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+      body_bucket:
+        type: string
+        description: The name of the bucket.
+        optional: true
+      domain:
+        type: string
+        description: The domain associated with the entity, if any.
+        optional: true
+      email:
+        type: string
+        description: The email address associated with the entity, if any.
+        optional: true
+      body_entity:
+        type: string
+        description: 'The entity holding the permission, in one of the following forms: - user-userId
+          - user-email - group-groupId - group-email - domain-domain - project-team-projectId - allUsers
+          - allAuthenticatedUsers Examples: - The user liz@example.com would be user-liz@example.com.
+          - The group example@googlegroups.'
+        optional: true
+      entity_id:
+        type: string
+        description: The ID for the entity, if any.
+        optional: true
+      project_team:
+        type: object
+        description: The project team associated with the entity, if any.
+        optional: true
+      role:
+        type: string
+        description: The access permission for the entity.
+        optional: true
+      self_link:
+        type: string
+        description: The link to this access-control entry.
+        optional: true
+    output:
+      description: The BucketAccessControl resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+  replace_bucket_access_control:
+    title: Replace bucket access control
+    description: Updates an ACL entry on the specified bucket.
+    category: bucket_access_controls
+    request:
+      method: PUT
+      path: /storage/v1/b/${bucket}/acl/${entity}
+      query:
+        userProject: ${user_project}
+      body:
+        bucket: ${body_bucket}
+        domain: ${domain}
+        email: ${email}
+        entity: ${body_entity}
+        entityId: ${entity_id}
+        projectTeam: ${project_team}
+        role: ${role}
+        selfLink: ${self_link}
+    input:
+      bucket:
+        type: string
+        description: Name of a bucket.
+      entity:
+        type: string
+        description: The entity holding the permission. Can be user-userId, user-emailAddress, group-groupId,
+          group-emailAddress, allUsers, or allAuthenticatedUsers.
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+      body_bucket:
+        type: string
+        description: The name of the bucket.
+        optional: true
+      domain:
+        type: string
+        description: The domain associated with the entity, if any.
+        optional: true
+      email:
+        type: string
+        description: The email address associated with the entity, if any.
+        optional: true
+      body_entity:
+        type: string
+        description: 'The entity holding the permission, in one of the following forms: - user-userId
+          - user-email - group-groupId - group-email - domain-domain - project-team-projectId - allUsers
+          - allAuthenticatedUsers Examples: - The user liz@example.com would be user-liz@example.com.
+          - The group example@googlegroups.'
+        optional: true
+      entity_id:
+        type: string
+        description: The ID for the entity, if any.
+        optional: true
+      project_team:
+        type: object
+        description: The project team associated with the entity, if any.
+        optional: true
+      role:
+        type: string
+        description: The access permission for the entity.
+        optional: true
+      self_link:
+        type: string
+        description: The link to this access-control entry.
+        optional: true
+    output:
+      description: The BucketAccessControl resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+  delete_bucket:
+    title: Delete bucket
+    description: Deletes an empty bucket. Deletions are permanent unless soft delete is enabled on the
+      bucket.
+    category: buckets
+    request:
+      method: DELETE
+      path: /storage/v1/b/${bucket}
+      query:
+        ifMetagenerationMatch: ${if_metageneration_match}
+        ifMetagenerationNotMatch: ${if_metageneration_not_match}
+        userProject: ${user_project}
+    input:
+      bucket:
+        type: string
+        description: Name of a bucket.
+      if_metageneration_match:
+        type: string
+        description: If set, only deletes the bucket if its metageneration matches this value.
+        optional: true
+      if_metageneration_not_match:
+        type: string
+        description: If set, only deletes the bucket if its metageneration does not match this value.
+        optional: true
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+    output:
+      description: What the API returned.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+    destructive: true
+  get_bucket:
+    title: Get bucket
+    description: Returns metadata for the specified bucket.
+    category: buckets
+    request:
+      method: GET
+      path: /storage/v1/b/${bucket}
+      query:
+        generation: ${generation}
+        ifMetagenerationMatch: ${if_metageneration_match}
+        ifMetagenerationNotMatch: ${if_metageneration_not_match}
+        projection: ${projection}
+        softDeleted: ${soft_deleted}
+        userProject: ${user_project}
+    input:
+      bucket:
+        type: string
+        description: Name of a bucket.
+      generation:
+        type: string
+        description: If present, specifies the generation of the bucket. This is required if softDeleted
+          is true.
+        optional: true
+      if_metageneration_match:
+        type: string
+        description: Makes the return of the bucket metadata conditional on whether the bucket's current
+          metageneration matches the given value.
+        optional: true
+      if_metageneration_not_match:
+        type: string
+        description: Makes the return of the bucket metadata conditional on whether the bucket's current
+          metageneration does not match the given value.
+        optional: true
+      projection:
+        type: string
+        description: Set of properties to return. Defaults to noAcl.
+        optional: true
+        enum:
+        - full
+        - noAcl
+      soft_deleted:
+        type: boolean
+        description: If true, return the soft-deleted version of this bucket. The default is false. For
+          more information, see Soft Delete.
+        optional: true
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+    output:
+      description: The Bucket resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - cloud-platform.read-only
+    - devstorage.full_control
+    - devstorage.read_only
+    - devstorage.read_write
+    read_only: true
+  get_iam_policy_bucket:
+    title: Get iam policy bucket
+    description: Returns an IAM policy for the specified bucket.
+    category: buckets
+    request:
+      method: GET
+      path: /storage/v1/b/${bucket}/iam
+      query:
+        optionsRequestedPolicyVersion: ${options_requested_policy_version}
+        userProject: ${user_project}
+    input:
+      bucket:
+        type: string
+        description: Name of a bucket.
+      options_requested_policy_version:
+        type: integer
+        description: The IAM policy format version to be returned. If the optionsRequestedPolicyVersion
+          is for an older version that doesn't support part of the requested IAM policy, the request fails.
+        optional: true
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+    output:
+      description: The Policy resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    read_only: true
+  get_storage_layout_bucket:
+    title: Get storage layout bucket
+    description: Returns the storage layout configuration for the specified bucket. Note that this operation
+      requires storage.objects.list permission.
+    category: buckets
+    request:
+      method: GET
+      path: /storage/v1/b/${bucket}/storageLayout
+      query:
+        prefix: ${prefix}
+    input:
+      bucket:
+        type: string
+        description: Name of a bucket.
+      prefix:
+        type: string
+        description: An optional prefix used for permission check. It is useful when the caller only has
+          storage.objects.list permission under a specific prefix.
+        optional: true
+    output:
+      description: The BucketStorageLayout resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - cloud-platform.read-only
+    - devstorage.full_control
+    - devstorage.read_only
+    - devstorage.read_write
+    read_only: true
+  create_bucket:
+    title: Create bucket
+    description: Creates a new bucket. Calls buckets.insert on the Cloud Storage JSON API.
+    category: buckets
+    request:
+      method: POST
+      path: /storage/v1/b
+      query:
+        enableObjectRetention: ${enable_object_retention}
+        predefinedAcl: ${predefined_acl}
+        predefinedDefaultObjectAcl: ${predefined_default_object_acl}
+        project: ${project}
+        projection: ${projection}
+        userProject: ${user_project}
+      body: ${body}
+    input:
+      enable_object_retention:
+        type: boolean
+        description: When set to true, object retention is enabled for this bucket.
+        optional: true
+        default: false
+      predefined_acl:
+        type: string
+        description: Apply a predefined set of access controls to this bucket.
+        optional: true
+        enum:
+        - authenticatedRead
+        - private
+        - projectPrivate
+        - publicRead
+        - publicReadWrite
+      predefined_default_object_acl:
+        type: string
+        description: Apply a predefined set of default object access controls to this bucket.
+        optional: true
+        enum:
+        - authenticatedRead
+        - bucketOwnerFullControl
+        - bucketOwnerRead
+        - private
+        - projectPrivate
+        - publicRead
+      project:
+        type: string
+        description: A valid API project identifier.
+      projection:
+        type: string
+        description: Set of properties to return. Defaults to noAcl, unless the bucket resource specifies
+          acl or defaultObjectAcl properties, when it defaults to full.
+        optional: true
+        enum:
+        - full
+        - noAcl
+      user_project:
+        type: string
+        description: The project to be billed for this request.
+        optional: true
+      body:
+        type: object
+        description: The Bucket resource, as the API's own reference defines it.
+    output:
+      description: The Bucket resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+  list_buckets:
+    title: List buckets
+    description: Retrieves a list of buckets for a given project.
+    category: buckets
+    request:
+      method: GET
+      path: /storage/v1/b
+      query:
+        maxResults: ${max_results}
+        pageToken: ${page_token}
+        prefix: ${prefix}
+        project: ${project}
+        projection: ${projection}
+        returnPartialSuccess: ${return_partial_success}
+        softDeleted: ${soft_deleted}
+        userProject: ${user_project}
+    input:
+      max_results:
+        type: integer
+        description: Maximum number of buckets to return in a single response. The service will use this
+          parameter or 1,000 items, whichever is smaller.
+        optional: true
+        default: 1000
+      page_token:
+        type: string
+        description: A previously-returned page token representing part of the larger set of results to
+          view.
+        optional: true
+      prefix:
+        type: string
+        description: Filter results to buckets whose names begin with this prefix.
+        optional: true
+      project:
+        type: string
+        description: A valid API project identifier.
+      projection:
+        type: string
+        description: Set of properties to return. Defaults to noAcl.
+        optional: true
+        enum:
+        - full
+        - noAcl
+      return_partial_success:
+        type: boolean
+        description: If true, return a list of bucket resource names for buckets that are in unreachable
+          locations.
+        optional: true
+      soft_deleted:
+        type: boolean
+        description: If true, only soft-deleted bucket versions will be returned. The default is false.
+          For more information, see Soft Delete.
+        optional: true
+      user_project:
+        type: string
+        description: The project to be billed for this request.
+        optional: true
+    output:
+      description: The Buckets resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - cloud-platform.read-only
+    - devstorage.full_control
+    - devstorage.read_only
+    - devstorage.read_write
+    read_only: true
+  lock_retention_policy_bucket:
+    title: Lock retention policy bucket
+    description: Locks retention policy on a bucket. Calls buckets.lockRetentionPolicy on the Cloud Storage
+      JSON API.
+    category: buckets
+    request:
+      method: POST
+      path: /storage/v1/b/${bucket}/lockRetentionPolicy
+      query:
+        ifMetagenerationMatch: ${if_metageneration_match}
+        userProject: ${user_project}
+    input:
+      bucket:
+        type: string
+        description: Name of a bucket.
+      if_metageneration_match:
+        type: string
+        description: Makes the operation conditional on whether bucket's current metageneration matches
+          the given value.
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+    output:
+      description: The Bucket resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+  update_bucket:
+    title: Update bucket
+    description: Patches a bucket. Changes to the bucket will be readable immediately after writing, but
+      configuration changes may take time to propagate.
+    category: buckets
+    request:
+      method: PATCH
+      path: /storage/v1/b/${bucket}
+      query:
+        ifMetagenerationMatch: ${if_metageneration_match}
+        ifMetagenerationNotMatch: ${if_metageneration_not_match}
+        predefinedAcl: ${predefined_acl}
+        predefinedDefaultObjectAcl: ${predefined_default_object_acl}
+        projection: ${projection}
+        userProject: ${user_project}
+      body: ${body}
+    input:
+      bucket:
+        type: string
+        description: Name of a bucket.
+      if_metageneration_match:
+        type: string
+        description: Makes the return of the bucket metadata conditional on whether the bucket's current
+          metageneration matches the given value.
+        optional: true
+      if_metageneration_not_match:
+        type: string
+        description: Makes the return of the bucket metadata conditional on whether the bucket's current
+          metageneration does not match the given value.
+        optional: true
+      predefined_acl:
+        type: string
+        description: Apply a predefined set of access controls to this bucket.
+        optional: true
+        enum:
+        - authenticatedRead
+        - private
+        - projectPrivate
+        - publicRead
+        - publicReadWrite
+      predefined_default_object_acl:
+        type: string
+        description: Apply a predefined set of default object access controls to this bucket.
+        optional: true
+        enum:
+        - authenticatedRead
+        - bucketOwnerFullControl
+        - bucketOwnerRead
+        - private
+        - projectPrivate
+        - publicRead
+      projection:
+        type: string
+        description: Set of properties to return. Defaults to full.
+        optional: true
+        enum:
+        - full
+        - noAcl
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+      body:
+        type: object
+        description: The Bucket resource, as the API's own reference defines it.
+    output:
+      description: The Bucket resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+  relocate_bucket:
+    title: Relocate bucket
+    description: Initiates a long-running Relocate Bucket operation on the specified bucket.
+    category: buckets
+    request:
+      method: POST
+      path: /storage/v1/b/${bucket}/relocate
+      body:
+        destinationLocation: ${destination_location}
+        destinationCustomPlacementConfig: ${destination_custom_placement_config}
+        validateOnly: ${validate_only}
+        destinationKmsKeyName: ${destination_kms_key_name}
+    input:
+      bucket:
+        type: string
+        description: Name of the bucket to be moved.
+      destination_location:
+        type: string
+        description: The new location the bucket will be relocated to.
+        optional: true
+      destination_custom_placement_config:
+        type: object
+        description: The bucket's new custom placement configuration if relocating to a Custom Dual Region.
+        optional: true
+      validate_only:
+        type: boolean
+        description: If true, validate the operation, but do not actually relocate the bucket.
+        optional: true
+      destination_kms_key_name:
+        type: string
+        description: Resource name of a Cloud KMS key, of the form projects/my-project/locations/global/keyRings/my-kr/cryptoKeys/my-key.
+          If set, is used to encrypt all objects in the destination bucket.
+        optional: true
+    output:
+      description: The GoogleLongrunningOperation resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+  restore_bucket:
+    title: Restore bucket
+    description: Restores a soft-deleted bucket. Calls buckets.restore on the Cloud Storage JSON API.
+    category: buckets
+    request:
+      method: POST
+      path: /storage/v1/b/${bucket}/restore
+      query:
+        generation: ${generation}
+        projection: ${projection}
+        userProject: ${user_project}
+    input:
+      bucket:
+        type: string
+        description: Name of a bucket.
+      generation:
+        type: string
+        description: Generation of a bucket.
+      projection:
+        type: string
+        description: Set of properties to return. Defaults to full.
+        optional: true
+        enum:
+        - full
+        - noAcl
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+    output:
+      description: The Bucket resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+  set_iam_policy_bucket:
+    title: Set iam policy bucket
+    description: Updates an IAM policy for the specified bucket.
+    category: buckets
+    request:
+      method: PUT
+      path: /storage/v1/b/${bucket}/iam
+      query:
+        userProject: ${user_project}
+      body:
+        bindings: ${bindings}
+        resourceId: ${resource_id}
+        version: ${version}
+    input:
+      bucket:
+        type: string
+        description: Name of a bucket.
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+      bindings:
+        type: array
+        items:
+          type: object
+        description: An association between a role, which comes with a set of permissions, and members
+          who may assume that role.
+        optional: true
+      resource_id:
+        type: string
+        description: 'The ID of the resource to which this policy belongs. Will be of the form projects/_/buckets/bucket
+          for buckets, projects/_/buckets/bucket/objects/object for objects, and projects/_/buckets/bucket/managedFolders/managedFolder.
+          A specific generation may be specified by appending #generationNumber to t'
+        optional: true
+      version:
+        type: integer
+        description: The IAM policy format version.
+        optional: true
+    output:
+      description: The Policy resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+  test_iam_permissions_bucket:
+    title: Test iam permissions bucket
+    description: Tests a set of permissions on the given bucket to see which, if any, are held by the
+      caller.
+    category: buckets
+    request:
+      method: GET
+      path: /storage/v1/b/${bucket}/iam/testPermissions
+      query:
+        permissions: ${permissions}
+        userProject: ${user_project}
+    input:
+      bucket:
+        type: string
+        description: Name of a bucket.
+      permissions:
+        type: string
+        description: Permissions to test.
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+    output:
+      description: The TestIamPermissionsResponse resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - cloud-platform.read-only
+    - devstorage.full_control
+    - devstorage.read_only
+    - devstorage.read_write
+    read_only: true
+  replace_bucket:
+    title: Replace bucket
+    description: Updates a bucket. Changes to the bucket will be readable immediately after writing, but
+      configuration changes may take time to propagate.
+    category: buckets
+    request:
+      method: PUT
+      path: /storage/v1/b/${bucket}
+      query:
+        ifMetagenerationMatch: ${if_metageneration_match}
+        ifMetagenerationNotMatch: ${if_metageneration_not_match}
+        predefinedAcl: ${predefined_acl}
+        predefinedDefaultObjectAcl: ${predefined_default_object_acl}
+        projection: ${projection}
+        userProject: ${user_project}
+      body: ${body}
+    input:
+      bucket:
+        type: string
+        description: Name of a bucket.
+      if_metageneration_match:
+        type: string
+        description: Makes the return of the bucket metadata conditional on whether the bucket's current
+          metageneration matches the given value.
+        optional: true
+      if_metageneration_not_match:
+        type: string
+        description: Makes the return of the bucket metadata conditional on whether the bucket's current
+          metageneration does not match the given value.
+        optional: true
+      predefined_acl:
+        type: string
+        description: Apply a predefined set of access controls to this bucket.
+        optional: true
+        enum:
+        - authenticatedRead
+        - private
+        - projectPrivate
+        - publicRead
+        - publicReadWrite
+      predefined_default_object_acl:
+        type: string
+        description: Apply a predefined set of default object access controls to this bucket.
+        optional: true
+        enum:
+        - authenticatedRead
+        - bucketOwnerFullControl
+        - bucketOwnerRead
+        - private
+        - projectPrivate
+        - publicRead
+      projection:
+        type: string
+        description: Set of properties to return. Defaults to full.
+        optional: true
+        enum:
+        - full
+        - noAcl
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+      body:
+        type: object
+        description: The Bucket resource, as the API's own reference defines it.
+    output:
+      description: The Bucket resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+  stop_channel:
+    title: Stop channel
+    description: Stop watching resources through this channel
+    category: channels
+    request:
+      method: POST
+      path: /storage/v1/channels/stop
+      body:
+        address: ${address}
+        expiration: ${expiration}
+        params: ${params}
+        payload: ${payload}
+        resourceId: ${resource_id}
+        resourceUri: ${resource_uri}
+        token: ${token}
+        type: ${type}
+    input:
+      address:
+        type: string
+        description: The address where notifications are delivered for this channel.
+        optional: true
+      expiration:
+        type: string
+        description: Date and time of notification channel expiration, expressed as a Unix timestamp,
+          in milliseconds. Optional.
+        optional: true
+      params:
+        type: object
+        description: Additional parameters controlling delivery channel behavior. Optional.
+        optional: true
+      payload:
+        type: boolean
+        description: A Boolean value to indicate whether payload is wanted. Optional.
+        optional: true
+      resource_id:
+        type: string
+        description: An opaque ID that identifies the resource being watched on this channel. Stable across
+          different API versions.
+        optional: true
+      resource_uri:
+        type: string
+        description: A version-specific identifier for the watched resource.
+        optional: true
+      token:
+        type: string
+        description: An arbitrary string delivered to the target address with each notification delivered
+          over this channel. Optional.
+        optional: true
+      type:
+        type: string
+        description: The type of delivery mechanism used for this channel.
+        optional: true
+    output:
+      description: What the API returned.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - cloud-platform.read-only
+    - devstorage.full_control
+    - devstorage.read_only
+    - devstorage.read_write
+  delete_default_object_access_control:
+    title: Delete default object access control
+    description: Permanently deletes the default object ACL entry for the specified entity on the specified
+      bucket.
+    category: default_object_access_controls
+    request:
+      method: DELETE
+      path: /storage/v1/b/${bucket}/defaultObjectAcl/${entity}
+      query:
+        userProject: ${user_project}
+    input:
+      bucket:
+        type: string
+        description: Name of a bucket.
+      entity:
+        type: string
+        description: The entity holding the permission. Can be user-userId, user-emailAddress, group-groupId,
+          group-emailAddress, allUsers, or allAuthenticatedUsers.
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+    output:
+      description: What the API returned.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    destructive: true
+  get_default_object_access_control:
+    title: Get default object access control
+    description: Returns the default object ACL entry for the specified entity on the specified bucket.
+    category: default_object_access_controls
+    request:
+      method: GET
+      path: /storage/v1/b/${bucket}/defaultObjectAcl/${entity}
+      query:
+        userProject: ${user_project}
+    input:
+      bucket:
+        type: string
+        description: Name of a bucket.
+      entity:
+        type: string
+        description: The entity holding the permission. Can be user-userId, user-emailAddress, group-groupId,
+          group-emailAddress, allUsers, or allAuthenticatedUsers.
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+    output:
+      description: The ObjectAccessControl resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    read_only: true
+  create_default_object_access_control:
+    title: Create default object access control
+    description: Creates a new default object ACL entry on the specified bucket.
+    category: default_object_access_controls
+    request:
+      method: POST
+      path: /storage/v1/b/${bucket}/defaultObjectAcl
+      query:
+        userProject: ${user_project}
+      body:
+        bucket: ${body_bucket}
+        domain: ${domain}
+        email: ${email}
+        entity: ${entity}
+        entityId: ${entity_id}
+        generation: ${generation}
+        object: ${object}
+        projectTeam: ${project_team}
+        role: ${role}
+        selfLink: ${self_link}
+    input:
+      bucket:
+        type: string
+        description: Name of a bucket.
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+      body_bucket:
+        type: string
+        description: The name of the bucket.
+        optional: true
+      domain:
+        type: string
+        description: The domain associated with the entity, if any.
+        optional: true
+      email:
+        type: string
+        description: The email address associated with the entity, if any.
+        optional: true
+      entity:
+        type: string
+        description: 'The entity holding the permission, in one of the following forms: - user-userId
+          - user-email - group-groupId - group-email - domain-domain - project-team-projectId - allUsers
+          - allAuthenticatedUsers Examples: - The user liz@example.com would be user-liz@example.com.
+          - The group example@googlegroups.'
+        optional: true
+      entity_id:
+        type: string
+        description: The ID for the entity, if any.
+        optional: true
+      generation:
+        type: string
+        description: The content generation of the object, if applied to an object.
+        optional: true
+      object:
+        type: string
+        description: The name of the object, if applied to an object.
+        optional: true
+      project_team:
+        type: object
+        description: The project team associated with the entity, if any.
+        optional: true
+      role:
+        type: string
+        description: The access permission for the entity.
+        optional: true
+      self_link:
+        type: string
+        description: The link to this access-control entry.
+        optional: true
+    output:
+      description: The ObjectAccessControl resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+  list_default_object_access_controls:
+    title: List default object access controls
+    description: Retrieves default object ACL entries on the specified bucket.
+    category: default_object_access_controls
+    request:
+      method: GET
+      path: /storage/v1/b/${bucket}/defaultObjectAcl
+      query:
+        ifMetagenerationMatch: ${if_metageneration_match}
+        ifMetagenerationNotMatch: ${if_metageneration_not_match}
+        userProject: ${user_project}
+    input:
+      bucket:
+        type: string
+        description: Name of a bucket.
+      if_metageneration_match:
+        type: string
+        description: If present, only return default ACL listing if the bucket's current metageneration
+          matches this value.
+        optional: true
+      if_metageneration_not_match:
+        type: string
+        description: If present, only return default ACL listing if the bucket's current metageneration
+          does not match the given value.
+        optional: true
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+    output:
+      description: The ObjectAccessControls resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    read_only: true
+  update_default_object_access_control:
+    title: Update default object access control
+    description: Patches a default object ACL entry on the specified bucket.
+    category: default_object_access_controls
+    request:
+      method: PATCH
+      path: /storage/v1/b/${bucket}/defaultObjectAcl/${entity}
+      query:
+        userProject: ${user_project}
+      body:
+        bucket: ${body_bucket}
+        domain: ${domain}
+        email: ${email}
+        entity: ${body_entity}
+        entityId: ${entity_id}
+        generation: ${generation}
+        object: ${object}
+        projectTeam: ${project_team}
+        role: ${role}
+        selfLink: ${self_link}
+    input:
+      bucket:
+        type: string
+        description: Name of a bucket.
+      entity:
+        type: string
+        description: The entity holding the permission. Can be user-userId, user-emailAddress, group-groupId,
+          group-emailAddress, allUsers, or allAuthenticatedUsers.
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+      body_bucket:
+        type: string
+        description: The name of the bucket.
+        optional: true
+      domain:
+        type: string
+        description: The domain associated with the entity, if any.
+        optional: true
+      email:
+        type: string
+        description: The email address associated with the entity, if any.
+        optional: true
+      body_entity:
+        type: string
+        description: 'The entity holding the permission, in one of the following forms: - user-userId
+          - user-email - group-groupId - group-email - domain-domain - project-team-projectId - allUsers
+          - allAuthenticatedUsers Examples: - The user liz@example.com would be user-liz@example.com.
+          - The group example@googlegroups.'
+        optional: true
+      entity_id:
+        type: string
+        description: The ID for the entity, if any.
+        optional: true
+      generation:
+        type: string
+        description: The content generation of the object, if applied to an object.
+        optional: true
+      object:
+        type: string
+        description: The name of the object, if applied to an object.
+        optional: true
+      project_team:
+        type: object
+        description: The project team associated with the entity, if any.
+        optional: true
+      role:
+        type: string
+        description: The access permission for the entity.
+        optional: true
+      self_link:
+        type: string
+        description: The link to this access-control entry.
+        optional: true
+    output:
+      description: The ObjectAccessControl resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+  replace_default_object_access_control:
+    title: Replace default object access control
+    description: Updates a default object ACL entry on the specified bucket.
+    category: default_object_access_controls
+    request:
+      method: PUT
+      path: /storage/v1/b/${bucket}/defaultObjectAcl/${entity}
+      query:
+        userProject: ${user_project}
+      body:
+        bucket: ${body_bucket}
+        domain: ${domain}
+        email: ${email}
+        entity: ${body_entity}
+        entityId: ${entity_id}
+        generation: ${generation}
+        object: ${object}
+        projectTeam: ${project_team}
+        role: ${role}
+        selfLink: ${self_link}
+    input:
+      bucket:
+        type: string
+        description: Name of a bucket.
+      entity:
+        type: string
+        description: The entity holding the permission. Can be user-userId, user-emailAddress, group-groupId,
+          group-emailAddress, allUsers, or allAuthenticatedUsers.
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+      body_bucket:
+        type: string
+        description: The name of the bucket.
+        optional: true
+      domain:
+        type: string
+        description: The domain associated with the entity, if any.
+        optional: true
+      email:
+        type: string
+        description: The email address associated with the entity, if any.
+        optional: true
+      body_entity:
+        type: string
+        description: 'The entity holding the permission, in one of the following forms: - user-userId
+          - user-email - group-groupId - group-email - domain-domain - project-team-projectId - allUsers
+          - allAuthenticatedUsers Examples: - The user liz@example.com would be user-liz@example.com.
+          - The group example@googlegroups.'
+        optional: true
+      entity_id:
+        type: string
+        description: The ID for the entity, if any.
+        optional: true
+      generation:
+        type: string
+        description: The content generation of the object, if applied to an object.
+        optional: true
+      object:
+        type: string
+        description: The name of the object, if applied to an object.
+        optional: true
+      project_team:
+        type: object
+        description: The project team associated with the entity, if any.
+        optional: true
+      role:
+        type: string
+        description: The access permission for the entity.
+        optional: true
+      self_link:
+        type: string
+        description: The link to this access-control entry.
+        optional: true
+    output:
+      description: The ObjectAccessControl resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+  delete_folder:
+    title: Delete folder
+    description: Permanently deletes a folder. Only applicable to buckets with hierarchical namespace
+      enabled.
+    category: folders
+    request:
+      method: DELETE
+      path: /storage/v1/b/${bucket}/folders/${folder}
+      query:
+        ifMetagenerationMatch: ${if_metageneration_match}
+        ifMetagenerationNotMatch: ${if_metageneration_not_match}
+    input:
+      bucket:
+        type: string
+        description: Name of the bucket in which the folder resides.
+      folder:
+        type: string
+        description: Name of a folder.
+      if_metageneration_match:
+        type: string
+        description: If set, only deletes the folder if its metageneration matches this value.
+        optional: true
+      if_metageneration_not_match:
+        type: string
+        description: If set, only deletes the folder if its metageneration does not match this value.
+        optional: true
+    output:
+      description: What the API returned.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+    destructive: true
+  delete_recursive_folder:
+    title: Delete recursive folder
+    description: Deletes a folder recursively. Only applicable to buckets with hierarchical namespace
+      enabled.
+    category: folders
+    request:
+      method: POST
+      path: /storage/v1/b/${bucket}/folders/${folder}/deleteRecursive
+      query:
+        ifMetagenerationMatch: ${if_metageneration_match}
+        ifMetagenerationNotMatch: ${if_metageneration_not_match}
+    input:
+      bucket:
+        type: string
+        description: Name of the bucket in which the folder resides.
+      folder:
+        type: string
+        description: Name of a folder.
+      if_metageneration_match:
+        type: string
+        description: If set, only deletes the folder if its metageneration matches this value.
+        optional: true
+      if_metageneration_not_match:
+        type: string
+        description: If set, only deletes the folder if its metageneration does not match this value.
+        optional: true
+    output:
+      description: The GoogleLongrunningOperation resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+  get_folder:
+    title: Get folder
+    description: Returns metadata for the specified folder. Only applicable to buckets with hierarchical
+      namespace enabled.
+    category: folders
+    request:
+      method: GET
+      path: /storage/v1/b/${bucket}/folders/${folder}
+      query:
+        ifMetagenerationMatch: ${if_metageneration_match}
+        ifMetagenerationNotMatch: ${if_metageneration_not_match}
+    input:
+      bucket:
+        type: string
+        description: Name of the bucket in which the folder resides.
+      folder:
+        type: string
+        description: Name of a folder.
+      if_metageneration_match:
+        type: string
+        description: Makes the return of the folder metadata conditional on whether the folder's current
+          metageneration matches the given value.
+        optional: true
+      if_metageneration_not_match:
+        type: string
+        description: Makes the return of the folder metadata conditional on whether the folder's current
+          metageneration does not match the given value.
+        optional: true
+    output:
+      description: The Folder resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - cloud-platform.read-only
+    - devstorage.full_control
+    - devstorage.read_only
+    - devstorage.read_write
+    read_only: true
+  create_folder:
+    title: Create folder
+    description: Creates a new folder. Only applicable to buckets with hierarchical namespace enabled.
+    category: folders
+    request:
+      method: POST
+      path: /storage/v1/b/${bucket}/folders
+      query:
+        recursive: ${recursive}
+      body:
+        bucket: ${body_bucket}
+        metageneration: ${metageneration}
+        name: ${name}
+        selfLink: ${self_link}
+        createTime: ${create_time}
+        updateTime: ${update_time}
+        pendingRenameInfo: ${pending_rename_info}
+    input:
+      bucket:
+        type: string
+        description: Name of the bucket in which the folder resides.
+      recursive:
+        type: boolean
+        description: If true, any parent folder which doesn't exist will be created automatically.
+        optional: true
+      body_bucket:
+        type: string
+        description: The name of the bucket containing this folder.
+        optional: true
+      metageneration:
+        type: string
+        description: The version of the metadata for this folder. Used for preconditions and for detecting
+          changes in metadata.
+        optional: true
+      name:
+        type: string
+        description: The name of the folder. Required if not specified by URL parameter.
+        optional: true
+      self_link:
+        type: string
+        description: The link to this folder.
+        optional: true
+      create_time:
+        type: string
+        description: The creation time of the folder in RFC 3339 format.
+        optional: true
+      update_time:
+        type: string
+        description: The modification time of the folder metadata in RFC 3339 format.
+        optional: true
+      pending_rename_info:
+        type: object
+        description: Only present if the folder is part of an ongoing rename folder operation. Contains
+          information which can be used to query the operation status.
+        optional: true
+    output:
+      description: The Folder resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+  list_folders:
+    title: List folders
+    description: Retrieves a list of folders matching the criteria. Only applicable to buckets with hierarchical
+      namespace enabled.
+    category: folders
+    request:
+      method: GET
+      path: /storage/v1/b/${bucket}/folders
+      query:
+        delimiter: ${delimiter}
+        endOffset: ${end_offset}
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+        prefix: ${prefix}
+        startOffset: ${start_offset}
+    input:
+      bucket:
+        type: string
+        description: Name of the bucket in which to look for folders.
+      delimiter:
+        type: string
+        description: Returns results in a directory-like mode. The only supported value is '/'. If set,
+          items will only contain folders that either exactly match the prefix, or are one level below
+          the prefix.
+        optional: true
+      end_offset:
+        type: string
+        description: Filter results to folders whose names are lexicographically before endOffset. If
+          startOffset is also set, the folders listed will have names between startOffset (inclusive)
+          and endOffset (exclusive).
+        optional: true
+      page_size:
+        type: integer
+        description: Maximum number of items to return in a single page of responses.
+        optional: true
+      page_token:
+        type: string
+        description: A previously-returned page token representing part of the larger set of results to
+          view.
+        optional: true
+      prefix:
+        type: string
+        description: Filter results to folders whose paths begin with this prefix. If set, the value must
+          either be an empty string or end with a '/'.
+        optional: true
+      start_offset:
+        type: string
+        description: Filter results to folders whose names are lexicographically equal to or after startOffset.
+          If endOffset is also set, the folders listed will have names between startOffset (inclusive)
+          and endOffset (exclusive).
+        optional: true
+    output:
+      description: The Folders resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - cloud-platform.read-only
+    - devstorage.full_control
+    - devstorage.read_only
+    - devstorage.read_write
+    read_only: true
+  rename_folder:
+    title: Rename folder
+    description: Renames a source folder to a destination folder. Only applicable to buckets with hierarchical
+      namespace enabled.
+    category: folders
+    request:
+      method: POST
+      path: /storage/v1/b/${bucket}/folders/${source_folder}/renameTo/folders/${destination_folder}
+      query:
+        ifSourceMetagenerationMatch: ${if_source_metageneration_match}
+        ifSourceMetagenerationNotMatch: ${if_source_metageneration_not_match}
+    input:
+      bucket:
+        type: string
+        description: Name of the bucket in which the folders are in.
+      destination_folder:
+        type: string
+        description: Name of the destination folder.
+      source_folder:
+        type: string
+        description: Name of the source folder.
+      if_source_metageneration_match:
+        type: string
+        description: Makes the operation conditional on whether the source object's current metageneration
+          matches the given value.
+        optional: true
+      if_source_metageneration_not_match:
+        type: string
+        description: Makes the operation conditional on whether the source object's current metageneration
+          does not match the given value.
+        optional: true
+    output:
+      description: The GoogleLongrunningOperation resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+  delete_managed_folder:
+    title: Delete managed folder
+    description: Permanently deletes a managed folder. Calls managedFolders.delete on the Cloud Storage
+      JSON API.
+    category: managed_folders
+    request:
+      method: DELETE
+      path: /storage/v1/b/${bucket}/managedFolders/${managed_folder}
+      query:
+        allowNonEmpty: ${allow_non_empty}
+        ifMetagenerationMatch: ${if_metageneration_match}
+        ifMetagenerationNotMatch: ${if_metageneration_not_match}
+    input:
+      bucket:
+        type: string
+        description: Name of the bucket containing the managed folder.
+      managed_folder:
+        type: string
+        description: The managed folder name/path.
+      allow_non_empty:
+        type: boolean
+        description: Allows the deletion of a managed folder even if it is not empty. A managed folder
+          is empty if there are no objects or managed folders that it applies to. Callers must have storage.managedFolders.setIamPolicy
+          permission.
+        optional: true
+      if_metageneration_match:
+        type: string
+        description: If set, only deletes the managed folder if its metageneration matches this value.
+        optional: true
+      if_metageneration_not_match:
+        type: string
+        description: If set, only deletes the managed folder if its metageneration does not match this
+          value.
+        optional: true
+    output:
+      description: What the API returned.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+    destructive: true
+  get_managed_folder:
+    title: Get managed folder
+    description: Returns metadata of the specified managed folder.
+    category: managed_folders
+    request:
+      method: GET
+      path: /storage/v1/b/${bucket}/managedFolders/${managed_folder}
+      query:
+        ifMetagenerationMatch: ${if_metageneration_match}
+        ifMetagenerationNotMatch: ${if_metageneration_not_match}
+    input:
+      bucket:
+        type: string
+        description: Name of the bucket containing the managed folder.
+      managed_folder:
+        type: string
+        description: The managed folder name/path.
+      if_metageneration_match:
+        type: string
+        description: Makes the return of the managed folder metadata conditional on whether the managed
+          folder's current metageneration matches the given value.
+        optional: true
+      if_metageneration_not_match:
+        type: string
+        description: Makes the return of the managed folder metadata conditional on whether the managed
+          folder's current metageneration does not match the given value.
+        optional: true
+    output:
+      description: The ManagedFolder resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - cloud-platform.read-only
+    - devstorage.full_control
+    - devstorage.read_only
+    - devstorage.read_write
+    read_only: true
+  get_iam_policy_managed_folder:
+    title: Get iam policy managed folder
+    description: Returns an IAM policy for the specified managed folder.
+    category: managed_folders
+    request:
+      method: GET
+      path: /storage/v1/b/${bucket}/managedFolders/${managed_folder}/iam
+      query:
+        optionsRequestedPolicyVersion: ${options_requested_policy_version}
+        userProject: ${user_project}
+    input:
+      bucket:
+        type: string
+        description: Name of the bucket containing the managed folder.
+      managed_folder:
+        type: string
+        description: The managed folder name/path.
+      options_requested_policy_version:
+        type: integer
+        description: The IAM policy format version to be returned. If the optionsRequestedPolicyVersion
+          is for an older version that doesn't support part of the requested IAM policy, the request fails.
+        optional: true
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+    output:
+      description: The Policy resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - cloud-platform.read-only
+    - devstorage.full_control
+    - devstorage.read_only
+    - devstorage.read_write
+    read_only: true
+  create_managed_folder:
+    title: Create managed folder
+    description: Creates a new managed folder. Calls managedFolders.insert on the Cloud Storage JSON API.
+    category: managed_folders
+    request:
+      method: POST
+      path: /storage/v1/b/${bucket}/managedFolders
+      body:
+        bucket: ${body_bucket}
+        metageneration: ${metageneration}
+        name: ${name}
+        selfLink: ${self_link}
+        createTime: ${create_time}
+        updateTime: ${update_time}
+        rapidCacheConfig: ${rapid_cache_config}
+    input:
+      bucket:
+        type: string
+        description: Name of the bucket containing the managed folder.
+      body_bucket:
+        type: string
+        description: The name of the bucket containing this managed folder.
+        optional: true
+      metageneration:
+        type: string
+        description: The version of the metadata for this managed folder. Used for preconditions and for
+          detecting changes in metadata.
+        optional: true
+      name:
+        type: string
+        description: The name of the managed folder. Required if not specified by URL parameter.
+        optional: true
+      self_link:
+        type: string
+        description: The link to this managed folder.
+        optional: true
+      create_time:
+        type: string
+        description: The creation time of the managed folder in RFC 3339 format.
+        optional: true
+      update_time:
+        type: string
+        description: The last update time of the managed folder metadata in RFC 3339 format.
+        optional: true
+      rapid_cache_config:
+        type: string
+        description: The rapid cache configuration for the managed folder.
+        optional: true
+    output:
+      description: The ManagedFolder resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+  list_managed_folders:
+    title: List managed folders
+    description: Lists managed folders in the given bucket.
+    category: managed_folders
+    request:
+      method: GET
+      path: /storage/v1/b/${bucket}/managedFolders
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+        prefix: ${prefix}
+    input:
+      bucket:
+        type: string
+        description: Name of the bucket containing the managed folder.
+      page_size:
+        type: integer
+        description: Maximum number of items to return in a single page of responses.
+        optional: true
+      page_token:
+        type: string
+        description: A previously-returned page token representing part of the larger set of results to
+          view.
+        optional: true
+      prefix:
+        type: string
+        description: The managed folder name/path prefix to filter the output list of results.
+        optional: true
+    output:
+      description: The ManagedFolders resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - cloud-platform.read-only
+    - devstorage.full_control
+    - devstorage.read_only
+    - devstorage.read_write
+    read_only: true
+  set_iam_policy_managed_folder:
+    title: Set iam policy managed folder
+    description: Updates an IAM policy for the specified managed folder.
+    category: managed_folders
+    request:
+      method: PUT
+      path: /storage/v1/b/${bucket}/managedFolders/${managed_folder}/iam
+      query:
+        userProject: ${user_project}
+      body:
+        bindings: ${bindings}
+        resourceId: ${resource_id}
+        version: ${version}
+    input:
+      bucket:
+        type: string
+        description: Name of the bucket containing the managed folder.
+      managed_folder:
+        type: string
+        description: The managed folder name/path.
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+      bindings:
+        type: array
+        items:
+          type: object
+        description: An association between a role, which comes with a set of permissions, and members
+          who may assume that role.
+        optional: true
+      resource_id:
+        type: string
+        description: 'The ID of the resource to which this policy belongs. Will be of the form projects/_/buckets/bucket
+          for buckets, projects/_/buckets/bucket/objects/object for objects, and projects/_/buckets/bucket/managedFolders/managedFolder.
+          A specific generation may be specified by appending #generationNumber to t'
+        optional: true
+      version:
+        type: integer
+        description: The IAM policy format version.
+        optional: true
+    output:
+      description: The Policy resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+  test_iam_permissions_managed_folder:
+    title: Test iam permissions managed folder
+    description: Tests a set of permissions on the given managed folder to see which, if any, are held
+      by the caller.
+    category: managed_folders
+    request:
+      method: GET
+      path: /storage/v1/b/${bucket}/managedFolders/${managed_folder}/iam/testPermissions
+      query:
+        permissions: ${permissions}
+        userProject: ${user_project}
+    input:
+      bucket:
+        type: string
+        description: Name of the bucket containing the managed folder.
+      managed_folder:
+        type: string
+        description: The managed folder name/path.
+      permissions:
+        type: string
+        description: Permissions to test.
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+    output:
+      description: The TestIamPermissionsResponse resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - cloud-platform.read-only
+    - devstorage.full_control
+    - devstorage.read_only
+    - devstorage.read_write
+    read_only: true
+  replace_managed_folder:
+    title: Replace managed folder
+    description: Updates a managed folder using patch semantics.
+    category: managed_folders
+    request:
+      method: PATCH
+      path: /storage/v1/b/${bucket}/managedFolders/${managed_folder}
+      query:
+        ifMetagenerationMatch: ${if_metageneration_match}
+        ifMetagenerationNotMatch: ${if_metageneration_not_match}
+      body:
+        bucket: ${body_bucket}
+        metageneration: ${metageneration}
+        name: ${name}
+        selfLink: ${self_link}
+        createTime: ${create_time}
+        updateTime: ${update_time}
+        rapidCacheConfig: ${rapid_cache_config}
+    input:
+      bucket:
+        type: string
+        description: The name of the bucket containing the managed folder.
+      managed_folder:
+        type: string
+        description: The name of the managed folder.
+      if_metageneration_match:
+        type: string
+        description: Makes the operation conditional on whether the metageneration of the managed folder
+          matches the specified value.
+        optional: true
+      if_metageneration_not_match:
+        type: string
+        description: Makes the operation conditional on whether the metageneration of the managed folder
+          doesn't match the specified value.
+        optional: true
+      body_bucket:
+        type: string
+        description: The name of the bucket containing this managed folder.
+        optional: true
+      metageneration:
+        type: string
+        description: The version of the metadata for this managed folder. Used for preconditions and for
+          detecting changes in metadata.
+        optional: true
+      name:
+        type: string
+        description: The name of the managed folder. Required if not specified by URL parameter.
+        optional: true
+      self_link:
+        type: string
+        description: The link to this managed folder.
+        optional: true
+      create_time:
+        type: string
+        description: The creation time of the managed folder in RFC 3339 format.
+        optional: true
+      update_time:
+        type: string
+        description: The last update time of the managed folder metadata in RFC 3339 format.
+        optional: true
+      rapid_cache_config:
+        type: string
+        description: The rapid cache configuration for the managed folder.
+        optional: true
+    output:
+      description: The ManagedFolder resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+  delete_notification:
+    title: Delete notification
+    description: Permanently deletes a notification subscription.
+    category: notifications
+    request:
+      method: DELETE
+      path: /storage/v1/b/${bucket}/notificationConfigs/${notification}
+      query:
+        userProject: ${user_project}
+    input:
+      bucket:
+        type: string
+        description: The parent bucket of the notification.
+      notification:
+        type: string
+        description: ID of the notification to delete.
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+    output:
+      description: What the API returned.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+    destructive: true
+  get_notification:
+    title: Get notification
+    description: View a notification configuration. Calls notifications.get on the Cloud Storage JSON
+      API.
+    category: notifications
+    request:
+      method: GET
+      path: /storage/v1/b/${bucket}/notificationConfigs/${notification}
+      query:
+        userProject: ${user_project}
+    input:
+      bucket:
+        type: string
+        description: The parent bucket of the notification.
+      notification:
+        type: string
+        description: Notification ID
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+    output:
+      description: The Notification resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - cloud-platform.read-only
+    - devstorage.full_control
+    - devstorage.read_only
+    - devstorage.read_write
+    read_only: true
+  create_notification:
+    title: Create notification
+    description: Creates a notification subscription for a given bucket.
+    category: notifications
+    request:
+      method: POST
+      path: /storage/v1/b/${bucket}/notificationConfigs
+      query:
+        userProject: ${user_project}
+      body:
+        custom_attributes: ${custom_attributes}
+        event_types: ${event_types}
+        object_name_prefix: ${object_name_prefix}
+        payload_format: ${payload_format}
+        selfLink: ${self_link}
+        topic: ${topic}
+    input:
+      bucket:
+        type: string
+        description: The parent bucket of the notification.
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+      custom_attributes:
+        type: object
+        description: An optional list of additional attributes to attach to each Cloud PubSub message
+          published for this notification subscription.
+        optional: true
+      event_types:
+        type: array
+        items:
+          type: string
+        description: If present, only send notifications about listed event types. If empty, sent notifications
+          for all event types.
+        optional: true
+      object_name_prefix:
+        type: string
+        description: If present, only apply this notification configuration to object names that begin
+          with this prefix.
+        optional: true
+      payload_format:
+        type: string
+        description: The desired content of the Payload.
+        optional: true
+        default: JSON_API_V1
+      self_link:
+        type: string
+        description: The canonical URL of this notification.
+        optional: true
+      topic:
+        type: string
+        description: 'The Cloud PubSub topic to which this subscription publishes. Formatted as: ''//pubsub.googleapis.com/projects/{project-identifier}/topics/{my-topic}'''
+        optional: true
+    output:
+      description: The Notification resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+  list_notifications:
+    title: List notifications
+    description: Retrieves a list of notification subscriptions for a given bucket.
+    category: notifications
+    request:
+      method: GET
+      path: /storage/v1/b/${bucket}/notificationConfigs
+      query:
+        userProject: ${user_project}
+    input:
+      bucket:
+        type: string
+        description: Name of a Google Cloud Storage bucket.
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+    output:
+      description: The Notifications resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - cloud-platform.read-only
+    - devstorage.full_control
+    - devstorage.read_only
+    - devstorage.read_write
+    read_only: true
+  delete_object_access_control:
+    title: Delete object access control
+    description: Permanently deletes the ACL entry for the specified entity on the specified object.
+    category: object_access_controls
+    request:
+      method: DELETE
+      path: /storage/v1/b/${bucket}/o/${object}/acl/${entity}
+      query:
+        generation: ${generation}
+        userProject: ${user_project}
+    input:
+      bucket:
+        type: string
+        description: Name of a bucket.
+      entity:
+        type: string
+        description: The entity holding the permission. Can be user-userId, user-emailAddress, group-groupId,
+          group-emailAddress, allUsers, or allAuthenticatedUsers.
+      object:
+        type: string
+        description: Name of the object. For information about how to URL encode object names to be path
+          safe, see Encoding URI Path Parts.
+      generation:
+        type: string
+        description: If present, selects a specific revision of this object (as opposed to the latest
+          version, the default).
+        optional: true
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+    output:
+      description: What the API returned.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    destructive: true
+  get_object_access_control:
+    title: Get object access control
+    description: Returns the ACL entry for the specified entity on the specified object.
+    category: object_access_controls
+    request:
+      method: GET
+      path: /storage/v1/b/${bucket}/o/${object}/acl/${entity}
+      query:
+        generation: ${generation}
+        userProject: ${user_project}
+    input:
+      bucket:
+        type: string
+        description: Name of a bucket.
+      entity:
+        type: string
+        description: The entity holding the permission. Can be user-userId, user-emailAddress, group-groupId,
+          group-emailAddress, allUsers, or allAuthenticatedUsers.
+      object:
+        type: string
+        description: Name of the object. For information about how to URL encode object names to be path
+          safe, see Encoding URI Path Parts.
+      generation:
+        type: string
+        description: If present, selects a specific revision of this object (as opposed to the latest
+          version, the default).
+        optional: true
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+    output:
+      description: The ObjectAccessControl resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    read_only: true
+  create_object_access_control:
+    title: Create object access control
+    description: Creates a new ACL entry on the specified object.
+    category: object_access_controls
+    request:
+      method: POST
+      path: /storage/v1/b/${bucket}/o/${object}/acl
+      query:
+        generation: ${generation}
+        userProject: ${user_project}
+      body:
+        bucket: ${body_bucket}
+        domain: ${domain}
+        email: ${email}
+        entity: ${entity}
+        entityId: ${entity_id}
+        generation: ${body_generation}
+        object: ${body_object}
+        projectTeam: ${project_team}
+        role: ${role}
+        selfLink: ${self_link}
+    input:
+      bucket:
+        type: string
+        description: Name of a bucket.
+      object:
+        type: string
+        description: Name of the object. For information about how to URL encode object names to be path
+          safe, see Encoding URI Path Parts.
+      generation:
+        type: string
+        description: If present, selects a specific revision of this object (as opposed to the latest
+          version, the default).
+        optional: true
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+      body_bucket:
+        type: string
+        description: The name of the bucket.
+        optional: true
+      domain:
+        type: string
+        description: The domain associated with the entity, if any.
+        optional: true
+      email:
+        type: string
+        description: The email address associated with the entity, if any.
+        optional: true
+      entity:
+        type: string
+        description: 'The entity holding the permission, in one of the following forms: - user-userId
+          - user-email - group-groupId - group-email - domain-domain - project-team-projectId - allUsers
+          - allAuthenticatedUsers Examples: - The user liz@example.com would be user-liz@example.com.
+          - The group example@googlegroups.'
+        optional: true
+      entity_id:
+        type: string
+        description: The ID for the entity, if any.
+        optional: true
+      body_generation:
+        type: string
+        description: The content generation of the object, if applied to an object.
+        optional: true
+      body_object:
+        type: string
+        description: The name of the object, if applied to an object.
+        optional: true
+      project_team:
+        type: object
+        description: The project team associated with the entity, if any.
+        optional: true
+      role:
+        type: string
+        description: The access permission for the entity.
+        optional: true
+      self_link:
+        type: string
+        description: The link to this access-control entry.
+        optional: true
+    output:
+      description: The ObjectAccessControl resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+  list_object_access_controls:
+    title: List object access controls
+    description: Retrieves ACL entries on the specified object.
+    category: object_access_controls
+    request:
+      method: GET
+      path: /storage/v1/b/${bucket}/o/${object}/acl
+      query:
+        generation: ${generation}
+        userProject: ${user_project}
+    input:
+      bucket:
+        type: string
+        description: Name of a bucket.
+      object:
+        type: string
+        description: Name of the object. For information about how to URL encode object names to be path
+          safe, see Encoding URI Path Parts.
+      generation:
+        type: string
+        description: If present, selects a specific revision of this object (as opposed to the latest
+          version, the default).
+        optional: true
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+    output:
+      description: The ObjectAccessControls resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    read_only: true
+  update_object_access_control:
+    title: Update object access control
+    description: Patches an ACL entry on the specified object.
+    category: object_access_controls
+    request:
+      method: PATCH
+      path: /storage/v1/b/${bucket}/o/${object}/acl/${entity}
+      query:
+        generation: ${generation}
+        userProject: ${user_project}
+      body:
+        bucket: ${body_bucket}
+        domain: ${domain}
+        email: ${email}
+        entity: ${body_entity}
+        entityId: ${entity_id}
+        generation: ${body_generation}
+        object: ${body_object}
+        projectTeam: ${project_team}
+        role: ${role}
+        selfLink: ${self_link}
+    input:
+      bucket:
+        type: string
+        description: Name of a bucket.
+      entity:
+        type: string
+        description: The entity holding the permission. Can be user-userId, user-emailAddress, group-groupId,
+          group-emailAddress, allUsers, or allAuthenticatedUsers.
+      object:
+        type: string
+        description: Name of the object. For information about how to URL encode object names to be path
+          safe, see Encoding URI Path Parts.
+      generation:
+        type: string
+        description: If present, selects a specific revision of this object (as opposed to the latest
+          version, the default).
+        optional: true
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+      body_bucket:
+        type: string
+        description: The name of the bucket.
+        optional: true
+      domain:
+        type: string
+        description: The domain associated with the entity, if any.
+        optional: true
+      email:
+        type: string
+        description: The email address associated with the entity, if any.
+        optional: true
+      body_entity:
+        type: string
+        description: 'The entity holding the permission, in one of the following forms: - user-userId
+          - user-email - group-groupId - group-email - domain-domain - project-team-projectId - allUsers
+          - allAuthenticatedUsers Examples: - The user liz@example.com would be user-liz@example.com.
+          - The group example@googlegroups.'
+        optional: true
+      entity_id:
+        type: string
+        description: The ID for the entity, if any.
+        optional: true
+      body_generation:
+        type: string
+        description: The content generation of the object, if applied to an object.
+        optional: true
+      body_object:
+        type: string
+        description: The name of the object, if applied to an object.
+        optional: true
+      project_team:
+        type: object
+        description: The project team associated with the entity, if any.
+        optional: true
+      role:
+        type: string
+        description: The access permission for the entity.
+        optional: true
+      self_link:
+        type: string
+        description: The link to this access-control entry.
+        optional: true
+    output:
+      description: The ObjectAccessControl resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+  replace_object_access_control:
+    title: Replace object access control
+    description: Updates an ACL entry on the specified object.
+    category: object_access_controls
+    request:
+      method: PUT
+      path: /storage/v1/b/${bucket}/o/${object}/acl/${entity}
+      query:
+        generation: ${generation}
+        userProject: ${user_project}
+      body:
+        bucket: ${body_bucket}
+        domain: ${domain}
+        email: ${email}
+        entity: ${body_entity}
+        entityId: ${entity_id}
+        generation: ${body_generation}
+        object: ${body_object}
+        projectTeam: ${project_team}
+        role: ${role}
+        selfLink: ${self_link}
+    input:
+      bucket:
+        type: string
+        description: Name of a bucket.
+      entity:
+        type: string
+        description: The entity holding the permission. Can be user-userId, user-emailAddress, group-groupId,
+          group-emailAddress, allUsers, or allAuthenticatedUsers.
+      object:
+        type: string
+        description: Name of the object. For information about how to URL encode object names to be path
+          safe, see Encoding URI Path Parts.
+      generation:
+        type: string
+        description: If present, selects a specific revision of this object (as opposed to the latest
+          version, the default).
+        optional: true
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+      body_bucket:
+        type: string
+        description: The name of the bucket.
+        optional: true
+      domain:
+        type: string
+        description: The domain associated with the entity, if any.
+        optional: true
+      email:
+        type: string
+        description: The email address associated with the entity, if any.
+        optional: true
+      body_entity:
+        type: string
+        description: 'The entity holding the permission, in one of the following forms: - user-userId
+          - user-email - group-groupId - group-email - domain-domain - project-team-projectId - allUsers
+          - allAuthenticatedUsers Examples: - The user liz@example.com would be user-liz@example.com.
+          - The group example@googlegroups.'
+        optional: true
+      entity_id:
+        type: string
+        description: The ID for the entity, if any.
+        optional: true
+      body_generation:
+        type: string
+        description: The content generation of the object, if applied to an object.
+        optional: true
+      body_object:
+        type: string
+        description: The name of the object, if applied to an object.
+        optional: true
+      project_team:
+        type: object
+        description: The project team associated with the entity, if any.
+        optional: true
+      role:
+        type: string
+        description: The access permission for the entity.
+        optional: true
+      self_link:
+        type: string
+        description: The link to this access-control entry.
+        optional: true
+    output:
+      description: The ObjectAccessControl resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+  bulk_restore_object:
+    title: Bulk restore object
+    description: Initiates a long-running bulk restore operation on the specified bucket.
+    category: objects
+    request:
+      method: POST
+      path: /storage/v1/b/${bucket}/o/bulkRestore
+      body:
+        allowOverwrite: ${allow_overwrite}
+        softDeletedAfterTime: ${soft_deleted_after_time}
+        softDeletedBeforeTime: ${soft_deleted_before_time}
+        matchGlobs: ${match_globs}
+        copySourceAcl: ${copy_source_acl}
+        createdAfterTime: ${created_after_time}
+        createdBeforeTime: ${created_before_time}
+    input:
+      bucket:
+        type: string
+        description: Name of the bucket in which the object resides.
+      allow_overwrite:
+        type: boolean
+        description: If false (default), the restore will not overwrite live objects with the same name
+          at the destination. This means some deleted objects may be skipped. If true, live objects will
+          be overwritten resulting in a noncurrent object (if versioning is enabled). If versioning is
+          not enabled, overwriting the
+        optional: true
+      soft_deleted_after_time:
+        type: string
+        description: Restores only the objects that were soft-deleted after this time.
+        optional: true
+      soft_deleted_before_time:
+        type: string
+        description: Restores only the objects that were soft-deleted before this time.
+        optional: true
+      match_globs:
+        type: array
+        items:
+          type: string
+        description: Restores only the objects matching any of the specified glob(s). If this parameter
+          is not specified, all objects will be restored within the specified time range.
+        optional: true
+      copy_source_acl:
+        type: boolean
+        description: If true, copies the source object's ACL; otherwise, uses the bucket's default object
+          ACL. The default is false.
+        optional: true
+      created_after_time:
+        type: string
+        description: Restores only the objects that were created after this time.
+        optional: true
+      created_before_time:
+        type: string
+        description: Restores only the objects that were created before this time.
+        optional: true
+    output:
+      description: The GoogleLongrunningOperation resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+  compose_object:
+    title: Compose object
+    description: Concatenates a list of existing objects into a new object in the same bucket.
+    category: objects
+    request:
+      method: POST
+      path: /storage/v1/b/${destination_bucket}/o/${destination_object}/compose
+      query:
+        destinationPredefinedAcl: ${destination_predefined_acl}
+        dropContextGroups: ${drop_context_groups}
+        ifGenerationMatch: ${if_generation_match}
+        ifMetagenerationMatch: ${if_metageneration_match}
+        kmsKeyName: ${kms_key_name}
+        userProject: ${user_project}
+      body:
+        destination: ${destination}
+        sourceObjects: ${source_objects}
+        deleteSourceObjects: ${delete_source_objects}
+    input:
+      destination_bucket:
+        type: string
+        description: Name of the bucket containing the source objects. The destination object is stored
+          in this bucket.
+      destination_object:
+        type: string
+        description: Name of the new object. For information about how to URL encode object names to be
+          path safe, see Encoding URI Path Parts.
+      destination_predefined_acl:
+        type: string
+        description: Apply a predefined set of access controls to the destination object.
+        optional: true
+        enum:
+        - authenticatedRead
+        - bucketOwnerFullControl
+        - bucketOwnerRead
+        - private
+        - projectPrivate
+        - publicRead
+      drop_context_groups:
+        type: string
+        description: 'Specifies which object context groups to drop from the source object(s) during a
+          compose operation. The accepted value is ''custom''. Destination contexts behave as follows:
+          - When request body contexts are provided, they override all source contexts. - When no request
+          body contexts are provided, sour'
+        optional: true
+      if_generation_match:
+        type: string
+        description: Makes the operation conditional on whether the object's current generation matches
+          the given value. Setting to 0 makes the operation succeed only if there are no live versions
+          of the object.
+        optional: true
+      if_metageneration_match:
+        type: string
+        description: Makes the operation conditional on whether the object's current metageneration matches
+          the given value.
+        optional: true
+      kms_key_name:
+        type: string
+        description: Resource name of the Cloud KMS key, of the form projects/my-project/locations/global/keyRings/my-kr/cryptoKeys/my-key,
+          that will be used to encrypt the object. Overrides the object metadata's kms_key_name value,
+          if any.
+        optional: true
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+      destination:
+        type: string
+        description: Properties of the resulting object.
+        optional: true
+      source_objects:
+        type: array
+        items:
+          type: object
+        description: The list of source objects that will be concatenated into a single object.
+        optional: true
+      delete_source_objects:
+        type: boolean
+        description: If true, the source objects will be deleted.
+        optional: true
+    output:
+      description: The Object resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+  copy_object:
+    title: Copy object
+    description: Copies a source object to a destination object. Optionally overrides metadata.
+    category: objects
+    request:
+      method: POST
+      path: /storage/v1/b/${source_bucket}/o/${source_object}/copyTo/b/${destination_bucket}/o/${destination_object}
+      query:
+        destinationKmsKeyName: ${destination_kms_key_name}
+        destinationPredefinedAcl: ${destination_predefined_acl}
+        ifGenerationMatch: ${if_generation_match}
+        ifGenerationNotMatch: ${if_generation_not_match}
+        ifMetagenerationMatch: ${if_metageneration_match}
+        ifMetagenerationNotMatch: ${if_metageneration_not_match}
+        ifSourceGenerationMatch: ${if_source_generation_match}
+        ifSourceGenerationNotMatch: ${if_source_generation_not_match}
+        ifSourceMetagenerationMatch: ${if_source_metageneration_match}
+        ifSourceMetagenerationNotMatch: ${if_source_metageneration_not_match}
+        projection: ${projection}
+        sourceGeneration: ${source_generation}
+        userProject: ${user_project}
+      body: ${body}
+    input:
+      destination_bucket:
+        type: string
+        description: Name of the bucket in which to store the new object. Overrides the provided object
+          metadata's bucket value, if any.For information about how to URL encode object names to be path
+          safe, see Encoding URI Path Parts.
+      destination_object:
+        type: string
+        description: Name of the new object. Required when the object metadata is not otherwise provided.
+          Overrides the object metadata's name value, if any.
+      source_bucket:
+        type: string
+        description: Name of the bucket in which to find the source object.
+      source_object:
+        type: string
+        description: Name of the source object. For information about how to URL encode object names to
+          be path safe, see Encoding URI Path Parts.
+      destination_kms_key_name:
+        type: string
+        description: Resource name of the Cloud KMS key, of the form projects/my-project/locations/global/keyRings/my-kr/cryptoKeys/my-key,
+          that will be used to encrypt the object. Overrides the object metadata's kms_key_name value,
+          if any.
+        optional: true
+      destination_predefined_acl:
+        type: string
+        description: Apply a predefined set of access controls to the destination object.
+        optional: true
+        enum:
+        - authenticatedRead
+        - bucketOwnerFullControl
+        - bucketOwnerRead
+        - private
+        - projectPrivate
+        - publicRead
+      if_generation_match:
+        type: string
+        description: Makes the operation conditional on whether the destination object's current generation
+          matches the given value. Setting to 0 makes the operation succeed only if there are no live
+          versions of the object.
+        optional: true
+      if_generation_not_match:
+        type: string
+        description: Makes the operation conditional on whether the destination object's current generation
+          does not match the given value. If no live object exists, the precondition fails. Setting to
+          0 makes the operation succeed only if there is a live version of the object.
+        optional: true
+      if_metageneration_match:
+        type: string
+        description: Makes the operation conditional on whether the destination object's current metageneration
+          matches the given value.
+        optional: true
+      if_metageneration_not_match:
+        type: string
+        description: Makes the operation conditional on whether the destination object's current metageneration
+          does not match the given value.
+        optional: true
+      if_source_generation_match:
+        type: string
+        description: Makes the operation conditional on whether the source object's current generation
+          matches the given value.
+        optional: true
+      if_source_generation_not_match:
+        type: string
+        description: Makes the operation conditional on whether the source object's current generation
+          does not match the given value.
+        optional: true
+      if_source_metageneration_match:
+        type: string
+        description: Makes the operation conditional on whether the source object's current metageneration
+          matches the given value.
+        optional: true
+      if_source_metageneration_not_match:
+        type: string
+        description: Makes the operation conditional on whether the source object's current metageneration
+          does not match the given value.
+        optional: true
+      projection:
+        type: string
+        description: Set of properties to return. Defaults to noAcl, unless the object resource specifies
+          the acl property, when it defaults to full.
+        optional: true
+        enum:
+        - full
+        - noAcl
+      source_generation:
+        type: string
+        description: If present, selects a specific revision of the source object (as opposed to the latest
+          version, the default).
+        optional: true
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+      body:
+        type: object
+        description: The Object resource, as the API's own reference defines it.
+    output:
+      description: The Object resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+  delete_object:
+    title: Delete object
+    description: Deletes an object and its metadata. Deletions are permanent if versioning is not enabled
+      for the bucket, or if the generation parameter is used.
+    category: objects
+    request:
+      method: DELETE
+      path: /storage/v1/b/${bucket}/o/${object}
+      query:
+        generation: ${generation}
+        ifGenerationMatch: ${if_generation_match}
+        ifGenerationNotMatch: ${if_generation_not_match}
+        ifMetagenerationMatch: ${if_metageneration_match}
+        ifMetagenerationNotMatch: ${if_metageneration_not_match}
+        userProject: ${user_project}
+    input:
+      bucket:
+        type: string
+        description: Name of the bucket in which the object resides.
+      object:
+        type: string
+        description: Name of the object. For information about how to URL encode object names to be path
+          safe, see Encoding URI Path Parts.
+      generation:
+        type: string
+        description: If present, permanently deletes a specific revision of this object (as opposed to
+          the latest version, the default).
+        optional: true
+      if_generation_match:
+        type: string
+        description: Makes the operation conditional on whether the object's current generation matches
+          the given value. Setting to 0 makes the operation succeed only if there are no live versions
+          of the object.
+        optional: true
+      if_generation_not_match:
+        type: string
+        description: Makes the operation conditional on whether the object's current generation does not
+          match the given value. If no live object exists, the precondition fails. Setting to 0 makes
+          the operation succeed only if there is a live version of the object.
+        optional: true
+      if_metageneration_match:
+        type: string
+        description: Makes the operation conditional on whether the object's current metageneration matches
+          the given value.
+        optional: true
+      if_metageneration_not_match:
+        type: string
+        description: Makes the operation conditional on whether the object's current metageneration does
+          not match the given value.
+        optional: true
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+    output:
+      description: What the API returned.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+    destructive: true
+  get_object:
+    title: Get object
+    description: Retrieves an object or its metadata. Calls objects.get on the Cloud Storage JSON API.
+    category: objects
+    request:
+      method: GET
+      path: /storage/v1/b/${bucket}/o/${object}
+      query:
+        generation: ${generation}
+        ifGenerationMatch: ${if_generation_match}
+        ifGenerationNotMatch: ${if_generation_not_match}
+        ifMetagenerationMatch: ${if_metageneration_match}
+        ifMetagenerationNotMatch: ${if_metageneration_not_match}
+        projection: ${projection}
+        restoreToken: ${restore_token}
+        softDeleted: ${soft_deleted}
+        userProject: ${user_project}
+    input:
+      bucket:
+        type: string
+        description: Name of the bucket in which the object resides.
+      object:
+        type: string
+        description: Name of the object. For information about how to URL encode object names to be path
+          safe, see Encoding URI Path Parts.
+      generation:
+        type: string
+        description: If present, selects a specific revision of this object (as opposed to the latest
+          version, the default).
+        optional: true
+      if_generation_match:
+        type: string
+        description: Makes the operation conditional on whether the object's current generation matches
+          the given value. Setting to 0 makes the operation succeed only if there are no live versions
+          of the object.
+        optional: true
+      if_generation_not_match:
+        type: string
+        description: Makes the operation conditional on whether the object's current generation does not
+          match the given value. If no live object exists, the precondition fails. Setting to 0 makes
+          the operation succeed only if there is a live version of the object.
+        optional: true
+      if_metageneration_match:
+        type: string
+        description: Makes the operation conditional on whether the object's current metageneration matches
+          the given value.
+        optional: true
+      if_metageneration_not_match:
+        type: string
+        description: Makes the operation conditional on whether the object's current metageneration does
+          not match the given value.
+        optional: true
+      projection:
+        type: string
+        description: Set of properties to return. Defaults to noAcl.
+        optional: true
+        enum:
+        - full
+        - noAcl
+      restore_token:
+        type: string
+        description: Restore token used to differentiate soft-deleted objects with the same name and generation.
+          Only applicable for hierarchical namespace buckets and if softDeleted is set to true. This parameter
+          is optional, and is only required in the rare case when there are multiple soft-deleted objects
+          with the sa
+        optional: true
+      soft_deleted:
+        type: boolean
+        description: If true, only soft-deleted object versions will be listed. The default is false.
+          For more information, see Soft Delete.
+        optional: true
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+    output:
+      description: The Object resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - cloud-platform.read-only
+    - devstorage.full_control
+    - devstorage.read_only
+    - devstorage.read_write
+    read_only: true
+  get_iam_policy_object:
+    title: Get iam policy object
+    description: Returns an IAM policy for the specified object.
+    category: objects
+    request:
+      method: GET
+      path: /storage/v1/b/${bucket}/o/${object}/iam
+      query:
+        generation: ${generation}
+        userProject: ${user_project}
+    input:
+      bucket:
+        type: string
+        description: Name of the bucket in which the object resides.
+      object:
+        type: string
+        description: Name of the object. For information about how to URL encode object names to be path
+          safe, see Encoding URI Path Parts.
+      generation:
+        type: string
+        description: If present, selects a specific revision of this object (as opposed to the latest
+          version, the default).
+        optional: true
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+    output:
+      description: The Policy resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - cloud-platform.read-only
+    - devstorage.full_control
+    - devstorage.read_only
+    - devstorage.read_write
+    read_only: true
+  create_object:
+    title: Create object
+    description: Stores a new object and metadata. Calls objects.insert on the Cloud Storage JSON API.
+    category: objects
+    request:
+      method: POST
+      path: /storage/v1/b/${bucket}/o
+      query:
+        contentEncoding: ${content_encoding}
+        ifGenerationMatch: ${if_generation_match}
+        ifGenerationNotMatch: ${if_generation_not_match}
+        ifMetagenerationMatch: ${if_metageneration_match}
+        ifMetagenerationNotMatch: ${if_metageneration_not_match}
+        kmsKeyName: ${kms_key_name}
+        name: ${name}
+        predefinedAcl: ${predefined_acl}
+        projection: ${projection}
+        userProject: ${user_project}
+      body: ${body}
+    input:
+      bucket:
+        type: string
+        description: Name of the bucket in which to store the new object. Overrides the provided object
+          metadata's bucket value, if any.
+      content_encoding:
+        type: string
+        description: If set, sets the contentEncoding property of the final object to this value. Setting
+          this parameter is equivalent to setting the contentEncoding metadata property. This can be useful
+          when uploading an object with uploadType=media to indicate the encoding of the content being
+          uploaded.
+        optional: true
+      if_generation_match:
+        type: string
+        description: Makes the operation conditional on whether the object's current generation matches
+          the given value. Setting to 0 makes the operation succeed only if there are no live versions
+          of the object.
+        optional: true
+      if_generation_not_match:
+        type: string
+        description: Makes the operation conditional on whether the object's current generation does not
+          match the given value. If no live object exists, the precondition fails. Setting to 0 makes
+          the operation succeed only if there is a live version of the object.
+        optional: true
+      if_metageneration_match:
+        type: string
+        description: Makes the operation conditional on whether the object's current metageneration matches
+          the given value.
+        optional: true
+      if_metageneration_not_match:
+        type: string
+        description: Makes the operation conditional on whether the object's current metageneration does
+          not match the given value.
+        optional: true
+      kms_key_name:
+        type: string
+        description: Resource name of the Cloud KMS key, of the form projects/my-project/locations/global/keyRings/my-kr/cryptoKeys/my-key,
+          that will be used to encrypt the object. Overrides the object metadata's kms_key_name value,
+          if any.
+        optional: true
+      name:
+        type: string
+        description: Name of the object. Required when the object metadata is not otherwise provided.
+          Overrides the object metadata's name value, if any. For information about how to URL encode
+          object names to be path safe, see Encoding URI Path Parts.
+        optional: true
+      predefined_acl:
+        type: string
+        description: Apply a predefined set of access controls to this object.
+        optional: true
+        enum:
+        - authenticatedRead
+        - bucketOwnerFullControl
+        - bucketOwnerRead
+        - private
+        - projectPrivate
+        - publicRead
+      projection:
+        type: string
+        description: Set of properties to return. Defaults to noAcl, unless the object resource specifies
+          the acl property, when it defaults to full.
+        optional: true
+        enum:
+        - full
+        - noAcl
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+      body:
+        type: object
+        description: The Object resource, as the API's own reference defines it.
+    output:
+      description: The Object resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+  list_objects:
+    title: List objects
+    description: Retrieves a list of objects matching the criteria.
+    category: objects
+    request:
+      method: GET
+      path: /storage/v1/b/${bucket}/o
+      query:
+        delimiter: ${delimiter}
+        endOffset: ${end_offset}
+        filter: ${filter}
+        includeFoldersAsPrefixes: ${include_folders_as_prefixes}
+        includeTrailingDelimiter: ${include_trailing_delimiter}
+        matchGlob: ${match_glob}
+        maxResults: ${max_results}
+        pageToken: ${page_token}
+        prefix: ${prefix}
+        projection: ${projection}
+        softDeleted: ${soft_deleted}
+        startOffset: ${start_offset}
+        userProject: ${user_project}
+        versions: ${versions}
+    input:
+      bucket:
+        type: string
+        description: Name of the bucket in which to look for objects.
+      delimiter:
+        type: string
+        description: Returns results in a directory-like mode. items will contain only objects whose names,
+          aside from the prefix, do not contain delimiter. Objects whose names, aside from the prefix,
+          contain delimiter will have their name, truncated after the delimiter, returned in prefixes.
+          Duplicate prefixes are omit
+        optional: true
+      end_offset:
+        type: string
+        description: Filter results to objects whose names are lexicographically before endOffset. If
+          startOffset is also set, the objects listed will have names between startOffset (inclusive)
+          and endOffset (exclusive).
+        optional: true
+      filter:
+        type: string
+        description: Filter the returned objects. Currently only supported for the contexts field. If
+          delimiter is set, the returned prefixes are exempt from this filter.
+        optional: true
+      include_folders_as_prefixes:
+        type: boolean
+        description: Only applicable if delimiter is set to '/'. If true, will also include folders and
+          managed folders (besides objects) in the returned prefixes.
+        optional: true
+      include_trailing_delimiter:
+        type: boolean
+        description: If true, objects that end in exactly one instance of delimiter will have their metadata
+          included in items in addition to prefixes.
+        optional: true
+      match_glob:
+        type: string
+        description: Filter results to objects and prefixes that match this glob pattern.
+        optional: true
+      max_results:
+        type: integer
+        description: Maximum number of items plus prefixes to return in a single page of responses. As
+          duplicate prefixes are omitted, fewer total results may be returned than requested. The service
+          will use this parameter or 1,000 items, whichever is smaller.
+        optional: true
+        default: 1000
+      page_token:
+        type: string
+        description: A previously-returned page token representing part of the larger set of results to
+          view.
+        optional: true
+      prefix:
+        type: string
+        description: Filter results to objects whose names begin with this prefix.
+        optional: true
+      projection:
+        type: string
+        description: Set of properties to return. Defaults to noAcl.
+        optional: true
+        enum:
+        - full
+        - noAcl
+      soft_deleted:
+        type: boolean
+        description: If true, only soft-deleted object versions will be listed. The default is false.
+          For more information, see Soft Delete.
+        optional: true
+      start_offset:
+        type: string
+        description: Filter results to objects whose names are lexicographically equal to or after startOffset.
+          If endOffset is also set, the objects listed will have names between startOffset (inclusive)
+          and endOffset (exclusive).
+        optional: true
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+      versions:
+        type: boolean
+        description: If true, lists all versions of an object as distinct results. The default is false.
+          For more information, see Object Versioning.
+        optional: true
+    output:
+      description: The Objects resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - cloud-platform.read-only
+    - devstorage.full_control
+    - devstorage.read_only
+    - devstorage.read_write
+    read_only: true
+  move_object:
+    title: Move object
+    description: Moves the source object to the destination object in the same bucket.
+    category: objects
+    request:
+      method: POST
+      path: /storage/v1/b/${bucket}/o/${source_object}/moveTo/o/${destination_object}
+      query:
+        ifGenerationMatch: ${if_generation_match}
+        ifGenerationNotMatch: ${if_generation_not_match}
+        ifMetagenerationMatch: ${if_metageneration_match}
+        ifMetagenerationNotMatch: ${if_metageneration_not_match}
+        ifSourceGenerationMatch: ${if_source_generation_match}
+        ifSourceGenerationNotMatch: ${if_source_generation_not_match}
+        ifSourceMetagenerationMatch: ${if_source_metageneration_match}
+        ifSourceMetagenerationNotMatch: ${if_source_metageneration_not_match}
+        projection: ${projection}
+        userProject: ${user_project}
+    input:
+      bucket:
+        type: string
+        description: Name of the bucket in which the object resides.
+      destination_object:
+        type: string
+        description: Name of the destination object. For information about how to URL encode object names
+          to be path safe, see Encoding URI Path Parts.
+      source_object:
+        type: string
+        description: Name of the source object. For information about how to URL encode object names to
+          be path safe, see Encoding URI Path Parts.
+      if_generation_match:
+        type: string
+        description: 'Makes the operation conditional on whether the destination object''s current generation
+          matches the given value. Setting to 0 makes the operation succeed only if there are no live
+          versions of the object. ifGenerationMatch and ifGenerationNotMatch conditions are mutually exclusive:
+          it''s an error for b'
+        optional: true
+      if_generation_not_match:
+        type: string
+        description: Makes the operation conditional on whether the destination object's current generation
+          does not match the given value. If no live object exists, the precondition fails. Setting to
+          0 makes the operation succeed only if there is a live version of the object.ifGenerationMatch
+          and ifGenerationNotMatch c
+        optional: true
+      if_metageneration_match:
+        type: string
+        description: 'Makes the operation conditional on whether the destination object''s current metageneration
+          matches the given value. ifMetagenerationMatch and ifMetagenerationNotMatch conditions are mutually
+          exclusive: it''s an error for both of them to be set in the request.'
+        optional: true
+      if_metageneration_not_match:
+        type: string
+        description: 'Makes the operation conditional on whether the destination object''s current metageneration
+          does not match the given value. ifMetagenerationMatch and ifMetagenerationNotMatch conditions
+          are mutually exclusive: it''s an error for both of them to be set in the request.'
+        optional: true
+      if_source_generation_match:
+        type: string
+        description: 'Makes the operation conditional on whether the source object''s current generation
+          matches the given value. ifSourceGenerationMatch and ifSourceGenerationNotMatch conditions are
+          mutually exclusive: it''s an error for both of them to be set in the request.'
+        optional: true
+      if_source_generation_not_match:
+        type: string
+        description: 'Makes the operation conditional on whether the source object''s current generation
+          does not match the given value. ifSourceGenerationMatch and ifSourceGenerationNotMatch conditions
+          are mutually exclusive: it''s an error for both of them to be set in the request.'
+        optional: true
+      if_source_metageneration_match:
+        type: string
+        description: 'Makes the operation conditional on whether the source object''s current metageneration
+          matches the given value. ifSourceMetagenerationMatch and ifSourceMetagenerationNotMatch conditions
+          are mutually exclusive: it''s an error for both of them to be set in the request.'
+        optional: true
+      if_source_metageneration_not_match:
+        type: string
+        description: 'Makes the operation conditional on whether the source object''s current metageneration
+          does not match the given value. ifSourceMetagenerationMatch and ifSourceMetagenerationNotMatch
+          conditions are mutually exclusive: it''s an error for both of them to be set in the request.'
+        optional: true
+      projection:
+        type: string
+        description: Set of properties to return. Defaults to noAcl.
+        optional: true
+        enum:
+        - full
+        - noAcl
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+    output:
+      description: The Object resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+  update_object:
+    title: Update object
+    description: Patches an object's metadata. Calls objects.patch on the Cloud Storage JSON API.
+    category: objects
+    request:
+      method: PATCH
+      path: /storage/v1/b/${bucket}/o/${object}
+      query:
+        generation: ${generation}
+        ifGenerationMatch: ${if_generation_match}
+        ifGenerationNotMatch: ${if_generation_not_match}
+        ifMetagenerationMatch: ${if_metageneration_match}
+        ifMetagenerationNotMatch: ${if_metageneration_not_match}
+        overrideUnlockedRetention: ${override_unlocked_retention}
+        predefinedAcl: ${predefined_acl}
+        projection: ${projection}
+        userProject: ${user_project}
+      body: ${body}
+    input:
+      bucket:
+        type: string
+        description: Name of the bucket in which the object resides.
+      object:
+        type: string
+        description: Name of the object. For information about how to URL encode object names to be path
+          safe, see Encoding URI Path Parts.
+      generation:
+        type: string
+        description: If present, selects a specific revision of this object (as opposed to the latest
+          version, the default).
+        optional: true
+      if_generation_match:
+        type: string
+        description: Makes the operation conditional on whether the object's current generation matches
+          the given value. Setting to 0 makes the operation succeed only if there are no live versions
+          of the object.
+        optional: true
+      if_generation_not_match:
+        type: string
+        description: Makes the operation conditional on whether the object's current generation does not
+          match the given value. If no live object exists, the precondition fails. Setting to 0 makes
+          the operation succeed only if there is a live version of the object.
+        optional: true
+      if_metageneration_match:
+        type: string
+        description: Makes the operation conditional on whether the object's current metageneration matches
+          the given value.
+        optional: true
+      if_metageneration_not_match:
+        type: string
+        description: Makes the operation conditional on whether the object's current metageneration does
+          not match the given value.
+        optional: true
+      override_unlocked_retention:
+        type: boolean
+        description: Must be true to remove the retention configuration, reduce its unlocked retention
+          period, or change its mode from unlocked to locked.
+        optional: true
+      predefined_acl:
+        type: string
+        description: Apply a predefined set of access controls to this object.
+        optional: true
+        enum:
+        - authenticatedRead
+        - bucketOwnerFullControl
+        - bucketOwnerRead
+        - private
+        - projectPrivate
+        - publicRead
+      projection:
+        type: string
+        description: Set of properties to return. Defaults to full.
+        optional: true
+        enum:
+        - full
+        - noAcl
+      user_project:
+        type: string
+        description: The project to be billed for this request, for Requester Pays buckets.
+        optional: true
+      body:
+        type: object
+        description: The Object resource, as the API's own reference defines it.
+    output:
+      description: The Object resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+  restore_object:
+    title: Restore object
+    description: Restores a soft-deleted object. Calls objects.restore on the Cloud Storage JSON API.
+    category: objects
+    request:
+      method: POST
+      path: /storage/v1/b/${bucket}/o/${object}/restore
+      query:
+        copySourceAcl: ${copy_source_acl}
+        generation: ${generation}
+        ifGenerationMatch: ${if_generation_match}
+        ifGenerationNotMatch: ${if_generation_not_match}
+        ifMetagenerationMatch: ${if_metageneration_match}
+        ifMetagenerationNotMatch: ${if_metageneration_not_match}
+        projection: ${projection}
+        restoreToken: ${restore_token}
+        userProject: ${user_project}
+    input:
+      bucket:
+        type: string
+        description: Name of the bucket in which the object resides.
+      object:
+        type: string
+        description: Name of the object. For information about how to URL encode object names to be path
+          safe, see Encoding URI Path Parts.
+      copy_source_acl:
+        type: boolean
+        description: If true, copies the source object's ACL; otherwise, uses the bucket's default object
+          ACL. The default is false.
+        optional: true
+      generation:
+        type: string
+        description: Selects a specific revision of this object.
+      if_generation_match:
+        type: string
+        description: Makes the operation conditional on whether the object's one live generation matches
+          the given value. Setting to 0 makes the operation succeed only if there are no live versions
+          of the object.
+        optional: true
+      if_generation_not_match:
+        type: string
+        description: Makes the operation conditional on whether none of the object's live generations
+          match the given value. If no live object exists, the precondition fails. Setting to 0 makes
+          the operation succeed only if there is a live version of the object.
+        optional: true
+      if_metageneration_match:
+        type: string
+        description: Makes the operation conditional on whether the object's one live metageneration matches
+          the given value.
+        optional: true
+      if_metageneration_not_match:
+        type: string
+        description: Makes the operation conditional on whether none of the object's live metagenerations
+          match the given value.
+        optional: true
+      projection:
+        type: string
+        description: Set of properties to return. Defaults to full.
+        optional: true
+        enum:
+        - full
+        - noAcl
+      restore_token:
+        type: string
+        description: Restore token used to differentiate sof-deleted objects with the same name and generation.
+          Only applicable for hierarchical namespace buckets. This parameter is optional, and is only
+          required in the rare case when there are multiple soft-deleted objects with the same name and
+          generation.
+        optional: true
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+    output:
+      description: The Object resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+  rewrite_object:
+    title: Rewrite object
+    description: Rewrites a source object to a destination object. Optionally overrides metadata.
+    category: objects
+    request:
+      method: POST
+      path: /storage/v1/b/${source_bucket}/o/${source_object}/rewriteTo/b/${destination_bucket}/o/${destination_object}
+      query:
+        destinationKmsKeyName: ${destination_kms_key_name}
+        destinationPredefinedAcl: ${destination_predefined_acl}
+        dropContextGroups: ${drop_context_groups}
+        ifGenerationMatch: ${if_generation_match}
+        ifGenerationNotMatch: ${if_generation_not_match}
+        ifMetagenerationMatch: ${if_metageneration_match}
+        ifMetagenerationNotMatch: ${if_metageneration_not_match}
+        ifSourceGenerationMatch: ${if_source_generation_match}
+        ifSourceGenerationNotMatch: ${if_source_generation_not_match}
+        ifSourceMetagenerationMatch: ${if_source_metageneration_match}
+        ifSourceMetagenerationNotMatch: ${if_source_metageneration_not_match}
+        maxBytesRewrittenPerCall: ${max_bytes_rewritten_per_call}
+        projection: ${projection}
+        rewriteToken: ${rewrite_token}
+        sourceGeneration: ${source_generation}
+        userProject: ${user_project}
+      body: ${body}
+    input:
+      destination_bucket:
+        type: string
+        description: Name of the bucket in which to store the new object. Overrides the provided object
+          metadata's bucket value, if any.
+      destination_object:
+        type: string
+        description: Name of the new object. Required when the object metadata is not otherwise provided.
+          Overrides the object metadata's name value, if any. For information about how to URL encode
+          object names to be path safe, see Encoding URI Path Parts.
+      source_bucket:
+        type: string
+        description: Name of the bucket in which to find the source object.
+      source_object:
+        type: string
+        description: Name of the source object. For information about how to URL encode object names to
+          be path safe, see Encoding URI Path Parts.
+      destination_kms_key_name:
+        type: string
+        description: Resource name of the Cloud KMS key, of the form projects/my-project/locations/global/keyRings/my-kr/cryptoKeys/my-key,
+          that will be used to encrypt the object. Overrides the object metadata's kms_key_name value,
+          if any.
+        optional: true
+      destination_predefined_acl:
+        type: string
+        description: Apply a predefined set of access controls to the destination object.
+        optional: true
+        enum:
+        - authenticatedRead
+        - bucketOwnerFullControl
+        - bucketOwnerRead
+        - private
+        - projectPrivate
+        - publicRead
+      drop_context_groups:
+        type: string
+        description: 'Specifies which object context groups to drop from the source object during a copy
+          operation. The accepted value is ''custom''. Destination contexts behave as follows: - When
+          request body contexts are provided, they override all source contexts. - When no request body
+          contexts are provided, source con'
+        optional: true
+      if_generation_match:
+        type: string
+        description: Makes the operation conditional on whether the object's current generation matches
+          the given value. Setting to 0 makes the operation succeed only if there are no live versions
+          of the object.
+        optional: true
+      if_generation_not_match:
+        type: string
+        description: Makes the operation conditional on whether the object's current generation does not
+          match the given value. If no live object exists, the precondition fails. Setting to 0 makes
+          the operation succeed only if there is a live version of the object.
+        optional: true
+      if_metageneration_match:
+        type: string
+        description: Makes the operation conditional on whether the destination object's current metageneration
+          matches the given value.
+        optional: true
+      if_metageneration_not_match:
+        type: string
+        description: Makes the operation conditional on whether the destination object's current metageneration
+          does not match the given value.
+        optional: true
+      if_source_generation_match:
+        type: string
+        description: Makes the operation conditional on whether the source object's current generation
+          matches the given value.
+        optional: true
+      if_source_generation_not_match:
+        type: string
+        description: Makes the operation conditional on whether the source object's current generation
+          does not match the given value.
+        optional: true
+      if_source_metageneration_match:
+        type: string
+        description: Makes the operation conditional on whether the source object's current metageneration
+          matches the given value.
+        optional: true
+      if_source_metageneration_not_match:
+        type: string
+        description: Makes the operation conditional on whether the source object's current metageneration
+          does not match the given value.
+        optional: true
+      max_bytes_rewritten_per_call:
+        type: string
+        description: The maximum number of bytes that will be rewritten per rewrite request. Most callers
+          shouldn't need to specify this parameter - it is primarily in place to support testing. If specified
+          the value must be an integral multiple of 1 MiB (1048576). Also, this only applies to requests
+          where the source an
+        optional: true
+      projection:
+        type: string
+        description: Set of properties to return. Defaults to noAcl, unless the object resource specifies
+          the acl property, when it defaults to full.
+        optional: true
+        enum:
+        - full
+        - noAcl
+      rewrite_token:
+        type: string
+        description: Include this field (from the previous rewrite response) on each rewrite request after
+          the first one, until the rewrite response 'done' flag is true. Calls that provide a rewriteToken
+          can omit all other request fields, but if included those fields must match the values provided
+          in the first rewrite r
+        optional: true
+      source_generation:
+        type: string
+        description: If present, selects a specific revision of the source object (as opposed to the latest
+          version, the default).
+        optional: true
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+      body:
+        type: object
+        description: The Object resource, as the API's own reference defines it.
+    output:
+      description: The RewriteResponse resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+  set_iam_policy_object:
+    title: Set iam policy object
+    description: Updates an IAM policy for the specified object.
+    category: objects
+    request:
+      method: PUT
+      path: /storage/v1/b/${bucket}/o/${object}/iam
+      query:
+        generation: ${generation}
+        userProject: ${user_project}
+      body:
+        bindings: ${bindings}
+        resourceId: ${resource_id}
+        version: ${version}
+    input:
+      bucket:
+        type: string
+        description: Name of the bucket in which the object resides.
+      object:
+        type: string
+        description: Name of the object. For information about how to URL encode object names to be path
+          safe, see Encoding URI Path Parts.
+      generation:
+        type: string
+        description: If present, selects a specific revision of this object (as opposed to the latest
+          version, the default).
+        optional: true
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+      bindings:
+        type: array
+        items:
+          type: object
+        description: An association between a role, which comes with a set of permissions, and members
+          who may assume that role.
+        optional: true
+      resource_id:
+        type: string
+        description: 'The ID of the resource to which this policy belongs. Will be of the form projects/_/buckets/bucket
+          for buckets, projects/_/buckets/bucket/objects/object for objects, and projects/_/buckets/bucket/managedFolders/managedFolder.
+          A specific generation may be specified by appending #generationNumber to t'
+        optional: true
+      version:
+        type: integer
+        description: The IAM policy format version.
+        optional: true
+    output:
+      description: The Policy resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+  test_iam_permissions_object:
+    title: Test iam permissions object
+    description: Tests a set of permissions on the given object to see which, if any, are held by the
+      caller.
+    category: objects
+    request:
+      method: GET
+      path: /storage/v1/b/${bucket}/o/${object}/iam/testPermissions
+      query:
+        generation: ${generation}
+        permissions: ${permissions}
+        userProject: ${user_project}
+    input:
+      bucket:
+        type: string
+        description: Name of the bucket in which the object resides.
+      object:
+        type: string
+        description: Name of the object. For information about how to URL encode object names to be path
+          safe, see Encoding URI Path Parts.
+      generation:
+        type: string
+        description: If present, selects a specific revision of this object (as opposed to the latest
+          version, the default).
+        optional: true
+      permissions:
+        type: string
+        description: Permissions to test.
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+    output:
+      description: The TestIamPermissionsResponse resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - cloud-platform.read-only
+    - devstorage.full_control
+    - devstorage.read_only
+    - devstorage.read_write
+    read_only: true
+  replace_object:
+    title: Replace object
+    description: Updates an object's metadata. Calls objects.update on the Cloud Storage JSON API.
+    category: objects
+    request:
+      method: PUT
+      path: /storage/v1/b/${bucket}/o/${object}
+      query:
+        generation: ${generation}
+        ifGenerationMatch: ${if_generation_match}
+        ifGenerationNotMatch: ${if_generation_not_match}
+        ifMetagenerationMatch: ${if_metageneration_match}
+        ifMetagenerationNotMatch: ${if_metageneration_not_match}
+        overrideUnlockedRetention: ${override_unlocked_retention}
+        predefinedAcl: ${predefined_acl}
+        projection: ${projection}
+        userProject: ${user_project}
+      body: ${body}
+    input:
+      bucket:
+        type: string
+        description: Name of the bucket in which the object resides.
+      object:
+        type: string
+        description: Name of the object. For information about how to URL encode object names to be path
+          safe, see Encoding URI Path Parts.
+      generation:
+        type: string
+        description: If present, selects a specific revision of this object (as opposed to the latest
+          version, the default).
+        optional: true
+      if_generation_match:
+        type: string
+        description: Makes the operation conditional on whether the object's current generation matches
+          the given value. Setting to 0 makes the operation succeed only if there are no live versions
+          of the object.
+        optional: true
+      if_generation_not_match:
+        type: string
+        description: Makes the operation conditional on whether the object's current generation does not
+          match the given value. If no live object exists, the precondition fails. Setting to 0 makes
+          the operation succeed only if there is a live version of the object.
+        optional: true
+      if_metageneration_match:
+        type: string
+        description: Makes the operation conditional on whether the object's current metageneration matches
+          the given value.
+        optional: true
+      if_metageneration_not_match:
+        type: string
+        description: Makes the operation conditional on whether the object's current metageneration does
+          not match the given value.
+        optional: true
+      override_unlocked_retention:
+        type: boolean
+        description: Must be true to remove the retention configuration, reduce its unlocked retention
+          period, or change its mode from unlocked to locked.
+        optional: true
+      predefined_acl:
+        type: string
+        description: Apply a predefined set of access controls to this object.
+        optional: true
+        enum:
+        - authenticatedRead
+        - bucketOwnerFullControl
+        - bucketOwnerRead
+        - private
+        - projectPrivate
+        - publicRead
+      projection:
+        type: string
+        description: Set of properties to return. Defaults to full.
+        optional: true
+        enum:
+        - full
+        - noAcl
+      user_project:
+        type: string
+        description: The project to be billed for this request. Required for Requester Pays buckets.
+        optional: true
+      body:
+        type: object
+        description: The Object resource, as the API's own reference defines it.
+    output:
+      description: The Object resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+  advance_relocate_bucket_operation:
+    title: Advance relocate bucket operation
+    description: Starts asynchronous advancement of the relocate bucket operation in the case of required
+      write downtime, to allow it to lock the bucket at the source location, and proceed with the bucket
+      location swap. The server makes a best effort to advance the relocate bucket operation, but success
+      is not guaranteed.
+    category: operations
+    request:
+      method: POST
+      path: /storage/v1/b/${bucket}/operations/${operation_id}/advanceRelocateBucket
+      body:
+        ttl: ${ttl}
+        expireTime: ${expire_time}
+    input:
+      bucket:
+        type: string
+        description: Name of the bucket to advance the relocate for.
+      operation_id:
+        type: string
+        description: ID of the operation resource.
+      ttl:
+        type: string
+        description: Specifies the duration after which the relocation will revert to the sync stage if
+          the relocation hasn't succeeded. Optional, if not supplied, a default value of 12h will be used.
+        optional: true
+      expire_time:
+        type: string
+        description: Specifies the time when the relocation will revert to the sync stage if the relocation
+          hasn't succeeded.
+        optional: true
+    output:
+      description: What the API returned.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+  cancel_operation:
+    title: Cancel operation
+    description: Starts asynchronous cancellation on a long-running operation. The server makes a best
+      effort to cancel the operation, but success is not guaranteed.
+    category: operations
+    request:
+      method: POST
+      path: /storage/v1/b/${bucket}/operations/${operation_id}/cancel
+    input:
+      bucket:
+        type: string
+        description: The parent bucket of the operation resource.
+      operation_id:
+        type: string
+        description: The ID of the operation resource.
+    output:
+      description: What the API returned.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+  get_operation:
+    title: Get operation
+    description: Gets the latest state of a long-running operation.
+    category: operations
+    request:
+      method: GET
+      path: /storage/v1/b/${bucket}/operations/${operation_id}
+    input:
+      bucket:
+        type: string
+        description: The parent bucket of the operation resource.
+      operation_id:
+        type: string
+        description: The ID of the operation resource.
+    output:
+      description: The GoogleLongrunningOperation resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - cloud-platform.read-only
+    - devstorage.full_control
+    - devstorage.read_only
+    - devstorage.read_write
+    read_only: true
+  list_operations:
+    title: List operations
+    description: Lists operations that match the specified filter in the request.
+    category: operations
+    request:
+      method: GET
+      path: /storage/v1/b/${bucket}/operations
+      query:
+        filter: ${filter}
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      bucket:
+        type: string
+        description: Name of the bucket in which to look for operations.
+      filter:
+        type: string
+        description: A filter to narrow down results to a preferred subset. The filtering language is
+          documented in more detail in AIP-160.
+        optional: true
+      page_size:
+        type: integer
+        description: Maximum number of items to return in a single page of responses. Fewer total results
+          may be returned than requested. The service uses this parameter or 100 items, whichever is smaller.
+        optional: true
+      page_token:
+        type: string
+        description: A previously-returned page token representing part of the larger set of results to
+          view.
+        optional: true
+    output:
+      description: The GoogleLongrunningListOperationsResponse resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - cloud-platform.read-only
+    - devstorage.full_control
+    - devstorage.read_only
+    - devstorage.read_write
+    read_only: true
+  create_hmac_key:
+    title: Create hmac key
+    description: Creates a new HMAC key for the specified service account.
+    category: projects
+    request:
+      method: POST
+      path: /storage/v1/projects/${project_id}/hmacKeys
+      query:
+        serviceAccountEmail: ${service_account_email}
+        userProject: ${user_project}
+    input:
+      project_id:
+        type: string
+        description: Project ID owning the service account.
+      service_account_email:
+        type: string
+        description: Email address of the service account.
+      user_project:
+        type: string
+        description: The project to be billed for this request.
+        optional: true
+    output:
+      description: The HmacKey resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+  delete_hmac_key:
+    title: Delete hmac key
+    description: Deletes an HMAC key. Calls projects.hmacKeys.delete on the Cloud Storage JSON API.
+    category: projects
+    request:
+      method: DELETE
+      path: /storage/v1/projects/${project_id}/hmacKeys/${access_id}
+      query:
+        userProject: ${user_project}
+    input:
+      access_id:
+        type: string
+        description: Name of the HMAC key to be deleted.
+      project_id:
+        type: string
+        description: Project ID owning the requested key
+      user_project:
+        type: string
+        description: The project to be billed for this request.
+        optional: true
+    output:
+      description: What the API returned.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+    destructive: true
+  get_hmac_key:
+    title: Get hmac key
+    description: Retrieves an HMAC key's metadata Calls projects.hmacKeys.get on the Cloud Storage JSON
+      API.
+    category: projects
+    request:
+      method: GET
+      path: /storage/v1/projects/${project_id}/hmacKeys/${access_id}
+      query:
+        userProject: ${user_project}
+    input:
+      access_id:
+        type: string
+        description: Name of the HMAC key.
+      project_id:
+        type: string
+        description: Project ID owning the service account of the requested key.
+      user_project:
+        type: string
+        description: The project to be billed for this request.
+        optional: true
+    output:
+      description: The HmacKeyMetadata resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - cloud-platform.read-only
+    - devstorage.full_control
+    - devstorage.read_only
+    read_only: true
+  list_hmac_keys:
+    title: List hmac keys
+    description: Retrieves a list of HMAC keys matching the criteria.
+    category: projects
+    request:
+      method: GET
+      path: /storage/v1/projects/${project_id}/hmacKeys
+      query:
+        maxResults: ${max_results}
+        pageToken: ${page_token}
+        serviceAccountEmail: ${service_account_email}
+        showDeletedKeys: ${show_deleted_keys}
+        userProject: ${user_project}
+    input:
+      project_id:
+        type: string
+        description: Name of the project in which to look for HMAC keys.
+      max_results:
+        type: integer
+        description: Maximum number of items to return in a single page of responses. The service uses
+          this parameter or 250 items, whichever is smaller. The max number of items per page will also
+          be limited by the number of distinct service accounts in the response. If the number of service
+          accounts in a single respons
+        optional: true
+        default: 250
+      page_token:
+        type: string
+        description: A previously-returned page token representing part of the larger set of results to
+          view.
+        optional: true
+      service_account_email:
+        type: string
+        description: If present, only keys for the given service account are returned.
+        optional: true
+      show_deleted_keys:
+        type: boolean
+        description: Whether or not to show keys in the DELETED state.
+        optional: true
+      user_project:
+        type: string
+        description: The project to be billed for this request.
+        optional: true
+    output:
+      description: The HmacKeysMetadata resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - cloud-platform.read-only
+    - devstorage.full_control
+    - devstorage.read_only
+    read_only: true
+  replace_hmac_key:
+    title: Replace hmac key
+    description: Updates the state of an HMAC key. See the HMAC Key resource descriptor for valid states.
+    category: projects
+    request:
+      method: PUT
+      path: /storage/v1/projects/${project_id}/hmacKeys/${access_id}
+      query:
+        userProject: ${user_project}
+      body:
+        accessId: ${body_access_id}
+        projectId: ${body_project_id}
+        selfLink: ${self_link}
+        serviceAccountEmail: ${service_account_email}
+        state: ${state}
+        timeCreated: ${time_created}
+        updated: ${updated}
+    input:
+      access_id:
+        type: string
+        description: Name of the HMAC key being updated.
+      project_id:
+        type: string
+        description: Project ID owning the service account of the updated key.
+      user_project:
+        type: string
+        description: The project to be billed for this request.
+        optional: true
+      body_access_id:
+        type: string
+        description: The ID of the HMAC Key.
+        optional: true
+      body_project_id:
+        type: string
+        description: Project ID owning the service account to which the key authenticates.
+        optional: true
+      self_link:
+        type: string
+        description: The link to this resource.
+        optional: true
+      service_account_email:
+        type: string
+        description: The email address of the key's associated service account.
+        optional: true
+      state:
+        type: string
+        description: The state of the key. Can be one of ACTIVE, INACTIVE, or DELETED.
+        optional: true
+      time_created:
+        type: string
+        description: The creation time of the HMAC key in RFC 3339 format.
+        optional: true
+      updated:
+        type: string
+        description: The last modification time of the HMAC key metadata in RFC 3339 format.
+        optional: true
+    output:
+      description: The HmacKeyMetadata resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+  get_service_account:
+    title: Get service account
+    description: Get the email address of this project's Google Cloud Storage service account.
+    category: projects
+    request:
+      method: GET
+      path: /storage/v1/projects/${project_id}/serviceAccount
+      query:
+        userProject: ${user_project}
+    input:
+      project_id:
+        type: string
+        description: Project ID
+      user_project:
+        type: string
+        description: The project to be billed for this request.
+        optional: true
+    output:
+      description: The ServiceAccount resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - cloud-platform.read-only
+    - devstorage.full_control
+    - devstorage.read_only
+    - devstorage.read_write
+    read_only: true
+  disable_rapid_cach:
+    title: Disable rapid cach
+    description: Disables a Rapid Cache instance. Calls rapidCaches.disable on the Cloud Storage JSON
+      API.
+    category: rapid_caches
+    request:
+      method: POST
+      path: /storage/v1/b/${bucket}/rapidCaches/${rapid_cache_id}/disable
+    input:
+      bucket:
+        type: string
+        description: Name of the parent bucket.
+      rapid_cache_id:
+        type: string
+        description: The ID of the requested Rapid Cache instance.
+    output:
+      description: The GoogleLongrunningOperation resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+  get_rapid_cach:
+    title: Get rapid cach
+    description: Returns the metadata of a Rapid Cache instance.
+    category: rapid_caches
+    request:
+      method: GET
+      path: /storage/v1/b/${bucket}/rapidCaches/${rapid_cache_id}
+    input:
+      bucket:
+        type: string
+        description: Name of the parent bucket.
+      rapid_cache_id:
+        type: string
+        description: The ID of the requested Rapid Cache instance.
+    output:
+      description: The RapidCache resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - cloud-platform.read-only
+    - devstorage.full_control
+    - devstorage.read_only
+    - devstorage.read_write
+    read_only: true
+  create_rapid_cach:
+    title: Create rapid cach
+    description: Creates a Rapid Cache instance. Calls rapidCaches.insert on the Cloud Storage JSON API.
+    category: rapid_caches
+    request:
+      method: POST
+      path: /storage/v1/b/${bucket}/rapidCaches
+      body:
+        selfLink: ${self_link}
+        bucket: ${body_bucket}
+        rapidCacheId: ${rapid_cache_id}
+        zone: ${zone}
+        state: ${state}
+        createTime: ${create_time}
+        updateTime: ${update_time}
+        ttl: ${ttl}
+        admissionPolicy: ${admission_policy}
+        pendingUpdate: ${pending_update}
+        ingestOnWrite: ${ingest_on_write}
+        cacheType: ${cache_type}
+    input:
+      bucket:
+        type: string
+        description: Name of the parent bucket.
+      self_link:
+        type: string
+        description: The link to this cache instance.
+        optional: true
+      body_bucket:
+        type: string
+        description: The name of the bucket containing this cache instance.
+        optional: true
+      rapid_cache_id:
+        type: string
+        description: The ID of the Rapid cache instance.
+        optional: true
+      zone:
+        type: string
+        description: The zone in which the cache instance is running. For example, us-central1-a.
+        optional: true
+      state:
+        type: string
+        description: The current state of the cache instance.
+        optional: true
+      create_time:
+        type: string
+        description: The creation time of the cache instance in RFC 3339 format.
+        optional: true
+      update_time:
+        type: string
+        description: The modification time of the cache instance metadata in RFC 3339 format.
+        optional: true
+      ttl:
+        type: string
+        description: The TTL of all cache entries in whole seconds. e.g., "7200s".
+        optional: true
+      admission_policy:
+        type: string
+        description: The cache-level entry admission policy.
+        optional: true
+      pending_update:
+        type: boolean
+        description: True if the cache instance has an active Update long-running operation.
+        optional: true
+      ingest_on_write:
+        type: boolean
+        description: Specifies whether objects are ingested into the cache upon write.
+        optional: true
+      cache_type:
+        type: string
+        description: 'The type of Rapid Cache this represents. Valid values include: "rapid-cache" and
+          "rapid-cache-ultra".'
+        optional: true
+    output:
+      description: The GoogleLongrunningOperation resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write
+  list_rapid_caches:
+    title: List rapid caches
+    description: Returns a list of Rapid Cache instances of the bucket.
+    category: rapid_caches
+    request:
+      method: GET
+      path: /storage/v1/b/${bucket}/rapidCaches
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      bucket:
+        type: string
+        description: Name of the parent bucket.
+      page_size:
+        type: integer
+        description: Maximum number of items to return in a single page of responses.
+        optional: true
+      page_token:
+        type: string
+        description: A previously-returned page token representing part of the larger set of results to
+          view.
+        optional: true
+    output:
+      description: The RapidCaches resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - cloud-platform.read-only
+    - devstorage.full_control
+    - devstorage.read_only
+    - devstorage.read_write
+    read_only: true
+  replace_rapid_cach:
+    title: Replace rapid cach
+    description: Updates the configuration of a Rapid Cache instance.
+    category: rapid_caches
+    request:
+      method: PATCH
+      path: /storage/v1/b/${bucket}/rapidCaches/${rapid_cache_id}
+      body:
+        selfLink: ${self_link}
+        bucket: ${body_bucket}
+        rapidCacheId: ${body_rapid_cache_id}
+        zone: ${zone}
+        state: ${state}
+        createTime: ${create_time}
+        updateTime: ${update_time}
+        ttl: ${ttl}
+        admissionPolicy: ${admission_policy}
+        pendingUpdate: ${pending_update}
+        ingestOnWrite: ${ingest_on_write}
+        cacheType: ${cache_type}
+    input:
+      bucket:
+        type: string
+        description: Name of the parent bucket.
+      rapid_cache_id:
+        type: string
+        description: The ID of the requested Rapid Cache instance.
+      self_link:
+        type: string
+        description: The link to this cache instance.
+        optional: true
+      body_bucket:
+        type: string
+        description: The name of the bucket containing this cache instance.
+        optional: true
+      body_rapid_cache_id:
+        type: string
+        description: The ID of the Rapid cache instance.
+        optional: true
+      zone:
+        type: string
+        description: The zone in which the cache instance is running. For example, us-central1-a.
+        optional: true
+      state:
+        type: string
+        description: The current state of the cache instance.
+        optional: true
+      create_time:
+        type: string
+        description: The creation time of the cache instance in RFC 3339 format.
+        optional: true
+      update_time:
+        type: string
+        description: The modification time of the cache instance metadata in RFC 3339 format.
+        optional: true
+      ttl:
+        type: string
+        description: The TTL of all cache entries in whole seconds. e.g., "7200s".
+        optional: true
+      admission_policy:
+        type: string
+        description: The cache-level entry admission policy.
+        optional: true
+      pending_update:
+        type: boolean
+        description: True if the cache instance has an active Update long-running operation.
+        optional: true
+      ingest_on_write:
+        type: boolean
+        description: Specifies whether objects are ingested into the cache upon write.
+        optional: true
+      cache_type:
+        type: string
+        description: 'The type of Rapid Cache this represents. Valid values include: "rapid-cache" and
+          "rapid-cache-ultra".'
+        optional: true
+    output:
+      description: The GoogleLongrunningOperation resource.
+      type: object
+    scopes_any:
+    - cloud-platform
+    - devstorage.full_control
+    - devstorage.read_write

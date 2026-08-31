@@ -1,0 +1,2173 @@
+# Acumatica ERP contract-based REST API tools.
+#
+# Acumatica's API is not a fixed list of endpoints: an *endpoint* (a contract)
+# named `Default` and versioned by release exposes a set of *entities*, and
+# every entity answers the same handful of operations. Which entities exist,
+# and which fields and actions each one has, depends on the endpoint version
+# and on what the instance is licensed for -- so the tools below are the
+# operations themselves, parameterised by entity, rather than 300 invented
+# per-entity endpoints that a given instance may not have.
+#
+#   GET    /entity/{endpoint}/{version}/{Entity}                 list
+#   GET    /entity/{endpoint}/{version}/{Entity}/{id}            read by GUID id
+#   GET    /entity/{endpoint}/{version}/{Entity}/{key}/{key}     read by keys
+#   GET    /entity/{endpoint}/{version}/{Entity}/$adHocSchema    that entity's fields
+#   PUT    /entity/{endpoint}/{version}/{Entity}                 create or update
+#   DELETE /entity/{endpoint}/{version}/{Entity}/{id|keys}       delete
+#   POST   /entity/{endpoint}/{version}/{Entity}/{Action}        invoke an action
+#
+# Start with `get_openapi_definition` or `get_entity_schema`: they are how you
+# learn what this particular instance actually offers, including custom
+# entities added by a customisation. The convenience list/upsert tools further
+# down cover the entities the stock Default endpoint ships, and every one of
+# them is the same two calls with the entity name filled in.
+#
+# Three things to know about the values:
+#
+#   * a record's `id` is a GUID Acumatica assigns; its *keys* are the business
+#     identifiers (CustomerID, or OrderType plus OrderNbr) and are what appear
+#     in the UI;
+#   * fields are wrapped: `{"CustomerID": {"value": "ABCCORP"}}`, not
+#     `{"CustomerID": "ABCCORP"}`, which is the shape `record` expects;
+#   * PUT is an upsert -- it creates when the keys match nothing and updates
+#     when they do, so there is no separate create call.
+#
+# This connector authenticates with OAuth 2.0 client credentials, so no
+# /entity/auth/login call is needed; `logout` is still here for releasing the
+# server-side session a burst of calls opened.
+#
+# Docs: https://help.acumatica.com/Help?ScreenId=ShowWiki&pageid=e6f4b0e6-8e4b-4f4c-a1d3-e0b9c00b0a4d
+
+connector_id: acumatica
+display_name: Acumatica
+docs_url: https://help.acumatica.com/
+
+tools:
+
+  # -- discovery -------------------------------------------------------------
+
+  get_openapi_definition:
+    title: Get the endpoint's OpenAPI definition
+    description: >-
+      The OpenAPI (swagger) document for one endpoint version: every entity it
+      exposes, every field on each, and every action that can be invoked. This
+      is the authoritative answer to "what can I call on this instance", since
+      entities vary by version, licence and customisation.
+    category: discovery
+    read_only: true
+    request:
+      method: GET
+      path: /entity/${endpoint_name}/${version}/swagger.json
+      query:
+        company: "${company}"
+    input:
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to describe. The stock one is "Default".
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: >-
+          Endpoint version, as shown on the Web Service Endpoints screen
+          (SM207060), e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+        example: 24.200.001
+      company:
+        type: string
+        description: Tenant to read the definition for, when the instance hosts several.
+        optional: true
+    output:
+      description: The endpoint's OpenAPI definition.
+      type: object
+      properties:
+        openapi: {type: string}
+        info: {type: object}
+        paths: {type: object, description: "One entry per entity and action the endpoint exposes."}
+        definitions: {type: object}
+
+  get_odata_metadata:
+    title: Get the endpoint's OData metadata
+    description: >-
+      The OData $metadata document for one endpoint version -- every entity
+      type, field and relationship, as XML. The same ground truth as the
+      OpenAPI definition, in the form Excel, Power Query and OData clients
+      consume.
+    category: discovery
+    read_only: true
+    request:
+      method: GET
+      path: /entity/${endpoint_name}/${version}/$metadata
+      query:
+        company: "${company}"
+    input:
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to describe.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      company:
+        type: string
+        description: Tenant to read the metadata for, when the instance hosts several.
+        optional: true
+    output:
+      description: The OData metadata document, as XML.
+      type: string
+
+  get_entity_schema:
+    title: Get an entity's fields
+    description: >-
+      The ad-hoc schema for one entity: the fields it accepts and returns,
+      including the custom fields a customisation added. Read this before
+      building a `record` for `create_or_update_record`, so field names and
+      nesting match what this instance actually has.
+    category: discovery
+    read_only: true
+    request:
+      method: GET
+      path: /entity/${endpoint_name}/${version}/${entity_name}/$adHocSchema
+    input:
+      entity_name:
+        type: string
+        description: Entity to describe, e.g. Customer, SalesOrder, StockItem.
+        example: Customer
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) the entity belongs to.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+    output:
+      description: The entity's fields, each with its type.
+      type: object
+      properties:
+        custom: {type: object, description: "Custom fields, grouped by the screen view they come from."}
+
+  # -- generic record operations --------------------------------------------
+
+  list_records:
+    title: List records of an entity
+    description: >-
+      Records of any entity, with OData-style filtering, projection and paging.
+      Two Acumatica specifics are worth knowing: nested detail lines (a sales
+      order's lines, an invoice's) are omitted unless `expand` names them, and
+      `select` cuts the response down sharply, which matters because these
+      documents are large. `custom` pulls in fields that are not part of the
+      contract.
+    category: records
+    read_only: true
+    request:
+      method: GET
+      path: /entity/${endpoint_name}/${version}/${entity_name}
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $expand: "${expand}"
+        $top: "${top}"
+        $skip: "${skip}"
+        $custom: "${custom}"
+      headers:
+        Accept: application/json
+    input:
+      entity_name:
+        type: string
+        description: Entity to list, e.g. Customer, SalesOrder, StockItem.
+        example: SalesOrder
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) the entity belongs to.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      filter:
+        type: string
+        description: >-
+          OData filter over the entity's fields, e.g.
+          Status eq 'Open' and OrderTotal gt 1000M.
+        optional: true
+        example: Status eq 'Open'
+      select:
+        type: string
+        description: Comma-separated fields to return, e.g. OrderNbr,Status,OrderTotal.
+        optional: true
+      expand:
+        type: string
+        description: >-
+          Comma-separated detail collections to include, e.g. Details,Shipments.
+          Nested lines are absent without this.
+        optional: true
+      top:
+        type: integer
+        description: Return at most this many records.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: Skip this many records before returning any, for paging.
+        optional: true
+        minimum: 0
+      custom:
+        type: string
+        description: >-
+          Custom fields to include, as View.Field pairs, e.g.
+          Document.AttributeCUSTOMER.
+        optional: true
+    output:
+      description: The matching records.
+      type: array
+      items:
+        type: object
+        description: 'A record, whose fields are {"value": ...} wrappers, plus id, rowNumber and custom.'
+
+  get_record_by_id:
+    title: Get a record by its id
+    description: >-
+      One record by the GUID Acumatica assigned it -- the `id` that comes back
+      from `list_records`. Stable across renames of the business keys, which is
+      why it is the id to store on your side.
+    category: records
+    read_only: true
+    request:
+      method: GET
+      path: /entity/${endpoint_name}/${version}/${entity_name}/${id}
+      query:
+        $select: "${select}"
+        $expand: "${expand}"
+        $custom: "${custom}"
+      headers:
+        Accept: application/json
+    input:
+      entity_name:
+        type: string
+        description: Entity the record belongs to, e.g. SalesOrder.
+      id:
+        type: string
+        description: The record's GUID id.
+        example: a6295b33-c7f6-e811-b817-00155d408001
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) the entity belongs to.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      select:
+        type: string
+        description: Comma-separated fields to return.
+        optional: true
+      expand:
+        type: string
+        description: Comma-separated detail collections to include, e.g. Details.
+        optional: true
+      custom:
+        type: string
+        description: Custom fields to include, as View.Field pairs.
+        optional: true
+    output:
+      description: The record.
+      type: object
+      properties:
+        id: {type: string}
+        rowNumber: {type: integer}
+        custom: {type: object}
+
+  get_record_by_keys:
+    title: Get a record by its business keys
+    description: >-
+      One record addressed by the identifiers a user would recognise, in the
+      order the entity declares them -- ["ABCCORP"] for a customer,
+      ["SO","000123"] for a sales order. Pass them as a list and they become
+      the path segments.
+    category: records
+    read_only: true
+    request:
+      method: GET
+      path: /entity/${endpoint_name}/${version}/${entity_name}/${keys}
+      query:
+        $select: "${select}"
+        $expand: "${expand}"
+        $custom: "${custom}"
+      headers:
+        Accept: application/json
+    input:
+      entity_name:
+        type: string
+        description: Entity the record belongs to, e.g. Customer.
+      keys:
+        type: array
+        description: >-
+          The record's key values in the entity's own key order, e.g.
+          ["SO","000123"] for a sales order. Joined with slashes.
+        items: {type: string}
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) the entity belongs to.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      select:
+        type: string
+        description: Comma-separated fields to return.
+        optional: true
+      expand:
+        type: string
+        description: Comma-separated detail collections to include.
+        optional: true
+      custom:
+        type: string
+        description: Custom fields to include, as View.Field pairs.
+        optional: true
+    output:
+      description: The record.
+      type: object
+      properties:
+        id: {type: string}
+        rowNumber: {type: integer}
+        custom: {type: object}
+
+  create_or_update_record:
+    title: Create or update a record
+    description: >-
+      Upsert one record of any entity. Acumatica matches on the key fields in
+      `record`: no match creates, a match updates, and fields you leave out
+      keep their current values. Every field is wrapped --
+      {"CustomerID": {"value": "ABCCORP"}} -- and a detail line list goes in
+      the entity's own collection field. Use `get_entity_schema` first if you
+      are unsure of a field's name or nesting.
+    category: records
+    request:
+      method: PUT
+      path: /entity/${endpoint_name}/${version}/${entity_name}
+      query:
+        $select: "${select}"
+        $expand: "${expand}"
+        $custom: "${custom}"
+        $filter: "${filter}"
+      body: "${record}"
+    input:
+      entity_name:
+        type: string
+        description: Entity to write, e.g. Customer, SalesOrder, StockItem.
+      record:
+        type: object
+        description: >-
+          The record, with each field as a {"value": ...} wrapper. Include the
+          key fields so Acumatica knows whether this is a create or an update.
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) the entity belongs to.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      select:
+        type: string
+        description: Comma-separated fields to return in the saved record.
+        optional: true
+      expand:
+        type: string
+        description: Comma-separated detail collections to return in the saved record.
+        optional: true
+      custom:
+        type: string
+        description: Custom fields to return, as View.Field pairs.
+        optional: true
+      filter:
+        type: string
+        description: >-
+          Restrict which existing record may be updated, for entities where the
+          keys alone are ambiguous.
+        optional: true
+    output:
+      description: The saved record, as stored.
+      type: object
+      properties:
+        id: {type: string}
+        rowNumber: {type: integer}
+        custom: {type: object}
+
+  delete_record_by_id:
+    title: Delete a record by its id
+    description: >-
+      Delete one record by its GUID id. Only entities Acumatica allows deleting
+      accept this -- posted documents generally do not, and answer 405 or a
+      business-logic error rather than deleting.
+    category: records
+    destructive: true
+    request:
+      method: DELETE
+      path: /entity/${endpoint_name}/${version}/${entity_name}/${id}
+    input:
+      entity_name:
+        type: string
+        description: Entity the record belongs to.
+      id:
+        type: string
+        description: The record's GUID id.
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) the entity belongs to.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+    output:
+      description: Empty on success; Acumatica answers 204 with no body.
+      type: object
+
+  delete_record_by_keys:
+    title: Delete a record by its business keys
+    description: >-
+      Delete one record addressed by its business keys, in the entity's key
+      order. As with deleting by id, entities that forbid deletion refuse the
+      call rather than silently ignoring it.
+    category: records
+    destructive: true
+    request:
+      method: DELETE
+      path: /entity/${endpoint_name}/${version}/${entity_name}/${keys}
+    input:
+      entity_name:
+        type: string
+        description: Entity the record belongs to.
+      keys:
+        type: array
+        description: The record's key values in the entity's key order, joined with slashes.
+        items: {type: string}
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) the entity belongs to.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+    output:
+      description: Empty on success; Acumatica answers 204 with no body.
+      type: object
+
+  invoke_action:
+    title: Invoke an entity action
+    description: >-
+      Run one of the actions an entity exposes -- the API equivalent of the
+      buttons on the screen, such as ReleaseInvoice or CreateShipment. The
+      action names an entity to act on (usually just its keys) plus any
+      parameters the action itself takes. Acumatica may answer 202 and finish
+      asynchronously: poll the Location header it returns until it reports
+      completion. `get_openapi_definition` lists the actions each entity has.
+    category: actions
+    request:
+      method: POST
+      path: /entity/${endpoint_name}/${version}/${entity_name}/${action_name}
+      body:
+        entity: "${entity_record}"
+        parameters: "${parameters}"
+    input:
+      entity_name:
+        type: string
+        description: Entity the action belongs to, e.g. Invoice.
+      action_name:
+        type: string
+        description: The action to run, e.g. ReleaseInvoice.
+        example: ReleaseInvoice
+      entity_record:
+        type: object
+        description: >-
+          The record to act on, usually just its key fields as {"value": ...}
+          wrappers, e.g. {"Type": {"value": "Invoice"}, "ReferenceNbr": {"value": "000123"}}.
+      parameters:
+        type: object
+        description: 'The action''s own parameters, as {"value": ...} wrappers. Omit when it takes none.'
+        optional: true
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) the entity belongs to.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+    output:
+      description: Empty on completion, or 202 with a Location header to poll while it runs.
+      type: object
+
+  release_invoice:
+    title: Release an invoice
+    description: >-
+      Release an AR invoice, the documented example of an entity action:
+      Acumatica posts the document and makes it ready for payment. Takes the
+      invoice's type and reference number. Often answers 202 and completes
+      asynchronously.
+    category: actions
+    request:
+      method: POST
+      path: /entity/${endpoint_name}/${version}/Invoice/ReleaseInvoice
+      body:
+        entity:
+          Type: {value: "${type}"}
+          ReferenceNbr: {value: "${reference_nbr}"}
+    input:
+      reference_nbr:
+        type: string
+        description: The invoice's reference number, e.g. 000123.
+        example: "000123"
+      type:
+        type: string
+        description: The invoice's document type, e.g. Invoice, Credit Note or Debit Note.
+        default: Invoice
+        optional: true
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+    output:
+      description: Empty on completion, or 202 with a Location header to poll while it runs.
+      type: object
+
+  logout:
+    title: End the API session
+    description: >-
+      Release the server-side session a run of calls opened. Acumatica counts
+      concurrent sessions against the licence, so a batch job that makes many
+      calls should end with this rather than leaving sessions to time out.
+      Sign-in is not needed with these credentials -- the OAuth token is the
+      authentication.
+    category: session
+    request:
+      method: POST
+      path: /entity/auth/logout
+      headers:
+        Content-Type: application/json
+    input: {}
+    output:
+      description: Empty on success.
+      type: object
+
+  # -- entities of the stock Default endpoint --------------------------------
+  #
+  # Each pair below is `list_records` and `create_or_update_record` with the
+  # entity name already filled in. They exist for discoverability; anything not
+  # listed here is still reachable through the generic tools by name.
+
+  list_customers:
+    title: List customers
+    description: >-
+      Customers from the Customer entity, with OData filtering and projection.
+      Filter on fields such as CustomerID, CustomerName, Status or CustomerClass.
+    category: customers
+    read_only: true
+    request:
+      method: GET
+      path: /entity/${endpoint_name}/${version}/Customer
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $expand: "${expand}"
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      filter:
+        type: string
+        description: OData filter, e.g. Status eq 'Active'.
+        optional: true
+      select:
+        type: string
+        description: Comma-separated fields to return, e.g. CustomerID,CustomerName.
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to include, e.g. Contacts,MainContact.
+        optional: true
+      top:
+        type: integer
+        description: Return at most this many customers.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: Skip this many customers before returning any.
+        optional: true
+        minimum: 0
+    output:
+      description: The matching customers.
+      type: array
+      items: {type: object, description: "A customer, with fields as {\"value\": ...} wrappers."}
+
+  create_or_update_customer:
+    title: Create or update a customer
+    description: >-
+      Upsert a customer. A CustomerID that matches nothing creates the
+      customer, one that matches updates it, and omitted fields are left alone.
+      Fields go in wrapped: {"CustomerName": {"value": "ACME"}}.
+    category: customers
+    request:
+      method: PUT
+      path: /entity/${endpoint_name}/${version}/Customer
+      query:
+        $expand: "${expand}"
+      body: "${record}"
+    input:
+      record:
+        type: object
+        description: >-
+          The customer, with each field as a {"value": ...} wrapper. Include
+          CustomerID to target an existing record.
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to return in the saved record.
+        optional: true
+    output:
+      description: The saved customer.
+      type: object
+      properties:
+        id: {type: string}
+
+  list_vendors:
+    title: List vendors
+    description: >-
+      Vendors from the Vendor entity, with OData filtering and projection.
+      Filter on VendorID, VendorName, Status or VendorClass.
+    category: vendors
+    read_only: true
+    request:
+      method: GET
+      path: /entity/${endpoint_name}/${version}/Vendor
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $expand: "${expand}"
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      filter:
+        type: string
+        description: OData filter, e.g. Status eq 'Active'.
+        optional: true
+      select:
+        type: string
+        description: Comma-separated fields to return.
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to include.
+        optional: true
+      top:
+        type: integer
+        description: Return at most this many vendors.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: Skip this many vendors before returning any.
+        optional: true
+        minimum: 0
+    output:
+      description: The matching vendors.
+      type: array
+      items: {type: object, description: "A vendor, with fields as value wrappers."}
+
+  create_or_update_vendor:
+    title: Create or update a vendor
+    description: >-
+      Upsert a vendor. A VendorID that matches nothing creates it, one that
+      matches updates it. Fields go in as {"value": ...} wrappers.
+    category: vendors
+    request:
+      method: PUT
+      path: /entity/${endpoint_name}/${version}/Vendor
+      query:
+        $expand: "${expand}"
+      body: "${record}"
+    input:
+      record:
+        type: object
+        description: 'The vendor, with each field as a {"value": ...} wrapper.'
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to return in the saved record.
+        optional: true
+    output:
+      description: The saved vendor.
+      type: object
+      properties:
+        id: {type: string}
+
+  list_contacts:
+    title: List contacts
+    description: >-
+      Contacts from the Contact entity -- people, whether attached to a
+      business account or standing alone. Filter on Email, LastName, Status or
+      ContactClass.
+    category: crm
+    read_only: true
+    request:
+      method: GET
+      path: /entity/${endpoint_name}/${version}/Contact
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $expand: "${expand}"
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      filter:
+        type: string
+        description: OData filter, e.g. Email eq 'ada@example.com'.
+        optional: true
+      select:
+        type: string
+        description: Comma-separated fields to return.
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to include, e.g. Attributes.
+        optional: true
+      top:
+        type: integer
+        description: Return at most this many contacts.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: Skip this many contacts before returning any.
+        optional: true
+        minimum: 0
+    output:
+      description: The matching contacts.
+      type: array
+      items: {type: object, description: "A contact, with fields as value wrappers."}
+
+  create_or_update_contact:
+    title: Create or update a contact
+    description: >-
+      Upsert a contact. Include ContactID to update an existing one; omit it and
+      Acumatica creates a contact and assigns the id.
+    category: crm
+    request:
+      method: PUT
+      path: /entity/${endpoint_name}/${version}/Contact
+      query:
+        $expand: "${expand}"
+      body: "${record}"
+    input:
+      record:
+        type: object
+        description: 'The contact, with each field as a {"value": ...} wrapper.'
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to return in the saved record.
+        optional: true
+    output:
+      description: The saved contact.
+      type: object
+      properties:
+        id: {type: string}
+
+  list_leads:
+    title: List leads
+    description: >-
+      Leads from the Lead entity, the top of Acumatica's CRM funnel. Filter on
+      Status, Email, LeadClass or the assigned owner.
+    category: crm
+    read_only: true
+    request:
+      method: GET
+      path: /entity/${endpoint_name}/${version}/Lead
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $expand: "${expand}"
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      filter:
+        type: string
+        description: OData filter, e.g. Status eq 'New'.
+        optional: true
+      select:
+        type: string
+        description: Comma-separated fields to return.
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to include.
+        optional: true
+      top:
+        type: integer
+        description: Return at most this many leads.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: Skip this many leads before returning any.
+        optional: true
+        minimum: 0
+    output:
+      description: The matching leads.
+      type: array
+      items: {type: object, description: "A lead, with fields as value wrappers."}
+
+  create_or_update_lead:
+    title: Create or update a lead
+    description: >-
+      Upsert a lead -- the usual way an inbound form or list purchase lands in
+      Acumatica. Fields go in as {"value": ...} wrappers.
+    category: crm
+    request:
+      method: PUT
+      path: /entity/${endpoint_name}/${version}/Lead
+      query:
+        $expand: "${expand}"
+      body: "${record}"
+    input:
+      record:
+        type: object
+        description: 'The lead, with each field as a {"value": ...} wrapper.'
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to return in the saved record.
+        optional: true
+    output:
+      description: The saved lead.
+      type: object
+      properties:
+        id: {type: string}
+
+  list_opportunities:
+    title: List opportunities
+    description: >-
+      Opportunities from the Opportunity entity, with their stage, estimated
+      amount and owner. Filter on Status, Stage or ClassID.
+    category: crm
+    read_only: true
+    request:
+      method: GET
+      path: /entity/${endpoint_name}/${version}/Opportunity
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $expand: "${expand}"
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      filter:
+        type: string
+        description: OData filter, e.g. Status eq 'Open'.
+        optional: true
+      select:
+        type: string
+        description: Comma-separated fields to return.
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to include, e.g. Products.
+        optional: true
+      top:
+        type: integer
+        description: Return at most this many opportunities.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: Skip this many opportunities before returning any.
+        optional: true
+        minimum: 0
+    output:
+      description: The matching opportunities.
+      type: array
+      items: {type: object, description: "An opportunity, with fields as value wrappers."}
+
+  create_or_update_opportunity:
+    title: Create or update an opportunity
+    description: >-
+      Upsert an opportunity, including its product lines when the Products
+      collection is supplied. Fields go in as {"value": ...} wrappers.
+    category: crm
+    request:
+      method: PUT
+      path: /entity/${endpoint_name}/${version}/Opportunity
+      query:
+        $expand: "${expand}"
+      body: "${record}"
+    input:
+      record:
+        type: object
+        description: 'The opportunity, with each field as a {"value": ...} wrapper.'
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to return in the saved record.
+        optional: true
+    output:
+      description: The saved opportunity.
+      type: object
+      properties:
+        id: {type: string}
+
+  list_cases:
+    title: List support cases
+    description: >-
+      Cases from the Case entity, with their status, severity, owner and the
+      business account they belong to.
+    category: crm
+    read_only: true
+    request:
+      method: GET
+      path: /entity/${endpoint_name}/${version}/Case
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $expand: "${expand}"
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      filter:
+        type: string
+        description: OData filter, e.g. Status eq 'Open'.
+        optional: true
+      select:
+        type: string
+        description: Comma-separated fields to return.
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to include, e.g. Activities.
+        optional: true
+      top:
+        type: integer
+        description: Return at most this many cases.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: Skip this many cases before returning any.
+        optional: true
+        minimum: 0
+    output:
+      description: The matching cases.
+      type: array
+      items: {type: object, description: "A case, with fields as value wrappers."}
+
+  create_or_update_case:
+    title: Create or update a support case
+    description: >-
+      Upsert a case. Omit the case id and Acumatica opens a new case, which is
+      how an inbound support integration files one.
+    category: crm
+    request:
+      method: PUT
+      path: /entity/${endpoint_name}/${version}/Case
+      query:
+        $expand: "${expand}"
+      body: "${record}"
+    input:
+      record:
+        type: object
+        description: 'The case, with each field as a {"value": ...} wrapper.'
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to return in the saved record.
+        optional: true
+    output:
+      description: The saved case.
+      type: object
+      properties:
+        id: {type: string}
+
+  list_sales_orders:
+    title: List sales orders
+    description: >-
+      Sales orders from the SalesOrder entity. Their lines are absent unless
+      `expand` names Details, and because these documents are wide, `select`
+      is worth using. Filter on Status, OrderType, CustomerID or OrderDate.
+    category: sales
+    read_only: true
+    request:
+      method: GET
+      path: /entity/${endpoint_name}/${version}/SalesOrder
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $expand: "${expand}"
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      filter:
+        type: string
+        description: OData filter, e.g. Status eq 'Open' and OrderType eq 'SO'.
+        optional: true
+      select:
+        type: string
+        description: Comma-separated fields to return, e.g. OrderNbr,Status,OrderTotal.
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to include, e.g. Details,Shipments,Totals.
+        optional: true
+      top:
+        type: integer
+        description: Return at most this many orders.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: Skip this many orders before returning any.
+        optional: true
+        minimum: 0
+    output:
+      description: The matching sales orders.
+      type: array
+      items: {type: object, description: "A sales order, with fields as value wrappers."}
+
+  create_or_update_sales_order:
+    title: Create or update a sales order
+    description: >-
+      Upsert a sales order and its lines. Send OrderType and OrderNbr to
+      update an existing order; send OrderType alone and Acumatica numbers the
+      new one. Lines go in the Details collection, each line's fields wrapped
+      the same way.
+    category: sales
+    request:
+      method: PUT
+      path: /entity/${endpoint_name}/${version}/SalesOrder
+      query:
+        $expand: "${expand}"
+      body: "${record}"
+    input:
+      record:
+        type: object
+        description: >-
+          The order, with each field as a {"value": ...} wrapper and its lines
+          under Details.
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to return in the saved order, e.g. Details.
+        optional: true
+    output:
+      description: The saved sales order.
+      type: object
+      properties:
+        id: {type: string}
+
+  list_shipments:
+    title: List shipments
+    description: >-
+      Shipments from the Shipment entity, with their status, warehouse and
+      customer. Lines come back only when `expand` names Details.
+    category: sales
+    read_only: true
+    request:
+      method: GET
+      path: /entity/${endpoint_name}/${version}/Shipment
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $expand: "${expand}"
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      filter:
+        type: string
+        description: OData filter, e.g. Status eq 'Open'.
+        optional: true
+      select:
+        type: string
+        description: Comma-separated fields to return.
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to include, e.g. Details,Packages.
+        optional: true
+      top:
+        type: integer
+        description: Return at most this many shipments.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: Skip this many shipments before returning any.
+        optional: true
+        minimum: 0
+    output:
+      description: The matching shipments.
+      type: array
+      items: {type: object, description: "A shipment, with fields as value wrappers."}
+
+  create_or_update_shipment:
+    title: Create or update a shipment
+    description: >-
+      Upsert a shipment. Creating one from an order is usually better done with
+      the order's own CreateShipment action through `invoke_action`; this is for
+      writing or amending the shipment record directly.
+    category: sales
+    request:
+      method: PUT
+      path: /entity/${endpoint_name}/${version}/Shipment
+      query:
+        $expand: "${expand}"
+      body: "${record}"
+    input:
+      record:
+        type: object
+        description: 'The shipment, with each field as a {"value": ...} wrapper.'
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to return in the saved record.
+        optional: true
+    output:
+      description: The saved shipment.
+      type: object
+      properties:
+        id: {type: string}
+
+  list_invoices:
+    title: List AR invoices
+    description: >-
+      Invoices from the Invoice entity -- accounts receivable documents, keyed
+      by type plus reference number. Filter on Status, Type, CustomerID or
+      DueDate to find what is outstanding.
+    category: receivables
+    read_only: true
+    request:
+      method: GET
+      path: /entity/${endpoint_name}/${version}/Invoice
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $expand: "${expand}"
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      filter:
+        type: string
+        description: OData filter, e.g. Status eq 'Open' and Type eq 'Invoice'.
+        optional: true
+      select:
+        type: string
+        description: Comma-separated fields to return.
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to include, e.g. Details,TaxDetails.
+        optional: true
+      top:
+        type: integer
+        description: Return at most this many invoices.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: Skip this many invoices before returning any.
+        optional: true
+        minimum: 0
+    output:
+      description: The matching invoices.
+      type: array
+      items: {type: object, description: "An invoice, with fields as value wrappers."}
+
+  create_or_update_invoice:
+    title: Create or update an AR invoice
+    description: >-
+      Upsert an AR invoice and its lines. A new invoice is created on hold; use
+      `release_invoice` to post it once it is complete.
+    category: receivables
+    request:
+      method: PUT
+      path: /entity/${endpoint_name}/${version}/Invoice
+      query:
+        $expand: "${expand}"
+      body: "${record}"
+    input:
+      record:
+        type: object
+        description: >-
+          The invoice, with each field as a {"value": ...} wrapper and its
+          lines under Details.
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to return in the saved invoice.
+        optional: true
+    output:
+      description: The saved invoice.
+      type: object
+      properties:
+        id: {type: string}
+
+  list_payments:
+    title: List payments
+    description: >-
+      Payments from the Payment entity, with their type, status, amount and the
+      documents they are applied to. Applications appear only when `expand`
+      names DocumentsToApply.
+    category: receivables
+    read_only: true
+    request:
+      method: GET
+      path: /entity/${endpoint_name}/${version}/Payment
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $expand: "${expand}"
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      filter:
+        type: string
+        description: OData filter, e.g. Status eq 'Balanced'.
+        optional: true
+      select:
+        type: string
+        description: Comma-separated fields to return.
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to include, e.g. DocumentsToApply,OrdersToApply.
+        optional: true
+      top:
+        type: integer
+        description: Return at most this many payments.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: Skip this many payments before returning any.
+        optional: true
+        minimum: 0
+    output:
+      description: The matching payments.
+      type: array
+      items: {type: object, description: "A payment, with fields as value wrappers."}
+
+  create_or_update_payment:
+    title: Create or update a payment
+    description: >-
+      Upsert a payment, optionally applying it to invoices through the
+      DocumentsToApply collection -- which is how a received payment is matched
+      to what it settles.
+    category: receivables
+    request:
+      method: PUT
+      path: /entity/${endpoint_name}/${version}/Payment
+      query:
+        $expand: "${expand}"
+      body: "${record}"
+    input:
+      record:
+        type: object
+        description: 'The payment, with each field as a {"value": ...} wrapper.'
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to return in the saved payment.
+        optional: true
+    output:
+      description: The saved payment.
+      type: object
+      properties:
+        id: {type: string}
+
+  list_bills:
+    title: List AP bills
+    description: >-
+      Bills from the Bill entity -- accounts payable documents. Filter on
+      Status, Type, Vendor or DueDate to see what is owed.
+    category: payables
+    read_only: true
+    request:
+      method: GET
+      path: /entity/${endpoint_name}/${version}/Bill
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $expand: "${expand}"
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      filter:
+        type: string
+        description: OData filter, e.g. Status eq 'Open'.
+        optional: true
+      select:
+        type: string
+        description: Comma-separated fields to return.
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to include, e.g. Details,Applications.
+        optional: true
+      top:
+        type: integer
+        description: Return at most this many bills.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: Skip this many bills before returning any.
+        optional: true
+        minimum: 0
+    output:
+      description: The matching bills.
+      type: array
+      items: {type: object, description: "A bill, with fields as value wrappers."}
+
+  create_or_update_bill:
+    title: Create or update an AP bill
+    description: >-
+      Upsert an AP bill and its lines -- how a vendor invoice from another
+      system is filed for approval and payment.
+    category: payables
+    request:
+      method: PUT
+      path: /entity/${endpoint_name}/${version}/Bill
+      query:
+        $expand: "${expand}"
+      body: "${record}"
+    input:
+      record:
+        type: object
+        description: 'The bill, with each field as a {"value": ...} wrapper and its lines under Details.'
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to return in the saved bill.
+        optional: true
+    output:
+      description: The saved bill.
+      type: object
+      properties:
+        id: {type: string}
+
+  list_purchase_orders:
+    title: List purchase orders
+    description: >-
+      Purchase orders from the PurchaseOrder entity, with their status, vendor
+      and totals. Lines come back only when `expand` names Details.
+    category: payables
+    read_only: true
+    request:
+      method: GET
+      path: /entity/${endpoint_name}/${version}/PurchaseOrder
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $expand: "${expand}"
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      filter:
+        type: string
+        description: OData filter, e.g. Status eq 'Open'.
+        optional: true
+      select:
+        type: string
+        description: Comma-separated fields to return.
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to include, e.g. Details.
+        optional: true
+      top:
+        type: integer
+        description: Return at most this many purchase orders.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: Skip this many purchase orders before returning any.
+        optional: true
+        minimum: 0
+    output:
+      description: The matching purchase orders.
+      type: array
+      items: {type: object, description: "A purchase order, with fields as value wrappers."}
+
+  create_or_update_purchase_order:
+    title: Create or update a purchase order
+    description: >-
+      Upsert a purchase order and its lines. Send the order number to amend an
+      existing order; leave it out and Acumatica numbers the new one.
+    category: payables
+    request:
+      method: PUT
+      path: /entity/${endpoint_name}/${version}/PurchaseOrder
+      query:
+        $expand: "${expand}"
+      body: "${record}"
+    input:
+      record:
+        type: object
+        description: 'The purchase order, with each field as a {"value": ...} wrapper.'
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to return in the saved order.
+        optional: true
+    output:
+      description: The saved purchase order.
+      type: object
+      properties:
+        id: {type: string}
+
+  list_stock_items:
+    title: List stock items
+    description: >-
+      Stock items from the StockItem entity, with their inventory id,
+      description, item class, unit of measure and price. Filter on
+      InventoryID, ItemStatus or ItemClass.
+    category: inventory
+    read_only: true
+    request:
+      method: GET
+      path: /entity/${endpoint_name}/${version}/StockItem
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $expand: "${expand}"
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      filter:
+        type: string
+        description: OData filter, e.g. ItemStatus eq 'Active'.
+        optional: true
+      select:
+        type: string
+        description: Comma-separated fields to return, e.g. InventoryID,Description.
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to include, e.g. WarehouseDetails,CrossReferences.
+        optional: true
+      top:
+        type: integer
+        description: Return at most this many items.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: Skip this many items before returning any.
+        optional: true
+        minimum: 0
+    output:
+      description: The matching stock items.
+      type: array
+      items: {type: object, description: "A stock item, with fields as value wrappers."}
+
+  create_or_update_stock_item:
+    title: Create or update a stock item
+    description: >-
+      Upsert a stock item. An InventoryID that matches nothing creates the
+      item; one that matches updates it, leaving omitted fields alone.
+    category: inventory
+    request:
+      method: PUT
+      path: /entity/${endpoint_name}/${version}/StockItem
+      query:
+        $expand: "${expand}"
+      body: "${record}"
+    input:
+      record:
+        type: object
+        description: 'The stock item, with each field as a {"value": ...} wrapper.'
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to return in the saved item.
+        optional: true
+    output:
+      description: The saved stock item.
+      type: object
+      properties:
+        id: {type: string}
+
+  list_journal_transactions:
+    title: List journal transactions
+    description: >-
+      GL batches from the JournalTransaction entity, with their module, status,
+      period and totals. Lines come back only when `expand` names Details.
+    category: accounting
+    read_only: true
+    request:
+      method: GET
+      path: /entity/${endpoint_name}/${version}/JournalTransaction
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $expand: "${expand}"
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      filter:
+        type: string
+        description: OData filter, e.g. Status eq 'Balanced'.
+        optional: true
+      select:
+        type: string
+        description: Comma-separated fields to return.
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to include, e.g. Details.
+        optional: true
+      top:
+        type: integer
+        description: Return at most this many batches.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: Skip this many batches before returning any.
+        optional: true
+        minimum: 0
+    output:
+      description: The matching journal transactions.
+      type: array
+      items: {type: object, description: "A GL batch, with fields as value wrappers."}
+
+  create_or_update_journal_transaction:
+    title: Create or update a journal transaction
+    description: >-
+      Upsert a GL batch and its lines. The batch must balance before it can be
+      released, so send the whole Details collection in one call rather than a
+      line at a time.
+    category: accounting
+    request:
+      method: PUT
+      path: /entity/${endpoint_name}/${version}/JournalTransaction
+      query:
+        $expand: "${expand}"
+      body: "${record}"
+    input:
+      record:
+        type: object
+        description: 'The batch, with each field as a {"value": ...} wrapper and its lines under Details.'
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to return in the saved batch.
+        optional: true
+    output:
+      description: The saved journal transaction.
+      type: object
+      properties:
+        id: {type: string}
+
+  list_accounts:
+    title: List GL accounts
+    description: >-
+      The chart of accounts from the Account entity, with each account's
+      number, description, type and class -- the codes journal lines reference.
+    category: accounting
+    read_only: true
+    request:
+      method: GET
+      path: /entity/${endpoint_name}/${version}/Account
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      filter:
+        type: string
+        description: OData filter, e.g. Active eq true.
+        optional: true
+      select:
+        type: string
+        description: Comma-separated fields to return, e.g. AccountCD,Description.
+        optional: true
+      top:
+        type: integer
+        description: Return at most this many accounts.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: Skip this many accounts before returning any.
+        optional: true
+        minimum: 0
+    output:
+      description: The matching GL accounts.
+      type: array
+      items: {type: object, description: "An account, with fields as value wrappers."}
+
+  list_employees:
+    title: List employees
+    description: >-
+      Employees from the Employee entity, with their id, name, status,
+      department and contact details.
+    category: people
+    read_only: true
+    request:
+      method: GET
+      path: /entity/${endpoint_name}/${version}/Employee
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $expand: "${expand}"
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      filter:
+        type: string
+        description: OData filter, e.g. Status eq 'Active'.
+        optional: true
+      select:
+        type: string
+        description: Comma-separated fields to return.
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to include.
+        optional: true
+      top:
+        type: integer
+        description: Return at most this many employees.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: Skip this many employees before returning any.
+        optional: true
+        minimum: 0
+    output:
+      description: The matching employees.
+      type: array
+      items: {type: object, description: "An employee, with fields as value wrappers."}
+
+  create_or_update_employee:
+    title: Create or update an employee
+    description: >-
+      Upsert an employee record -- how an HR system keeps Acumatica's employee
+      list in step with its own.
+    category: people
+    request:
+      method: PUT
+      path: /entity/${endpoint_name}/${version}/Employee
+      query:
+        $expand: "${expand}"
+      body: "${record}"
+    input:
+      record:
+        type: object
+        description: 'The employee, with each field as a {"value": ...} wrapper.'
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to return in the saved record.
+        optional: true
+    output:
+      description: The saved employee.
+      type: object
+      properties:
+        id: {type: string}
+
+  list_projects:
+    title: List projects
+    description: >-
+      Projects from the Project entity, with their id, status, customer and
+      budget figures. Tasks come back only when `expand` names them.
+    category: projects
+    read_only: true
+    request:
+      method: GET
+      path: /entity/${endpoint_name}/${version}/Project
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $expand: "${expand}"
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      filter:
+        type: string
+        description: OData filter, e.g. Status eq 'Active'.
+        optional: true
+      select:
+        type: string
+        description: Comma-separated fields to return.
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to include, e.g. Tasks,Balances.
+        optional: true
+      top:
+        type: integer
+        description: Return at most this many projects.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: Skip this many projects before returning any.
+        optional: true
+        minimum: 0
+    output:
+      description: The matching projects.
+      type: array
+      items: {type: object, description: "A project, with fields as value wrappers."}
+
+  create_or_update_project:
+    title: Create or update a project
+    description: >-
+      Upsert a project, including its tasks when the Tasks collection is
+      supplied. Fields go in as {"value": ...} wrappers.
+    category: projects
+    request:
+      method: PUT
+      path: /entity/${endpoint_name}/${version}/Project
+      query:
+        $expand: "${expand}"
+      body: "${record}"
+    input:
+      record:
+        type: object
+        description: 'The project, with each field as a {"value": ...} wrapper.'
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      expand:
+        type: string
+        description: Detail collections to return in the saved project.
+        optional: true
+    output:
+      description: The saved project.
+      type: object
+      properties:
+        id: {type: string}
+
+  list_time_entries:
+    title: List time entries
+    description: >-
+      Time entries from the TimeEntry entity, with their date, employee,
+      project, task and hours -- the raw material of project billing and
+      payroll.
+    category: projects
+    read_only: true
+    request:
+      method: GET
+      path: /entity/${endpoint_name}/${version}/TimeEntry
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+      filter:
+        type: string
+        description: OData filter, e.g. Date ge datetimeoffset'2026-09-01T00:00:00Z'.
+        optional: true
+      select:
+        type: string
+        description: Comma-separated fields to return.
+        optional: true
+      top:
+        type: integer
+        description: Return at most this many time entries.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: Skip this many time entries before returning any.
+        optional: true
+        minimum: 0
+    output:
+      description: The matching time entries.
+      type: array
+      items: {type: object, description: "A time entry, with fields as value wrappers."}
+
+  create_or_update_time_entry:
+    title: Create or update a time entry
+    description: >-
+      Upsert a time entry against a project task -- how an external timesheet
+      app files hours into Acumatica.
+    category: projects
+    request:
+      method: PUT
+      path: /entity/${endpoint_name}/${version}/TimeEntry
+      body: "${record}"
+    input:
+      record:
+        type: object
+        description: 'The time entry, with each field as a {"value": ...} wrapper.'
+      endpoint_name:
+        type: string
+        description: Which endpoint (contract) to use.
+        default: Default
+        optional: true
+      version:
+        type: string
+        description: Endpoint version, e.g. 24.200.001.
+        default: 24.200.001
+        optional: true
+    output:
+      description: The saved time entry.
+      type: object
+      properties:
+        id: {type: string}

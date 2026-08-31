@@ -1,0 +1,482 @@
+# DigitalOcean tools.
+#
+# DigitalOcean's OAuth grants either read or read+write across the whole
+# account, so the scope gating here is coarse -- a write tool asks for `write`.
+#
+# Docs: https://docs.digitalocean.com/reference/api/
+
+connector_id: digitalocean
+display_name: DigitalOcean
+docs_url: https://docs.digitalocean.com/reference/api/
+
+scope_rules:
+  implies:
+    write: [read]
+
+tools:
+
+  list_droplets:
+    title: List droplets
+    description: >-
+      List the account's droplets with their ids, regions, sizes, status and IP
+      addresses.
+    category: droplets
+    scopes: [read]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/droplets
+      query:
+        page: "${page}"
+        per_page: "${per_page}"
+        tag_name: "${tag_name}"
+    input:
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      per_page:
+        type: integer
+        description: How many droplets per page (1-200).
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 200
+      tag_name:
+        type: string
+        description: Only droplets carrying this tag.
+        optional: true
+    output:
+      description: A page of droplets.
+      type: object
+      properties:
+        droplets: {type: array}
+        meta: {type: object}
+
+  get_droplet:
+    title: Get a droplet
+    description: Read one droplet's status, size, region, image and networks.
+    category: droplets
+    scopes: [read]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/droplets/${droplet_id}
+    input:
+      droplet_id:
+        type: integer
+        description: The droplet's numeric id.
+    output:
+      description: The droplet.
+      type: object
+      response_path: droplet
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        status: {type: string}
+        networks: {type: object}
+        region: {type: object}
+
+  create_droplet:
+    title: Create a droplet
+    description: >-
+      Provision a droplet. This costs money from the moment it boots. Sizes look
+      like "s-1vcpu-1gb" and regions like "nyc3"; list_regions and list_sizes
+      return the current values.
+    category: droplets
+    scopes: [write]
+    destructive: true
+    request:
+      method: POST
+      path: /v2/droplets
+      body:
+        name: "${name}"
+        region: "${region}"
+        size: "${size}"
+        image: "${image}"
+        ssh_keys: "${ssh_keys}"
+        backups: "${backups}"
+        monitoring: "${monitoring}"
+        tags: "${tags}"
+        user_data: "${user_data}"
+        vpc_uuid: "${vpc_uuid}"
+    input:
+      name:
+        type: string
+        description: Hostname for the droplet.
+      region:
+        type: string
+        description: Region slug, e.g. nyc3 or lon1.
+        example: nyc3
+      size:
+        type: string
+        description: Size slug, e.g. s-1vcpu-1gb.
+        example: s-1vcpu-1gb
+      image:
+        type: string
+        description: Image slug or id, e.g. ubuntu-24-04-x64.
+        example: ubuntu-24-04-x64
+      ssh_keys:
+        type: array
+        description: SSH key ids or fingerprints to install.
+        optional: true
+        items: {type: string}
+      backups:
+        type: boolean
+        description: Enable automatic backups, which costs extra.
+        optional: true
+      monitoring:
+        type: boolean
+        description: Install the monitoring agent.
+        optional: true
+      tags:
+        type: array
+        description: Tags to apply.
+        optional: true
+        items: {type: string}
+      user_data:
+        type: string
+        description: Cloud-init script run on first boot.
+        optional: true
+      vpc_uuid:
+        type: string
+        description: VPC to place it in. Defaults to the region's default VPC.
+        optional: true
+    output:
+      description: The droplet as it begins provisioning.
+      type: object
+      properties:
+        droplet: {type: object}
+        links: {type: object, description: "Holds an action to poll for completion."}
+
+  delete_droplet:
+    title: Destroy a droplet
+    description: >-
+      Permanently destroy a droplet and its local disk. Billing stops, and the
+      data is gone unless a snapshot or backup exists.
+    category: droplets
+    scopes: [write]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/droplets/${droplet_id}
+    input:
+      droplet_id:
+        type: integer
+        description: The droplet to destroy.
+    output:
+      description: Empty on success -- DigitalOcean answers 204 No Content.
+      type: object
+
+  droplet_action:
+    title: Reboot, power or resize a droplet
+    description: >-
+      Run an action on a droplet — reboot, power_off, power_on, shutdown,
+      snapshot, resize, rebuild. The call returns immediately with an action to
+      poll.
+    category: droplets
+    scopes: [write]
+    destructive: true
+    request:
+      method: POST
+      path: /v2/droplets/${droplet_id}/actions
+      body:
+        type: "${type}"
+        name: "${name}"
+        size: "${size}"
+        image: "${image}"
+        disk: "${disk}"
+    input:
+      droplet_id:
+        type: integer
+        description: The droplet to act on.
+      type:
+        type: string
+        description: Which action to run.
+        enum: [reboot, power_cycle, shutdown, power_off, power_on, password_reset, resize, rebuild, rename, snapshot, enable_backups, disable_backups, enable_ipv6]
+      name:
+        type: string
+        description: New hostname, for rename, or snapshot name, for snapshot.
+        optional: true
+      size:
+        type: string
+        description: Target size slug, for resize.
+        optional: true
+      image:
+        type: string
+        description: Image slug or id, for rebuild.
+        optional: true
+      disk:
+        type: boolean
+        description: For resize, whether to grow the disk too. Growing it cannot be undone.
+        optional: true
+    output:
+      description: The queued action.
+      type: object
+      response_path: action
+      properties:
+        id: {type: integer}
+        status: {type: string}
+        type: {type: string}
+
+  list_apps:
+    title: List App Platform apps
+    description: >-
+      List the account's App Platform applications with their ids, live URLs and
+      deployment state.
+    category: apps
+    scopes: [read]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/apps
+      query:
+        page: "${page}"
+        per_page: "${per_page}"
+        with_projects: "${with_projects}"
+    input:
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      per_page:
+        type: integer
+        description: How many apps per page (1-200).
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 200
+      with_projects:
+        type: boolean
+        description: Include each app's project.
+        optional: true
+    output:
+      description: A page of apps.
+      type: object
+      properties:
+        apps: {type: array}
+        meta: {type: object}
+
+  create_app_deployment:
+    title: Deploy an App Platform app
+    description: >-
+      Trigger a deployment of an app from its current source. Set force_build to
+      rebuild rather than reuse the cached build.
+    category: apps
+    scopes: [write]
+    destructive: true
+    request:
+      method: POST
+      path: /v2/apps/${app_id}/deployments
+      body:
+        force_build: "${force_build}"
+    input:
+      app_id:
+        type: string
+        description: The app id, from list_apps.
+      force_build:
+        type: boolean
+        description: Rebuild from scratch instead of reusing the cached build.
+        optional: true
+    output:
+      description: The started deployment.
+      type: object
+      response_path: deployment
+      properties:
+        id: {type: string}
+        phase: {type: string}
+        created_at: {type: string}
+
+  list_databases:
+    title: List managed databases
+    description: >-
+      List the account's managed database clusters with their engines, sizes and
+      connection details.
+    category: databases
+    scopes: [read]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/databases
+      query:
+        tag_name: "${tag_name}"
+    input:
+      tag_name:
+        type: string
+        description: Only clusters carrying this tag.
+        optional: true
+    output:
+      description: The account's database clusters.
+      type: object
+      properties:
+        databases: {type: array}
+
+  list_domains:
+    title: List domains
+    description: List the domains managed by DigitalOcean DNS on this account.
+    category: dns
+    scopes: [read]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/domains
+      query:
+        page: "${page}"
+        per_page: "${per_page}"
+    input:
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      per_page:
+        type: integer
+        description: How many domains per page (1-200).
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 200
+    output:
+      description: A page of domains.
+      type: object
+      properties:
+        domains: {type: array}
+        meta: {type: object}
+
+  create_dns_record:
+    title: Create a DNS record
+    description: >-
+      Add a record to a domain. Type A takes an IP in `data`, CNAME a hostname
+      ending in a dot, TXT arbitrary text.
+    category: dns
+    scopes: [write]
+    request:
+      method: POST
+      path: /v2/domains/${domain}/records
+      body:
+        type: "${type}"
+        name: "${name}"
+        data: "${data}"
+        ttl: "${ttl}"
+        priority: "${priority}"
+        port: "${port}"
+        weight: "${weight}"
+    input:
+      domain:
+        type: string
+        description: The domain name, e.g. example.com.
+      type:
+        type: string
+        description: Record type.
+        enum: [A, AAAA, CAA, CNAME, MX, NS, SOA, SRV, TXT]
+      name:
+        type: string
+        description: Hostname relative to the domain, or "@" for the domain itself.
+      data:
+        type: string
+        description: The record's value — an IP, a hostname, or text.
+      ttl:
+        type: integer
+        description: Time to live in seconds.
+        optional: true
+        minimum: 30
+      priority:
+        type: integer
+        description: Priority, for MX and SRV records.
+        optional: true
+        minimum: 0
+      port:
+        type: integer
+        description: Port, for SRV records.
+        optional: true
+        minimum: 1
+      weight:
+        type: integer
+        description: Weight, for SRV records.
+        optional: true
+        minimum: 0
+    output:
+      description: The created DNS record.
+      type: object
+      response_path: domain_record
+      properties:
+        id: {type: integer}
+        type: {type: string}
+        name: {type: string}
+        data: {type: string}
+
+  list_regions:
+    title: List regions
+    description: >-
+      List the datacentre regions with their slugs and which sizes each one
+      offers, for create_droplet.
+    category: metadata
+    scopes: [read]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/regions
+    input: {}
+    output:
+      description: The available regions.
+      type: object
+      properties:
+        regions: {type: array, description: "Each with slug, name, sizes and available."}
+
+  list_sizes:
+    title: List droplet sizes
+    description: >-
+      List the droplet sizes with their slugs, resources and hourly and monthly
+      prices.
+    category: metadata
+    scopes: [read]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/sizes
+      query:
+        page: "${page}"
+        per_page: "${per_page}"
+    input:
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      per_page:
+        type: integer
+        description: How many sizes per page (1-200).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 200
+    output:
+      description: A page of droplet sizes.
+      type: object
+      properties:
+        sizes: {type: array}
+        meta: {type: object}
+
+  get_account:
+    title: Get the account
+    description: >-
+      Read the DigitalOcean account the token belongs to — email, status and
+      droplet limit. The cheapest health check for the connection.
+    category: account
+    scopes: [read]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/account
+    input: {}
+    output:
+      description: The account.
+      type: object
+      response_path: account
+      properties:
+        email: {type: string}
+        uuid: {type: string}
+        droplet_limit: {type: integer}
+        status: {type: string}

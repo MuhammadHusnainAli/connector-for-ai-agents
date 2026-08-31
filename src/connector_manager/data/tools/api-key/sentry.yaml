@@ -1,0 +1,443 @@
+# Sentry tools.
+#
+# The connection's hostname plus /api is the base, so paths start at /0.
+# Almost everything is scoped to an organisation slug, and issues additionally
+# to a project slug -- both are the short names in Sentry's URLs.
+#
+# Docs: https://docs.sentry.io/api/
+
+connector_id: sentry
+display_name: Sentry
+docs_url: https://docs.sentry.io/api/
+
+scope_rules:
+  implies:
+    "project:write": ["project:read"]
+    "project:admin": ["project:write", "project:read"]
+    "event:write": ["event:read"]
+    "event:admin": ["event:write", "event:read"]
+    "org:write": ["org:read"]
+    "org:admin": ["org:write", "org:read"]
+    "member:write": ["member:read"]
+
+tools:
+
+  list_organizations:
+    title: List organisations
+    description: >-
+      List the organisations the token can reach, with the slugs every other
+      tool takes. Start here.
+    category: organizations
+    scopes: ["org:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /0/organizations/
+      query:
+        owner: "${owner_only}"
+    input:
+      owner_only:
+        type: boolean
+        description: Only organisations the user owns.
+        optional: true
+    output:
+      description: The accessible organisations.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          slug: {type: string, description: "Organisation slug -- what the other tools take."}
+          name: {type: string}
+
+  list_projects:
+    title: List an organisation's projects
+    description: >-
+      List the projects in an organisation with their slugs and platforms.
+    category: projects
+    scopes: ["project:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /0/organizations/${organization_slug}/projects/
+      query:
+        cursor: "${cursor}"
+    input:
+      organization_slug:
+        type: string
+        description: The organisation slug.
+      cursor:
+        type: string
+        description: Cursor from the previous response's Link header.
+        optional: true
+    output:
+      description: The organisation's projects.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          slug: {type: string}
+          name: {type: string}
+          platform: {type: string}
+
+  list_issues:
+    title: List a project's issues
+    description: >-
+      List issues in a project. `query` uses Sentry's search syntax, e.g.
+      "is:unresolved", "is:unresolved level:error", or "assigned:me".
+    category: issues
+    scopes: ["event:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /0/projects/${organization_slug}/${project_slug}/issues/
+      query:
+        query: "${query}"
+        statsPeriod: "${stats_period}"
+        sort: "${sort}"
+        limit: "${limit}"
+        cursor: "${cursor}"
+        environment: "${environment}"
+    input:
+      organization_slug:
+        type: string
+        description: The organisation slug.
+      project_slug:
+        type: string
+        description: The project slug.
+      query:
+        type: string
+        description: Sentry search query.
+        optional: true
+        default: is:unresolved
+      stats_period:
+        type: string
+        description: Window for the event counts, e.g. 24h or 14d.
+        optional: true
+        enum: ["", 24h, 14d]
+      sort:
+        type: string
+        description: How to order the issues.
+        optional: true
+        enum: [date, new, priority, freq, user]
+      limit:
+        type: integer
+        description: How many issues to return (1-100).
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 100
+      cursor:
+        type: string
+        description: Cursor from the previous response's Link header.
+        optional: true
+      environment:
+        type: string
+        description: Only issues seen in this environment.
+        optional: true
+    output:
+      description: The matching issues.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          title: "{type: string}"
+          culprit: {type: string}
+          level: {type: string}
+          status: {type: string}
+          count: {type: string}
+          permalink: {type: string}
+
+  get_issue:
+    title: Get an issue
+    description: >-
+      Read one issue's title, culprit, first and last seen times, and how many
+      events and users it has affected.
+    category: issues
+    scopes: ["event:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /0/issues/${issue_id}/
+    input:
+      issue_id:
+        type: string
+        description: The issue's numeric id.
+    output:
+      description: The issue.
+      type: object
+      properties:
+        id: {type: string}
+        title: "{type: string}"
+        status: {type: string}
+        firstSeen: {type: string}
+        lastSeen: {type: string}
+        count: {type: string}
+        userCount: {type: integer}
+
+  get_latest_event:
+    title: Get an issue's latest event
+    description: >-
+      Read the most recent event for an issue, with its stack trace, tags,
+      breadcrumbs and request context — the detail needed to actually debug it.
+    category: issues
+    scopes: ["event:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /0/issues/${issue_id}/events/latest/
+    input:
+      issue_id:
+        type: string
+        description: The issue's numeric id.
+    output:
+      description: The latest event.
+      type: object
+      properties:
+        eventID: {type: string}
+        message: {type: string}
+        entries: {type: array, description: "Holds the stacktrace, request and breadcrumbs."}
+        tags: {type: array}
+        context: {type: object}
+
+  update_issue:
+    title: Resolve, ignore or assign an issue
+    description: >-
+      Change an issue's status or assignee. Set status to "resolved",
+      "ignored" or "unresolved"; assign with a username, email or "team:slug".
+    category: issues
+    scopes: ["event:write"]
+    request:
+      method: PUT
+      path: /0/issues/${issue_id}/
+      body:
+        status: "${status}"
+        assignedTo: "${assigned_to}"
+        isPublic: "${is_public}"
+        isBookmarked: "${is_bookmarked}"
+        statusDetails: "${status_details}"
+    input:
+      issue_id:
+        type: string
+        description: The issue's numeric id.
+      status:
+        type: string
+        description: New status.
+        optional: true
+        enum: [resolved, resolvedInNextRelease, unresolved, ignored]
+      assigned_to:
+        type: string
+        description: Username, email, or "team:slug". Pass an empty string to unassign.
+        optional: true
+      status_details:
+        type: object
+        description: "Extra conditions, e.g. {\"ignoreDuration\": 60} to snooze for an hour."
+        optional: true
+      is_public:
+        type: boolean
+        description: Share the issue publicly.
+        optional: true
+      is_bookmarked:
+        type: boolean
+        description: Bookmark the issue for the token's user.
+        optional: true
+    output:
+      description: The updated issue.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string}
+        assignedTo: {type: object}
+
+  delete_issue:
+    title: Delete an issue
+    description: >-
+      Permanently delete an issue and its events. This cannot be undone —
+      resolving or ignoring is almost always what is wanted instead.
+    category: issues
+    scopes: ["event:admin"]
+    destructive: true
+    request:
+      method: DELETE
+      path: /0/issues/${issue_id}/
+    input:
+      issue_id:
+        type: string
+        description: The issue to delete.
+    output:
+      description: Empty on success -- Sentry answers 202 Accepted.
+      type: object
+
+  list_releases:
+    title: List releases
+    description: >-
+      List an organisation's releases with their versions, commit counts and
+      deploy times.
+    category: releases
+    scopes: ["project:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /0/organizations/${organization_slug}/releases/
+      query:
+        query: "${query}"
+        per_page: "${per_page}"
+        cursor: "${cursor}"
+    input:
+      organization_slug:
+        type: string
+        description: The organisation slug.
+      query:
+        type: string
+        description: Match against release versions.
+        optional: true
+      per_page:
+        type: integer
+        description: How many releases per page (1-100).
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 100
+      cursor:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+    output:
+      description: The organisation's releases.
+      type: array
+      items:
+        type: object
+        properties:
+          version: {type: string}
+          dateCreated: {type: string}
+          commitCount: {type: integer}
+          projects: {type: array}
+
+  create_release:
+    title: Create a release
+    description: >-
+      Record a release so Sentry can attribute new issues to it and mark
+      regressions. Usually called from a deploy pipeline.
+    category: releases
+    scopes: ["project:write"]
+    request:
+      method: POST
+      path: /0/organizations/${organization_slug}/releases/
+      body:
+        version: "${version}"
+        projects: "${projects}"
+        ref: "${ref}"
+        url: "${url}"
+        dateReleased: "${date_released}"
+        refs: "${refs}"
+    input:
+      organization_slug:
+        type: string
+        description: The organisation slug.
+      version:
+        type: string
+        description: Release version, e.g. a git sha or a semver tag.
+      projects:
+        type: array
+        description: Project slugs the release covers.
+        items: {type: string}
+      ref:
+        type: string
+        description: Commit sha the release was built from.
+        optional: true
+      url:
+        type: string
+        description: Link to the build or deploy.
+        optional: true
+        format: uri
+      date_released:
+        type: string
+        description: When it went out, ISO 8601. Defaults to now.
+        optional: true
+      refs:
+        type: array
+        description: >-
+          Commit ranges for suspect-commit detection, each {"repository":
+          "owner/repo", "commit": "sha", "previousCommit": "sha"}.
+        optional: true
+        items: {type: object}
+    output:
+      description: The created release.
+      type: object
+      properties:
+        version: {type: string}
+        dateCreated: {type: string}
+
+  list_organization_members:
+    title: List organisation members
+    description: >-
+      List who is in an organisation, with their roles and email addresses — the
+      names issue assignment takes.
+    category: organizations
+    scopes: ["member:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /0/organizations/${organization_slug}/members/
+      query:
+        cursor: "${cursor}"
+    input:
+      organization_slug:
+        type: string
+        description: The organisation slug.
+      cursor:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+    output:
+      description: The organisation's members.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          email: {type: string}
+          role: {type: string}
+          user: {type: object}
+
+  list_project_events:
+    title: List a project's recent events
+    description: >-
+      Read raw events for a project, newest first — useful when you want the
+      individual occurrences rather than the grouped issues.
+    category: events
+    scopes: ["event:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /0/projects/${organization_slug}/${project_slug}/events/
+      query:
+        full: "${full}"
+        cursor: "${cursor}"
+    input:
+      organization_slug:
+        type: string
+        description: The organisation slug.
+      project_slug:
+        type: string
+        description: The project slug.
+      full:
+        type: boolean
+        description: Include the complete event payload rather than a summary.
+        optional: true
+      cursor:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+    output:
+      description: Recent events.
+      type: array
+      items:
+        type: object
+        properties:
+          eventID: {type: string}
+          message: {type: string}
+          dateCreated: {type: string}
+          tags: {type: array}

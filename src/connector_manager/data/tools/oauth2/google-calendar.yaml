@@ -1,0 +1,2321 @@
+# Google Calendar API tools.
+#
+# Docs: https://developers.google.com/calendar/api/v3/reference
+#
+# The tools below the "rest of the API" divider come from Google's own
+# discovery document for this API -- the machine readable contract its client
+# libraries are generated from -- so their paths, parameters and per-tool OAuth
+# scopes are Google's. The hand-authored tools above it are kept because they
+# offer a friendlier shape for the common cases.
+#
+connector_id: google-calendar
+display_name: Google Calendar
+docs_url: https://developers.google.com/calendar/api/v3/reference
+
+scope_rules:
+  strip_prefixes:
+    - https://www.googleapis.com/auth/
+  implies:
+    calendar: [calendar.readonly, calendar.events, calendar.events.readonly, calendar.calendarlist]
+    calendar.events: [calendar.events.readonly]
+    calendar.readonly: [calendar.events.readonly]
+
+scope_discovery:
+  method: GET
+  base_url_override: https://oauth2.googleapis.com
+  endpoint: /tokeninfo
+  query:
+    access_token: ${credentials.access_token}
+  scopes_path: scope
+
+tools:
+
+  list_calendars:
+    title: List calendars
+    description: >-
+      List the calendars on the user's calendar list, with the ids every event
+      tool takes. The user's own calendar is always addressable as "primary".
+    category: calendars
+    scopes_any: [calendar.readonly, calendar]
+    read_only: true
+    request:
+      method: GET
+      path: /calendar/v3/users/me/calendarList
+      query:
+        maxResults: "${limit}"
+        pageToken: "${page_token}"
+        minAccessRole: "${min_access_role}"
+    input:
+      limit:
+        type: integer
+        description: How many calendars per page (1-250).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 250
+      page_token:
+        type: string
+        description: Cursor from the previous response's nextPageToken.
+        optional: true
+      min_access_role:
+        type: string
+        description: Only calendars the user has at least this role on.
+        optional: true
+        enum: [freeBusyReader, reader, writer, owner]
+    output:
+      description: The user's calendar list.
+      type: object
+      properties:
+        items: {type: array, description: "Each with id, summary, timeZone and accessRole."}
+        nextPageToken: {type: string}
+
+  list_events:
+    title: List events in a date range
+    description: >-
+      List events on a calendar between two instants, with recurring series
+      expanded into individual occurrences. This is the tool for "what is on my
+      calendar this week".
+    category: events
+    scopes_any: [calendar.events.readonly, calendar.readonly, calendar.events, calendar]
+    read_only: true
+    request:
+      method: GET
+      path: /calendar/v3/calendars/${calendar_id}/events
+      query:
+        timeMin: "${time_min}"
+        timeMax: "${time_max}"
+        q: "${query}"
+        maxResults: "${limit}"
+        pageToken: "${page_token}"
+        singleEvents: "${single_events}"
+        orderBy: "${order_by}"
+        showDeleted: "${show_deleted}"
+    input:
+      calendar_id:
+        type: string
+        description: Calendar id, or "primary" for the user's own calendar.
+        optional: true
+        default: primary
+      time_min:
+        type: string
+        description: Earliest event end time, RFC 3339, e.g. 2026-09-01T00:00:00Z.
+        optional: true
+        example: "2026-09-01T00:00:00Z"
+      time_max:
+        type: string
+        description: Latest event start time, RFC 3339.
+        optional: true
+      query:
+        type: string
+        description: Free-text search across event fields.
+        optional: true
+      limit:
+        type: integer
+        description: How many events per page (1-2500).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 2500
+      page_token:
+        type: string
+        description: Cursor from the previous response's nextPageToken.
+        optional: true
+      single_events:
+        type: boolean
+        description: Expand recurring series into individual occurrences. Required for orderBy=startTime.
+        optional: true
+        default: true
+      order_by:
+        type: string
+        description: Order of the results.
+        optional: true
+        default: startTime
+        enum: [startTime, updated]
+      show_deleted:
+        type: boolean
+        description: Include cancelled events.
+        optional: true
+    output:
+      description: A page of events.
+      type: object
+      properties:
+        items: {type: array}
+        nextPageToken: {type: string}
+        timeZone: {type: string}
+
+  get_event:
+    title: Get a calendar event
+    description: Read one event in full, including attendees, conference details and reminders.
+    category: events
+    scopes_any: [calendar.events.readonly, calendar.readonly, calendar.events, calendar]
+    read_only: true
+    request:
+      method: GET
+      path: /calendar/v3/calendars/${calendar_id}/events/${event_id}
+    input:
+      calendar_id:
+        type: string
+        description: Calendar id, or "primary".
+        optional: true
+        default: primary
+      event_id:
+        type: string
+        description: The event id.
+    output:
+      description: The event.
+      type: object
+      properties:
+        id: {type: string}
+        summary: {type: string}
+        start: {type: object}
+        end: {type: object}
+        attendees: {type: array}
+        hangoutLink: {type: string}
+
+  create_event:
+    title: Create a calendar event
+    description: >-
+      Create an event. Times are RFC 3339 with an offset, e.g.
+      2026-09-01T14:00:00-07:00. Invited attendees get an email unless
+      send_updates is none.
+    category: events
+    scopes_any: [calendar.events, calendar]
+    request:
+      method: POST
+      path: /calendar/v3/calendars/${calendar_id}/events
+      query:
+        sendUpdates: "${send_updates}"
+        conferenceDataVersion: "${conference_data_version}"
+      body:
+        summary: "${summary}"
+        description: "${description}"
+        location: "${location}"
+        start:
+          dateTime: "${start}"
+          timeZone: "${timezone}"
+        end:
+          dateTime: "${end}"
+          timeZone: "${timezone}"
+        attendees:
+          $map:
+            source: "${attendees}"
+            template: {email: "${item}"}
+        recurrence: "${recurrence}"
+    input:
+      summary:
+        type: string
+        description: Event title.
+      start:
+        type: string
+        description: Start time, RFC 3339, e.g. 2026-09-01T14:00:00-07:00.
+        example: "2026-09-01T14:00:00-07:00"
+      end:
+        type: string
+        description: End time, RFC 3339.
+      calendar_id:
+        type: string
+        description: Calendar to create it on, or "primary".
+        optional: true
+        default: primary
+      description:
+        type: string
+        description: Longer description shown in the invitation.
+        optional: true
+      location:
+        type: string
+        description: Where the event happens.
+        optional: true
+      timezone:
+        type: string
+        description: IANA time zone the times are in, e.g. America/Los_Angeles.
+        optional: true
+      attendees:
+        type: array
+        description: Email addresses to invite.
+        optional: true
+        items: {type: string, format: email}
+      recurrence:
+        type: array
+        description: RRULE strings, e.g. ["RRULE:FREQ=WEEKLY;COUNT=10"].
+        optional: true
+        items: {type: string}
+      send_updates:
+        type: string
+        description: Who gets an email about the new event.
+        optional: true
+        enum: [all, externalOnly, none]
+      conference_data_version:
+        type: integer
+        description: Set to 1 to allow conference (Meet) data on the event.
+        optional: true
+        minimum: 0
+        maximum: 1
+    output:
+      description: The created event.
+      type: object
+      properties:
+        id: {type: string}
+        htmlLink: {type: string}
+        hangoutLink: {type: string}
+        status: {type: string}
+
+  update_event:
+    title: Update a calendar event
+    description: >-
+      Change an event's fields. This is a patch, so only what is supplied is
+      written; attendee lists, however, replace the previous one wholesale.
+    category: events
+    scopes_any: [calendar.events, calendar]
+    request:
+      method: PATCH
+      path: /calendar/v3/calendars/${calendar_id}/events/${event_id}
+      query:
+        sendUpdates: "${send_updates}"
+      body:
+        summary: "${summary}"
+        description: "${description}"
+        location: "${location}"
+        start:
+          dateTime: "${start}"
+          timeZone: "${timezone}"
+        end:
+          dateTime: "${end}"
+          timeZone: "${timezone}"
+        attendees:
+          $map:
+            source: "${attendees}"
+            template: {email: "${item}"}
+    input:
+      event_id:
+        type: string
+        description: The event to change.
+      calendar_id:
+        type: string
+        description: Calendar the event is on, or "primary".
+        optional: true
+        default: primary
+      summary:
+        type: string
+        description: New title.
+        optional: true
+      description:
+        type: string
+        description: New description.
+        optional: true
+      location:
+        type: string
+        description: New location.
+        optional: true
+      start:
+        type: string
+        description: New start time, RFC 3339.
+        optional: true
+      end:
+        type: string
+        description: New end time, RFC 3339.
+        optional: true
+      timezone:
+        type: string
+        description: IANA time zone for the new times.
+        optional: true
+      attendees:
+        type: array
+        description: Replaces the attendee list entirely.
+        optional: true
+        items: {type: string, format: email}
+      send_updates:
+        type: string
+        description: Who gets an email about the change.
+        optional: true
+        enum: [all, externalOnly, none]
+    output:
+      description: The updated event.
+      type: object
+      properties:
+        id: {type: string}
+        updated: {type: string}
+
+  delete_event:
+    title: Delete a calendar event
+    description: >-
+      Delete an event. Attendees are notified unless send_updates is none. This
+      cannot be undone.
+    category: events
+    scopes_any: [calendar.events, calendar]
+    destructive: true
+    request:
+      method: DELETE
+      path: /calendar/v3/calendars/${calendar_id}/events/${event_id}
+      query:
+        sendUpdates: "${send_updates}"
+    input:
+      event_id:
+        type: string
+        description: The event to delete.
+      calendar_id:
+        type: string
+        description: Calendar the event is on, or "primary".
+        optional: true
+        default: primary
+      send_updates:
+        type: string
+        description: Who gets a cancellation email.
+        optional: true
+        enum: [all, externalOnly, none]
+    output:
+      description: Empty on success -- Google answers 204 No Content.
+      type: object
+
+  quick_add_event:
+    title: Create an event from a sentence
+    description: >-
+      Create an event by parsing plain English, e.g. "Lunch with Ada Friday
+      1pm". Google interprets the text; the result is worth checking.
+    category: events
+    scopes_any: [calendar.events, calendar]
+    request:
+      method: POST
+      path: /calendar/v3/calendars/${calendar_id}/events/quickAdd
+      query:
+        text: "${text}"
+        sendUpdates: "${send_updates}"
+    input:
+      text:
+        type: string
+        description: The event described in plain language.
+        example: Lunch with Ada Friday 1pm
+      calendar_id:
+        type: string
+        description: Calendar to create it on, or "primary".
+        optional: true
+        default: primary
+      send_updates:
+        type: string
+        description: Who gets an email about the new event.
+        optional: true
+        enum: [all, externalOnly, none]
+    output:
+      description: The created event as Google parsed it.
+      type: object
+      properties:
+        id: {type: string}
+        summary: {type: string}
+        start: {type: object}
+
+  get_free_busy:
+    title: Check when calendars are busy
+    description: >-
+      Read the busy blocks on a set of calendars over a window, without seeing
+      what the events are. Use it to find a free slot before creating an event.
+    category: events
+    scopes_any: [calendar.readonly, calendar, calendar.freebusy]
+    read_only: true
+    request:
+      method: POST
+      path: /calendar/v3/freeBusy
+      body:
+        timeMin: "${time_min}"
+        timeMax: "${time_max}"
+        timeZone: "${timezone}"
+        items:
+          $map:
+            source: "${calendar_ids}"
+            template: {id: "${item}"}
+    input:
+      time_min:
+        type: string
+        description: Start of the window, RFC 3339.
+      time_max:
+        type: string
+        description: End of the window, RFC 3339.
+      calendar_ids:
+        type: array
+        description: Calendar ids or email addresses to check.
+        items: {type: string}
+      timezone:
+        type: string
+        description: IANA time zone the answer is expressed in.
+        optional: true
+    output:
+      description: Busy blocks per calendar.
+      type: object
+      properties:
+        calendars: {type: object, description: "Calendar id to its busy array."}
+
+  add_event_attendees:
+    title: Invite people to an existing event
+    description: >-
+      Replace an event's attendee list, which is how Google's API adds guests.
+      Include the people already invited or they are removed.
+    category: events
+    scopes_any: [calendar.events, calendar]
+    request:
+      method: PATCH
+      path: /calendar/v3/calendars/${calendar_id}/events/${event_id}
+      query:
+        sendUpdates: "${send_updates}"
+      body:
+        attendees:
+          $map:
+            source: "${attendees}"
+            template: {email: "${item}"}
+    input:
+      event_id:
+        type: string
+        description: The event to invite to.
+      attendees:
+        type: array
+        description: The full attendee list after the change, existing guests included.
+        items: {type: string, format: email}
+      calendar_id:
+        type: string
+        description: Calendar the event is on, or "primary".
+        optional: true
+        default: primary
+      send_updates:
+        type: string
+        description: Who gets an invitation email.
+        optional: true
+        default: all
+        enum: [all, externalOnly, none]
+    output:
+      description: The event with its new attendee list.
+      type: object
+      properties:
+        id: {type: string}
+        attendees: {type: array}
+
+  create_calendar:
+    title: Create a calendar
+    description: Create a secondary calendar the user owns, for a project or a team.
+    category: calendars
+    scopes: [calendar]
+    request:
+      method: POST
+      path: /calendar/v3/calendars
+      body:
+        summary: "${summary}"
+        description: "${description}"
+        timeZone: "${timezone}"
+    input:
+      summary:
+        type: string
+        description: The calendar's name.
+      description:
+        type: string
+        description: What the calendar is for.
+        optional: true
+      timezone:
+        type: string
+        description: IANA time zone, e.g. Europe/London.
+        optional: true
+    output:
+      description: The created calendar.
+      type: object
+      properties:
+        id: {type: string}
+        summary: {type: string}
+        timeZone: {type: string}
+
+  # -- the rest of the API, from Google's own discovery document ------------
+
+  delete_acl:
+    title: Delete acl
+    description: Deletes an access control rule. Calls acl.delete on the Calendar API.
+    category: acl
+    request:
+      method: DELETE
+      path: /calendar/v3/calendars/${calendar_id}/acl/${rule_id}
+    input:
+      calendar_id:
+        type: string
+        description: Calendar identifier. To retrieve calendar IDs call the calendarList.list method.
+          If you want to access the primary calendar of the currently logged in user, use the "primary"
+          keyword.
+      rule_id:
+        type: string
+        description: ACL rule identifier.
+    output:
+      description: What the API returned.
+      type: object
+    scopes_any:
+    - calendar
+    - calendar.acls
+    destructive: true
+  get_acl:
+    title: Get acl
+    description: Returns an access control rule. Calls acl.get on the Calendar API.
+    category: acl
+    request:
+      method: GET
+      path: /calendar/v3/calendars/${calendar_id}/acl/${rule_id}
+    input:
+      calendar_id:
+        type: string
+        description: Calendar identifier. To retrieve calendar IDs call the calendarList.list method.
+          If you want to access the primary calendar of the currently logged in user, use the "primary"
+          keyword.
+      rule_id:
+        type: string
+        description: ACL rule identifier.
+    output:
+      description: The AclRule resource.
+      type: object
+    scopes_any:
+    - calendar
+    - calendar.acls
+    - calendar.acls.readonly
+    - calendar.readonly
+    read_only: true
+  create_acl:
+    title: Create acl
+    description: Creates an access control rule. Calls acl.insert on the Calendar API.
+    category: acl
+    request:
+      method: POST
+      path: /calendar/v3/calendars/${calendar_id}/acl
+      query:
+        sendNotifications: ${send_notifications}
+      body:
+        role: ${role}
+        scope: ${scope}
+    input:
+      calendar_id:
+        type: string
+        description: Calendar identifier. To retrieve calendar IDs call the calendarList.list method.
+          If you want to access the primary calendar of the currently logged in user, use the "primary"
+          keyword.
+      send_notifications:
+        type: boolean
+        description: Whether to send notifications about the calendar sharing change. Optional. The default
+          is True.
+        optional: true
+      role:
+        type: string
+        description: 'The role assigned to the scope. Possible values are: - "none" - Provides no access.
+          - "freeBusyReader" - Provides read access to free/busy information. - "reader" - Provides read
+          access to the calendar. Private events will appear to users with reader access, but event details
+          will be hidden. - "writ'
+        optional: true
+      scope:
+        type: object
+        description: The extent to which calendar access is granted by this ACL rule.
+        optional: true
+    output:
+      description: The AclRule resource.
+      type: object
+    scopes_any:
+    - calendar
+    - calendar.acls
+  list_acl:
+    title: List acl
+    description: Returns the rules in the access control list for the calendar.
+    category: acl
+    request:
+      method: GET
+      path: /calendar/v3/calendars/${calendar_id}/acl
+      query:
+        maxResults: ${max_results}
+        pageToken: ${page_token}
+        showDeleted: ${show_deleted}
+        syncToken: ${sync_token}
+    input:
+      calendar_id:
+        type: string
+        description: Calendar identifier. To retrieve calendar IDs call the calendarList.list method.
+          If you want to access the primary calendar of the currently logged in user, use the "primary"
+          keyword.
+      max_results:
+        type: integer
+        description: Maximum number of entries returned on one result page. By default the value is 100
+          entries. The page size can never be larger than 250 entries. Optional.
+        optional: true
+      page_token:
+        type: string
+        description: Token specifying which result page to return. Optional.
+        optional: true
+      show_deleted:
+        type: boolean
+        description: Whether to include deleted ACLs in the result. Deleted ACLs are represented by role
+          equal to "none". Deleted ACLs will always be included if syncToken is provided. Optional. The
+          default is False.
+        optional: true
+      sync_token:
+        type: string
+        description: Token obtained from the nextSyncToken field returned on the last page of results
+          from the previous list request. It makes the result of this list request contain only entries
+          that have changed since then. All entries deleted since the previous list request will always
+          be in the result set and it is
+        optional: true
+    output:
+      description: The Acl resource.
+      type: object
+    scopes_any:
+    - calendar
+    - calendar.acls
+    - calendar.acls.readonly
+    read_only: true
+  update_acl:
+    title: Update acl
+    description: Updates an access control rule. This method supports patch semantics.
+    category: acl
+    request:
+      method: PATCH
+      path: /calendar/v3/calendars/${calendar_id}/acl/${rule_id}
+      query:
+        sendNotifications: ${send_notifications}
+      body:
+        role: ${role}
+        scope: ${scope}
+    input:
+      calendar_id:
+        type: string
+        description: Calendar identifier. To retrieve calendar IDs call the calendarList.list method.
+          If you want to access the primary calendar of the currently logged in user, use the "primary"
+          keyword.
+      rule_id:
+        type: string
+        description: ACL rule identifier.
+      send_notifications:
+        type: boolean
+        description: Whether to send notifications about the calendar sharing change. Note that there
+          are no notifications on access removal. Optional. The default is True.
+        optional: true
+      role:
+        type: string
+        description: 'The role assigned to the scope. Possible values are: - "none" - Provides no access.
+          - "freeBusyReader" - Provides read access to free/busy information. - "reader" - Provides read
+          access to the calendar. Private events will appear to users with reader access, but event details
+          will be hidden. - "writ'
+        optional: true
+      scope:
+        type: object
+        description: The extent to which calendar access is granted by this ACL rule.
+        optional: true
+    output:
+      description: The AclRule resource.
+      type: object
+    scopes_any:
+    - calendar
+    - calendar.acls
+  replace_acl:
+    title: Replace acl
+    description: Updates an access control rule. Calls acl.update on the Calendar API.
+    category: acl
+    request:
+      method: PUT
+      path: /calendar/v3/calendars/${calendar_id}/acl/${rule_id}
+      query:
+        sendNotifications: ${send_notifications}
+      body:
+        role: ${role}
+        scope: ${scope}
+    input:
+      calendar_id:
+        type: string
+        description: Calendar identifier. To retrieve calendar IDs call the calendarList.list method.
+          If you want to access the primary calendar of the currently logged in user, use the "primary"
+          keyword.
+      rule_id:
+        type: string
+        description: ACL rule identifier.
+      send_notifications:
+        type: boolean
+        description: Whether to send notifications about the calendar sharing change. Note that there
+          are no notifications on access removal. Optional. The default is True.
+        optional: true
+      role:
+        type: string
+        description: 'The role assigned to the scope. Possible values are: - "none" - Provides no access.
+          - "freeBusyReader" - Provides read access to free/busy information. - "reader" - Provides read
+          access to the calendar. Private events will appear to users with reader access, but event details
+          will be hidden. - "writ'
+        optional: true
+      scope:
+        type: object
+        description: The extent to which calendar access is granted by this ACL rule.
+        optional: true
+    output:
+      description: The AclRule resource.
+      type: object
+    scopes_any:
+    - calendar
+    - calendar.acls
+  watch_acl:
+    title: Watch acl
+    description: Watch for changes to ACL resources. Calls acl.watch on the Calendar API.
+    category: acl
+    request:
+      method: POST
+      path: /calendar/v3/calendars/${calendar_id}/acl/watch
+      query:
+        maxResults: ${max_results}
+        pageToken: ${page_token}
+        showDeleted: ${show_deleted}
+        syncToken: ${sync_token}
+      body:
+        expiration: ${expiration}
+        token: ${token}
+        resourceId: ${resource_id}
+        address: ${address}
+        payload: ${payload}
+        type: ${type}
+        resourceUri: ${resource_uri}
+        params: ${params}
+    input:
+      calendar_id:
+        type: string
+        description: Calendar identifier. To retrieve calendar IDs call the calendarList.list method.
+          If you want to access the primary calendar of the currently logged in user, use the "primary"
+          keyword.
+      max_results:
+        type: integer
+        description: Maximum number of entries returned on one result page. By default the value is 100
+          entries. The page size can never be larger than 250 entries. Optional.
+        optional: true
+      page_token:
+        type: string
+        description: Token specifying which result page to return. Optional.
+        optional: true
+      show_deleted:
+        type: boolean
+        description: Whether to include deleted ACLs in the result. Deleted ACLs are represented by role
+          equal to "none". Deleted ACLs will always be included if syncToken is provided. Optional. The
+          default is False.
+        optional: true
+      sync_token:
+        type: string
+        description: Token obtained from the nextSyncToken field returned on the last page of results
+          from the previous list request. It makes the result of this list request contain only entries
+          that have changed since then. All entries deleted since the previous list request will always
+          be in the result set and it is
+        optional: true
+      expiration:
+        type: string
+        description: Date and time of notification channel expiration, expressed as a Unix timestamp,
+          in milliseconds. Optional.
+        optional: true
+      token:
+        type: string
+        description: An arbitrary string delivered to the target address with each notification delivered
+          over this channel. Optional.
+        optional: true
+      resource_id:
+        type: string
+        description: An opaque ID that identifies the resource being watched on this channel. Stable across
+          different API versions.
+        optional: true
+      address:
+        type: string
+        description: The address where notifications are delivered for this channel.
+        optional: true
+      payload:
+        type: boolean
+        description: A Boolean value to indicate whether payload is wanted. Optional.
+        optional: true
+      type:
+        type: string
+        description: The type of delivery mechanism used for this channel. Valid values are "web_hook"
+          (or "webhook"). Both values refer to a channel where Http requests are used to deliver messages.
+        optional: true
+      resource_uri:
+        type: string
+        description: A version-specific identifier for the watched resource.
+        optional: true
+      params:
+        type: object
+        description: Additional parameters controlling delivery channel behavior. Optional.
+        optional: true
+    output:
+      description: The Channel resource.
+      type: object
+    scopes_any:
+    - calendar
+    - calendar.acls
+    - calendar.acls.readonly
+  delete_calendar_list:
+    title: Delete calendar list
+    description: Removes a calendar from the user's calendar list.
+    category: calendar_list
+    request:
+      method: DELETE
+      path: /calendar/v3/users/me/calendarList/${calendar_id}
+    input:
+      calendar_id:
+        type: string
+        description: Calendar identifier. To retrieve calendar IDs call the calendarList.list method.
+          If you want to access the primary calendar of the currently logged in user, use the "primary"
+          keyword.
+    output:
+      description: What the API returned.
+      type: object
+    scopes_any:
+    - calendar
+    - calendar.app.created
+    - calendar.calendarlist
+    destructive: true
+  get_calendar_list:
+    title: Get calendar list
+    description: Returns a calendar from the user's calendar list.
+    category: calendar_list
+    request:
+      method: GET
+      path: /calendar/v3/users/me/calendarList/${calendar_id}
+    input:
+      calendar_id:
+        type: string
+        description: Calendar identifier. To retrieve calendar IDs call the calendarList.list method.
+          If you want to access the primary calendar of the currently logged in user, use the "primary"
+          keyword.
+    output:
+      description: The CalendarListEntry resource.
+      type: object
+    scopes_any:
+    - calendar
+    - calendar.app.created
+    - calendar.calendarlist
+    - calendar.calendarlist.readonly
+    - calendar.readonly
+    read_only: true
+  create_calendar_list:
+    title: Create calendar list
+    description: Inserts an existing calendar into the user's calendar list.
+    category: calendar_list
+    request:
+      method: POST
+      path: /calendar/v3/users/me/calendarList
+      query:
+        colorRgbFormat: ${color_rgb_format}
+      body:
+        colorId: ${color_id}
+        dataOwner: ${data_owner}
+        foregroundColor: ${foreground_color}
+        accessRole: ${access_role}
+        timeZone: ${time_zone}
+        location: ${location}
+        primary: ${primary}
+        deleted: ${deleted}
+        backgroundColor: ${background_color}
+        summaryOverride: ${summary_override}
+        selected: ${selected}
+        conferenceProperties: ${conference_properties}
+        description: ${description}
+        hidden: ${hidden}
+        defaultReminders: ${default_reminders}
+        summary: ${summary}
+        notificationSettings: ${notification_settings}
+        autoAcceptInvitations: ${auto_accept_invitations}
+    input:
+      color_rgb_format:
+        type: boolean
+        description: Whether to use the foregroundColor and backgroundColor fields to write the calendar
+          colors (RGB). If this feature is used, the index-based colorId field will be set to the best
+          matching option automatically. Optional. The default is False.
+        optional: true
+      color_id:
+        type: string
+        description: The color of the calendar. This is an ID referring to an entry in the calendar section
+          of the colors definition (see the colors endpoint). This property is superseded by the backgroundColor
+          and foregroundColor properties and can be ignored when using these properties. Optional.
+        optional: true
+      data_owner:
+        type: string
+        description: The email of the owner of the calendar. Set only for secondary calendars. Read-only.
+        optional: true
+      foreground_color:
+        type: string
+        description: The foreground color of the calendar in the hexadecimal format "#ffffff". This property
+          supersedes the index-based colorId property. To set or change this property, you need to specify
+          colorRgbFormat=true in the parameters of the insert, update and patch methods. Optional.
+        optional: true
+      access_role:
+        type: string
+        description: 'The effective access role that the authenticated user has on the calendar. Read-only.
+          Possible values are: - "freeBusyReader" - Provides read access to free/busy information. - "reader"
+          - Provides read access to the calendar. Private events will appear to users with reader access,
+          but event details'
+        optional: true
+      time_zone:
+        type: string
+        description: The time zone of the calendar. Optional. Read-only.
+        optional: true
+      location:
+        type: string
+        description: Geographic location of the calendar as free-form text. Optional. Read-only.
+        optional: true
+      primary:
+        type: boolean
+        description: Whether the calendar is the primary calendar of the authenticated user. Read-only.
+          Optional. The default is False.
+        optional: true
+        default: false
+      deleted:
+        type: boolean
+        description: Whether this calendar list entry has been deleted from the calendar list. Read-only.
+          Optional. The default is False.
+        optional: true
+        default: false
+      background_color:
+        type: string
+        description: The main color of the calendar in the hexadecimal format "#0088aa". This property
+          supersedes the index-based colorId property. To set or change this property, you need to specify
+          colorRgbFormat=true in the parameters of the insert, update and patch methods. Optional.
+        optional: true
+      summary_override:
+        type: string
+        description: The summary that the authenticated user has set for this calendar. Optional.
+        optional: true
+      selected:
+        type: boolean
+        description: Whether the calendar content shows up in the calendar UI. Optional. The default is
+          False.
+        optional: true
+        default: false
+      conference_properties:
+        type: string
+        description: Conferencing properties for this calendar, for example what types of conferences
+          are allowed.
+        optional: true
+      description:
+        type: string
+        description: Description of the calendar. Optional. Read-only.
+        optional: true
+      hidden:
+        type: boolean
+        description: Whether the calendar has been hidden from the list. Optional. The attribute is only
+          returned when the calendar is hidden, in which case the value is true.
+        optional: true
+        default: false
+      default_reminders:
+        type: array
+        items:
+          type: string
+        description: The default reminders that the authenticated user has for this calendar.
+        optional: true
+      summary:
+        type: string
+        description: Title of the calendar. Read-only.
+        optional: true
+      notification_settings:
+        type: object
+        description: The notifications that the authenticated user is receiving for this calendar.
+        optional: true
+      auto_accept_invitations:
+        type: boolean
+        description: Whether this calendar automatically accepts invitations. Only valid for resource
+          calendars. Read-only.
+        optional: true
+    output:
+      description: The CalendarListEntry resource.
+      type: object
+    scopes_any:
+    - calendar
+    - calendar.calendarlist
+  update_calendar_list:
+    title: Update calendar list
+    description: Updates an existing calendar on the user's calendar list. This method supports patch
+      semantics.
+    category: calendar_list
+    request:
+      method: PATCH
+      path: /calendar/v3/users/me/calendarList/${calendar_id}
+      query:
+        colorRgbFormat: ${color_rgb_format}
+      body:
+        colorId: ${color_id}
+        dataOwner: ${data_owner}
+        foregroundColor: ${foreground_color}
+        accessRole: ${access_role}
+        timeZone: ${time_zone}
+        location: ${location}
+        primary: ${primary}
+        deleted: ${deleted}
+        backgroundColor: ${background_color}
+        summaryOverride: ${summary_override}
+        selected: ${selected}
+        conferenceProperties: ${conference_properties}
+        description: ${description}
+        hidden: ${hidden}
+        defaultReminders: ${default_reminders}
+        summary: ${summary}
+        notificationSettings: ${notification_settings}
+        autoAcceptInvitations: ${auto_accept_invitations}
+    input:
+      calendar_id:
+        type: string
+        description: Calendar identifier. To retrieve calendar IDs call the calendarList.list method.
+          If you want to access the primary calendar of the currently logged in user, use the "primary"
+          keyword.
+      color_rgb_format:
+        type: boolean
+        description: Whether to use the foregroundColor and backgroundColor fields to write the calendar
+          colors (RGB). If this feature is used, the index-based colorId field will be set to the best
+          matching option automatically. Optional. The default is False.
+        optional: true
+      color_id:
+        type: string
+        description: The color of the calendar. This is an ID referring to an entry in the calendar section
+          of the colors definition (see the colors endpoint). This property is superseded by the backgroundColor
+          and foregroundColor properties and can be ignored when using these properties. Optional.
+        optional: true
+      data_owner:
+        type: string
+        description: The email of the owner of the calendar. Set only for secondary calendars. Read-only.
+        optional: true
+      foreground_color:
+        type: string
+        description: The foreground color of the calendar in the hexadecimal format "#ffffff". This property
+          supersedes the index-based colorId property. To set or change this property, you need to specify
+          colorRgbFormat=true in the parameters of the insert, update and patch methods. Optional.
+        optional: true
+      access_role:
+        type: string
+        description: 'The effective access role that the authenticated user has on the calendar. Read-only.
+          Possible values are: - "freeBusyReader" - Provides read access to free/busy information. - "reader"
+          - Provides read access to the calendar. Private events will appear to users with reader access,
+          but event details'
+        optional: true
+      time_zone:
+        type: string
+        description: The time zone of the calendar. Optional. Read-only.
+        optional: true
+      location:
+        type: string
+        description: Geographic location of the calendar as free-form text. Optional. Read-only.
+        optional: true
+      primary:
+        type: boolean
+        description: Whether the calendar is the primary calendar of the authenticated user. Read-only.
+          Optional. The default is False.
+        optional: true
+        default: false
+      deleted:
+        type: boolean
+        description: Whether this calendar list entry has been deleted from the calendar list. Read-only.
+          Optional. The default is False.
+        optional: true
+        default: false
+      background_color:
+        type: string
+        description: The main color of the calendar in the hexadecimal format "#0088aa". This property
+          supersedes the index-based colorId property. To set or change this property, you need to specify
+          colorRgbFormat=true in the parameters of the insert, update and patch methods. Optional.
+        optional: true
+      summary_override:
+        type: string
+        description: The summary that the authenticated user has set for this calendar. Optional.
+        optional: true
+      selected:
+        type: boolean
+        description: Whether the calendar content shows up in the calendar UI. Optional. The default is
+          False.
+        optional: true
+        default: false
+      conference_properties:
+        type: string
+        description: Conferencing properties for this calendar, for example what types of conferences
+          are allowed.
+        optional: true
+      description:
+        type: string
+        description: Description of the calendar. Optional. Read-only.
+        optional: true
+      hidden:
+        type: boolean
+        description: Whether the calendar has been hidden from the list. Optional. The attribute is only
+          returned when the calendar is hidden, in which case the value is true.
+        optional: true
+        default: false
+      default_reminders:
+        type: array
+        items:
+          type: string
+        description: The default reminders that the authenticated user has for this calendar.
+        optional: true
+      summary:
+        type: string
+        description: Title of the calendar. Read-only.
+        optional: true
+      notification_settings:
+        type: object
+        description: The notifications that the authenticated user is receiving for this calendar.
+        optional: true
+      auto_accept_invitations:
+        type: boolean
+        description: Whether this calendar automatically accepts invitations. Only valid for resource
+          calendars. Read-only.
+        optional: true
+    output:
+      description: The CalendarListEntry resource.
+      type: object
+    scopes_any:
+    - calendar
+    - calendar.app.created
+    - calendar.calendarlist
+  replace_calendar_list:
+    title: Replace calendar list
+    description: Updates an existing calendar on the user's calendar list.
+    category: calendar_list
+    request:
+      method: PUT
+      path: /calendar/v3/users/me/calendarList/${calendar_id}
+      query:
+        colorRgbFormat: ${color_rgb_format}
+      body:
+        colorId: ${color_id}
+        dataOwner: ${data_owner}
+        foregroundColor: ${foreground_color}
+        accessRole: ${access_role}
+        timeZone: ${time_zone}
+        location: ${location}
+        primary: ${primary}
+        deleted: ${deleted}
+        backgroundColor: ${background_color}
+        summaryOverride: ${summary_override}
+        selected: ${selected}
+        conferenceProperties: ${conference_properties}
+        description: ${description}
+        hidden: ${hidden}
+        defaultReminders: ${default_reminders}
+        summary: ${summary}
+        notificationSettings: ${notification_settings}
+        autoAcceptInvitations: ${auto_accept_invitations}
+    input:
+      calendar_id:
+        type: string
+        description: Calendar identifier. To retrieve calendar IDs call the calendarList.list method.
+          If you want to access the primary calendar of the currently logged in user, use the "primary"
+          keyword.
+      color_rgb_format:
+        type: boolean
+        description: Whether to use the foregroundColor and backgroundColor fields to write the calendar
+          colors (RGB). If this feature is used, the index-based colorId field will be set to the best
+          matching option automatically. Optional. The default is False.
+        optional: true
+      color_id:
+        type: string
+        description: The color of the calendar. This is an ID referring to an entry in the calendar section
+          of the colors definition (see the colors endpoint). This property is superseded by the backgroundColor
+          and foregroundColor properties and can be ignored when using these properties. Optional.
+        optional: true
+      data_owner:
+        type: string
+        description: The email of the owner of the calendar. Set only for secondary calendars. Read-only.
+        optional: true
+      foreground_color:
+        type: string
+        description: The foreground color of the calendar in the hexadecimal format "#ffffff". This property
+          supersedes the index-based colorId property. To set or change this property, you need to specify
+          colorRgbFormat=true in the parameters of the insert, update and patch methods. Optional.
+        optional: true
+      access_role:
+        type: string
+        description: 'The effective access role that the authenticated user has on the calendar. Read-only.
+          Possible values are: - "freeBusyReader" - Provides read access to free/busy information. - "reader"
+          - Provides read access to the calendar. Private events will appear to users with reader access,
+          but event details'
+        optional: true
+      time_zone:
+        type: string
+        description: The time zone of the calendar. Optional. Read-only.
+        optional: true
+      location:
+        type: string
+        description: Geographic location of the calendar as free-form text. Optional. Read-only.
+        optional: true
+      primary:
+        type: boolean
+        description: Whether the calendar is the primary calendar of the authenticated user. Read-only.
+          Optional. The default is False.
+        optional: true
+        default: false
+      deleted:
+        type: boolean
+        description: Whether this calendar list entry has been deleted from the calendar list. Read-only.
+          Optional. The default is False.
+        optional: true
+        default: false
+      background_color:
+        type: string
+        description: The main color of the calendar in the hexadecimal format "#0088aa". This property
+          supersedes the index-based colorId property. To set or change this property, you need to specify
+          colorRgbFormat=true in the parameters of the insert, update and patch methods. Optional.
+        optional: true
+      summary_override:
+        type: string
+        description: The summary that the authenticated user has set for this calendar. Optional.
+        optional: true
+      selected:
+        type: boolean
+        description: Whether the calendar content shows up in the calendar UI. Optional. The default is
+          False.
+        optional: true
+        default: false
+      conference_properties:
+        type: string
+        description: Conferencing properties for this calendar, for example what types of conferences
+          are allowed.
+        optional: true
+      description:
+        type: string
+        description: Description of the calendar. Optional. Read-only.
+        optional: true
+      hidden:
+        type: boolean
+        description: Whether the calendar has been hidden from the list. Optional. The attribute is only
+          returned when the calendar is hidden, in which case the value is true.
+        optional: true
+        default: false
+      default_reminders:
+        type: array
+        items:
+          type: string
+        description: The default reminders that the authenticated user has for this calendar.
+        optional: true
+      summary:
+        type: string
+        description: Title of the calendar. Read-only.
+        optional: true
+      notification_settings:
+        type: object
+        description: The notifications that the authenticated user is receiving for this calendar.
+        optional: true
+      auto_accept_invitations:
+        type: boolean
+        description: Whether this calendar automatically accepts invitations. Only valid for resource
+          calendars. Read-only.
+        optional: true
+    output:
+      description: The CalendarListEntry resource.
+      type: object
+    scopes_any:
+    - calendar
+    - calendar.app.created
+    - calendar.calendarlist
+  watch_calendar_list:
+    title: Watch calendar list
+    description: Watch for changes to CalendarList resources.
+    category: calendar_list
+    request:
+      method: POST
+      path: /calendar/v3/users/me/calendarList/watch
+      query:
+        maxResults: ${max_results}
+        minAccessRole: ${min_access_role}
+        pageToken: ${page_token}
+        showDeleted: ${show_deleted}
+        showHidden: ${show_hidden}
+        showOwnOrganizationOnly: ${show_own_organization_only}
+        syncToken: ${sync_token}
+      body:
+        expiration: ${expiration}
+        token: ${token}
+        resourceId: ${resource_id}
+        address: ${address}
+        payload: ${payload}
+        type: ${type}
+        resourceUri: ${resource_uri}
+        params: ${params}
+    input:
+      max_results:
+        type: integer
+        description: Maximum number of entries returned on one result page. By default the value is 100
+          entries. The page size can never be larger than 250 entries. Optional.
+        optional: true
+      min_access_role:
+        type: string
+        description: The minimum access role for the user in the returned entries. Optional. The default
+          is no restriction.
+        optional: true
+        enum:
+        - freeBusyReader
+        - owner
+        - reader
+        - writer
+        - writerWithoutPrivateAccess
+      page_token:
+        type: string
+        description: Token specifying which result page to return. Optional.
+        optional: true
+      show_deleted:
+        type: boolean
+        description: Whether to include deleted calendar list entries in the result. Optional. The default
+          is False.
+        optional: true
+      show_hidden:
+        type: boolean
+        description: Whether to show hidden entries. Optional. The default is False.
+        optional: true
+      show_own_organization_only:
+        type: boolean
+        description: Whether to show only entries for calendars from the organization. This parameter
+          is only applicable to Google Workspace users. Optional. The default is False.
+        optional: true
+      sync_token:
+        type: string
+        description: Token obtained from the nextSyncToken field returned on the last page of results
+          from the previous list request. It makes the result of this list request contain only entries
+          that have changed since then. If only read-only fields such as calendar properties or ACLs have
+          changed, the entry won't be r
+        optional: true
+      expiration:
+        type: string
+        description: Date and time of notification channel expiration, expressed as a Unix timestamp,
+          in milliseconds. Optional.
+        optional: true
+      token:
+        type: string
+        description: An arbitrary string delivered to the target address with each notification delivered
+          over this channel. Optional.
+        optional: true
+      resource_id:
+        type: string
+        description: An opaque ID that identifies the resource being watched on this channel. Stable across
+          different API versions.
+        optional: true
+      address:
+        type: string
+        description: The address where notifications are delivered for this channel.
+        optional: true
+      payload:
+        type: boolean
+        description: A Boolean value to indicate whether payload is wanted. Optional.
+        optional: true
+      type:
+        type: string
+        description: The type of delivery mechanism used for this channel. Valid values are "web_hook"
+          (or "webhook"). Both values refer to a channel where Http requests are used to deliver messages.
+        optional: true
+      resource_uri:
+        type: string
+        description: A version-specific identifier for the watched resource.
+        optional: true
+      params:
+        type: object
+        description: Additional parameters controlling delivery channel behavior. Optional.
+        optional: true
+    output:
+      description: The Channel resource.
+      type: object
+    scopes_any:
+    - calendar
+    - calendar.calendarlist
+    - calendar.calendarlist.readonly
+    - calendar.readonly
+  clear_calendar:
+    title: Clear calendar
+    description: Clears a primary calendar. This operation deletes all events associated with the primary
+      calendar of an account.
+    category: calendars
+    request:
+      method: POST
+      path: /calendar/v3/calendars/${calendar_id}/clear
+    input:
+      calendar_id:
+        type: string
+        description: Calendar identifier. To retrieve calendar IDs call the calendarList.list method.
+          If you want to access the primary calendar of the currently logged in user, use the "primary"
+          keyword.
+    output:
+      description: What the API returned.
+      type: object
+    scopes_any:
+    - calendar
+    - calendar.calendars
+  delete_calendar:
+    title: Delete calendar
+    description: Deletes a secondary calendar. Use calendars.clear for clearing all events on primary
+      calendars.
+    category: calendars
+    request:
+      method: DELETE
+      path: /calendar/v3/calendars/${calendar_id}
+    input:
+      calendar_id:
+        type: string
+        description: Calendar identifier. To retrieve calendar IDs call the calendarList.list method.
+          If you want to access the primary calendar of the currently logged in user, use the "primary"
+          keyword.
+    output:
+      description: What the API returned.
+      type: object
+    scopes_any:
+    - calendar
+    - calendar.app.created
+    - calendar.calendars
+    destructive: true
+  get_calendar:
+    title: Get calendar
+    description: Returns metadata for a calendar. Calls calendars.get on the Calendar API.
+    category: calendars
+    request:
+      method: GET
+      path: /calendar/v3/calendars/${calendar_id}
+    input:
+      calendar_id:
+        type: string
+        description: Calendar identifier. To retrieve calendar IDs call the calendarList.list method.
+          If you want to access the primary calendar of the currently logged in user, use the "primary"
+          keyword.
+    output:
+      description: The Calendar resource.
+      type: object
+    scopes_any:
+    - calendar
+    - calendar.app.created
+    - calendar.calendars
+    - calendar.calendars.readonly
+    - calendar.readonly
+    read_only: true
+  update_calendar:
+    title: Update calendar
+    description: Updates metadata for a calendar. This method supports patch semantics.
+    category: calendars
+    request:
+      method: PATCH
+      path: /calendar/v3/calendars/${calendar_id}
+      body:
+        autoAcceptInvitations: ${auto_accept_invitations}
+        labelProperties: ${label_properties}
+        description: ${description}
+        dataOwner: ${data_owner}
+        summary: ${summary}
+        conferenceProperties: ${conference_properties}
+        timeZone: ${time_zone}
+        location: ${location}
+    input:
+      calendar_id:
+        type: string
+        description: Calendar identifier. To retrieve calendar IDs call the calendarList.list method.
+          If you want to access the primary calendar of the currently logged in user, use the "primary"
+          keyword.
+      auto_accept_invitations:
+        type: boolean
+        description: Whether this calendar automatically accepts invitations. Only valid for resource
+          calendars.
+        optional: true
+      label_properties:
+        type: string
+        description: Label properties defined on this calendar. If specified, overwrites the existing
+          label properties. If not specified, the label properties remain unchanged.
+        optional: true
+      description:
+        type: string
+        description: Description of the calendar. Optional.
+        optional: true
+      data_owner:
+        type: string
+        description: The email of the owner of the calendar. Set only for secondary calendars. Read-only.
+        optional: true
+      summary:
+        type: string
+        description: Title of the calendar.
+        optional: true
+      conference_properties:
+        type: string
+        description: Conferencing properties for this calendar, for example what types of conferences
+          are allowed.
+        optional: true
+      time_zone:
+        type: string
+        description: The time zone of the calendar. (Formatted as an IANA Time Zone Database name, e.g.
+          "Europe/Zurich".) Optional.
+        optional: true
+      location:
+        type: string
+        description: Geographic location of the calendar as free-form text. Optional.
+        optional: true
+    output:
+      description: The Calendar resource.
+      type: object
+    scopes_any:
+    - calendar
+    - calendar.app.created
+    - calendar.calendars
+  transfer_ownership_calendar:
+    title: Transfer ownership calendar
+    description: 'Transfers a secondary calendar between users within a Google Workspace organization.
+      Requires user authentication with Manage Calendars administrator privilege, and one of the following
+      authorization scopes: - https://www.googleapis.com/auth/calendar - https://www.googleapis.com/auth/calendar.calendars
+      In the request, set useAdminAccess to true. The secondary calendar must be active to be transferred.
+      Transferring di'
+    category: calendars
+    request:
+      method: POST
+      path: /calendar/v3/calendars/${calendar_id}/transferOwnership
+      query:
+        newDataOwner: ${new_data_owner}
+        useAdminAccess: ${use_admin_access}
+    input:
+      calendar_id:
+        type: string
+        description: Calendar identifier. To retrieve calendar IDs, call the calendarList.list method.
+      new_data_owner:
+        type: string
+        description: The email address of a user who will become the data owner of the calendar.
+      use_admin_access:
+        type: boolean
+        description: When true, the method runs using the user's Google Workspace administrator privileges.
+          The calling user must be a Google Workspace administrator with the Manage Calendars privilege.
+          This method currently only supports admin access, thus only true is accepted for this field.
+    output:
+      description: What the API returned.
+      type: object
+    scopes_any:
+    - calendar
+    - calendar.calendars
+  replace_calendar:
+    title: Replace calendar
+    description: Updates metadata for a calendar. Calls calendars.update on the Calendar API.
+    category: calendars
+    request:
+      method: PUT
+      path: /calendar/v3/calendars/${calendar_id}
+      body:
+        autoAcceptInvitations: ${auto_accept_invitations}
+        labelProperties: ${label_properties}
+        description: ${description}
+        dataOwner: ${data_owner}
+        summary: ${summary}
+        conferenceProperties: ${conference_properties}
+        timeZone: ${time_zone}
+        location: ${location}
+    input:
+      calendar_id:
+        type: string
+        description: Calendar identifier. To retrieve calendar IDs call the calendarList.list method.
+          If you want to access the primary calendar of the currently logged in user, use the "primary"
+          keyword.
+      auto_accept_invitations:
+        type: boolean
+        description: Whether this calendar automatically accepts invitations. Only valid for resource
+          calendars.
+        optional: true
+      label_properties:
+        type: string
+        description: Label properties defined on this calendar. If specified, overwrites the existing
+          label properties. If not specified, the label properties remain unchanged.
+        optional: true
+      description:
+        type: string
+        description: Description of the calendar. Optional.
+        optional: true
+      data_owner:
+        type: string
+        description: The email of the owner of the calendar. Set only for secondary calendars. Read-only.
+        optional: true
+      summary:
+        type: string
+        description: Title of the calendar.
+        optional: true
+      conference_properties:
+        type: string
+        description: Conferencing properties for this calendar, for example what types of conferences
+          are allowed.
+        optional: true
+      time_zone:
+        type: string
+        description: The time zone of the calendar. (Formatted as an IANA Time Zone Database name, e.g.
+          "Europe/Zurich".) Optional.
+        optional: true
+      location:
+        type: string
+        description: Geographic location of the calendar as free-form text. Optional.
+        optional: true
+    output:
+      description: The Calendar resource.
+      type: object
+    scopes_any:
+    - calendar
+    - calendar.app.created
+    - calendar.calendars
+  stop_channel:
+    title: Stop channel
+    description: Stop watching resources through this channel
+    category: channels
+    request:
+      method: POST
+      path: /calendar/v3/channels/stop
+      body:
+        expiration: ${expiration}
+        token: ${token}
+        resourceId: ${resource_id}
+        address: ${address}
+        payload: ${payload}
+        type: ${type}
+        resourceUri: ${resource_uri}
+        params: ${params}
+    input:
+      expiration:
+        type: string
+        description: Date and time of notification channel expiration, expressed as a Unix timestamp,
+          in milliseconds. Optional.
+        optional: true
+      token:
+        type: string
+        description: An arbitrary string delivered to the target address with each notification delivered
+          over this channel. Optional.
+        optional: true
+      resource_id:
+        type: string
+        description: An opaque ID that identifies the resource being watched on this channel. Stable across
+          different API versions.
+        optional: true
+      address:
+        type: string
+        description: The address where notifications are delivered for this channel.
+        optional: true
+      payload:
+        type: boolean
+        description: A Boolean value to indicate whether payload is wanted. Optional.
+        optional: true
+      type:
+        type: string
+        description: The type of delivery mechanism used for this channel. Valid values are "web_hook"
+          (or "webhook"). Both values refer to a channel where Http requests are used to deliver messages.
+        optional: true
+      resource_uri:
+        type: string
+        description: A version-specific identifier for the watched resource.
+        optional: true
+      params:
+        type: object
+        description: Additional parameters controlling delivery channel behavior. Optional.
+        optional: true
+    output:
+      description: What the API returned.
+      type: object
+    scopes_any:
+    - calendar
+    - calendar.acls
+    - calendar.acls.readonly
+    - calendar.app.created
+    - calendar.calendarlist
+    - calendar.calendarlist.readonly
+    - calendar.events
+    - calendar.events.freebusy
+    - calendar.events.owned
+    - calendar.events.owned.readonly
+    - calendar.events.public.readonly
+    - calendar.events.readonly
+    - calendar.readonly
+    - calendar.settings.readonly
+  get_color:
+    title: Get color
+    description: Returns the color definitions for calendars and events.
+    category: colors
+    request:
+      method: GET
+      path: /calendar/v3/colors
+    input: {}
+    output:
+      description: The Colors resource.
+      type: object
+    scopes_any:
+    - calendar
+    - calendar.app.created
+    - calendar.calendarlist
+    - calendar.calendarlist.readonly
+    - calendar.events.freebusy
+    - calendar.events.owned
+    - calendar.events.owned.readonly
+    - calendar.events.public.readonly
+    - calendar.readonly
+    read_only: true
+  import_event:
+    title: Import event
+    description: 'Imports an event. This operation is used to add a private copy of an existing event
+      to a calendar. Only events with an eventType of default may be imported. Deprecated behavior: If
+      a non-default event is imported, its type will be changed to default and any event-type-specific
+      properties it may have will be dropped.'
+    category: events
+    request:
+      method: POST
+      path: /calendar/v3/calendars/${calendar_id}/events/import
+      query:
+        conferenceDataVersion: ${conference_data_version}
+        eventLabelVersion: ${event_label_version}
+        supportsAttachments: ${supports_attachments}
+      body: ${body}
+    input:
+      calendar_id:
+        type: string
+        description: Calendar identifier. To retrieve calendar IDs call the calendarList.list method.
+          If you want to access the primary calendar of the currently logged in user, use the "primary"
+          keyword.
+      conference_data_version:
+        type: integer
+        description: Version number of conference data supported by the API client. Version 0 assumes
+          no conference data support and ignores conference data in the event's body. Version 1 enables
+          support for copying of ConferenceData as well as for creating new conferences using the createRequest
+          field of conferenceData
+        optional: true
+      event_label_version:
+        type: integer
+        description: Version number of the event label feature supported by the API client. Version 0
+          assumes no event label support and processes the colorId field for color management. Version
+          1 enables support for event labels, and processes the eventLabelId in the event's body. In this
+          case, the colorId field is ign
+        optional: true
+      supports_attachments:
+        type: boolean
+        description: Whether API client performing operation supports event attachments. Optional. The
+          default is False.
+        optional: true
+      body:
+        type: object
+        description: The Event resource, as the API's own reference defines it.
+    output:
+      description: The Event resource.
+      type: object
+    scopes_any:
+    - calendar
+    - calendar.app.created
+    - calendar.events
+    - calendar.events.owned
+  instances_event:
+    title: Instances event
+    description: Returns instances of the specified recurring event.
+    category: events
+    request:
+      method: GET
+      path: /calendar/v3/calendars/${calendar_id}/events/${event_id}/instances
+      query:
+        alwaysIncludeEmail: ${always_include_email}
+        maxAttendees: ${max_attendees}
+        maxResults: ${max_results}
+        originalStart: ${original_start}
+        pageToken: ${page_token}
+        showDeleted: ${show_deleted}
+        timeMax: ${time_max}
+        timeMin: ${time_min}
+        timeZone: ${time_zone}
+    input:
+      calendar_id:
+        type: string
+        description: Calendar identifier. To retrieve calendar IDs call the calendarList.list method.
+          If you want to access the primary calendar of the currently logged in user, use the "primary"
+          keyword.
+      event_id:
+        type: string
+        description: Recurring event identifier.
+      always_include_email:
+        type: boolean
+        description: Deprecated and ignored. A value will always be returned in the email field for the
+          organizer, creator and attendees, even if no real email address is available (i.e. a generated,
+          non-working value will be provided).
+        optional: true
+      max_attendees:
+        type: integer
+        description: The maximum number of attendees to include in the response. If there are more than
+          the specified number of attendees, only the participant is returned. Optional.
+        optional: true
+      max_results:
+        type: integer
+        description: Maximum number of events returned on one result page. By default the value is 250
+          events. The page size can never be larger than 2500 events. Optional.
+        optional: true
+      original_start:
+        type: string
+        description: The original start time of the instance in the result. Optional.
+        optional: true
+      page_token:
+        type: string
+        description: Token specifying which result page to return. Optional.
+        optional: true
+      show_deleted:
+        type: boolean
+        description: Whether to include deleted events (with status equals "cancelled") in the result.
+          Cancelled instances of recurring events will still be included if singleEvents is False. Optional.
+          The default is False.
+        optional: true
+      time_max:
+        type: string
+        description: Upper bound (exclusive) for an event's start time to filter by. Optional. The default
+          is not to filter by start time. Must be an RFC3339 timestamp with mandatory time zone offset.
+        optional: true
+      time_min:
+        type: string
+        description: Lower bound (inclusive) for an event's end time to filter by. Optional. The default
+          is not to filter by end time. Must be an RFC3339 timestamp with mandatory time zone offset.
+        optional: true
+      time_zone:
+        type: string
+        description: Time zone used in the response. Optional. The default is the time zone of the calendar.
+        optional: true
+    output:
+      description: The Events resource.
+      type: object
+    scopes_any:
+    - calendar
+    - calendar.app.created
+    - calendar.events
+    - calendar.events.freebusy
+    - calendar.events.owned
+    - calendar.events.owned.readonly
+    - calendar.events.public.readonly
+    - calendar.events.readonly
+    - calendar.readonly
+    read_only: true
+  move_event:
+    title: Move event
+    description: Moves an event to another calendar, i.e. changes an event's organizer. Note that only
+      default events can be moved; birthday, focusTime, fromGmail, outOfOffice and workingLocation events
+      cannot be moved.
+    category: events
+    request:
+      method: POST
+      path: /calendar/v3/calendars/${calendar_id}/events/${event_id}/move
+      query:
+        destination: ${destination}
+        sendNotifications: ${send_notifications}
+        sendUpdates: ${send_updates}
+    input:
+      calendar_id:
+        type: string
+        description: Calendar identifier of the source calendar where the event currently is on.
+      event_id:
+        type: string
+        description: Event identifier.
+      destination:
+        type: string
+        description: Calendar identifier of the target calendar where the event is to be moved to.
+      send_notifications:
+        type: boolean
+        description: Deprecated. Please use sendUpdates instead. Whether to send notifications about the
+          change of the event's organizer. Note that some emails might still be sent even if you set the
+          value to false. The default is false.
+        optional: true
+      send_updates:
+        type: string
+        description: Guests who should receive notifications about the change of the event's organizer.
+        optional: true
+        enum:
+        - all
+        - externalOnly
+        - none
+    output:
+      description: The Event resource.
+      type: object
+    scopes_any:
+    - calendar
+    - calendar.events
+    - calendar.events.owned
+  replace_event:
+    title: Replace event
+    description: Updates an event. Calls events.update on the Calendar API.
+    category: events
+    request:
+      method: PUT
+      path: /calendar/v3/calendars/${calendar_id}/events/${event_id}
+      query:
+        alwaysIncludeEmail: ${always_include_email}
+        conferenceDataVersion: ${conference_data_version}
+        eventLabelVersion: ${event_label_version}
+        maxAttendees: ${max_attendees}
+        sendNotifications: ${send_notifications}
+        sendUpdates: ${send_updates}
+        supportsAttachments: ${supports_attachments}
+      body: ${body}
+    input:
+      calendar_id:
+        type: string
+        description: Calendar identifier. To retrieve calendar IDs call the calendarList.list method.
+          If you want to access the primary calendar of the currently logged in user, use the "primary"
+          keyword.
+      event_id:
+        type: string
+        description: Event identifier.
+      always_include_email:
+        type: boolean
+        description: Deprecated and ignored. A value will always be returned in the email field for the
+          organizer, creator and attendees, even if no real email address is available (i.e. a generated,
+          non-working value will be provided).
+        optional: true
+      conference_data_version:
+        type: integer
+        description: Version number of conference data supported by the API client. Version 0 assumes
+          no conference data support and ignores conference data in the event's body. Version 1 enables
+          support for copying of ConferenceData as well as for creating new conferences using the createRequest
+          field of conferenceData
+        optional: true
+      event_label_version:
+        type: integer
+        description: Version number of the event label feature supported by the API client. Version 0
+          assumes no event label support and processes the colorId field for color management. Version
+          1 enables support for event labels, and processes the eventLabelId in the event's body. In this
+          case, the colorId field is ign
+        optional: true
+      max_attendees:
+        type: integer
+        description: The maximum number of attendees to include in the response. If there are more than
+          the specified number of attendees, only the participant is returned. Optional.
+        optional: true
+      send_notifications:
+        type: boolean
+        description: Deprecated. Please use sendUpdates instead. Whether to send notifications about the
+          event update (for example, description changes, etc.). Note that some emails might still be
+          sent even if you set the value to false. The default is false.
+        optional: true
+      send_updates:
+        type: string
+        description: Guests who should receive notifications about the event update (for example, title
+          changes, etc.).
+        optional: true
+        enum:
+        - all
+        - externalOnly
+        - none
+      supports_attachments:
+        type: boolean
+        description: Whether API client performing operation supports event attachments. Optional. The
+          default is False.
+        optional: true
+      body:
+        type: object
+        description: The Event resource, as the API's own reference defines it.
+    output:
+      description: The Event resource.
+      type: object
+    scopes_any:
+    - calendar
+    - calendar.app.created
+    - calendar.events
+    - calendar.events.owned
+  watch_event:
+    title: Watch event
+    description: Watch for changes to Events resources. Calls events.watch on the Calendar API.
+    category: events
+    request:
+      method: POST
+      path: /calendar/v3/calendars/${calendar_id}/events/watch
+      query:
+        alwaysIncludeEmail: ${always_include_email}
+        eventTypes: ${event_types}
+        iCalUID: ${i_cal_uid}
+        maxAttendees: ${max_attendees}
+        maxResults: ${max_results}
+        orderBy: ${order_by}
+        pageToken: ${page_token}
+        privateExtendedProperty: ${private_extended_property}
+        q: ${q}
+        sharedExtendedProperty: ${shared_extended_property}
+        showDeleted: ${show_deleted}
+        showHiddenInvitations: ${show_hidden_invitations}
+        singleEvents: ${single_events}
+        syncToken: ${sync_token}
+        timeMax: ${time_max}
+        timeMin: ${time_min}
+        timeZone: ${time_zone}
+        updatedMin: ${updated_min}
+      body:
+        expiration: ${expiration}
+        token: ${token}
+        resourceId: ${resource_id}
+        address: ${address}
+        payload: ${payload}
+        type: ${type}
+        resourceUri: ${resource_uri}
+        params: ${params}
+    input:
+      calendar_id:
+        type: string
+        description: Calendar identifier. To retrieve calendar IDs call the calendarList.list method.
+          If you want to access the primary calendar of the currently logged in user, use the "primary"
+          keyword.
+      always_include_email:
+        type: boolean
+        description: Deprecated and ignored.
+        optional: true
+      event_types:
+        type: string
+        description: Event types to return. Optional. This parameter can be repeated multiple times to
+          return events of different types. If unset, returns all event types.
+        optional: true
+        enum:
+        - birthday
+        - default
+        - focusTime
+        - fromGmail
+        - outOfOffice
+        - workingLocation
+      i_cal_uid:
+        type: string
+        description: Specifies an event ID in the iCalendar format to be provided in the response. Optional.
+          Use this if you want to search for an event by its iCalendar ID.
+        optional: true
+      max_attendees:
+        type: integer
+        description: The maximum number of attendees to include in the response. If there are more than
+          the specified number of attendees, only the participant is returned. Optional.
+        optional: true
+      max_results:
+        type: integer
+        description: Maximum number of events returned on one result page. The number of events in the
+          resulting page may be less than this value, or none at all, even if there are more events matching
+          the query. Incomplete pages can be detected by a non-empty nextPageToken field in the response.
+          By default the value is
+        optional: true
+        default: 250
+      order_by:
+        type: string
+        description: The order of the events returned in the result. Optional. The default is an unspecified,
+          stable order.
+        optional: true
+        enum:
+        - startTime
+        - updated
+      page_token:
+        type: string
+        description: Token specifying which result page to return. Optional.
+        optional: true
+      private_extended_property:
+        type: string
+        description: Extended properties constraint specified as propertyName=value. Matches only private
+          properties. This parameter might be repeated multiple times to return events that match all
+          given constraints.
+        optional: true
+      q:
+        type: string
+        description: 'Free text search terms to find events that match these terms in the following fields:
+          - summary - description - location - attendee''s displayName - attendee''s email - organizer''s
+          displayName - organizer''s email - workingLocationProperties.officeLocation.buildingId - workingLocationProperties.officeL'
+        optional: true
+      shared_extended_property:
+        type: string
+        description: Extended properties constraint specified as propertyName=value. Matches only shared
+          properties. This parameter might be repeated multiple times to return events that match all
+          given constraints.
+        optional: true
+      show_deleted:
+        type: boolean
+        description: Whether to include deleted events (with status equals "cancelled") in the result.
+          Cancelled instances of recurring events (but not the underlying recurring event) will still
+          be included if showDeleted and singleEvents are both False. If showDeleted and singleEvents
+          are both True, only single instanc
+        optional: true
+      show_hidden_invitations:
+        type: boolean
+        description: Whether to include hidden invitations in the result. Optional. The default is False.
+        optional: true
+      single_events:
+        type: boolean
+        description: Whether to expand recurring events into instances and only return single one-off
+          events and instances of recurring events, but not the underlying recurring events themselves.
+          Optional. The default is False.
+        optional: true
+      sync_token:
+        type: string
+        description: Token obtained from the nextSyncToken field returned on the last page of results
+          from the previous list request. It makes the result of this list request contain only entries
+          that have changed since then. All events deleted since the previous list request will always
+          be in the result set and it is n
+        optional: true
+      time_max:
+        type: string
+        description: Upper bound (exclusive) for an event's start time to filter by. Optional. The default
+          is not to filter by start time. Must be an RFC3339 timestamp with mandatory time zone offset,
+          for example, 2011-06-03T10:00:00-07:00, 2011-06-03T10:00:00Z. Milliseconds may be provided but
+          are ignored. If timeMin i
+        optional: true
+      time_min:
+        type: string
+        description: Lower bound (exclusive) for an event's end time to filter by. Optional. The default
+          is not to filter by end time. Must be an RFC3339 timestamp with mandatory time zone offset,
+          for example, 2011-06-03T10:00:00-07:00, 2011-06-03T10:00:00Z. Milliseconds may be provided but
+          are ignored. If timeMax is se
+        optional: true
+      time_zone:
+        type: string
+        description: Time zone used in the response. Optional. The default is the time zone of the calendar.
+        optional: true
+      updated_min:
+        type: string
+        description: Lower bound for an event's last modification time (as a RFC3339 timestamp) to filter
+          by. When specified, entries deleted since this time will always be included regardless of showDeleted.
+          Optional. The default is not to filter by last modification time.
+        optional: true
+      expiration:
+        type: string
+        description: Date and time of notification channel expiration, expressed as a Unix timestamp,
+          in milliseconds. Optional.
+        optional: true
+      token:
+        type: string
+        description: An arbitrary string delivered to the target address with each notification delivered
+          over this channel. Optional.
+        optional: true
+      resource_id:
+        type: string
+        description: An opaque ID that identifies the resource being watched on this channel. Stable across
+          different API versions.
+        optional: true
+      address:
+        type: string
+        description: The address where notifications are delivered for this channel.
+        optional: true
+      payload:
+        type: boolean
+        description: A Boolean value to indicate whether payload is wanted. Optional.
+        optional: true
+      type:
+        type: string
+        description: The type of delivery mechanism used for this channel. Valid values are "web_hook"
+          (or "webhook"). Both values refer to a channel where Http requests are used to deliver messages.
+        optional: true
+      resource_uri:
+        type: string
+        description: A version-specific identifier for the watched resource.
+        optional: true
+      params:
+        type: object
+        description: Additional parameters controlling delivery channel behavior. Optional.
+        optional: true
+    output:
+      description: The Channel resource.
+      type: object
+    scopes_any:
+    - calendar
+    - calendar.app.created
+    - calendar.events
+    - calendar.events.freebusy
+    - calendar.events.owned
+    - calendar.events.owned.readonly
+    - calendar.events.public.readonly
+    - calendar.events.readonly
+    - calendar.readonly
+  get_setting:
+    title: Get setting
+    description: Returns a single user setting. Calls settings.get on the Calendar API.
+    category: settings
+    request:
+      method: GET
+      path: /calendar/v3/users/me/settings/${setting}
+    input:
+      setting:
+        type: string
+        description: The id of the user setting.
+    output:
+      description: The Setting resource.
+      type: object
+    scopes_any:
+    - calendar
+    - calendar.readonly
+    - calendar.settings.readonly
+    read_only: true
+  list_settings:
+    title: List settings
+    description: Returns all user settings for the authenticated user.
+    category: settings
+    request:
+      method: GET
+      path: /calendar/v3/users/me/settings
+      query:
+        maxResults: ${max_results}
+        pageToken: ${page_token}
+        syncToken: ${sync_token}
+    input:
+      max_results:
+        type: integer
+        description: Maximum number of entries returned on one result page. By default the value is 100
+          entries. The page size can never be larger than 250 entries. Optional.
+        optional: true
+      page_token:
+        type: string
+        description: Token specifying which result page to return. Optional.
+        optional: true
+      sync_token:
+        type: string
+        description: Token obtained from the nextSyncToken field returned on the last page of results
+          from the previous list request. It makes the result of this list request contain only entries
+          that have changed since then. If the syncToken expires, the server will respond with a 410 GONE
+          response code and the client
+        optional: true
+    output:
+      description: The Settings resource.
+      type: object
+    scopes_any:
+    - calendar
+    - calendar.readonly
+    - calendar.settings.readonly
+    read_only: true
+  watch_setting:
+    title: Watch setting
+    description: Watch for changes to Settings resources.
+    category: settings
+    request:
+      method: POST
+      path: /calendar/v3/users/me/settings/watch
+      query:
+        maxResults: ${max_results}
+        pageToken: ${page_token}
+        syncToken: ${sync_token}
+      body:
+        expiration: ${expiration}
+        token: ${token}
+        resourceId: ${resource_id}
+        address: ${address}
+        payload: ${payload}
+        type: ${type}
+        resourceUri: ${resource_uri}
+        params: ${params}
+    input:
+      max_results:
+        type: integer
+        description: Maximum number of entries returned on one result page. By default the value is 100
+          entries. The page size can never be larger than 250 entries. Optional.
+        optional: true
+      page_token:
+        type: string
+        description: Token specifying which result page to return. Optional.
+        optional: true
+      sync_token:
+        type: string
+        description: Token obtained from the nextSyncToken field returned on the last page of results
+          from the previous list request. It makes the result of this list request contain only entries
+          that have changed since then. If the syncToken expires, the server will respond with a 410 GONE
+          response code and the client
+        optional: true
+      expiration:
+        type: string
+        description: Date and time of notification channel expiration, expressed as a Unix timestamp,
+          in milliseconds. Optional.
+        optional: true
+      token:
+        type: string
+        description: An arbitrary string delivered to the target address with each notification delivered
+          over this channel. Optional.
+        optional: true
+      resource_id:
+        type: string
+        description: An opaque ID that identifies the resource being watched on this channel. Stable across
+          different API versions.
+        optional: true
+      address:
+        type: string
+        description: The address where notifications are delivered for this channel.
+        optional: true
+      payload:
+        type: boolean
+        description: A Boolean value to indicate whether payload is wanted. Optional.
+        optional: true
+      type:
+        type: string
+        description: The type of delivery mechanism used for this channel. Valid values are "web_hook"
+          (or "webhook"). Both values refer to a channel where Http requests are used to deliver messages.
+        optional: true
+      resource_uri:
+        type: string
+        description: A version-specific identifier for the watched resource.
+        optional: true
+      params:
+        type: object
+        description: Additional parameters controlling delivery channel behavior. Optional.
+        optional: true
+    output:
+      description: The Channel resource.
+      type: object
+    scopes_any:
+    - calendar
+    - calendar.readonly
+    - calendar.settings.readonly

@@ -1,0 +1,568 @@
+# Leexi tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://public-api.leexi.ai/v1/openapi.json
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: leexi
+display_name: Leexi
+docs_url: https://public-api.leexi.ai/v1/openapi.json
+generated: true
+generated_from: https://public-api.leexi.ai/v1/openapi.json
+tools:
+  list_call_notes:
+    title: List call notes
+    description: List call notes List call notes for a given call. calluuid is required. You can optionally
+      filter by promptuuid. Only call notes generated from prompts in the summary or text categories are
+      returned. The call must be within the API key's access scope, otherwise no notes are returned. Calls
+      GET /v1/call_notes on Leexi's API.
+    category: call_notes
+    request:
+      method: GET
+      path: /v1/call_notes
+      query:
+        page: ${page}
+        items: ${items}
+        call_uuid: ${call_uuid}
+        prompt_uuid: ${prompt_uuid}
+    input:
+      page:
+        type: integer
+        description: The page parameter.
+        optional: true
+        default: 1
+      items:
+        type: integer
+        description: 'min: 1, max: 100'
+        optional: true
+        default: 10
+      call_uuid:
+        type: string
+        description: The uuid of the call whose notes you want to list.
+      prompt_uuid:
+        type: string
+        description: Optional prompt uuid to filter call notes to a single prompt.
+        optional: true
+    output:
+      description: '200'
+      type: object
+    read_only: true
+  list_calls:
+    title: List calls
+    description: List calls List all calls and meetings within the API key's access scope. Keys with whole-company
+      access list every call; scoped keys list only the calls they can access. Calls GET /v1/calls on
+      Leexi's API.
+    category: calls
+    request:
+      method: GET
+      path: /v1/calls
+      query:
+        page: ${page}
+        items: ${items}
+        order: ${order}
+        date_filter: ${date_filter}
+        from: ${from}
+        to: ${to}
+        source: ${source}
+        source_id: ${source_id}
+        owner_uuid: ${owner_uuid}
+        participating_user_uuid: ${participating_user_uuid}
+        conversation_type_uuid: ${conversation_type_uuid}
+        customer_phone_number: ${customer_phone_number}
+        customer_email_address: ${customer_email_address}
+        with_simple_transcript: ${with_simple_transcript}
+    input:
+      page:
+        type: integer
+        description: The page parameter.
+        optional: true
+        default: 1
+      items:
+        type: integer
+        description: 'min: 1, max: 100'
+        optional: true
+        default: 10
+      order:
+        type: string
+        description: The order parameter.
+        optional: true
+        enum:
+        - created_at desc
+        - created_at asc
+        - performed_at desc
+        - performed_at asc
+        - updated_at desc
+        - updated_at asc
+        default: created_at desc
+      date_filter:
+        type: string
+        description: from/to filter date
+        optional: true
+        enum:
+        - created_at
+        - performed_at
+        - updated_at
+        default: created_at
+      from:
+        type: string
+        description: YYYY-MM-DDTHH:MM:SS.000Z, this filters on the call creation date in Leexi (createdat)
+        optional: true
+      to:
+        type: string
+        description: YYYY-MM-DDTHH:MM:SS.000Z, this filters on the call creation date in Leexi (createdat)
+        optional: true
+      source:
+        type: string
+        description: Integration slug
+        optional: true
+      source_id:
+        type: array
+        description: sourceid[]=abc&sourceid[]=xyz
+        optional: true
+        items:
+          type: string
+      owner_uuid:
+        type: array
+        description: owneruuid[]=aaa-bbb&owneruuid[]=ccc-ddd
+        optional: true
+        items:
+          type: string
+      participating_user_uuid:
+        type: array
+        description: participatinguseruuid[]=aaa-bbb&owneruuid[]=aaa-bbb&owneruuid[]=ccc-ddd[]=ccc-ddd
+        optional: true
+        items:
+          type: string
+      conversation_type_uuid:
+        type: string
+        description: Filter by conversation type uuid
+        optional: true
+      customer_phone_number:
+        type: array
+        description: customerphonenumber[]=+32474000000&customerphonenumber[]=+33476824768
+        optional: true
+        items:
+          type: string
+      customer_email_address:
+        type: array
+        description: customeremailaddress[]=admin@leexi.ai&customeremailaddress[]=support@leexi.ai
+        optional: true
+        items:
+          type: string
+      with_simple_transcript:
+        type: boolean
+        description: Get transcript as a string
+        optional: true
+        default: false
+    output:
+      description: '200'
+      type: object
+    read_only: true
+  create_a_call:
+    title: Create a call
+    description: Create a call Create a call or meeting asynchronously (creation time is typically a few
+      minutes). You must first finish uploading the recording of the call using a presigned recording
+      url retrieved with the previous endpoint. Use the "LIST users" endpoint to find the useruuid to
+      use in this request. Calls POST /v1/calls on Leexi's API.
+    category: calls
+    request:
+      method: POST
+      path: /v1/calls
+      body:
+        customers: ${customers}
+        description: ${description}
+        direction: ${direction}
+        emails: ${emails}
+        external_id: ${external_id}
+        locale: ${locale}
+        participating_user_uuids: ${participating_user_uuids}
+        performed_at: ${performed_at}
+        raw_phone_number: ${raw_phone_number}
+        recording_s3_key: ${recording_s3_key}
+        tags: ${tags}
+        title: ${title}
+    input:
+      customers:
+        type: array
+        description: The external participants (customers) of the call. An array of objects, each accepting
+          any of name, email, phonenumber and uuid (only one attribute is required per object). When uuid
+          is set it links an existing customer and the other attributes are ignored; unknown uuids are
+          skipped. The provided names are used to help identify the speakers in the transcript. Prefer
+          this over the deprecated emails
+        optional: true
+        items:
+          type: object
+      description:
+        type: string
+        description: The description field of the request body.
+        optional: true
+      direction:
+        type: string
+        description: inbound or outbound
+      emails:
+        type: array
+        description: ⚠️ DEPRECATED — kept for backward compatibility only. A list of emails of other participants
+          in the call. Use participatinguseruuids (for fellow Leexi users) and the customers array (for
+          external participants) instead. Cannot be combined with customers or participatinguseruuids
+          in the same request (returns a 400).
+        optional: true
+        items:
+          type: string
+      external_id:
+        type: string
+        description: the id of the call in your system
+      locale:
+        type: string
+        description: fr-FR en-US de-DE es-ES nl-NL ar-AE da-DK hi-IN id-ID it-IT ja-JP ko-KR nb-NO pl-PL
+          pt-PT ru-RU sv-SE tr-TR uk-UA zh-CN fr-CA he-IL th-TH bg-BG cs-CZ el-GR et-EE fi-FI hr-HR hu-HU
+          lt-LT lv-LV ro-RO vi-VN en-AU en-GB en-NZ en-IN ca-ES
+        optional: true
+      participating_user_uuids:
+        type: array
+        description: uuids of fellow Leexi users participating in the call (in addition to the owner set
+          via useruuid). Use the "LIST users" endpoint to find them. ⚠️ Cannot be combined with the deprecated
+          emails or rawphonenumber params in the same request (returns a 400).
+        optional: true
+        items:
+          type: string
+      performed_at:
+        type: string
+        description: iso8601 format
+      raw_phone_number:
+        type: string
+        description: ⚠️ DEPRECATED — kept for backward compatibility only. A string representation of
+          the customer's phonenumber. Use the customers array instead (set its phonenumber attribute).
+          Cannot be combined with customers or participatinguseruuids in the same request (returns a 400).
+        optional: true
+      recording_s3_key:
+        type: string
+        description: the key returned by the presignrecordingurl endpoint
+      tags:
+        type: array
+        description: an array of tag names
+        optional: true
+        items:
+          type: string
+      title:
+        type: string
+        description: The title of the call or meeting
+        optional: true
+    output:
+      description: '200'
+      type: object
+  list_meeting_events:
+    title: list meeting events
+    description: list meeting events Calls GET /v1/meeting_events on Leexi's API.
+    category: meeting_events
+    request:
+      method: GET
+      path: /v1/meeting_events
+      query:
+        page: ${page}
+        items: ${items}
+        order: ${order}
+        origin: ${origin}
+        date_filter: ${date_filter}
+        from: ${from}
+        to: ${to}
+    input:
+      page:
+        type: integer
+        description: The page parameter.
+        optional: true
+        default: 1
+      items:
+        type: integer
+        description: 'min: 1, max: 100'
+        optional: true
+        default: 10
+      order:
+        type: string
+        description: The order parameter.
+        optional: true
+        enum:
+        - created_at desc
+        - created_at asc
+        - start_time desc
+        - start_time asc
+        - end_time desc
+        - end_time asc
+        default: start_time desc
+      origin:
+        type: string
+        description: Filter by meeting event origin
+        optional: true
+        enum:
+        - calendar
+        - manual
+        - api
+      date_filter:
+        type: string
+        description: from/to filter date
+        optional: true
+        enum:
+        - start_time
+        - end_time
+        default: start_time
+      from:
+        type: string
+        description: YYYY-MM-DDTHH:MM:SS.000Z, this filters on the meetings starttime (or other datefilter)
+        optional: true
+      to:
+        type: string
+        description: YYYY-MM-DDTHH:MM:SS.000Z, this filters on the meetings starttime (or other datefilter)
+        optional: true
+    output:
+      description: '200'
+      type: object
+    read_only: true
+  create_a_meeting_event:
+    title: Create a meeting event
+    description: Create a meeting event Calls POST /v1/meeting_events on Leexi's API.
+    category: meeting_events
+    request:
+      method: POST
+      path: /v1/meeting_events
+      body:
+        attendees: ${attendees}
+        description: ${description}
+        direction: ${direction}
+        end_time: ${end_time}
+        internal: ${internal}
+        meeting_url: ${meeting_url}
+        organizer: ${organizer}
+        owned: ${owned}
+        start_time: ${start_time}
+        title: ${title}
+        to_record: ${to_record}
+        user_uuid: ${user_uuid}
+    input:
+      attendees:
+        type: array
+        description: '[alice@test.com, bob@test.com]'
+        optional: true
+        items:
+          type: string
+      description:
+        type: string
+        description: The description field of the request body.
+        optional: true
+      direction:
+        type: string
+        description: The direction field of the request body.
+        optional: true
+        enum:
+        - inbound
+        - outbound
+      end_time:
+        type: string
+        description: YYYY-MM-DDTHH:MM:SS.000Z
+      internal:
+        type: boolean
+        description: The internal field of the request body.
+      meeting_url:
+        type: string
+        description: Zoom, Teams or Google meet
+      organizer:
+        type: string
+        description: foo@bar.com
+      owned:
+        type: boolean
+        description: The owned field of the request body.
+      start_time:
+        type: string
+        description: YYYY-MM-DDTHH:MM:SS.000Z
+      title:
+        type: string
+        description: The title field of the request body.
+        optional: true
+      to_record:
+        type: boolean
+        description: The to_record field of the request body.
+      user_uuid:
+        type: string
+        description: Leexi user associated with the meeting. (Use the LIST users endpoint)
+    output:
+      description: '200'
+      type: object
+  list_teams:
+    title: List teams
+    description: List teams List all teams in your workspace Calls GET /v1/teams on Leexi's API.
+    category: teams
+    request:
+      method: GET
+      path: /v1/teams
+      query:
+        page: ${page}
+        items: ${items}
+    input:
+      page:
+        type: integer
+        description: The page parameter.
+        optional: true
+        default: 1
+      items:
+        type: integer
+        description: 'min: 1, max: 100'
+        optional: true
+        default: 10
+    output:
+      description: '200'
+      type: object
+    read_only: true
+  create_a_team:
+    title: Create a team
+    description: Create a team Create a team in your workspace. The team inherits your company settings
+      and gets the default email templates. Calls POST /v1/teams on Leexi's API.
+    category: teams
+    request:
+      method: POST
+      path: /v1/teams
+      body:
+        active: ${active}
+        name: ${name}
+    input:
+      active:
+        type: boolean
+        description: Defaults to true on creation. A team can only be deactivated once it has no active
+          users.
+        optional: true
+      name:
+        type: string
+        description: The team name. It must be unique within your workspace.
+    output:
+      description: '200'
+      type: object
+  list_users:
+    title: List Users
+    description: List Users List all users in your workspace Calls GET /v1/users on Leexi's API.
+    category: users
+    request:
+      method: GET
+      path: /v1/users
+      query:
+        page: ${page}
+        items: ${items}
+    input:
+      page:
+        type: integer
+        description: The page parameter.
+        optional: true
+        default: 1
+      items:
+        type: integer
+        description: 'min: 1, max: 100'
+        optional: true
+        default: 10
+    output:
+      description: '200'
+      type: object
+    read_only: true
+  create_a_user:
+    title: Create a user
+    description: Create a user Create a user in your workspace. The user receives a welcome email with
+      a link to set their password, unless sendwelcomeemail is false. Calls POST /v1/users on Leexi's
+      API.
+    category: users
+    request:
+      method: POST
+      path: /v1/users
+      body:
+        active: ${active}
+        email: ${email}
+        license: ${license}
+        name: ${name}
+        roles: ${roles}
+        send_welcome_email: ${send_welcome_email}
+        team_uuid: ${team_uuid}
+    input:
+      active:
+        type: boolean
+        description: Defaults to true on creation. Set to false to deactivate the user.
+        optional: true
+      email:
+        type: string
+        description: The user's email address. It must be deliverable and unique within your workspace.
+      license:
+        type: string
+        description: Either free or your company's own license category. Any other value is ignored.
+        optional: true
+      name:
+        type: string
+        description: The user's full name.
+      roles:
+        type: array
+        description: Role names. Defaults to ["member"] on creation. Privileged roles (superadmin, systemadmin,
+          billingmanager) cannot be assigned through the API; grant them from Leexi Settings Users.
+        optional: true
+        items:
+          type: string
+      send_welcome_email:
+        type: boolean
+        description: Defaults to true. Set to false to create the user without sending them the welcome
+          email.
+        optional: true
+      team_uuid:
+        type: string
+        description: The uuid of the team the user belongs to.
+    output:
+      description: '200'
+      type: object
+  request_a_presigned_url:
+    title: Request a presigned url
+    description: Request a presigned url Request a presigned URL to upload a call recording, before creating
+      the call. To upload the file you must send a PUT request to the returned url, with the headers provided
+      by the endpoint (single-part upload). This uploaded file automatically expires after 3 days unless
+      used to create a call. Calls POST /v1/calls/presign_recording_url on Leexi's API.
+    category: calls
+    request:
+      method: POST
+      path: /v1/calls/presign_recording_url
+      body:
+        extension: ${extension}
+    input:
+      extension:
+        type: string
+        description: 'VIDEO: .mp4 .mkv .avi .webm .mov .wmv .mpg .mpeg .m4v AUDIO: .mp3 .wav .aac .flac
+          .ogg .m4a .wma .opus .aiff .alac .amr .ape .dts .ac3 .mid .mp2 .mpc .ra .tta .vox'
+    output:
+      description: '200'
+      type: object
+  delete_a_call_note:
+    title: Delete a call note
+    description: Delete a call note Delete a call note Calls DELETE /v1/call_notes/{uuid} on Leexi's API.
+    category: call_notes
+    request:
+      method: DELETE
+      path: /v1/call_notes/${uuid}
+    input:
+      uuid:
+        type: string
+        description: The uuid parameter.
+    output:
+      description: '200'
+      type: object
+    destructive: true
+  get_a_call_note:
+    title: Get a call note
+    description: Get a call note Retrieve a single call note Calls GET /v1/call_notes/{uuid} on Leexi's
+      API.
+    category: call_notes
+    request:
+      method: GET
+      path: /v1/call_notes/${uuid}
+    input:
+      uuid:
+        type: string
+        description: The uuid parameter.
+    output:
+      description: '200'
+      type: object
+    read_only: true

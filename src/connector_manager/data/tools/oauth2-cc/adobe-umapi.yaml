@@ -1,0 +1,1269 @@
+# Adobe User Management API (UMAPI) tools.
+#
+# UMAPI is how an enterprise's Adobe users, user groups and product
+# entitlements are managed. Its shape is unusual, and the tools follow it
+# rather than hiding it:
+#
+#   * **every call is scoped to an organisation id** -- the `...@AdobeOrg`
+#     value from the Adobe Admin Console. It is a path segment, not a header;
+#   * **reads are paged by path segment**, not by a query parameter:
+#     `/users/{orgId}/{page}` with a 0-based page number, up to 2,000 entries a
+#     page. The real totals come back in the `X-Total-Count`, `X-Page-Count`
+#     and `X-Page-Size` response headers rather than in the body;
+#   * **every write goes through one endpoint** -- `POST /action/{orgId}` with a
+#     list of commands. The typed write tools below are that endpoint with one
+#     documented command shape filled in, and `run_action_commands` is the raw
+#     form for anything they do not cover.
+#
+# Two provider limits worth planning around: reads are throttled to 25 requests
+# a minute per client and actions to 10, and one action request may carry at
+# most 10 users or 10 user groups. Send `test_only` first on anything
+# destructive -- it validates the commands and changes nothing.
+#
+# Account types matter for creates: `addAdobeID` invites an existing Adobe ID,
+# `createEnterpriseID` and `createFederatedID` make accounts the organisation
+# owns, and a Federated ID needs the domain to be claimed and federated first.
+#
+# Docs: https://adobe-apiplatform.github.io/umapi-documentation/en/
+
+connector_id: adobe-umapi
+display_name: UMAPI (Adobe User Management API)
+docs_url: https://adobe-apiplatform.github.io/umapi-documentation/en/
+
+tools:
+
+  # -- reads -----------------------------------------------------------------
+
+  list_users:
+    title: List users in the organisation
+    description: >-
+      A page of the organisation's users with their account type, email, groups
+      and status. Pages are 0-based path segments of up to 2,000 users, and
+      `X-Page-Count` in the response headers says how many there are. Narrow to
+      one claimed domain with `domain`, or to directly assigned membership with
+      `direct_only`.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /v2/usermanagement/users/${org_id}/${page}
+      query:
+        domain: "${domain}"
+        directOnly: "${direct_only}"
+    input:
+      org_id:
+        type: string
+        description: The organisation id, ending in @AdobeOrg.
+        example: 28E1E2EB570F90057F000101@AdobeOrg
+      page:
+        type: integer
+        description: 0-based page number. A number beyond the end returns the last page.
+        optional: true
+        default: 0
+        minimum: 0
+      domain:
+        type: string
+        description: Only users in this claimed domain.
+        optional: true
+      direct_only:
+        type: boolean
+        description: >-
+          Report only directly assigned group membership, leaving out
+          membership inherited through nesting.
+        optional: true
+    output:
+      description: A page of users.
+      type: object
+      properties:
+        result: {type: string, description: "success, or partial when more pages remain."}
+        users: {type: array, description: "Each with email, type, status, groups and name fields."}
+        lastPage: {type: boolean}
+
+  list_users_rest:
+    title: List users (REST-style paging)
+    description: >-
+      The same user list with the page as a query parameter rather than a path
+      segment -- the newer REST-shaped form of the read. Same 2,000-per-page
+      limit and the same paging headers.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /v2/usermanagement/${org_id}/users
+      query:
+        page: "${page}"
+        domain: "${domain}"
+        directOnly: "${direct_only}"
+    input:
+      org_id:
+        type: string
+        description: The organisation id, ending in @AdobeOrg.
+      page:
+        type: integer
+        description: Page number being requested.
+        optional: true
+        minimum: 0
+      domain:
+        type: string
+        description: Only users in this claimed domain.
+        optional: true
+      direct_only:
+        type: boolean
+        description: Report only directly assigned group membership.
+        optional: true
+    output:
+      description: A page of users.
+      type: object
+      properties:
+        result: {type: string}
+        users: {type: array}
+        lastPage: {type: boolean}
+
+  list_users_in_group:
+    title: List users in a group
+    description: >-
+      A page of the users in one user group, product profile or admin group.
+      Admin groups use reserved names: `_org_admin`, `_deployment_admin`,
+      `_support_admin`, or the prefixed forms `_admin_{group}`,
+      `_product_admin_{product}` and `_developer_{group}`. A group that exists
+      with no such admins returns an empty list rather than an error.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /v2/usermanagement/users/${org_id}/${page}/${group_name}
+      query:
+        directOnly: "${direct_only}"
+    input:
+      org_id:
+        type: string
+        description: The organisation id, ending in @AdobeOrg.
+      group_name:
+        type: string
+        description: >-
+          User group, product profile or admin group name -- including the
+          reserved `_org_admin` style names.
+        example: _org_admin
+      page:
+        type: integer
+        description: 0-based page number.
+        optional: true
+        default: 0
+        minimum: 0
+      direct_only:
+        type: boolean
+        description: Report only directly assigned membership.
+        optional: true
+    output:
+      description: A page of the group's users.
+      type: object
+      properties:
+        result: {type: string}
+        users: {type: array}
+        lastPage: {type: boolean}
+
+  get_user:
+    title: Get one user
+    description: >-
+      One user by email address (or username for a Federated ID), with their
+      account type, status, country, groups and the product profiles they are
+      entitled through.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /v2/usermanagement/organizations/${org_id}/users/${user_string}
+    input:
+      org_id:
+        type: string
+        description: The organisation id, ending in @AdobeOrg.
+      user_string:
+        type: string
+        description: The user's email address, or their username for a Federated ID.
+        example: ada@example.com
+    output:
+      description: The user.
+      type: object
+      properties:
+        result: {type: string}
+        user: {type: object, description: "email, type, status, groups, country and name fields."}
+
+  list_groups:
+    title: List groups
+    description: >-
+      A page of every group in the organisation -- user groups, product
+      profiles and admin groups alike -- with their member and admin counts.
+      Paged as a 0-based path segment.
+    category: groups
+    read_only: true
+    request:
+      method: GET
+      path: /v2/usermanagement/groups/${org_id}/${page}
+    input:
+      org_id:
+        type: string
+        description: The organisation id, ending in @AdobeOrg.
+      page:
+        type: integer
+        description: 0-based page number.
+        optional: true
+        default: 0
+        minimum: 0
+    output:
+      description: A page of groups.
+      type: object
+      properties:
+        result: {type: string}
+        groups: {type: array, description: "Each with groupName, type, memberCount and adminCount."}
+        lastPage: {type: boolean}
+
+  list_user_groups:
+    title: List user groups
+    description: >-
+      The organisation's user groups only -- the ones an administrator creates
+      to bundle entitlements -- without product profiles or admin groups mixed
+      in.
+    category: groups
+    read_only: true
+    request:
+      method: GET
+      path: /v2/usermanagement/${org_id}/user-groups
+      query:
+        page: "${page}"
+    input:
+      org_id:
+        type: string
+        description: The organisation id, ending in @AdobeOrg.
+      page:
+        type: integer
+        description: Page number being requested.
+        optional: true
+        minimum: 0
+    output:
+      description: A page of user groups.
+      type: object
+      properties:
+        result: {type: string}
+        groups: {type: array}
+        lastPage: {type: boolean}
+
+  get_user_group:
+    title: Get a user group
+    description: >-
+      One user group by id, with its name, description and the product profiles
+      attached to it -- which is what its members are entitled to.
+    category: groups
+    read_only: true
+    request:
+      method: GET
+      path: /v2/usermanagement/${org_id}/user-groups/${group_id}
+    input:
+      org_id:
+        type: string
+        description: The organisation id, ending in @AdobeOrg.
+      group_id:
+        type: string
+        description: The user group's id.
+    output:
+      description: The user group.
+      type: object
+      properties:
+        result: {type: string}
+        group: {type: object}
+
+  list_products:
+    title: List products
+    description: >-
+      The products the organisation has licences for, each with its id and the
+      profiles defined under it. Product ids are what the profile calls below
+      take.
+    category: products
+    read_only: true
+    request:
+      method: GET
+      path: /v2/usermanagement/${org_id}/products/
+      query:
+        page: "${page}"
+    input:
+      org_id:
+        type: string
+        description: The organisation id, ending in @AdobeOrg.
+      page:
+        type: integer
+        description: Page number being requested.
+        optional: true
+        minimum: 0
+    output:
+      description: A page of products.
+      type: object
+      properties:
+        result: {type: string}
+        products: {type: array}
+        lastPage: {type: boolean}
+
+  list_product_profiles:
+    title: List a product's profiles
+    description: >-
+      The profiles (formerly configurations) under one product. A profile is the
+      unit of entitlement in Adobe: users get licences by being put in a
+      profile, so these names are what `add_user_to_products` takes.
+    category: products
+    read_only: true
+    request:
+      method: GET
+      path: /v2/usermanagement/${org_id}/products/${product_id}/configurations
+    input:
+      org_id:
+        type: string
+        description: The organisation id, ending in @AdobeOrg.
+      product_id:
+        type: string
+        description: The product's id, from `list_products`.
+    output:
+      description: The product's profiles.
+      type: object
+      properties:
+        result: {type: string}
+        configurations: {type: array}
+
+  get_product_profile:
+    title: Get a product profile
+    description: >-
+      One profile by id, with its name, the licence quota it draws on and how
+      much of that quota is used -- the number to check before adding users.
+    category: products
+    read_only: true
+    request:
+      method: GET
+      path: /v2/usermanagement/${org_id}/products/${product_id}/configurations/${profile_id}
+    input:
+      org_id:
+        type: string
+        description: The organisation id, ending in @AdobeOrg.
+      product_id:
+        type: string
+        description: The product's id.
+      profile_id:
+        type: string
+        description: The profile's id.
+    output:
+      description: The product profile.
+      type: object
+      properties:
+        result: {type: string}
+        configuration: {type: object, description: "Includes licenseQuota and usage counts."}
+
+  list_product_profile_users:
+    title: List a product profile's users
+    description: >-
+      The users entitled through one product profile -- in other words, who is
+      consuming that product's licences.
+    category: products
+    read_only: true
+    request:
+      method: GET
+      path: /v2/usermanagement/${org_id}/products/${product_id}/configurations/${profile_id}/users
+      query:
+        page: "${page}"
+    input:
+      org_id:
+        type: string
+        description: The organisation id, ending in @AdobeOrg.
+      product_id:
+        type: string
+        description: The product's id.
+      profile_id:
+        type: string
+        description: The profile's id.
+      page:
+        type: integer
+        description: Page number being requested.
+        optional: true
+        minimum: 0
+    output:
+      description: The profile's users.
+      type: object
+      properties:
+        result: {type: string}
+        users: {type: array}
+        lastPage: {type: boolean}
+
+  # -- writes: the action endpoint -------------------------------------------
+
+  run_action_commands:
+    title: Run user management commands
+    description: >-
+      The raw action endpoint, and the only way UMAPI writes anything: a list of
+      command objects, each naming a `user` (or `usergroup`) and a `do` list of
+      steps to perform on it. At most 10 users or 10 groups per request, and 10
+      requests a minute. Set `test_only` to validate a command set without
+      changing anything -- the response then reports `completedInTestMode`
+      instead of `completed`. Reach for this when the typed tools below do not
+      cover the step you need.
+    category: actions
+    request:
+      method: POST
+      path: /v2/usermanagement/action/${org_id}
+      query:
+        testOnly: "${test_only}"
+      headers:
+        Content-Type: application/json
+      body: "${commands}"
+    input:
+      org_id:
+        type: string
+        description: The organisation id, ending in @AdobeOrg.
+      commands:
+        type: array
+        description: >-
+          The command list, each entry naming `user` or `usergroup` plus a `do`
+          array of steps such as createEnterpriseID, update, add, remove,
+          removeFromOrg, createUserGroup or deleteUserGroup.
+        items: {type: object}
+      test_only:
+        type: boolean
+        description: Validate the commands without performing them.
+        optional: true
+    output:
+      description: What the service did, and what failed.
+      type: object
+      properties:
+        result: {type: string, description: "success, partial or error."}
+        completed: {type: integer}
+        completedInTestMode: {type: integer}
+        notCompleted: {type: integer}
+        errors: {type: array, description: "One entry per command that failed, with its index and reason."}
+
+  invite_adobe_id_user:
+    title: Invite an existing Adobe ID user
+    description: >-
+      Add someone who already has an Adobe ID to the organisation. Adobe emails
+      them an invitation and the account stays theirs -- the organisation never
+      owns an Adobe ID, which is the difference from an Enterprise or Federated
+      ID.
+    category: actions
+    request:
+      method: POST
+      path: /v2/usermanagement/action/${org_id}
+      query:
+        testOnly: "${test_only}"
+      headers:
+        Content-Type: application/json
+      body:
+        - user: "${email}"
+          do:
+            - addAdobeID:
+                email: "${email}"
+                country: "${country}"
+                firstname: "${first_name}"
+                lastname: "${last_name}"
+                option: "${option}"
+    input:
+      org_id:
+        type: string
+        description: The organisation id, ending in @AdobeOrg.
+      email:
+        type: string
+        description: The person's Adobe ID email address.
+        format: email
+        example: ada@example.com
+      country:
+        type: string
+        description: Two-letter country code for the account.
+        optional: true
+        example: US
+      first_name:
+        type: string
+        description: First name, used when Adobe creates the profile.
+        optional: true
+      last_name:
+        type: string
+        description: Last name, used when Adobe creates the profile.
+        optional: true
+      option:
+        type: string
+        description: >-
+          How to treat an account that already exists -- "ignoreIfAlreadyExists"
+          or "updateIfAlreadyExists".
+        optional: true
+        enum: [ignoreIfAlreadyExists, updateIfAlreadyExists]
+      test_only:
+        type: boolean
+        description: Validate without performing the change.
+        optional: true
+    output:
+      description: The outcome of the command.
+      type: object
+      properties:
+        result: {type: string}
+        completed: {type: integer}
+        notCompleted: {type: integer}
+        errors: {type: array}
+
+  create_enterprise_id_user:
+    title: Create an Enterprise ID user
+    description: >-
+      Create an account the organisation owns, in a domain it has claimed. The
+      person signs in with an Adobe-managed password. Email and country are
+      required; the domain must already be claimed or the command fails.
+    category: actions
+    request:
+      method: POST
+      path: /v2/usermanagement/action/${org_id}
+      query:
+        testOnly: "${test_only}"
+      headers:
+        Content-Type: application/json
+      body:
+        - user: "${email}"
+          do:
+            - createEnterpriseID:
+                email: "${email}"
+                country: "${country}"
+                firstname: "${first_name}"
+                lastname: "${last_name}"
+                option: "${option}"
+    input:
+      org_id:
+        type: string
+        description: The organisation id, ending in @AdobeOrg.
+      email:
+        type: string
+        description: Email address for the new account, in a claimed domain.
+        format: email
+      country:
+        type: string
+        description: Two-letter country code. Required by Adobe for owned accounts.
+        example: US
+      first_name:
+        type: string
+        description: The person's first name.
+        optional: true
+      last_name:
+        type: string
+        description: The person's last name.
+        optional: true
+      option:
+        type: string
+        description: How to treat an account that already exists.
+        optional: true
+        enum: [ignoreIfAlreadyExists, updateIfAlreadyExists]
+      test_only:
+        type: boolean
+        description: Validate without performing the change.
+        optional: true
+    output:
+      description: The outcome of the command.
+      type: object
+      properties:
+        result: {type: string}
+        completed: {type: integer}
+        notCompleted: {type: integer}
+        errors: {type: array}
+
+  create_federated_id_user:
+    title: Create a Federated ID user
+    description: >-
+      Create an account that authenticates through the organisation's own
+      identity provider. The domain must be claimed *and* federated first, and
+      `username` is what the IdP asserts -- often the email, sometimes not.
+    category: actions
+    request:
+      method: POST
+      path: /v2/usermanagement/action/${org_id}
+      query:
+        testOnly: "${test_only}"
+      headers:
+        Content-Type: application/json
+      body:
+        - user: "${email}"
+          do:
+            - createFederatedID:
+                email: "${email}"
+                country: "${country}"
+                firstname: "${first_name}"
+                lastname: "${last_name}"
+                username: "${username}"
+                domain: "${domain}"
+                option: "${option}"
+    input:
+      org_id:
+        type: string
+        description: The organisation id, ending in @AdobeOrg.
+      email:
+        type: string
+        description: Email address for the new account.
+        format: email
+      country:
+        type: string
+        description: Two-letter country code.
+        example: US
+      username:
+        type: string
+        description: >-
+          The username the identity provider asserts. Defaults to the email
+          when omitted.
+        optional: true
+      domain:
+        type: string
+        description: The federated domain, when the username is not an email address.
+        optional: true
+      first_name:
+        type: string
+        description: The person's first name.
+        optional: true
+      last_name:
+        type: string
+        description: The person's last name.
+        optional: true
+      option:
+        type: string
+        description: How to treat an account that already exists.
+        optional: true
+        enum: [ignoreIfAlreadyExists, updateIfAlreadyExists]
+      test_only:
+        type: boolean
+        description: Validate without performing the change.
+        optional: true
+    output:
+      description: The outcome of the command.
+      type: object
+      properties:
+        result: {type: string}
+        completed: {type: integer}
+        notCompleted: {type: integer}
+        errors: {type: array}
+
+  update_user:
+    title: Update a user's details
+    description: >-
+      Change a user's name, country, email or username. Only accounts the
+      organisation owns -- Enterprise and Federated IDs -- can be updated this
+      way; an Adobe ID belongs to the person, not the organisation. Changing
+      `email` moves the account's sign-in address, so it is not a cosmetic edit.
+    category: actions
+    request:
+      method: POST
+      path: /v2/usermanagement/action/${org_id}
+      query:
+        testOnly: "${test_only}"
+      headers:
+        Content-Type: application/json
+      body:
+        - user: "${user}"
+          do:
+            - update:
+                firstname: "${first_name}"
+                lastname: "${last_name}"
+                email: "${email}"
+                username: "${username}"
+                country: "${country}"
+    input:
+      org_id:
+        type: string
+        description: The organisation id, ending in @AdobeOrg.
+      user:
+        type: string
+        description: The user to update, by email address or username.
+      first_name:
+        type: string
+        description: New first name.
+        optional: true
+      last_name:
+        type: string
+        description: New last name.
+        optional: true
+      email:
+        type: string
+        description: New email address -- this changes how they sign in.
+        optional: true
+        format: email
+      username:
+        type: string
+        description: New username, for a Federated ID.
+        optional: true
+      country:
+        type: string
+        description: New two-letter country code.
+        optional: true
+      test_only:
+        type: boolean
+        description: Validate without performing the change.
+        optional: true
+    output:
+      description: The outcome of the command.
+      type: object
+      properties:
+        result: {type: string}
+        completed: {type: integer}
+        notCompleted: {type: integer}
+        errors: {type: array}
+
+  add_user_to_groups:
+    title: Add a user to user groups
+    description: >-
+      Put a user into one or more user groups. Membership is what carries
+      entitlement in Adobe, so adding someone to a group whose profiles hold
+      licences consumes those licences.
+    category: actions
+    request:
+      method: POST
+      path: /v2/usermanagement/action/${org_id}
+      query:
+        testOnly: "${test_only}"
+      headers:
+        Content-Type: application/json
+      body:
+        - user: "${user}"
+          do:
+            - add:
+                group: "${groups}"
+    input:
+      org_id:
+        type: string
+        description: The organisation id, ending in @AdobeOrg.
+      user:
+        type: string
+        description: The user, by email address or username.
+      groups:
+        type: array
+        description: Names of the user groups to add them to.
+        items: {type: string}
+      test_only:
+        type: boolean
+        description: Validate without performing the change.
+        optional: true
+    output:
+      description: The outcome of the command.
+      type: object
+      properties:
+        result: {type: string}
+        completed: {type: integer}
+        notCompleted: {type: integer}
+        errors: {type: array}
+
+  add_user_to_products:
+    title: Entitle a user to product profiles
+    description: >-
+      Add a user directly to product profiles, which grants the licences those
+      profiles carry. Check the profile's quota with `get_product_profile`
+      first: an over-quota add fails rather than queueing.
+    category: actions
+    request:
+      method: POST
+      path: /v2/usermanagement/action/${org_id}
+      query:
+        testOnly: "${test_only}"
+      headers:
+        Content-Type: application/json
+      body:
+        - user: "${user}"
+          do:
+            - add:
+                product: "${products}"
+    input:
+      org_id:
+        type: string
+        description: The organisation id, ending in @AdobeOrg.
+      user:
+        type: string
+        description: The user, by email address or username.
+      products:
+        type: array
+        description: Names of the product profiles to entitle them to.
+        items: {type: string}
+      test_only:
+        type: boolean
+        description: Validate without performing the change.
+        optional: true
+    output:
+      description: The outcome of the command.
+      type: object
+      properties:
+        result: {type: string}
+        completed: {type: integer}
+        notCompleted: {type: integer}
+        errors: {type: array}
+
+  remove_user_from_groups:
+    title: Remove a user from user groups
+    description: >-
+      Take a user out of user groups. Any entitlement they held only through
+      those groups goes with the membership, so licences are released.
+    category: actions
+    destructive: true
+    request:
+      method: POST
+      path: /v2/usermanagement/action/${org_id}
+      query:
+        testOnly: "${test_only}"
+      headers:
+        Content-Type: application/json
+      body:
+        - user: "${user}"
+          do:
+            - remove:
+                group: "${groups}"
+    input:
+      org_id:
+        type: string
+        description: The organisation id, ending in @AdobeOrg.
+      user:
+        type: string
+        description: The user, by email address or username.
+      groups:
+        type: array
+        description: Names of the user groups to remove them from.
+        items: {type: string}
+      test_only:
+        type: boolean
+        description: Validate without performing the change.
+        optional: true
+    output:
+      description: The outcome of the command.
+      type: object
+      properties:
+        result: {type: string}
+        completed: {type: integer}
+        notCompleted: {type: integer}
+        errors: {type: array}
+
+  remove_user_from_products:
+    title: Remove a user's product entitlements
+    description: >-
+      Take a user out of product profiles, releasing those licences. Their
+      account stays in the organisation -- to remove the account itself, use
+      `remove_user_from_organization`.
+    category: actions
+    destructive: true
+    request:
+      method: POST
+      path: /v2/usermanagement/action/${org_id}
+      query:
+        testOnly: "${test_only}"
+      headers:
+        Content-Type: application/json
+      body:
+        - user: "${user}"
+          do:
+            - remove:
+                product: "${products}"
+    input:
+      org_id:
+        type: string
+        description: The organisation id, ending in @AdobeOrg.
+      user:
+        type: string
+        description: The user, by email address or username.
+      products:
+        type: array
+        description: Names of the product profiles to remove them from.
+        items: {type: string}
+      test_only:
+        type: boolean
+        description: Validate without performing the change.
+        optional: true
+    output:
+      description: The outcome of the command.
+      type: object
+      properties:
+        result: {type: string}
+        completed: {type: integer}
+        notCompleted: {type: integer}
+        errors: {type: array}
+
+  remove_all_user_entitlements:
+    title: Remove all of a user's groups and products
+    description: >-
+      Strip every group membership and product entitlement from a user in one
+      step -- the "remove: all" command. The account remains in the
+      organisation with nothing assigned, which is the usual holding state
+      before offboarding.
+    category: actions
+    destructive: true
+    request:
+      method: POST
+      path: /v2/usermanagement/action/${org_id}
+      query:
+        testOnly: "${test_only}"
+      headers:
+        Content-Type: application/json
+      body:
+        - user: "${user}"
+          do:
+            - remove: all
+    input:
+      org_id:
+        type: string
+        description: The organisation id, ending in @AdobeOrg.
+      user:
+        type: string
+        description: The user, by email address or username.
+      test_only:
+        type: boolean
+        description: Validate without performing the change.
+        optional: true
+    output:
+      description: The outcome of the command.
+      type: object
+      properties:
+        result: {type: string}
+        completed: {type: integer}
+        notCompleted: {type: integer}
+        errors: {type: array}
+
+  remove_user_from_organization:
+    title: Remove a user from the organisation
+    description: >-
+      Offboard a user. For an Adobe ID this ends the organisation's
+      relationship with an account the person keeps; for an Enterprise or
+      Federated ID the organisation owns the account, and
+      `delete_account` true deletes it outright -- with the assets stored in it,
+      unless they have been transferred first. Test mode is worth using here.
+    category: actions
+    destructive: true
+    request:
+      method: POST
+      path: /v2/usermanagement/action/${org_id}
+      query:
+        testOnly: "${test_only}"
+      headers:
+        Content-Type: application/json
+      body:
+        - user: "${user}"
+          do:
+            - removeFromOrg:
+                deleteAccount: "${delete_account}"
+    input:
+      org_id:
+        type: string
+        description: The organisation id, ending in @AdobeOrg.
+      user:
+        type: string
+        description: The user, by email address or username.
+      delete_account:
+        type: boolean
+        description: >-
+          Also delete the account itself, for an Enterprise or Federated ID the
+          organisation owns. Its stored assets go with it.
+        optional: true
+      test_only:
+        type: boolean
+        description: Validate without performing the change.
+        optional: true
+    output:
+      description: The outcome of the command.
+      type: object
+      properties:
+        result: {type: string}
+        completed: {type: integer}
+        notCompleted: {type: integer}
+        errors: {type: array}
+
+  create_user_group:
+    title: Create a user group
+    description: >-
+      Create a user group, optionally with a description. If a group of that
+      name already exists the command updates its description rather than
+      failing.
+    category: actions
+    request:
+      method: POST
+      path: /v2/usermanagement/action/${org_id}
+      query:
+        testOnly: "${test_only}"
+      headers:
+        Content-Type: application/json
+      body:
+        - usergroup: "${group_name}"
+          do:
+            - createUserGroup:
+                option: "${option}"
+                description: "${description}"
+    input:
+      org_id:
+        type: string
+        description: The organisation id, ending in @AdobeOrg.
+      group_name:
+        type: string
+        description: Name of the group to create.
+        example: DevOps
+      description:
+        type: string
+        description: What the group is for.
+        optional: true
+      option:
+        type: string
+        description: How to treat a group that already exists.
+        optional: true
+        enum: [ignoreIfAlreadyExists, updateIfAlreadyExists]
+      test_only:
+        type: boolean
+        description: Validate without performing the change.
+        optional: true
+    output:
+      description: The outcome of the command.
+      type: object
+      properties:
+        result: {type: string}
+        completed: {type: integer}
+        notCompleted: {type: integer}
+        errors: {type: array}
+
+  update_user_group:
+    title: Update a user group
+    description: >-
+      Rename a user group or change its description. Renaming affects every
+      reference to it, including the profile assignments made through it.
+    category: actions
+    request:
+      method: POST
+      path: /v2/usermanagement/action/${org_id}
+      query:
+        testOnly: "${test_only}"
+      headers:
+        Content-Type: application/json
+      body:
+        - usergroup: "${group_name}"
+          do:
+            - updateUserGroup:
+                name: "${new_name}"
+                description: "${description}"
+    input:
+      org_id:
+        type: string
+        description: The organisation id, ending in @AdobeOrg.
+      group_name:
+        type: string
+        description: The group to update, by name.
+      new_name:
+        type: string
+        description: New name for the group.
+        optional: true
+      description:
+        type: string
+        description: New description.
+        optional: true
+      test_only:
+        type: boolean
+        description: Validate without performing the change.
+        optional: true
+    output:
+      description: The outcome of the command.
+      type: object
+      properties:
+        result: {type: string}
+        completed: {type: integer}
+        notCompleted: {type: integer}
+        errors: {type: array}
+
+  delete_user_group:
+    title: Delete a user group
+    description: >-
+      Delete a user group. Its members lose whatever they held through it, so
+      licences assigned via the group are released -- check the membership with
+      `list_users_in_group` first.
+    category: actions
+    destructive: true
+    request:
+      method: POST
+      path: /v2/usermanagement/action/${org_id}
+      query:
+        testOnly: "${test_only}"
+      headers:
+        Content-Type: application/json
+      body:
+        - usergroup: "${group_name}"
+          do:
+            - deleteUserGroup: {}
+    input:
+      org_id:
+        type: string
+        description: The organisation id, ending in @AdobeOrg.
+      group_name:
+        type: string
+        description: The group to delete, by name.
+      test_only:
+        type: boolean
+        description: Validate without performing the change.
+        optional: true
+    output:
+      description: The outcome of the command.
+      type: object
+      properties:
+        result: {type: string}
+        completed: {type: integer}
+        notCompleted: {type: integer}
+        errors: {type: array}
+
+  add_users_to_group:
+    title: Add users to a user group
+    description: >-
+      Add several users to one group in a single command -- the group-first
+      counterpart to `add_user_to_groups`, and the efficient shape when
+      onboarding a cohort. At most 10 groups per request.
+    category: actions
+    request:
+      method: POST
+      path: /v2/usermanagement/action/${org_id}
+      query:
+        testOnly: "${test_only}"
+      headers:
+        Content-Type: application/json
+      body:
+        - usergroup: "${group_name}"
+          do:
+            - add:
+                user: "${users}"
+    input:
+      org_id:
+        type: string
+        description: The organisation id, ending in @AdobeOrg.
+      group_name:
+        type: string
+        description: The group to add members to.
+      users:
+        type: array
+        description: Email addresses or usernames of the users to add.
+        items: {type: string}
+      test_only:
+        type: boolean
+        description: Validate without performing the change.
+        optional: true
+    output:
+      description: The outcome of the command.
+      type: object
+      properties:
+        result: {type: string}
+        completed: {type: integer}
+        notCompleted: {type: integer}
+        errors: {type: array}
+
+  remove_users_from_group:
+    title: Remove users from a user group
+    description: >-
+      Remove several users from one group at once. They keep their accounts and
+      anything entitled to them directly; only what the group carried is lost.
+    category: actions
+    destructive: true
+    request:
+      method: POST
+      path: /v2/usermanagement/action/${org_id}
+      query:
+        testOnly: "${test_only}"
+      headers:
+        Content-Type: application/json
+      body:
+        - usergroup: "${group_name}"
+          do:
+            - remove:
+                user: "${users}"
+    input:
+      org_id:
+        type: string
+        description: The organisation id, ending in @AdobeOrg.
+      group_name:
+        type: string
+        description: The group to remove members from.
+      users:
+        type: array
+        description: Email addresses or usernames of the users to remove.
+        items: {type: string}
+      test_only:
+        type: boolean
+        description: Validate without performing the change.
+        optional: true
+    output:
+      description: The outcome of the command.
+      type: object
+      properties:
+        result: {type: string}
+        completed: {type: integer}
+        notCompleted: {type: integer}
+        errors: {type: array}
+
+  add_product_profiles_to_group:
+    title: Attach product profiles to a user group
+    description: >-
+      Give a whole group an entitlement by attaching product profiles to it.
+      Every member gains those licences, and future members gain them on
+      joining -- which is how Adobe entitlement is usually managed at scale.
+    category: actions
+    request:
+      method: POST
+      path: /v2/usermanagement/action/${org_id}
+      query:
+        testOnly: "${test_only}"
+      headers:
+        Content-Type: application/json
+      body:
+        - usergroup: "${group_name}"
+          do:
+            - add:
+                productConfiguration: "${product_profiles}"
+    input:
+      org_id:
+        type: string
+        description: The organisation id, ending in @AdobeOrg.
+      group_name:
+        type: string
+        description: The group to attach profiles to.
+      product_profiles:
+        type: array
+        description: Names of the product profiles to attach.
+        items: {type: string}
+      test_only:
+        type: boolean
+        description: Validate without performing the change.
+        optional: true
+    output:
+      description: The outcome of the command.
+      type: object
+      properties:
+        result: {type: string}
+        completed: {type: integer}
+        notCompleted: {type: integer}
+        errors: {type: array}
+
+  remove_product_profiles_from_group:
+    title: Detach product profiles from a user group
+    description: >-
+      Remove product profiles from a group, withdrawing those licences from
+      every member who held them only through it.
+    category: actions
+    destructive: true
+    request:
+      method: POST
+      path: /v2/usermanagement/action/${org_id}
+      query:
+        testOnly: "${test_only}"
+      headers:
+        Content-Type: application/json
+      body:
+        - usergroup: "${group_name}"
+          do:
+            - remove:
+                productConfiguration: "${product_profiles}"
+    input:
+      org_id:
+        type: string
+        description: The organisation id, ending in @AdobeOrg.
+      group_name:
+        type: string
+        description: The group to detach profiles from.
+      product_profiles:
+        type: array
+        description: Names of the product profiles to detach.
+        items: {type: string}
+      test_only:
+        type: boolean
+        description: Validate without performing the change.
+        optional: true
+    output:
+      description: The outcome of the command.
+      type: object
+      properties:
+        result: {type: string}
+        completed: {type: integer}
+        notCompleted: {type: integer}
+        errors: {type: array}

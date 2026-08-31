@@ -1,0 +1,504 @@
+# Lokalise tools.
+#
+# The hierarchy is project -> key -> translation, one translation per language
+# per key. Language codes are Lokalise's ISO codes, e.g. en, fr, de_DE.
+#
+# Docs: https://developers.lokalise.com/reference/lokalise-rest-api
+
+connector_id: lokalise
+display_name: Lokalise
+docs_url: https://developers.lokalise.com/reference/lokalise-rest-api
+
+scope_rules:
+  implies:
+    write_projects: [read_projects]
+    write_keys: [read_keys]
+    write_contributors: [read_contributors]
+
+tools:
+
+  list_projects:
+    title: List projects
+    description: >-
+      List the team's projects with the ids every other tool takes. Start here.
+    category: projects
+    scopes: [read_projects]
+    read_only: true
+    request:
+      method: GET
+      path: /projects
+      query:
+        limit: "${limit}"
+        page: "${page}"
+        filter_team_id: "${team_id}"
+        filter_names: "${names}"
+    input:
+      limit:
+        type: integer
+        description: How many projects per page (1-5000).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 5000
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      team_id:
+        type: string
+        description: Only projects in this team.
+        optional: true
+      names:
+        type: string
+        description: Comma-separated project names to match.
+        optional: true
+    output:
+      description: A page of projects.
+      type: array
+      response_path: projects
+      items:
+        type: object
+        properties:
+          project_id: {type: string}
+          name: {type: string}
+          base_language_iso: {type: string}
+
+  list_keys:
+    title: List a project's keys
+    description: >-
+      Page through translation keys, optionally inlining their translations.
+      This is the main way to read what a project contains.
+    category: keys
+    scopes: [read_keys]
+    read_only: true
+    request:
+      method: GET
+      path: /projects/${project_id}/keys
+      query:
+        limit: "${limit}"
+        page: "${page}"
+        include_translations: "${include_translations}"
+        filter_keys: "${filter_keys}"
+        filter_tags: "${filter_tags}"
+        filter_platforms: "${filter_platforms}"
+        filter_untranslated: "${filter_untranslated}"
+    input:
+      project_id:
+        type: string
+        description: The project id.
+      limit:
+        type: integer
+        description: How many keys per page (1-5000).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 5000
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      include_translations:
+        type: integer
+        description: Set to 1 to inline each key's translations.
+        optional: true
+        minimum: 0
+        maximum: 1
+      filter_keys:
+        type: string
+        description: Comma-separated key names to match.
+        optional: true
+      filter_tags:
+        type: string
+        description: Comma-separated tags to filter by.
+        optional: true
+      filter_platforms:
+        type: string
+        description: Comma-separated platforms, e.g. "web,ios".
+        optional: true
+      filter_untranslated:
+        type: integer
+        description: Set to 1 to return only keys with missing translations.
+        optional: true
+        minimum: 0
+        maximum: 1
+    output:
+      description: A page of keys.
+      type: array
+      response_path: keys
+      items:
+        type: object
+        properties:
+          key_id: {type: integer}
+          key_name: {type: object}
+          translations: {type: array}
+          tags: {type: array}
+
+  create_keys:
+    title: Add translation keys
+    description: >-
+      Create keys in a project, optionally with their base-language text.
+      key_name may be a string or per-platform, e.g. {"web": "greeting"}.
+    category: keys
+    scopes: [write_keys]
+    request:
+      method: POST
+      path: /projects/${project_id}/keys
+      body:
+        keys: "${keys}"
+    input:
+      project_id:
+        type: string
+        description: The project to add to.
+      keys:
+        type: array
+        description: >-
+          Keys to create, each {"key_name": "greeting", "platforms": ["web"],
+          "translations": [{"language_iso": "en", "translation": "Hello"}]}.
+        items: {type: object}
+    output:
+      description: The created keys, plus any that errored.
+      type: object
+      properties:
+        keys: {type: array}
+        errors: {type: array}
+
+  update_keys:
+    title: Update translation keys
+    description: >-
+      Change existing keys — rename them, retag them, or replace their
+      translations. Each entry must carry its key_id.
+    category: keys
+    scopes: [write_keys]
+    request:
+      method: PUT
+      path: /projects/${project_id}/keys
+      body:
+        keys: "${keys}"
+    input:
+      project_id:
+        type: string
+        description: The project id.
+      keys:
+        type: array
+        description: Keys to change, each with a key_id and the fields to write.
+        items: {type: object}
+    output:
+      description: The updated keys.
+      type: object
+      properties:
+        keys: {type: array}
+        errors: {type: array}
+
+  delete_keys:
+    title: Delete translation keys
+    description: >-
+      Permanently delete keys and every translation attached to them. This
+      cannot be undone.
+    category: keys
+    scopes: [write_keys]
+    destructive: true
+    request:
+      method: DELETE
+      path: /projects/${project_id}/keys
+      body:
+        keys: "${key_ids}"
+    input:
+      project_id:
+        type: string
+        description: The project id.
+      key_ids:
+        type: array
+        description: Numeric key ids to delete.
+        items: {type: integer}
+    output:
+      description: Confirmation of the deletion.
+      type: object
+      properties:
+        project_id: {type: string}
+        keys_removed: {type: boolean}
+
+  update_translation:
+    title: Update one translation
+    description: >-
+      Write the text for a single key in a single language, and optionally mark
+      it reviewed or unverified.
+    category: translations
+    scopes: [write_keys]
+    request:
+      method: PUT
+      path: /projects/${project_id}/translations/${translation_id}
+      body:
+        translation: "${translation}"
+        is_reviewed: "${is_reviewed}"
+        is_unverified: "${is_unverified}"
+        custom_translation_status_ids: "${status_ids}"
+    input:
+      project_id:
+        type: string
+        description: The project id.
+      translation_id:
+        type: integer
+        description: The translation id, from list_keys with include_translations.
+      translation:
+        type: string
+        description: The translated text.
+      is_reviewed:
+        type: boolean
+        description: Mark it reviewed.
+        optional: true
+      is_unverified:
+        type: boolean
+        description: Flag it as needing another look.
+        optional: true
+      status_ids:
+        type: array
+        description: Custom translation status ids to apply.
+        optional: true
+        items: {type: integer}
+    output:
+      description: The updated translation.
+      type: object
+      response_path: translation
+      properties:
+        translation_id: {type: integer}
+        language_iso: {type: string}
+        translation: {type: string}
+
+  list_languages:
+    title: List a project's languages
+    description: >-
+      List the languages a project targets, with their ISO codes and progress.
+    category: languages
+    scopes: [read_projects]
+    read_only: true
+    request:
+      method: GET
+      path: /projects/${project_id}/languages
+      query:
+        limit: "${limit}"
+        page: "${page}"
+    input:
+      project_id:
+        type: string
+        description: The project id.
+      limit:
+        type: integer
+        description: How many languages per page.
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 5000
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+    output:
+      description: The project's languages.
+      type: array
+      response_path: languages
+      items:
+        type: object
+        properties:
+          lang_id: {type: integer}
+          lang_iso: {type: string}
+          lang_name: {type: string}
+
+  add_languages:
+    title: Add languages to a project
+    description: >-
+      Add target languages so keys can be translated into them. Codes are
+      Lokalise ISO codes, e.g. fr, de_DE, pt_BR.
+    category: languages
+    scopes: [write_projects]
+    request:
+      method: POST
+      path: /projects/${project_id}/languages
+      body:
+        languages: "${languages}"
+    input:
+      project_id:
+        type: string
+        description: The project id.
+      languages:
+        type: array
+        description: "Languages to add, each {\"lang_iso\": \"fr\"}."
+        items: {type: object}
+    output:
+      description: The languages that were added.
+      type: object
+      properties:
+        project_id: {type: string}
+        languages: {type: array}
+
+  download_files:
+    title: Export a project's translations
+    description: >-
+      Build an export bundle and return a URL to download it. Format is the
+      target file type — json, xliff, po, strings, yml and others.
+    category: files
+    scopes: [read_keys]
+    request:
+      method: POST
+      path: /projects/${project_id}/files/download
+      body:
+        format: "${format}"
+        original_filenames: "${original_filenames}"
+        filter_langs: "${filter_langs}"
+        filter_tags: "${filter_tags}"
+        export_empty_as: "${export_empty_as}"
+        indentation: "${indentation}"
+    input:
+      project_id:
+        type: string
+        description: The project to export.
+      format:
+        type: string
+        description: Target file format, e.g. json, xliff, po, strings, yml.
+        example: json
+      original_filenames:
+        type: boolean
+        description: Keep the filenames the keys were imported under.
+        optional: true
+      filter_langs:
+        type: array
+        description: Only export these language ISO codes.
+        optional: true
+        items: {type: string}
+      filter_tags:
+        type: array
+        description: Only export keys carrying these tags.
+        optional: true
+        items: {type: string}
+      export_empty_as:
+        type: string
+        description: What to write where a translation is missing.
+        optional: true
+        enum: [empty, base, skip]
+      indentation:
+        type: string
+        description: Indentation for structured formats, e.g. 2sp or tab.
+        optional: true
+    output:
+      description: A link to the export bundle.
+      type: object
+      properties:
+        project_id: {type: string}
+        bundle_url: {type: string, description: "Short-lived URL for the zipped export."}
+
+  upload_file:
+    title: Import a translation file
+    description: >-
+      Upload a translation file, base64-encoded, for one language. Lokalise
+      processes it asynchronously and returns a process id.
+    category: files
+    scopes: [write_keys]
+    request:
+      method: POST
+      path: /projects/${project_id}/files/upload
+      body:
+        data: "${data}"
+        filename: "${filename}"
+        lang_iso: "${lang_iso}"
+        tags: "${tags}"
+        replace_modified: "${replace_modified}"
+        convert_placeholders: "${convert_placeholders}"
+    input:
+      project_id:
+        type: string
+        description: The project to import into.
+      data:
+        type: string
+        description: The file's bytes, base64-encoded.
+      filename:
+        type: string
+        description: File name, which decides how Lokalise parses it, e.g. en.json.
+      lang_iso:
+        type: string
+        description: Language ISO code the file holds.
+      tags:
+        type: array
+        description: Tags to apply to the imported keys.
+        optional: true
+        items: {type: string}
+      replace_modified:
+        type: boolean
+        description: Overwrite translations that were edited in Lokalise.
+        optional: true
+      convert_placeholders:
+        type: boolean
+        description: Convert platform placeholders to Lokalise's universal form.
+        optional: true
+    output:
+      description: The queued import process.
+      type: object
+      properties:
+        project_id: {type: string}
+        process: {type: object, description: "Holds process_id and status."}
+
+  list_contributors:
+    title: List a project's contributors
+    description: >-
+      List who can work on a project, with their languages and permissions.
+    category: contributors
+    scopes: [read_contributors]
+    read_only: true
+    request:
+      method: GET
+      path: /projects/${project_id}/contributors
+      query:
+        limit: "${limit}"
+        page: "${page}"
+    input:
+      project_id:
+        type: string
+        description: The project id.
+      limit:
+        type: integer
+        description: How many contributors per page.
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 5000
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+    output:
+      description: The project's contributors.
+      type: array
+      response_path: contributors
+      items:
+        type: object
+        properties:
+          user_id: {type: integer}
+          email: {type: string}
+          fullname: {type: string}
+          is_admin: {type: boolean}
+
+  get_project:
+    title: Get a project
+    description: >-
+      Read a project's name, base language, statistics and settings. The
+      cheapest health check once a project id is known.
+    category: projects
+    scopes: [read_projects]
+    read_only: true
+    request:
+      method: GET
+      path: /projects/${project_id}
+    input:
+      project_id:
+        type: string
+        description: The project id.
+    output:
+      description: The project.
+      type: object
+      properties:
+        project_id: {type: string}
+        name: {type: string}
+        base_language_iso: {type: string}
+        statistics: {type: object}

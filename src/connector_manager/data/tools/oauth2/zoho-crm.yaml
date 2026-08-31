@@ -1,0 +1,481 @@
+# Zoho CRM tools.
+#
+# Zoho models everything as a module -- Leads, Contacts, Accounts, Deals, Tasks
+# and any custom module -- so most tools take a `module` argument and work for
+# all of them. Records come back and go out wrapped in a `data` array.
+#
+# The connection's `extension` picks the data centre (com, eu, in, com.au).
+#
+# Docs: https://www.zoho.com/crm/developer/docs/api/v2/
+
+connector_id: zoho-crm
+display_name: Zoho CRM
+docs_url: https://www.zoho.com/crm/developer/docs/api/v2/
+
+scope_rules:
+  implies:
+    ZohoCRM.modules.ALL: [ZohoCRM.modules.READ, ZohoCRM.modules.CREATE, ZohoCRM.modules.UPDATE, ZohoCRM.modules.DELETE]
+    ZohoCRM.settings.ALL: [ZohoCRM.settings.READ, ZohoCRM.settings.modules.READ, ZohoCRM.settings.fields.READ]
+    ZohoCRM.users.ALL: [ZohoCRM.users.READ]
+
+tools:
+
+  list_records:
+    title: List a module's records
+    description: >-
+      Page through the records in a module — Leads, Contacts, Accounts, Deals or
+      any custom module. Zoho pages 200 at a time.
+    category: records
+    scopes: [ZohoCRM.modules.READ]
+    read_only: true
+    request:
+      method: GET
+      path: /crm/v2/${module}
+      query:
+        fields: "${fields}"
+        page: "${page}"
+        per_page: "${per_page}"
+        sort_by: "${sort_by}"
+        sort_order: "${sort_order}"
+        converted: "${converted}"
+    input:
+      module:
+        type: string
+        description: Module API name, e.g. Leads, Contacts, Accounts, Deals, Tasks.
+        example: Contacts
+      fields:
+        type: array
+        description: Field API names to return. Zoho requires this on most modules.
+        optional: true
+        items: {type: string}
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      per_page:
+        type: integer
+        description: How many records per page (1-200).
+        optional: true
+        default: 200
+        minimum: 1
+        maximum: 200
+      sort_by:
+        type: string
+        description: Field API name to order by, e.g. Created_Time.
+        optional: true
+      sort_order:
+        type: string
+        description: Sort direction.
+        optional: true
+        enum: [asc, desc]
+      converted:
+        type: string
+        description: For Leads, whether to return converted ones.
+        optional: true
+        enum: ["true", "false", both]
+    output:
+      description: A page of records.
+      type: array
+      response_path: data
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          Created_Time: {type: string}
+          Owner: {type: object}
+
+  get_record:
+    title: Get a record
+    description: Read one record from a module by its id, with the fields named.
+    category: records
+    scopes: [ZohoCRM.modules.READ]
+    read_only: true
+    request:
+      method: GET
+      path: /crm/v2/${module}/${record_id}
+      query:
+        fields: "${fields}"
+    input:
+      module:
+        type: string
+        description: Module API name.
+      record_id:
+        type: string
+        description: The record id.
+      fields:
+        type: array
+        description: Field API names to return.
+        optional: true
+        items: {type: string}
+    output:
+      description: The record.
+      type: array
+      response_path: data
+      items: {type: object}
+
+  search_records:
+    title: Search a module's records
+    description: >-
+      Find records by email, phone, a word, or a criteria expression such as
+      ((Last_Name:equals:Lovelace)and(City:equals:London)). Exactly one search
+      argument should be given.
+    category: records
+    scopes: [ZohoCRM.modules.READ]
+    read_only: true
+    request:
+      method: GET
+      path: /crm/v2/${module}/search
+      query:
+        criteria: "${criteria}"
+        email: "${email}"
+        phone: "${phone}"
+        word: "${word}"
+        page: "${page}"
+        per_page: "${per_page}"
+    input:
+      module:
+        type: string
+        description: Module API name.
+      criteria:
+        type: string
+        description: Zoho criteria expression.
+        optional: true
+        example: (Last_Name:equals:Lovelace)
+      email:
+        type: string
+        description: Match records with this email address.
+        optional: true
+        format: email
+      phone:
+        type: string
+        description: Match records with this phone number.
+        optional: true
+      word:
+        type: string
+        description: Free-text word to match across searchable fields.
+        optional: true
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      per_page:
+        type: integer
+        description: How many records per page (1-200).
+        optional: true
+        default: 200
+        minimum: 1
+        maximum: 200
+    output:
+      description: The matching records.
+      type: array
+      response_path: data
+      items: {type: object}
+
+  create_records:
+    title: Create records
+    description: >-
+      Create up to 100 records in a module. Each item is keyed by field API
+      name, e.g. {"Last_Name": "Lovelace", "Email": "ada@example.com"}.
+    category: records
+    scopes: [ZohoCRM.modules.CREATE]
+    request:
+      method: POST
+      path: /crm/v2/${module}
+      body:
+        data: "${records}"
+        trigger: "${trigger}"
+        duplicate_check_fields: "${duplicate_check_fields}"
+    input:
+      module:
+        type: string
+        description: Module API name.
+      records:
+        type: array
+        description: Up to 100 records, each keyed by field API name.
+        max_length: 100
+        items: {type: object}
+      trigger:
+        type: array
+        description: Which automations to run, e.g. ["workflow","approval"]. Pass [] for none.
+        optional: true
+        items: {type: string}
+      duplicate_check_fields:
+        type: array
+        description: Fields to deduplicate on rather than creating twice.
+        optional: true
+        items: {type: string}
+    output:
+      description: One result per record, with its new id.
+      type: array
+      response_path: data
+      items:
+        type: object
+        properties:
+          code: {type: string}
+          details: {type: object}
+          status: {type: string}
+
+  update_records:
+    title: Update records
+    description: >-
+      Change up to 100 existing records. Each item must carry its `id` alongside
+      the fields being written.
+    category: records
+    scopes: [ZohoCRM.modules.UPDATE]
+    request:
+      method: PUT
+      path: /crm/v2/${module}
+      body:
+        data: "${records}"
+        trigger: "${trigger}"
+    input:
+      module:
+        type: string
+        description: Module API name.
+      records:
+        type: array
+        description: Up to 100 records, each with an id and the fields to change.
+        max_length: 100
+        items: {type: object}
+      trigger:
+        type: array
+        description: Which automations to run. Pass [] for none.
+        optional: true
+        items: {type: string}
+    output:
+      description: One result per record.
+      type: array
+      response_path: data
+      items: {type: object}
+
+  upsert_records:
+    title: Create or update records
+    description: >-
+      Insert records, updating any that match on the duplicate-check fields —
+      the idempotent way to sync records into Zoho.
+    category: records
+    scopes: [ZohoCRM.modules.CREATE]
+    request:
+      method: POST
+      path: /crm/v2/${module}/upsert
+      body:
+        data: "${records}"
+        duplicate_check_fields: "${duplicate_check_fields}"
+        trigger: "${trigger}"
+    input:
+      module:
+        type: string
+        description: Module API name.
+      records:
+        type: array
+        description: Up to 100 records, each keyed by field API name.
+        max_length: 100
+        items: {type: object}
+      duplicate_check_fields:
+        type: array
+        description: Fields to match existing records on, e.g. ["Email"].
+        optional: true
+        items: {type: string}
+      trigger:
+        type: array
+        description: Which automations to run.
+        optional: true
+        items: {type: string}
+    output:
+      description: One result per record, saying whether it was inserted or updated.
+      type: array
+      response_path: data
+      items: {type: object}
+
+  delete_records:
+    title: Delete records
+    description: >-
+      Move up to 100 records to Zoho's recycle bin. Recoverable from the UI for
+      a time, but not by this tool.
+    category: records
+    scopes: [ZohoCRM.modules.DELETE]
+    destructive: true
+    request:
+      method: DELETE
+      path: /crm/v2/${module}
+      query:
+        ids: "${record_ids}"
+        wf_trigger: "${trigger_workflow}"
+    input:
+      module:
+        type: string
+        description: Module API name.
+      record_ids:
+        type: array
+        description: Up to 100 record ids to delete.
+        max_length: 100
+        items: {type: string}
+      trigger_workflow:
+        type: boolean
+        description: Run deletion workflows.
+        optional: true
+    output:
+      description: One result per record.
+      type: array
+      response_path: data
+      items: {type: object}
+
+  list_modules:
+    title: List the CRM's modules
+    description: >-
+      List the modules this org has, standard and custom, with the API names
+      every record tool takes.
+    category: metadata
+    scopes: [ZohoCRM.settings.modules.READ]
+    read_only: true
+    request:
+      method: GET
+      path: /crm/v2/settings/modules
+    input: {}
+    output:
+      description: The org's modules.
+      type: array
+      response_path: modules
+      items:
+        type: object
+        properties:
+          api_name: {type: string}
+          module_name: {type: string}
+          plural_label: {type: string}
+
+  list_fields:
+    title: List a module's fields
+    description: >-
+      Read a module's field definitions — API names, data types and picklist
+      values. Read this before writing fields you did not name yourself.
+    category: metadata
+    scopes: [ZohoCRM.settings.fields.READ]
+    read_only: true
+    request:
+      method: GET
+      path: /crm/v2/settings/fields
+      query:
+        module: "${module}"
+    input:
+      module:
+        type: string
+        description: Module API name.
+    output:
+      description: The module's fields.
+      type: array
+      response_path: fields
+      items:
+        type: object
+        properties:
+          api_name: {type: string}
+          field_label: {type: string}
+          data_type: {type: string}
+          pick_list_values: {type: array}
+
+  add_note:
+    title: Add a note to a record
+    description: >-
+      Attach a note to any record, naming the record's id and its module in
+      Parent_Id and se_module.
+    category: notes
+    scopes: [ZohoCRM.modules.CREATE]
+    request:
+      method: POST
+      path: /crm/v2/Notes
+      body:
+        data:
+          - Note_Title: "${title}"
+            Note_Content: "${content}"
+            Parent_Id: "${record_id}"
+            se_module: "${module}"
+    input:
+      record_id:
+        type: string
+        description: Id of the record to annotate.
+      module:
+        type: string
+        description: Module API name the record belongs to.
+      content:
+        type: string
+        description: The note text.
+      title:
+        type: string
+        description: The note's title.
+        optional: true
+    output:
+      description: The created note.
+      type: array
+      response_path: data
+      items: {type: object}
+
+  list_users:
+    title: List CRM users
+    description: >-
+      List the org's users with their ids and email addresses, which record
+      owner fields take.
+    category: users
+    scopes: [ZohoCRM.users.READ]
+    read_only: true
+    request:
+      method: GET
+      path: /crm/v2/users
+      query:
+        type: "${type}"
+        page: "${page}"
+        per_page: "${per_page}"
+    input:
+      type:
+        type: string
+        description: Which users to return.
+        optional: true
+        default: AllUsers
+        enum: [AllUsers, ActiveUsers, DeactiveUsers, ConfirmedUsers, NotConfirmedUsers, AdminUsers, ActiveConfirmedAdmins]
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      per_page:
+        type: integer
+        description: How many users per page (1-200).
+        optional: true
+        default: 200
+        minimum: 1
+        maximum: 200
+    output:
+      description: The org's users.
+      type: array
+      response_path: users
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          full_name: {type: string}
+          email: {type: string}
+          status: {type: string}
+
+  get_organization:
+    title: Get the CRM organisation
+    description: >-
+      Read the Zoho CRM org the token belongs to — its name, id, edition and
+      currency. The cheapest health check for the connection.
+    category: metadata
+    scopes: [ZohoCRM.settings.READ]
+    read_only: true
+    request:
+      method: GET
+      path: /crm/v2/org
+    input: {}
+    output:
+      description: The organisation.
+      type: array
+      response_path: org
+      items:
+        type: object
+        properties:
+          company_name: {type: string}
+          id: {type: string}
+          primary_email: {type: string}
+          currency: {type: string}

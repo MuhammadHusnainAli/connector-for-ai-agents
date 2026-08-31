@@ -1,0 +1,903 @@
+# Firstbase tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://apipub.firstbasehq.com/v3/api-docs
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: firstbase
+display_name: Firstbase
+docs_url: https://apipub.firstbasehq.com/v3/api-docs
+generated: true
+generated_from: https://apipub.firstbasehq.com/v3/api-docs
+tools:
+  get_all_events:
+    title: Get a list of business events for a time period
+    description: Get a list of business events for a time period Retrieves a list of business events Calls
+      GET /businessevents on Firstbase's API.
+    category: businessevents
+    request:
+      method: GET
+      path: /businessevents
+      query:
+        start: ${start}
+        end: ${end}
+        eventTypes: ${event_types}
+        organizationId: ${organization_id}
+        personId: ${person_id}
+        eventDataFilter: ${event_data_filter}
+    input:
+      start:
+        type: string
+        description: A start time to query business events from
+      end:
+        type: string
+        description: An end time to query business events to (defaults to current time)
+        optional: true
+      event_types:
+        type: array
+        description: A comma seperated list of business event types
+        optional: true
+        items:
+          type: string
+      organization_id:
+        type: string
+        description: The UUID of an organization to filter by
+        optional: true
+      person_id:
+        type: string
+        description: The UUID of a person to filter by
+        optional: true
+      event_data_filter:
+        type: string
+        description: A jsonb query string (must be url encoded)
+        optional: true
+    output:
+      description: Business events
+      type: object
+    read_only: true
+  create_asset:
+    title: Create an asset
+    description: Create an asset Creates a new asset (inventory item) in the organization's inventory.
+      Identify the product either by skuid (for known SKUs) or by categorycode + description (for custom
+      products). Assign the asset to a person (personid) or an office (officeid). Calls POST /api/assets
+      on Firstbase's API.
+    category: api
+    request:
+      method: POST
+      path: /api/assets
+      body:
+        sku_id: ${sku_id}
+        category_code: ${category_code}
+        brand_code: ${brand_code}
+        brand_id: ${brand_id}
+        description: ${description}
+        serial_number: ${serial_number}
+        condition: ${condition}
+        renewal_date: ${renewal_date}
+        person_id: ${person_id}
+        office_id: ${office_id}
+    input:
+      sku_id:
+        type: string
+        description: SKU ID for known products. Mutually exclusive with categorycode+description.
+        optional: true
+      category_code:
+        type: string
+        description: Category code for custom/legacy products. Mutually exclusive with skuid.
+        optional: true
+      brand_code:
+        type: string
+        description: Brand code. Optional, used with categorycode. Accepts legacy vendorcode.
+        optional: true
+      brand_id:
+        type: string
+        description: Brand ID. Optional alternative to brandcode. Accepts legacy vendorid.
+        optional: true
+      description:
+        type: string
+        description: Product description. Required when categorycode is provided.
+        optional: true
+      serial_number:
+        type: string
+        description: Serial number of the asset.
+        optional: true
+      condition:
+        type: string
+        description: Condition of the asset.
+        enum:
+        - NEW
+        - USED_LIKE_NEW
+        - USED_GOOD
+        - USED_FAIR
+        - USED
+        - USED_POOR
+        - UNUSABLE
+      renewal_date:
+        type: string
+        description: Renewal date for the asset. Defaults to a calculated date based on the organization's
+          refresh policy if not provided.
+        optional: true
+      person_id:
+        type: string
+        description: Person ID to assign the asset to. Mutually exclusive with officeid.
+        optional: true
+      office_id:
+        type: string
+        description: Office ID to assign the asset to. Mutually exclusive with personslug.
+        optional: true
+    output:
+      description: Asset created
+      type: object
+  list_inventories_1:
+    title: List inventory items for the authenticated organization
+    description: List inventory items for the authenticated organization Returns a paginated list of inventory
+      items owned by the caller's organization. Supports filtering by deploy status, person, office, category,
+      and more. Results are sorted by creation date descending by default. Deprecated deploy statuses
+      (GIFTED, LOCKED, OUTFORREPAIR) are rejected with 400. Calls GET /api/inventory on Firstbase's API.
+    category: api
+    request:
+      method: GET
+      path: /api/inventory
+      query:
+        page: ${page}
+        size: ${size}
+        personId: ${person_id}
+        warehouseId: ${warehouse_id}
+        officeId: ${office_id}
+        categories: ${categories}
+        deployStatuses: ${deploy_statuses}
+        skuIds: ${sku_ids}
+        searchString: ${search_string}
+        updatedAtFrom: ${updated_at_from}
+        updatedAtTo: ${updated_at_to}
+        assignedEmail: ${assigned_email}
+        serialNumber: ${serial_number}
+        vendorSku: ${vendor_sku}
+        sortBy: ${sort_by}
+        sortDirection: ${sort_direction}
+    input:
+      page:
+        type: integer
+        description: The page number to request (1 based)
+        optional: true
+      size:
+        type: integer
+        description: The number of results to return in a page
+        optional: true
+      person_id:
+        type: string
+        description: Id of a person to which inventory is assigned
+        optional: true
+      warehouse_id:
+        type: string
+        description: Id of a warehouse to which inventory is assigned
+        optional: true
+      office_id:
+        type: string
+        description: Id of an office to which inventory is assigned
+        optional: true
+      categories:
+        type: array
+        description: The categories parameter.
+        optional: true
+        items:
+          type: string
+      deploy_statuses:
+        type: array
+        description: The deployStatuses parameter.
+        optional: true
+        items:
+          type: string
+      sku_ids:
+        type: array
+        description: The skuIds parameter.
+        optional: true
+        items:
+          type: string
+      search_string:
+        type: string
+        description: Keyword to search for - This searches the description, the name of the manufacturer,
+          the category, the item's title, and the serial number.
+        optional: true
+      updated_at_from:
+        type: string
+        description: UTC Date-time to filter inventory updated after (ISO-8601 without timezone)
+        optional: true
+      updated_at_to:
+        type: string
+        description: UTC Date-time to filter inventory updated before (ISO-8601 without timezone)
+        optional: true
+      assigned_email:
+        type: string
+        description: Email address of the person to which inventory is assigned. Alternative to personId
+          — cannot be combined with personId.
+        optional: true
+      serial_number:
+        type: array
+        description: Filter by inventory serial numbers
+        optional: true
+        items:
+          type: string
+      vendor_sku:
+        type: array
+        description: Filter by vendor SKUs
+        optional: true
+        items:
+          type: string
+      sort_by:
+        type: string
+        description: Field to sort by (product, skuId, createdAt, updatedAt, serialNumber, deployStatus,
+          deployReason, assignee, condition, renewalDate, category, suppliedBy)
+        optional: true
+      sort_direction:
+        type: string
+        description: Sort direction (ASC, DESC)
+        optional: true
+    output:
+      description: Paginated list of inventory items
+      type: object
+    read_only: true
+  list_inventory_levels_1:
+    title: List inventory level configurations for the authenticated organization
+    description: List inventory level configurations for the authenticated organization Returns a paginated
+      list of inventory level configurations (min/max stock rules) for the caller's organization. Each
+      record defines the minimum and maximum quantity thresholds for a specific SKU at a specific warehouse.
+      Supports filtering by SKU, warehouse, region, category, brand, and active status Calls GET /api/inventory-levels
+      on Firstbase's API.
+    category: api
+    request:
+      method: GET
+      path: /api/inventory-levels
+      query:
+        page: ${page}
+        size: ${size}
+        skuIds: ${sku_ids}
+        warehouseIds: ${warehouse_ids}
+        regionIds: ${region_ids}
+        categories: ${categories}
+        brands: ${brands}
+        searchString: ${search_string}
+        active: ${active}
+    input:
+      page:
+        type: integer
+        description: 'Page number (1-based, default: 1)'
+        optional: true
+        default: 1
+      size:
+        type: integer
+        description: 'Number of results per page (max: 1000, default: 100)'
+        optional: true
+        default: 100
+      sku_ids:
+        type: array
+        description: Filter by one or more SKU IDs
+        optional: true
+        items:
+          type: string
+      warehouse_ids:
+        type: array
+        description: Filter by one or more warehouse IDs
+        optional: true
+        items:
+          type: string
+      region_ids:
+        type: array
+        description: Filter by one or more region IDs
+        optional: true
+        items:
+          type: string
+      categories:
+        type: array
+        description: Filter by one or more product category codes (e.g. COMPUTER, MONITOR)
+        optional: true
+        items:
+          type: string
+      brands:
+        type: array
+        description: Filter by one or more vendor/brand codes
+        optional: true
+        items:
+          type: string
+      search_string:
+        type: string
+        description: Search by product title (partial match)
+        optional: true
+      active:
+        type: boolean
+        description: 'Filter by active status — true returns active levels only, false returns inactive
+          only (default: true)'
+        optional: true
+        default: true
+    output:
+      description: Paginated list of inventory level configurations with current stock details
+      type: object
+    read_only: true
+  create_inventory_level_1:
+    title: Create a new inventory level configuration for a SKU at a warehouse
+    description: Create a new inventory level configuration for a SKU at a warehouse Creates an inventory
+      level configuration that defines the minimum and maximum stock thresholds for a specific SKU at
+      a specific warehouse. Optionally scoped to a region. Returns 409 if a level already exists for the
+      same SKU + warehouse + region combination. Calls POST /api/inventory-levels on Firstbase's API.
+    category: api
+    request:
+      method: POST
+      path: /api/inventory-levels
+      body:
+        skuId: ${sku_id}
+        warehouseId: ${warehouse_id}
+        minQuantity: ${min_quantity}
+        maxQuantity: ${max_quantity}
+        regionId: ${region_id}
+        includeUsed: ${include_used}
+        autoCreate: ${auto_create}
+        customerPoNumber: ${customer_po_number}
+    input:
+      sku_id:
+        type: string
+        description: ID of the SKU to set inventory levels for
+      warehouse_id:
+        type: string
+        description: ID of the warehouse
+      min_quantity:
+        type: integer
+        description: Minimum quantity threshold
+      max_quantity:
+        type: integer
+        description: Maximum quantity threshold
+      region_id:
+        type: string
+        description: ID of the region (optional; uses org default when not provided)
+        optional: true
+      include_used:
+        type: boolean
+        description: Whether to include used inventory in stock calculations
+      auto_create:
+        type: boolean
+        description: Whether to automatically create inventory orders when stock is low
+      customer_po_number:
+        type: string
+        description: Customer purchase order number to apply to restock orders created from this level
+        optional: true
+    output:
+      description: Inventory level created successfully
+      type: object
+  list_inventory_orders_1:
+    title: List all inventory orders for the authenticated organization
+    description: List all inventory orders for the authenticated organization Returns a paginated list
+      of inventory orders (warehouse stock replenishment requests) for the caller's organization. Supports
+      filtering by status and date range, and sorting by creation date. Each result includes the ordered
+      items and their shipment details. Calls GET /api/inventory-orders on Firstbase's API.
+    category: api
+    request:
+      method: GET
+      path: /api/inventory-orders
+      query:
+        page: ${page}
+        size: ${size}
+        ids: ${ids}
+        statuses: ${statuses}
+        warehouseIds: ${warehouse_ids}
+        categories: ${categories}
+        brands: ${brands}
+        customerPoNumbers: ${customer_po_numbers}
+        friendlyOrderIds: ${friendly_order_ids}
+        submittedBy: ${submitted_by}
+        includeOrdersWithoutSubmitter: ${include_orders_without_submitter}
+        reasons: ${reasons}
+        createdDateFrom: ${created_date_from}
+        createdDateTo: ${created_date_to}
+        expectedShipDateFrom: ${expected_ship_date_from}
+        expectedShipDateTo: ${expected_ship_date_to}
+        searchString: ${search_string}
+        vendorSku: ${vendor_sku}
+        skuId: ${sku_id}
+        serialNumber: ${serial_number}
+        sortBy: ${sort_by}
+        sortDirection: ${sort_direction}
+    input:
+      page:
+        type: integer
+        description: The page number to request (1 based)
+        optional: true
+      size:
+        type: integer
+        description: The number of results to return in a page
+        optional: true
+      ids:
+        type: array
+        description: Filter by inventory order IDs
+        optional: true
+        items:
+          type: string
+      statuses:
+        type: array
+        description: Filter by order statuses (e.g. SUBMITTED, PROCESSING)
+        optional: true
+        items:
+          type: string
+      warehouse_ids:
+        type: array
+        description: Filter by warehouse IDs
+        optional: true
+        items:
+          type: string
+      categories:
+        type: array
+        description: Filter by product categories (e.g. COMPUTER)
+        optional: true
+        items:
+          type: string
+      brands:
+        type: array
+        description: Filter by product brands
+        optional: true
+        items:
+          type: string
+      customer_po_numbers:
+        type: array
+        description: Filter by customer PO numbers
+        optional: true
+        items:
+          type: string
+      friendly_order_ids:
+        type: array
+        description: Filter by exact friendly order IDs (case-insensitive)
+        optional: true
+        items:
+          type: string
+      submitted_by:
+        type: array
+        description: Filter by person IDs who submitted the order
+        optional: true
+        items:
+          type: string
+      include_orders_without_submitter:
+        type: boolean
+        description: When true, includes orders without a submitter (system-generated). OR'd with submittedBy
+          if both are provided.
+        optional: true
+      reasons:
+        type: array
+        description: Filter by order reasons (e.g. ONEOFF, RESTOCK)
+        optional: true
+        items:
+          type: string
+      created_date_from:
+        type: string
+        description: Filter orders created on or after this date (ISO-8601). If provided, createdDateTo
+          must also be provided.
+        optional: true
+      created_date_to:
+        type: string
+        description: Filter orders created on or before this date (ISO-8601). If provided, createdDateFrom
+          must also be provided.
+        optional: true
+      expected_ship_date_from:
+        type: string
+        description: Filter orders with expected ship date on or after this date (ISO-8601). If provided,
+          expectedShipDateTo must also be provided.
+        optional: true
+      expected_ship_date_to:
+        type: string
+        description: Filter orders with expected ship date on or before this date (ISO-8601). If provided,
+          expectedShipDateFrom must also be provided.
+        optional: true
+      search_string:
+        type: string
+        description: Search string to filter orders
+        optional: true
+      vendor_sku:
+        type: array
+        description: Filter by SKU vendor SKUs (MPN).
+        optional: true
+        items:
+          type: string
+      sku_id:
+        type: array
+        description: Filter by SKU IDs.
+        optional: true
+        items:
+          type: string
+      serial_number:
+        type: array
+        description: Filter by inventory serial numbers.
+        optional: true
+        items:
+          type: string
+      sort_by:
+        type: string
+        description: Field to sort by (createdAt, updatedAt, warehouse, status, submittedBy).
+        optional: true
+      sort_direction:
+        type: string
+        description: Sort direction (ASC, DESC).
+        optional: true
+    output:
+      description: Paginated list of inventory orders
+      type: object
+    read_only: true
+  create_inventory_order_1:
+    title: Create an inventory order
+    description: Create an inventory order Creates an inventory order to ship equipment from a supplier
+      or customer to a Firstbase warehouse. Specify the destination warehouse and the items (SKUs with
+      quantities) to be stocked. The created order begins in SUBMITTED status and will be processed by
+      the Firstbase logistics team. Calls POST /api/inventory-orders on Firstbase's API.
+    category: api
+    request:
+      method: POST
+      path: /api/inventory-orders
+      body:
+        warehouseId: ${warehouse_id}
+        regionId: ${region_id}
+        items: ${items}
+        billingType: ${billing_type}
+        firstbaseSupplied: ${firstbase_supplied}
+        trackingNumber: ${tracking_number}
+        notes: ${notes}
+        expectedShipDate: ${expected_ship_date}
+        customerPoNumber: ${customer_po_number}
+    input:
+      warehouse_id:
+        type: string
+        description: Warehouse ID where the inventory will be sent
+      region_id:
+        type: string
+        description: Region ID. Required when the organization uses multi-entity
+        optional: true
+      items:
+        type: array
+        description: Items to include in the inventory order
+        items:
+          type: object
+      billing_type:
+        type: string
+        description: Billing type. Required for HAAS organizations (SUBSCRIPTION or PURCHASED). Non-HAAS
+          organizations default to PURCHASED and cannot use SUBSCRIPTION
+        optional: true
+        enum:
+        - SUBSCRIPTION
+        - PURCHASED
+      firstbase_supplied:
+        type: boolean
+        description: Whether Firstbase supplies the equipment. Defaults to true
+        optional: true
+      tracking_number:
+        type: string
+        description: Tracking number for the shipment
+        optional: true
+      notes:
+        type: string
+        description: Additional notes for the order
+        optional: true
+      expected_ship_date:
+        type: string
+        description: Expected ship date (ISO-8601)
+        optional: true
+      customer_po_number:
+        type: string
+        description: Customer PO number
+        optional: true
+    output:
+      description: Inventory order created
+      type: object
+  get_new_joiners:
+    title: Get new joiners
+    description: Get new joiners Paginated, filterable, sortable list of new joiner rows for the organization.
+      When startDateFrom is omitted, the domain applies a default 60-day lookback floor — supply it explicitly
+      to widen the window beyond 60 days. Calls GET /api/new-joiners on Firstbase's API.
+    category: api
+    request:
+      method: GET
+      path: /api/new-joiners
+      query:
+        page: ${page}
+        size: ${size}
+        sortBy: ${sort_by}
+        sortDirection: ${sort_direction}
+        searchString: ${search_string}
+        equipmentReadiness: ${equipment_readiness}
+        urgency: ${urgency}
+        countryCodes: ${country_codes}
+        provisioningOutcome: ${provisioning_outcome}
+        startDateFrom: ${start_date_from}
+        startDateTo: ${start_date_to}
+        userStatus: ${user_status}
+        procurementMethod: ${procurement_method}
+    input:
+      page:
+        type: integer
+        description: Page number (1-based)
+        optional: true
+        default: 1
+      size:
+        type: integer
+        description: Page size (1–200)
+        optional: true
+        default: 25
+      sort_by:
+        type: string
+        description: 'Sort field: startDate, urgency, equipmentReadiness, employee, country, personStatus,
+          estimatedDeliveryDate, reminderCount, lastReminderSentAt, provisioningOutcome, orderDate'
+        optional: true
+      sort_direction:
+        type: string
+        description: Sort direction (ASC, DESC)
+        optional: true
+      search_string:
+        type: string
+        description: Free-text search across name and email
+        optional: true
+      equipment_readiness:
+        type: array
+        description: 'Filter by equipment readiness: NOTSTARTED, ORDERPLACED, READY'
+        optional: true
+        items:
+          type: string
+      urgency:
+        type: array
+        description: 'Filter by urgency: ONTRACK, ATRISK, LATE'
+        optional: true
+        items:
+          type: string
+      country_codes:
+        type: array
+        description: Filter by ISO country codes
+        optional: true
+        items:
+          type: string
+      provisioning_outcome:
+        type: array
+        description: 'Filter by provisioning outcome: ONTIME, LATE'
+        optional: true
+        items:
+          type: string
+      start_date_from:
+        type: string
+        description: Start date lower bound (ISO-8601). When omitted, a default 60-day lookback floor
+          is applied. Supply explicitly to widen the window.
+        optional: true
+      start_date_to:
+        type: string
+        description: Start date upper bound (ISO-8601)
+        optional: true
+      user_status:
+        type: array
+        description: 'Filter by person status: INVITED, ACTIVE, INACTIVE, etc.'
+        optional: true
+        items:
+          type: string
+      procurement_method:
+        type: array
+        description: 'Filter by procurement method: WAREHOUSE, DROPSHIP, MIXED'
+        optional: true
+        items:
+          type: string
+    output:
+      description: New joiners retrieved successfully
+      type: object
+    read_only: true
+  list_offices:
+    title: List all offices for the authenticated organization
+    description: List all offices for the authenticated organization Returns a paginated list of offices
+      belonging to the caller's organization. Supports pagination. Active and inactive offices are both
+      returned unless filtered. Calls GET /api/offices on Firstbase's API.
+    category: api
+    request:
+      method: GET
+      path: /api/offices
+      query:
+        page: ${page}
+        size: ${size}
+    input:
+      page:
+        type: integer
+        description: The page number to request (1 based)
+        optional: true
+      size:
+        type: integer
+        description: The number of results to return in a page
+        optional: true
+    output:
+      description: Paginated list of offices
+      type: object
+    read_only: true
+  get_orders_1:
+    title: List all orders for the authenticated organization
+    description: List all orders for the authenticated organization Returns a paginated list of orders
+      belonging to the caller's organization. Supports filtering by person, date range, status, and sorting.
+      Results are sorted by creation date ascending by default. Calls GET /api/orders on Firstbase's API.
+    category: api
+    request:
+      method: GET
+      path: /api/orders
+      query:
+        page: ${page}
+        size: ${size}
+        personId: ${person_id}
+        startDate: ${start_date}
+        endDate: ${end_date}
+        status: ${status}
+        expectedByFrom: ${expected_by_from}
+        expectedByTo: ${expected_by_to}
+        packageSlug: ${package_slug}
+        submittedBy: ${submitted_by}
+        approvedBy: ${approved_by}
+        country: ${country}
+        recipientType: ${recipient_type}
+        deliveryLocation: ${delivery_location}
+        vendorSku: ${vendor_sku}
+        skuId: ${sku_id}
+        serialNumber: ${serial_number}
+        sortBy: ${sort_by}
+        sortDirection: ${sort_direction}
+    input:
+      page:
+        type: integer
+        description: The page number to request (1 based)
+        optional: true
+      size:
+        type: integer
+        description: The number of results to return in a page
+        optional: true
+      person_id:
+        type: string
+        description: The ID of the person to return orders for
+        optional: true
+      start_date:
+        type: string
+        description: UTC Date-time to filter orders created after (ISO-8601 without timezone)
+        optional: true
+      end_date:
+        type: string
+        description: UTC Date-time to filter orders created before (ISO-8601 without timezone)
+        optional: true
+      status:
+        type: array
+        description: Filter by order statuses
+        optional: true
+        items:
+          type: string
+      expected_by_from:
+        type: string
+        description: Filter by earliest expected-by date (requires expectedByTo)
+        optional: true
+      expected_by_to:
+        type: string
+        description: Filter by latest expected-by date (requires expectedByFrom)
+        optional: true
+      package_slug:
+        type: array
+        description: Filter by package slug
+        optional: true
+        items:
+          type: string
+      submitted_by:
+        type: array
+        description: Filter by person IDs who submitted the order
+        optional: true
+        items:
+          type: string
+      approved_by:
+        type: array
+        description: Filter by person IDs who approved the order
+        optional: true
+        items:
+          type: string
+      country:
+        type: array
+        description: Filter by destination country codes
+        optional: true
+        items:
+          type: string
+      recipient_type:
+        type: string
+        description: Filter by recipient type (PERSON, OFFICE)
+        optional: true
+        enum:
+        - PERSON
+        - OFFICE
+      delivery_location:
+        type: string
+        description: 'Filter by delivery location type (corresponds to the FE ''Delivery location'' toggle
+          on the Orders page, where PERSON is shown to users as ''Employee''). Allowed values: PERSON,
+          OFFICE.'
+        optional: true
+        enum:
+        - PERSON
+        - OFFICE
+        - PERSON
+        - OFFICE
+      vendor_sku:
+        type: array
+        description: Filter by vendor SKUs
+        optional: true
+        items:
+          type: string
+      sku_id:
+        type: array
+        description: Filter by SKU IDs
+        optional: true
+        items:
+          type: string
+      serial_number:
+        type: array
+        description: Filter by serial numbers
+        optional: true
+        items:
+          type: string
+      sort_by:
+        type: string
+        description: Field to sort by
+        optional: true
+      sort_direction:
+        type: string
+        description: Sort direction (ASC, DESC)
+        optional: true
+    output:
+      description: Paginated list of orders
+      type: object
+    read_only: true
+  get_event_types:
+    title: Get a list of event types for use with other 'event' api requests
+    description: Get a list of event types for use with other 'event' api requests Retrieves a list of
+      business event types Calls GET /businessevents/types on Firstbase's API.
+    category: businessevents
+    request:
+      method: GET
+      path: /businessevents/types
+    input: {}
+    output:
+      description: Business event types
+      type: object
+    read_only: true
+  list_users:
+    title: List people in the organization via SCIM
+    description: List people in the organization via SCIM Returns a paginated SCIM ListResponse of people
+      in the caller's organization. Filter by email address or name using SCIM filter expressions. Maximum
+      of 50 users per page. Calls GET /scim/v2/Users on Firstbase's API.
+    category: scim
+    request:
+      method: GET
+      path: /scim/v2/Users
+      query:
+        filter: ${filter}
+        startIndex: ${start_index}
+        count: ${count}
+        attributes: ${attributes}
+        excludedAttributes: ${excluded_attributes}
+    input:
+      filter:
+        type: string
+        description: 'Fetch user with a given name or email address using SCIM operators Examples: emails.value
+          eq "test@email.com" name.givenName eq "James" and name.familyName eq "Bond"'
+        optional: true
+      start_index:
+        type: integer
+        description: The 1-based start index of the first user to be returned
+        optional: true
+      count:
+        type: integer
+        description: The number of users to be returned. A maximum of 50 users will be returned in a page.
+        optional: true
+      attributes:
+        type: string
+        description: Comma-separated SCIM defined attributes to be returned. Required attributes are always
+          returned
+        optional: true
+      excluded_attributes:
+        type: string
+        description: Comma-separated SCIM defined attributes to be excluded. Required attributes cannot
+          be excluded
+        optional: true
+    output:
+      description: List of users
+      type: object
+    read_only: true

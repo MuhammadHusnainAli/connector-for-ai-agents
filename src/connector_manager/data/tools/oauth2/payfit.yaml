@@ -1,0 +1,369 @@
+# Payfit tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://partner-api.payfit.com/api-docs
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: payfit
+display_name: Payfit
+docs_url: https://partner-api.payfit.com/api-docs
+generated: true
+generated_from: https://partner-api.payfit.com/api-docs
+tools:
+  get_company_fr:
+    title: Get Company 🇫🇷
+    description: Get Company 🇫🇷 Returns the basic information of the company with french specific data.
+      Calls GET /companies-fr/{companyId} on Payfit's API.
+    category: companies_fr
+    request:
+      method: GET
+      path: /companies-fr/${company_id}
+    input:
+      company_id:
+        type: string
+        description: The id of the company
+    output:
+      description: The french fetched company
+      type: object
+    read_only: true
+  get_company:
+    title: Get Company 🌍
+    description: Get Company 🌍 Returns the basic information of the company. Calls GET /companies/{companyId}
+      on Payfit's API.
+    category: companies
+    request:
+      method: GET
+      path: /companies/${company_id}
+    input:
+      company_id:
+        type: string
+        description: The id of the company
+    output:
+      description: The fetched company
+      type: object
+    read_only: true
+  post_health_insurance_setup_sheets:
+    title: Create health insurance contracts from setup sheets 🇫🇷
+    description: 'Create health insurance contracts from setup sheets 🇫🇷 Allows to create or update health
+      insurance contracts of a company, given setup sheets. Setup sheets are the documents sent to "net-entreprises.fr"
+      when new health insurance or prevoyance contracts are available. Notes : - This is only available
+      for French companies - This is only available to speci Calls POST /companies-fr/{companyId}/health-insurance-setup-sheets
+      on Payfit''s API.'
+    category: companies_fr
+    request:
+      method: POST
+      path: /companies-fr/${company_id}/health-insurance-setup-sheets
+    input:
+      company_id:
+        type: string
+        description: The id of the company
+    output:
+      description: The setup sheet was correctly sent
+      type: object
+  get_absences:
+    title: List absences 🌍
+    description: List absences 🌍 Returns the absences in a company. This list is paginated. The output
+      can be filtered given some fields like contractId. By default, only approved absences are returned,
+      but this can be changed by setting status filter. Calls GET /companies/{companyId}/absences on Payfit's
+      API.
+    category: companies
+    request:
+      method: GET
+      path: /companies/${company_id}/absences
+      query:
+        nextPageToken: ${next_page_token}
+        maxResults: ${max_results}
+        contractId: ${contract_id}
+        status: ${status}
+        beginDate: ${begin_date}
+        endDate: ${end_date}
+    input:
+      company_id:
+        type: string
+        description: The id of the company
+      next_page_token:
+        type: string
+        description: The encoded pagination token
+        optional: true
+      max_results:
+        type: string
+        description: 'Allows to define the maximum number of items to fetch at once. (Max: 50, Default:
+          10)'
+        optional: true
+        default: '10'
+      contract_id:
+        type: string
+        description: Filter by contractId.
+        optional: true
+      status:
+        type: string
+        description: 'Filter by status. Defaults to approved. Multiple statuses can be provided, separated
+          by commas, for example status=approved,pendingapproval. If all is provided, all absences will
+          be returned, regardless of their status. Possible statuses are: - approved - pendingapproval
+          - declined - cancelled - pendingcancellation'
+        optional: true
+      begin_date:
+        type: string
+        description: Defines the minimal begin date of absences to fetch. Every absences with params.beginDate
+          <= absences.endDate will be included.
+        optional: true
+      end_date:
+        type: string
+        description: Defines the maximal end date of absences to fetch. Every absences with params.endDate
+          = absences.startDate will be included.
+        optional: true
+    output:
+      description: The absences of the collaborators in the company.
+      type: object
+    read_only: true
+  post_absences:
+    title: Create a validated absence 🌍
+    description: Create a validated absence 🌍 Creates a validated absence for a collaborator in a company
+      and returns the new absence ID. Calls POST /companies/{companyId}/absences on Payfit's API.
+    category: companies
+    request:
+      method: POST
+      path: /companies/${company_id}/absences
+      body:
+        contractId: ${contract_id}
+        type: ${type}
+        startDate: ${start_date}
+        endDate: ${end_date}
+    input:
+      company_id:
+        type: string
+        description: The id of the company
+      contract_id:
+        type: string
+        description: Contract ID of the absence owner.
+      type:
+        type: string
+        description: Type of absence to create.
+        enum:
+        - fr_conges_payes
+        - fr_rtt
+        - fr_repos
+        - fr_sans_solde
+        - fr_teletravail
+        - fr_ecole
+        - fr_maladie_ordinaire
+        - fr_mariage_salarie
+        - fr_pacs_salarie
+        - fr_mariage_enfant
+        - fr_mariage_frere_ou_soeur
+        - fr_mariage_beau_frere_ou_belle_soeur
+        - fr_mariage_ascendant
+        - fr_mariage_petit_enfant
+        - fr_deces_beau_pere_ou_belle_mere
+        - fr_deces_conjoint
+        - fr_deces_enfant
+        - fr_deces_frere_ou_soeur
+        - fr_deces_grand_parent
+        - fr_deces_pere_ou_mere
+      start_date:
+        type: object
+        description: Date and moment of the day when the absence starts.
+      end_date:
+        type: object
+        description: Date and moment of the day when the absence ends.
+    output:
+      description: The absence was created.
+      type: object
+  get_company_accounting:
+    title: Get accounting data 🇫🇷
+    description: Get accounting data 🇫🇷 Returns accounting of the company for a given month. The data
+      is structured as CSV. Calls GET /companies/{companyId}/accounting on Payfit's API.
+    category: companies
+    request:
+      method: GET
+      path: /companies/${company_id}/accounting
+      query:
+        date: ${date}
+    input:
+      company_id:
+        type: string
+        description: The id of the company
+      date:
+        type: string
+        description: The month to fetch the data for. This must be in the format YYYYMM, January being
+          the month "01".
+    output:
+      description: The accounting file
+      type: object
+    read_only: true
+  get_company_accounting_v2:
+    title: Get accounting v2 data 🇫🇷
+    description: Get accounting v2 data 🇫🇷 Only available for FR. Returns accounting data of the company
+      for a given month. For French companies, the data returned is the same than the one in the automatic
+      accounting exports, so the company accounting exports have to be configured properly in order to
+      get details by analytical code, and by e Calls GET /companies/{companyId}/accounting-v2 on Payfit's
+      API.
+    category: companies
+    request:
+      method: GET
+      path: /companies/${company_id}/accounting-v2
+      query:
+        date: ${date}
+    input:
+      company_id:
+        type: string
+        description: The id of the company
+      date:
+        type: string
+        description: The month to fetch the data for. This must be in the format YYYYMM, January being
+          the month "01".
+    output:
+      description: The accounting JSON of the company for a given month
+      type: object
+    read_only: true
+  get_company_auto_enrolment_documents:
+    title: Get Auto Enrolment documents 🇬🇧
+    description: Get Auto Enrolment documents 🇬🇧 Returns the all documents related to auto enrolment.
+      This endpoint should only be used for UK companies. Calls GET /companies/{companyId}/auto-enrolment-documents
+      on Payfit's API.
+    category: companies
+    request:
+      method: GET
+      path: /companies/${company_id}/auto-enrolment-documents
+    input:
+      company_id:
+        type: string
+        description: The id of the company
+    output:
+      description: The Auto Enrolment documents
+      type: object
+    read_only: true
+  post_partner_declarations:
+    title: Declare Partnership Data 🇫🇷
+    description: Declare Partnership Data 🇫🇷 Create declaration on a partner company for billing. (Only
+      for partners) Calls POST /companies/{companyId}/billing-declarations on Payfit's API.
+    category: companies
+    request:
+      method: POST
+      path: /companies/${company_id}/billing-declarations
+    input:
+      company_id:
+        type: string
+        description: The id of the company
+    output:
+      description: The declaration was correctly created
+      type: object
+  get_collaborators:
+    title: List Collaborators 🌍
+    description: List Collaborators 🌍 Returns the collaborators of the company. This list is paginated.
+      The output can be filtered given some fields. Calls GET /companies/{companyId}/collaborators on
+      Payfit's API.
+    category: companies
+    request:
+      method: GET
+      path: /companies/${company_id}/collaborators
+      query:
+        nextPageToken: ${next_page_token}
+        maxResults: ${max_results}
+        email: ${email}
+    input:
+      company_id:
+        type: string
+        description: The id of the company
+      next_page_token:
+        type: string
+        description: The encoded pagination token
+        optional: true
+      max_results:
+        type: string
+        description: 'Allows to define the maximum number of items to fetch at once. (Max: 50, Default:
+          10)'
+        optional: true
+        default: '10'
+      email:
+        type: string
+        description: 'Filter by email. Important note: only emails in the collaborator''s contracts are
+          used for the search, so you can''t filter by the login email.'
+        optional: true
+    output:
+      description: The collaborators of the company. Some collaborators may not have a contract.
+      type: object
+    read_only: true
+  post_collaborator:
+    title: Create a Collaborator 🌍
+    description: Create a Collaborator 🌍 Create a collaborator and return its ID. The created collaborator
+      won't have a contract, and therefore won't appear in the collaborators list in the PayFit app. In
+      order to create a contract, use the create contract endpoint. Calls POST /companies/{companyId}/collaborators
+      on Payfit's API.
+    category: companies
+    request:
+      method: POST
+      path: /companies/${company_id}/collaborators
+      body:
+        firstName: ${first_name}
+        lastName: ${last_name}
+        otherName: ${other_name}
+        personalEmail: ${personal_email}
+        socialSecurityNumber: ${social_security_number}
+        personalAddress: ${personal_address}
+        birthInformation: ${birth_information}
+        personalPhoneNumber: ${personal_phone_number}
+        numberOfChildren: ${number_of_children}
+        gender: ${gender}
+        inviteCollaborator: ${invite_collaborator}
+    input:
+      company_id:
+        type: string
+        description: The id of the company
+      first_name:
+        type: string
+        description: First name of the employee.
+      last_name:
+        type: string
+        description: Last name of the employee.
+      other_name:
+        type: string
+        description: Additional name information of an employee. In France it can be the "nom d'usage",
+          in Spain it can be the "segundo apellido", in UK it can be the "middle name".
+        optional: true
+      personal_email:
+        type: string
+        description: Personal email of the employee.
+      social_security_number:
+        type: string
+        description: 'Social security number of the employee. Length allowed by country: GB: 12, ES: 14,
+          FR: 15'
+        optional: true
+      personal_address:
+        type: object
+        description: Personal address of the employee.
+        optional: true
+      birth_information:
+        type: object
+        description: Birth information of the employee.
+        optional: true
+      personal_phone_number:
+        type: string
+        description: Personal phone number of the employee.
+        optional: true
+      number_of_children:
+        type: number
+        description: The number of children must be an integer between 0 and 20.
+        optional: true
+      gender:
+        type: string
+        description: Gender of the employee.
+        optional: true
+        enum:
+        - MALE
+        - FEMALE
+      invite_collaborator:
+        type: boolean
+        description: Whether to send an invitation email to the collaborator to access the PayFit platform.
+          This is a beta feature and is only available for some customers for now.
+        optional: true
+    output:
+      description: The collaborator ID.
+      type: object

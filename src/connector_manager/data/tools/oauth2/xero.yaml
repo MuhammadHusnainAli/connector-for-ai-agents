@@ -1,0 +1,580 @@
+# Xero tools.
+#
+# A Xero token can reach several organisations, so every call must name one in
+# the Xero-tenant-id header. `tenant_id` is therefore a required argument on
+# each tool -- list_tenants returns the ids to use.
+#
+# Xero's accounting endpoints take and return arrays even for a single record,
+# which is why the create tools wrap their body in a list.
+#
+# Docs: https://developer.xero.com/documentation/api/accounting/overview
+
+connector_id: xero
+display_name: Xero
+docs_url: https://developer.xero.com/documentation/api/accounting/overview
+
+scope_rules:
+  implies:
+    accounting.transactions: [accounting.transactions.read]
+    accounting.contacts: [accounting.contacts.read]
+    accounting.settings: [accounting.settings.read]
+    accounting.reports.read: [accounting.reports.tenninetynine.read]
+
+tools:
+
+  list_tenants:
+    title: List the organisations this token can reach
+    description: >-
+      List the Xero organisations the connection was granted, with the tenant
+      ids every other tool needs. Call this first.
+    category: connections
+    read_only: true
+    request:
+      method: GET
+      base_url_override: https://api.xero.com
+      path: /connections
+    input: {}
+    output:
+      description: The authorised organisations.
+      type: array
+      items:
+        type: object
+        properties:
+          tenantId: {type: string, description: "Pass as `tenant_id` to every other tool."}
+          tenantName: {type: string}
+          tenantType: {type: string}
+
+  list_contacts:
+    title: List contacts
+    description: >-
+      Page through the organisation's contacts — customers and suppliers alike.
+      Narrow with a Xero `where` clause such as IsCustomer==true.
+    category: contacts
+    scopes_any: [accounting.contacts.read, accounting.contacts]
+    read_only: true
+    request:
+      method: GET
+      path: /api.xro/2.0/Contacts
+      headers:
+        Xero-tenant-id: "${tenant_id}"
+        Accept: application/json
+      query:
+        page: "${page}"
+        where: "${where}"
+        order: "${order}"
+        searchTerm: "${search}"
+    input:
+      tenant_id:
+        type: string
+        description: Xero tenant id, from list_tenants.
+      page:
+        type: integer
+        description: 1-based page number; Xero returns 100 contacts per page.
+        optional: true
+        minimum: 1
+      where:
+        type: string
+        description: Xero filter expression, e.g. IsCustomer==true.
+        optional: true
+      order:
+        type: string
+        description: Sort order, e.g. "Name ASC".
+        optional: true
+      search:
+        type: string
+        description: Free-text search across name, email and contact number.
+        optional: true
+    output:
+      description: A page of contacts.
+      type: array
+      response_path: Contacts
+      items:
+        type: object
+        properties:
+          ContactID: {type: string}
+          Name: {type: string}
+          EmailAddress: {type: string}
+          IsCustomer: {type: boolean}
+
+  create_contact:
+    title: Create a contact
+    description: >-
+      Add a customer or supplier. Name must be unique within the organisation;
+      Xero decides customer or supplier from how the contact is later used.
+    category: contacts
+    scopes: [accounting.contacts]
+    request:
+      method: POST
+      path: /api.xro/2.0/Contacts
+      headers:
+        Xero-tenant-id: "${tenant_id}"
+        Accept: application/json
+      body:
+        Contacts:
+          - Name: "${name}"
+            FirstName: "${first_name}"
+            LastName: "${last_name}"
+            EmailAddress: "${email}"
+            AccountNumber: "${account_number}"
+            Addresses: "${addresses}"
+            Phones: "${phones}"
+    input:
+      tenant_id:
+        type: string
+        description: Xero tenant id, from list_tenants.
+      name:
+        type: string
+        description: Contact name. Must be unique in the organisation.
+      first_name:
+        type: string
+        description: Primary person's first name.
+        optional: true
+      last_name:
+        type: string
+        description: Primary person's last name.
+        optional: true
+      email:
+        type: string
+        description: Primary email address.
+        optional: true
+        format: email
+      account_number:
+        type: string
+        description: Your own account reference for this contact.
+        optional: true
+      addresses:
+        type: array
+        description: Address objects, e.g. [{"AddressType":"STREET","City":"London"}].
+        optional: true
+        items: {type: object}
+      phones:
+        type: array
+        description: Phone objects, e.g. [{"PhoneType":"DEFAULT","PhoneNumber":"555 0100"}].
+        optional: true
+        items: {type: object}
+    output:
+      description: The created contact.
+      type: array
+      response_path: Contacts
+      items:
+        type: object
+        properties:
+          ContactID: {type: string}
+          Name: {type: string}
+
+  list_invoices:
+    title: List invoices
+    description: >-
+      Page through sales invoices and bills. Use a `where` clause such as
+      Status=="AUTHORISED" or Type=="ACCREC" to narrow them.
+    category: invoices
+    scopes_any: [accounting.transactions.read, accounting.transactions]
+    read_only: true
+    request:
+      method: GET
+      path: /api.xro/2.0/Invoices
+      headers:
+        Xero-tenant-id: "${tenant_id}"
+        Accept: application/json
+      query:
+        page: "${page}"
+        where: "${where}"
+        order: "${order}"
+        Statuses: "${statuses}"
+        ContactIDs: "${contact_ids}"
+    input:
+      tenant_id:
+        type: string
+        description: Xero tenant id, from list_tenants.
+      page:
+        type: integer
+        description: 1-based page number; Xero returns 100 invoices per page.
+        optional: true
+        minimum: 1
+      where:
+        type: string
+        description: Xero filter expression.
+        optional: true
+      order:
+        type: string
+        description: Sort order, e.g. "Date DESC".
+        optional: true
+      statuses:
+        type: array
+        description: Only invoices in these states, e.g. ["AUTHORISED","PAID"].
+        optional: true
+        items: {type: string}
+      contact_ids:
+        type: array
+        description: Only invoices for these contact ids.
+        optional: true
+        items: {type: string}
+    output:
+      description: A page of invoices.
+      type: array
+      response_path: Invoices
+      items:
+        type: object
+        properties:
+          InvoiceID: {type: string}
+          InvoiceNumber: {type: string}
+          Type: {type: string}
+          Status: {type: string}
+          Total: {type: number}
+          AmountDue: {type: number}
+
+  create_invoice:
+    title: Create an invoice
+    description: >-
+      Raise a sales invoice (ACCREC) or a bill (ACCPAY). Line items are
+      [{"Description": "Consulting", "Quantity": 2, "UnitAmount": 500,
+      "AccountCode": "200"}]. DRAFT keeps it editable; AUTHORISED posts it.
+    category: invoices
+    scopes: [accounting.transactions]
+    request:
+      method: POST
+      path: /api.xro/2.0/Invoices
+      headers:
+        Xero-tenant-id: "${tenant_id}"
+        Accept: application/json
+      body:
+        Invoices:
+          - Type: "${type}"
+            Contact:
+              ContactID: "${contact_id}"
+            LineItems: "${line_items}"
+            Date: "${date}"
+            DueDate: "${due_date}"
+            Reference: "${reference}"
+            Status: "${status}"
+            CurrencyCode: "${currency}"
+    input:
+      tenant_id:
+        type: string
+        description: Xero tenant id, from list_tenants.
+      contact_id:
+        type: string
+        description: ContactID the invoice is for.
+      line_items:
+        type: array
+        description: Invoice lines, each with Description, Quantity, UnitAmount and AccountCode.
+        items: {type: object}
+      type:
+        type: string
+        description: ACCREC for a sales invoice, ACCPAY for a bill.
+        optional: true
+        default: ACCREC
+        enum: [ACCREC, ACCPAY]
+      date:
+        type: string
+        description: Invoice date as YYYY-MM-DD. Defaults to today.
+        optional: true
+      due_date:
+        type: string
+        description: Due date as YYYY-MM-DD.
+        optional: true
+      reference:
+        type: string
+        description: Reference shown on the invoice.
+        optional: true
+      status:
+        type: string
+        description: DRAFT keeps it editable; AUTHORISED posts it to the ledger.
+        optional: true
+        default: DRAFT
+        enum: [DRAFT, SUBMITTED, AUTHORISED]
+      currency:
+        type: string
+        description: Three-letter currency code. Defaults to the organisation's.
+        optional: true
+    output:
+      description: The created invoice.
+      type: array
+      response_path: Invoices
+      items:
+        type: object
+        properties:
+          InvoiceID: {type: string}
+          InvoiceNumber: {type: string}
+          Total: {type: number}
+
+  email_invoice:
+    title: Email an invoice
+    description: >-
+      Send an authorised invoice to its contact using Xero's own template. The
+      invoice must not be in DRAFT.
+    category: invoices
+    scopes: [accounting.transactions]
+    destructive: true
+    request:
+      method: POST
+      path: /api.xro/2.0/Invoices/${invoice_id}/Email
+      headers:
+        Xero-tenant-id: "${tenant_id}"
+        Accept: application/json
+      body: {}
+    input:
+      tenant_id:
+        type: string
+        description: Xero tenant id, from list_tenants.
+      invoice_id:
+        type: string
+        description: The InvoiceID to send.
+    output:
+      description: Empty on success -- Xero answers 204 No Content.
+      type: object
+
+  list_payments:
+    title: List payments
+    description: List payments recorded against invoices and bills.
+    category: payments
+    scopes_any: [accounting.transactions.read, accounting.transactions]
+    read_only: true
+    request:
+      method: GET
+      path: /api.xro/2.0/Payments
+      headers:
+        Xero-tenant-id: "${tenant_id}"
+        Accept: application/json
+      query:
+        page: "${page}"
+        where: "${where}"
+        order: "${order}"
+    input:
+      tenant_id:
+        type: string
+        description: Xero tenant id, from list_tenants.
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      where:
+        type: string
+        description: Xero filter expression, e.g. Date>=DateTime(2026,01,01).
+        optional: true
+      order:
+        type: string
+        description: Sort order.
+        optional: true
+    output:
+      description: A page of payments.
+      type: array
+      response_path: Payments
+      items: {type: object}
+
+  create_payment:
+    title: Record a payment
+    description: >-
+      Apply a payment to an invoice from a bank account. Both the invoice id and
+      the bank account code are required.
+    category: payments
+    scopes: [accounting.transactions]
+    request:
+      method: PUT
+      path: /api.xro/2.0/Payments
+      headers:
+        Xero-tenant-id: "${tenant_id}"
+        Accept: application/json
+      body:
+        Payments:
+          - Invoice:
+              InvoiceID: "${invoice_id}"
+            Account:
+              Code: "${account_code}"
+            Amount: "${amount}"
+            Date: "${date}"
+            Reference: "${reference}"
+    input:
+      tenant_id:
+        type: string
+        description: Xero tenant id, from list_tenants.
+      invoice_id:
+        type: string
+        description: InvoiceID the payment settles.
+      account_code:
+        type: string
+        description: Code of the bank account the money landed in.
+      amount:
+        type: number
+        description: Amount paid.
+        minimum: 0
+      date:
+        type: string
+        description: Payment date as YYYY-MM-DD. Defaults to today.
+        optional: true
+      reference:
+        type: string
+        description: Reference for the payment.
+        optional: true
+    output:
+      description: The recorded payment.
+      type: array
+      response_path: Payments
+      items:
+        type: object
+        properties:
+          PaymentID: {type: string}
+          Amount: {type: number}
+
+  list_accounts:
+    title: List the chart of accounts
+    description: >-
+      List the organisation's accounts with their codes, which invoice lines and
+      payments refer to.
+    category: settings
+    scopes_any: [accounting.settings.read, accounting.settings]
+    read_only: true
+    request:
+      method: GET
+      path: /api.xro/2.0/Accounts
+      headers:
+        Xero-tenant-id: "${tenant_id}"
+        Accept: application/json
+      query:
+        where: "${where}"
+        order: "${order}"
+    input:
+      tenant_id:
+        type: string
+        description: Xero tenant id, from list_tenants.
+      where:
+        type: string
+        description: Xero filter expression, e.g. Type=="BANK".
+        optional: true
+      order:
+        type: string
+        description: Sort order.
+        optional: true
+    output:
+      description: The chart of accounts.
+      type: array
+      response_path: Accounts
+      items:
+        type: object
+        properties:
+          AccountID: {type: string}
+          Code: {type: string}
+          Name: {type: string}
+          Type: {type: string}
+
+  list_bank_transactions:
+    title: List bank transactions
+    description: List spend and receive transactions recorded against bank accounts.
+    category: banking
+    scopes_any: [accounting.transactions.read, accounting.transactions]
+    read_only: true
+    request:
+      method: GET
+      path: /api.xro/2.0/BankTransactions
+      headers:
+        Xero-tenant-id: "${tenant_id}"
+        Accept: application/json
+      query:
+        page: "${page}"
+        where: "${where}"
+        order: "${order}"
+    input:
+      tenant_id:
+        type: string
+        description: Xero tenant id, from list_tenants.
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      where:
+        type: string
+        description: Xero filter expression.
+        optional: true
+      order:
+        type: string
+        description: Sort order.
+        optional: true
+    output:
+      description: A page of bank transactions.
+      type: array
+      response_path: BankTransactions
+      items: {type: object}
+
+  get_report:
+    title: Run a financial report
+    description: >-
+      Run a Xero report — ProfitAndLoss, BalanceSheet, TrialBalance,
+      AgedReceivablesByContact and the rest — over a date range.
+    category: reports
+    scopes: [accounting.reports.read]
+    read_only: true
+    request:
+      method: GET
+      path: /api.xro/2.0/Reports/${report}
+      headers:
+        Xero-tenant-id: "${tenant_id}"
+        Accept: application/json
+      query:
+        fromDate: "${from_date}"
+        toDate: "${to_date}"
+        date: "${date}"
+        contactID: "${contact_id}"
+    input:
+      tenant_id:
+        type: string
+        description: Xero tenant id, from list_tenants.
+      report:
+        type: string
+        description: Report name, e.g. ProfitAndLoss, BalanceSheet, TrialBalance.
+        example: ProfitAndLoss
+      from_date:
+        type: string
+        description: Period start as YYYY-MM-DD, for range reports.
+        optional: true
+      to_date:
+        type: string
+        description: Period end as YYYY-MM-DD, for range reports.
+        optional: true
+      date:
+        type: string
+        description: As-at date as YYYY-MM-DD, for point-in-time reports like BalanceSheet.
+        optional: true
+      contact_id:
+        type: string
+        description: Contact to scope the report to, where the report supports it.
+        optional: true
+    output:
+      description: The report.
+      type: array
+      response_path: Reports
+      items:
+        type: object
+        properties:
+          ReportName: {type: string}
+          Rows: {type: array}
+
+  get_organisation:
+    title: Get the organisation
+    description: >-
+      Read the Xero organisation's name, country, base currency and financial
+      year end. The cheapest health check once a tenant id is known.
+    category: settings
+    scopes_any: [accounting.settings.read, accounting.settings]
+    read_only: true
+    request:
+      method: GET
+      path: /api.xro/2.0/Organisation
+      headers:
+        Xero-tenant-id: "${tenant_id}"
+        Accept: application/json
+    input:
+      tenant_id:
+        type: string
+        description: Xero tenant id, from list_tenants.
+    output:
+      description: The organisation.
+      type: array
+      response_path: Organisations
+      items:
+        type: object
+        properties:
+          Name: {type: string}
+          CountryCode: {type: string}
+          BaseCurrency: {type: string}

@@ -1,0 +1,361 @@
+# Tally tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://api.tally.so/openapi.json
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: tally
+display_name: Tally
+docs_url: https://api.tally.so/openapi.json
+generated: true
+generated_from: https://api.tally.so/openapi.json
+tools:
+  get_forms:
+    title: Retrieve a list of forms
+    description: Retrieve a list of forms Returns a paginated array of form objects. Calls GET /forms
+      on the provider's API.
+    category: forms
+    request:
+      method: GET
+      path: /forms
+      query:
+        page: ${page}
+        limit: ${limit}
+        workspaceIds: ${workspace_ids}
+    input:
+      page:
+        type: number
+        description: 'Page number for pagination (default: 1)'
+        optional: true
+      limit:
+        type: number
+        description: 'Number of forms per page (default: 50, max: 500)'
+        optional: true
+      workspace_ids:
+        type: array
+        description: Filter forms by specific workspace IDs (encoded strings)
+        optional: true
+        items:
+          type: string
+    output:
+      description: A paginated list of forms
+      type: object
+    read_only: true
+  create_forms:
+    title: Create a new form
+    description: Create a new form Creates a new form, optionally based on a template or within a specific
+      workspace. Calls POST /forms on the provider's API.
+    category: forms
+    request:
+      method: POST
+      path: /forms
+      body:
+        workspaceId: ${workspace_id}
+        templateId: ${template_id}
+        folderId: ${folder_id}
+        status: ${status}
+        blocks: ${blocks}
+        settings: ${settings}
+    input:
+      workspace_id:
+        type: string
+        description: ID of the workspace to create the form in. If not provided, uses the user's default
+          workspace
+        optional: true
+      template_id:
+        type: string
+        description: ID of the template to base the form on
+        optional: true
+      folder_id:
+        type: string
+        description: ID of the folder to place the form in. Must belong to the target workspace.
+        optional: true
+      status:
+        type: string
+        description: Deleting a form is done through DELETE /forms/{formId}, which moves it to the trash
+          so it can be restored.
+        enum:
+        - BLANK
+        - DRAFT
+        - PUBLISHED
+      blocks:
+        type: array
+        description: The blocks field of the request body.
+        items:
+          type: string
+      settings:
+        type: object
+        description: The settings field of the request body.
+        optional: true
+    output:
+      description: Form created successfully
+      type: object
+  get_webhooks:
+    title: List webhooks
+    description: List webhooks Returns a paginated list of all webhooks across your accessible forms and
+      workspaces. Calls GET /webhooks on the provider's API.
+    category: webhooks
+    request:
+      method: GET
+      path: /webhooks
+      query:
+        page: ${page}
+        limit: ${limit}
+    input:
+      page:
+        type: number
+        description: 'Page number for pagination (default: 1)'
+        optional: true
+      limit:
+        type: number
+        description: 'Number of webhooks per page (default: 25, max: 100)'
+        optional: true
+    output:
+      description: List of webhooks
+      type: object
+    read_only: true
+  create_webhooks:
+    title: Create a webhook
+    description: Create a webhook Creates a new webhook for a form to receive form events. Calls POST
+      /webhooks on the provider's API.
+    category: webhooks
+    request:
+      method: POST
+      path: /webhooks
+      body:
+        formId: ${form_id}
+        url: ${url}
+        signingSecret: ${signing_secret}
+        httpHeaders: ${http_headers}
+        eventTypes: ${event_types}
+        externalSubscriber: ${external_subscriber}
+    input:
+      form_id:
+        type: string
+        description: The ID of the form to create the webhook for
+      url:
+        type: string
+        description: The URL to send webhook events to
+      signing_secret:
+        type: string
+        description: Optional secret used to sign webhook payloads
+        optional: true
+      http_headers:
+        type: array
+        description: Optional custom HTTP headers to include in webhook requests
+        optional: true
+        items:
+          type: object
+      event_types:
+        type: array
+        description: Types of events to receive
+        items:
+          type: string
+      external_subscriber:
+        type: string
+        description: Optional identifier for the external subscriber
+        optional: true
+    output:
+      description: Webhook created successfully
+      type: object
+  get_workspaces:
+    title: Retrieve a list of workspaces
+    description: Retrieve a list of workspaces Returns a paginated array of workspace objects with associated
+      users and pending invites. Calls GET /workspaces on the provider's API.
+    category: workspaces
+    request:
+      method: GET
+      path: /workspaces
+      query:
+        page: ${page}
+    input:
+      page:
+        type: number
+        description: 'Page number for pagination (default: 1)'
+        optional: true
+    output:
+      description: A paginated list of workspaces
+      type: object
+    read_only: true
+  create_workspaces:
+    title: Create a new workspace
+    description: Create a new workspace Creates a new workspace and assigns the authenticated user as
+      a member. Requires a Pro subscription. Calls POST /workspaces on the provider's API.
+    category: workspaces
+    request:
+      method: POST
+      path: /workspaces
+      body:
+        name: ${name}
+    input:
+      name:
+        type: string
+        description: The name of the workspace
+    output:
+      description: Workspace created successfully
+      type: object
+  get_users_me:
+    title: Retrieve current user information
+    description: Retrieve current user information Returns information about the current authenticated
+      user. Calls GET /users/me on the provider's API.
+    category: users
+    request:
+      method: GET
+      path: /users/me
+      query:
+        timezone: ${timezone}
+    input:
+      timezone:
+        type: string
+        description: IANA timezone identifier (e.g., Europe/Brussels). When provided, updates the user's
+          stored timezone.
+        optional: true
+    output:
+      description: User information retrieved successfully
+      type: object
+    read_only: true
+  delete_forms:
+    title: Delete a form
+    description: Delete a form Deletes a form by its ID and moves it to the trash. Calls DELETE /forms/{formId}
+      on the provider's API.
+    category: forms
+    request:
+      method: DELETE
+      path: /forms/${form_id}
+    input:
+      form_id:
+        type: string
+        description: The ID of the form to delete
+    output:
+      description: Form successfully deleted
+      type: object
+    destructive: true
+  get_forms_alt:
+    title: Retrieve a form
+    description: Retrieve a form Returns a single form by its ID with all its blocks and settings. Calls
+      GET /forms/{formId} on the provider's API.
+    category: forms
+    request:
+      method: GET
+      path: /forms/${form_id}
+    input:
+      form_id:
+        type: string
+        description: The ID of the form to retrieve
+    output:
+      description: Form retrieved successfully
+      type: object
+    read_only: true
+  update_forms:
+    title: Update a form
+    description: Update a form Updates a form's settings, blocks, or status. Calls PATCH /forms/{formId}
+      on the provider's API.
+    category: forms
+    request:
+      method: PATCH
+      path: /forms/${form_id}
+      body:
+        name: ${name}
+        status: ${status}
+        blocks: ${blocks}
+        settings: ${settings}
+    input:
+      form_id:
+        type: string
+        description: The ID of the form to update
+      name:
+        type: string
+        description: New name for the form
+        optional: true
+      status:
+        type: string
+        description: Deleting a form is done through DELETE /forms/{formId}, which moves it to the trash
+          so it can be restored.
+        optional: true
+        enum:
+        - BLANK
+        - DRAFT
+        - PUBLISHED
+      blocks:
+        type: array
+        description: Updated blocks for the form
+        optional: true
+        items:
+          type: string
+      settings:
+        type: object
+        description: The settings field of the request body.
+        optional: true
+    output:
+      description: Form updated successfully
+      type: object
+  delete_webhooks:
+    title: Delete a webhook
+    description: Delete a webhook Deletes a webhook. If this is the last webhook for a form, the webhooks
+      integration will also be marked as deleted. Calls DELETE /webhooks/{webhookId} on the provider's
+      API.
+    category: webhooks
+    request:
+      method: DELETE
+      path: /webhooks/${webhook_id}
+    input:
+      webhook_id:
+        type: string
+        description: The ID of the webhook to delete
+    output:
+      description: Webhook deleted successfully
+      type: object
+    destructive: true
+  update_webhooks:
+    title: Update a webhook
+    description: Update a webhook Updates an existing webhook configuration. Calls PATCH /webhooks/{webhookId}
+      on the provider's API.
+    category: webhooks
+    request:
+      method: PATCH
+      path: /webhooks/${webhook_id}
+      body:
+        formId: ${form_id}
+        url: ${url}
+        signingSecret: ${signing_secret}
+        httpHeaders: ${http_headers}
+        eventTypes: ${event_types}
+        isEnabled: ${is_enabled}
+    input:
+      webhook_id:
+        type: string
+        description: The ID of the webhook to update
+      form_id:
+        type: string
+        description: The ID of the form the webhook is for
+      url:
+        type: string
+        description: The URL to send webhook events to
+      signing_secret:
+        type: string
+        description: Optional secret used to sign webhook payloads
+        optional: true
+      http_headers:
+        type: array
+        description: Optional custom HTTP headers to include in webhook requests
+        optional: true
+        items:
+          type: object
+      event_types:
+        type: array
+        description: Types of events to receive
+        items:
+          type: string
+      is_enabled:
+        type: boolean
+        description: Whether the webhook is enabled
+    output:
+      description: Webhook updated successfully
+      type: object

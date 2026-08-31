@@ -1,0 +1,556 @@
+# Jira Cloud tools.
+#
+# Jira Cloud is addressed through Atlassian's gateway, so every path carries the
+# site's cloud id: /ex/jira/${cloudId}/rest/api/3/... The RequestBuilder fills
+# ${cloudId} from the connection's config, which the OAuth callback records --
+# it is not a tool argument.
+#
+# Docs: https://developer.atlassian.com/cloud/jira/platform/rest/v3/
+
+connector_id: jira
+display_name: Jira
+docs_url: https://developer.atlassian.com/cloud/jira/platform/rest/v3/
+
+scope_rules:
+  implies:
+    write:jira-work: ["read:jira-work"]
+    manage:jira-project: ["write:jira-work", "read:jira-work"]
+    manage:jira-configuration: ["read:jira-work"]
+
+tools:
+
+  search_issues:
+    title: Search issues with JQL
+    description: >-
+      Run a JQL query -- "project = ENG AND status != Done ORDER BY created DESC",
+      "assignee = currentUser() AND sprint in openSprints()". The primary way to
+      find issues in Jira.
+    category: issues
+    scopes: ["read:jira-work"]
+    read_only: true
+    request:
+      method: POST
+      path: /ex/jira/${cloudId}/rest/api/3/search/jql
+      body:
+        jql: "${jql}"
+        maxResults: "${limit}"
+        nextPageToken: "${next_page_token}"
+        fields: "${fields}"
+    input:
+      jql:
+        type: string
+        description: The JQL query.
+        example: project = ENG AND status != Done
+      limit:
+        type: integer
+        description: How many issues per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      next_page_token:
+        type: string
+        description: Cursor from the previous response's nextPageToken.
+        optional: true
+      fields:
+        type: array
+        description: Fields to return, e.g. ["summary","status","assignee"]. Use ["*all"] for everything.
+        optional: true
+        items: {type: string}
+    output:
+      description: Matching issues with the cursor for the next page.
+      type: object
+      properties:
+        issues: {type: array}
+        nextPageToken: {type: string}
+        isLast: {type: boolean}
+
+  get_issue:
+    title: Get an issue
+    description: >-
+      Read one issue by its key (ENG-123) or numeric id, with its fields,
+      status, assignee and optionally its comments and change history.
+    category: issues
+    scopes: ["read:jira-work"]
+    read_only: true
+    request:
+      method: GET
+      path: /ex/jira/${cloudId}/rest/api/3/issue/${issue_key}
+      query:
+        fields: "${fields}"
+        expand: "${expand}"
+    input:
+      issue_key:
+        type: string
+        description: Issue key like ENG-123, or its numeric id.
+        example: ENG-123
+      fields:
+        type: array
+        description: Fields to return. Omit for the default set.
+        optional: true
+        items: {type: string}
+      expand:
+        type: array
+        description: Extra sections to inline, e.g. ["changelog","renderedFields"].
+        optional: true
+        items: {type: string}
+    output:
+      description: The issue.
+      type: object
+      properties:
+        id: {type: string}
+        key: {type: string}
+        fields: {type: object, description: "summary, status, assignee, description and the rest."}
+
+  create_issue:
+    title: Create an issue
+    description: >-
+      Create an issue in a project. The description takes Atlassian Document
+      Format, not plain text -- {"type":"doc","version":1,"content":[...]}.
+      Fields beyond the standard ones go in extra_fields by their field id.
+    category: issues
+    scopes: ["write:jira-work"]
+    request:
+      method: POST
+      path: /ex/jira/${cloudId}/rest/api/3/issue
+      body:
+        fields:
+          project: {key: "${project_key}"}
+          summary: "${summary}"
+          issuetype: {name: "${issue_type}"}
+          description: "${description}"
+          assignee: {id: "${assignee_account_id}"}
+          priority: {name: "${priority}"}
+          labels: "${labels}"
+          parent: {key: "${parent_key}"}
+        update: "${extra_fields}"
+    input:
+      project_key:
+        type: string
+        description: Project key the issue belongs to, e.g. ENG.
+      summary:
+        type: string
+        description: The issue's one-line summary.
+      issue_type:
+        type: string
+        description: Issue type name, e.g. Task, Bug, Story, Epic, Sub-task.
+        example: Task
+      description:
+        type: object
+        description: Description in Atlassian Document Format.
+        optional: true
+      assignee_account_id:
+        type: string
+        description: Atlassian account id to assign it to, from search_users.
+        optional: true
+      priority:
+        type: string
+        description: Priority name, e.g. High. Only where the project uses priorities.
+        optional: true
+      labels:
+        type: array
+        description: Labels to apply.
+        optional: true
+        items: {type: string}
+      parent_key:
+        type: string
+        description: Parent issue key, for a sub-task or an epic child.
+        optional: true
+      extra_fields:
+        type: object
+        description: Raw update operations for fields the arguments do not cover.
+        optional: true
+    output:
+      description: The created issue.
+      type: object
+      properties:
+        id: {type: string}
+        key: {type: string, description: "The new issue key, e.g. ENG-124."}
+        self: {type: string}
+
+  update_issue:
+    title: Update an issue
+    description: >-
+      Change an issue's fields. Only what is supplied is written. To move an
+      issue between statuses use transition_issue instead -- status is not a
+      writable field.
+    category: issues
+    scopes: ["write:jira-work"]
+    request:
+      method: PUT
+      path: /ex/jira/${cloudId}/rest/api/3/issue/${issue_key}
+      query:
+        notifyUsers: "${notify_users}"
+      body:
+        fields:
+          summary: "${summary}"
+          description: "${description}"
+          assignee: {id: "${assignee_account_id}"}
+          priority: {name: "${priority}"}
+          labels: "${labels}"
+          duedate: "${due_date}"
+    input:
+      issue_key:
+        type: string
+        description: Issue key or id.
+      summary:
+        type: string
+        description: New summary.
+        optional: true
+      description:
+        type: object
+        description: New description, in Atlassian Document Format.
+        optional: true
+      assignee_account_id:
+        type: string
+        description: New assignee's Atlassian account id.
+        optional: true
+      priority:
+        type: string
+        description: New priority name.
+        optional: true
+      labels:
+        type: array
+        description: Replaces the label set entirely.
+        optional: true
+        items: {type: string}
+      due_date:
+        type: string
+        description: Due date as YYYY-MM-DD.
+        optional: true
+      notify_users:
+        type: boolean
+        description: Email the watchers about the change.
+        optional: true
+    output:
+      description: Empty on success -- Jira answers 204 No Content.
+      type: object
+
+  transition_issue:
+    title: Move an issue to another status
+    description: >-
+      Move an issue through its workflow. Statuses are changed by transition id,
+      not by name; list_transitions returns the ones available right now.
+    category: issues
+    scopes: ["write:jira-work"]
+    request:
+      method: POST
+      path: /ex/jira/${cloudId}/rest/api/3/issue/${issue_key}/transitions
+      body:
+        transition: {id: "${transition_id}"}
+        fields: "${fields}"
+    input:
+      issue_key:
+        type: string
+        description: Issue key or id.
+      transition_id:
+        type: string
+        description: Transition id from list_transitions.
+      fields:
+        type: object
+        description: Fields the transition screen requires, e.g. a resolution.
+        optional: true
+    output:
+      description: Empty on success -- Jira answers 204 No Content.
+      type: object
+
+  list_transitions:
+    title: List an issue's available transitions
+    description: >-
+      List the workflow transitions this issue can take right now, with the ids
+      transition_issue needs and the target status of each.
+    category: issues
+    scopes: ["read:jira-work"]
+    read_only: true
+    request:
+      method: GET
+      path: /ex/jira/${cloudId}/rest/api/3/issue/${issue_key}/transitions
+    input:
+      issue_key:
+        type: string
+        description: Issue key or id.
+    output:
+      description: The available transitions.
+      type: object
+      properties:
+        transitions: {type: array, description: "Each with id, name and the target status."}
+
+  comment_on_issue:
+    title: Comment on an issue
+    description: >-
+      Add a comment. The body is Atlassian Document Format, so plain text goes
+      in as a doc with one paragraph.
+    category: issues
+    scopes: ["write:jira-work"]
+    request:
+      method: POST
+      path: /ex/jira/${cloudId}/rest/api/3/issue/${issue_key}/comment
+      body:
+        body: "${body}"
+        visibility: "${visibility}"
+    input:
+      issue_key:
+        type: string
+        description: Issue key or id.
+      body:
+        type: object
+        description: >-
+          The comment in Atlassian Document Format, e.g. {"type":"doc",
+          "version":1,"content":[{"type":"paragraph","content":[{"type":"text",
+          "text":"Looks good"}]}]}.
+      visibility:
+        type: object
+        description: Restrict who can see it, e.g. {"type":"role","value":"Administrators"}.
+        optional: true
+    output:
+      description: The created comment.
+      type: object
+      properties:
+        id: {type: string}
+        author: {type: object}
+        created: {type: string}
+
+  list_comments:
+    title: List an issue's comments
+    description: Read the comment thread on an issue, oldest first.
+    category: issues
+    scopes: ["read:jira-work"]
+    read_only: true
+    request:
+      method: GET
+      path: /ex/jira/${cloudId}/rest/api/3/issue/${issue_key}/comment
+      query:
+        maxResults: "${limit}"
+        startAt: "${start_at}"
+        orderBy: "${order_by}"
+    input:
+      issue_key:
+        type: string
+        description: Issue key or id.
+      limit:
+        type: integer
+        description: How many comments per page.
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      start_at:
+        type: integer
+        description: Zero-based index to start from.
+        optional: true
+        minimum: 0
+      order_by:
+        type: string
+        description: Sort order, e.g. "created" or "-created".
+        optional: true
+    output:
+      description: A page of comments.
+      type: object
+      properties:
+        comments: {type: array}
+        total: {type: integer}
+
+  assign_issue:
+    title: Assign an issue
+    description: >-
+      Set an issue's assignee by Atlassian account id. Pass null to unassign,
+      or "-1" to hand it to the project's default assignee.
+    category: issues
+    scopes: ["write:jira-work"]
+    request:
+      method: PUT
+      path: /ex/jira/${cloudId}/rest/api/3/issue/${issue_key}/assignee
+      body:
+        accountId: "${account_id}"
+    input:
+      issue_key:
+        type: string
+        description: Issue key or id.
+      account_id:
+        type: string
+        description: Atlassian account id of the new assignee.
+    output:
+      description: Empty on success -- Jira answers 204 No Content.
+      type: object
+
+  add_issue_worklog:
+    title: Log work on an issue
+    description: >-
+      Record time spent on an issue, e.g. "3h 30m", optionally backdated and
+      with a comment.
+    category: issues
+    scopes: ["write:jira-work"]
+    request:
+      method: POST
+      path: /ex/jira/${cloudId}/rest/api/3/issue/${issue_key}/worklog
+      body:
+        timeSpent: "${time_spent}"
+        started: "${started}"
+        comment: "${comment}"
+    input:
+      issue_key:
+        type: string
+        description: Issue key or id.
+      time_spent:
+        type: string
+        description: Time in Jira's format, e.g. "3h 30m" or "1d".
+        example: 3h 30m
+      started:
+        type: string
+        description: When the work started, ISO 8601 with offset. Defaults to now.
+        optional: true
+      comment:
+        type: object
+        description: What was done, in Atlassian Document Format.
+        optional: true
+    output:
+      description: The created worklog entry.
+      type: object
+      properties:
+        id: {type: string}
+        timeSpentSeconds: {type: integer}
+
+  list_projects:
+    title: List projects
+    description: >-
+      List the site's projects with their keys, which create_issue and JQL both
+      take.
+    category: projects
+    scopes: ["read:jira-work"]
+    read_only: true
+    request:
+      method: GET
+      path: /ex/jira/${cloudId}/rest/api/3/project/search
+      query:
+        maxResults: "${limit}"
+        startAt: "${start_at}"
+        query: "${query}"
+        orderBy: "${order_by}"
+    input:
+      limit:
+        type: integer
+        description: How many projects per page.
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      start_at:
+        type: integer
+        description: Zero-based index to start from.
+        optional: true
+        minimum: 0
+      query:
+        type: string
+        description: Match against project name and key.
+        optional: true
+      order_by:
+        type: string
+        description: Sort order, e.g. "name" or "-lastIssueUpdatedTime".
+        optional: true
+    output:
+      description: A page of projects.
+      type: object
+      properties:
+        values: {type: array, description: "Each with id, key and name."}
+        total: {type: integer}
+
+  list_issue_types:
+    title: List a project's issue types
+    description: >-
+      List the issue types a project accepts, with their names -- which is what
+      create_issue's issue_type argument must match.
+    category: projects
+    scopes: ["read:jira-work"]
+    read_only: true
+    request:
+      method: GET
+      path: /ex/jira/${cloudId}/rest/api/3/issue/createmeta/${project_key}/issuetypes
+    input:
+      project_key:
+        type: string
+        description: Project key, e.g. ENG.
+    output:
+      description: The project's issue types.
+      type: object
+      properties:
+        issueTypes: {type: array, description: "Each with id, name and whether it is a subtask."}
+
+  search_users:
+    title: Find users
+    description: >-
+      Search the site's users by name or email and return their Atlassian
+      account ids, which the assignee arguments take.
+    category: users
+    scopes: ["read:jira-user"]
+    read_only: true
+    request:
+      method: GET
+      path: /ex/jira/${cloudId}/rest/api/3/user/search
+      query:
+        query: "${query}"
+        maxResults: "${limit}"
+    input:
+      query:
+        type: string
+        description: Name or email fragment to match.
+      limit:
+        type: integer
+        description: How many users to return.
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 1000
+    output:
+      description: Matching users.
+      type: array
+      items:
+        type: object
+        properties:
+          accountId: {type: string}
+          displayName: {type: string}
+          emailAddress: {type: string}
+
+  get_myself:
+    title: Get the authenticated user
+    description: >-
+      Read the Jira account the token belongs to, with its account id and time
+      zone. The cheapest health check for a Jira connection.
+    category: users
+    scopes: ["read:jira-user"]
+    read_only: true
+    request:
+      method: GET
+      path: /ex/jira/${cloudId}/rest/api/3/myself
+    input: {}
+    output:
+      description: The authenticated user.
+      type: object
+      properties:
+        accountId: {type: string}
+        displayName: {type: string}
+        emailAddress: {type: string}
+        timeZone: {type: string}
+
+  list_accessible_sites:
+    title: List the Atlassian sites this token can reach
+    description: >-
+      List the Jira and Confluence sites the token was granted, with the cloud
+      id each one is addressed by. Call this first when the connection's cloudId
+      is not already recorded.
+    category: sites
+    read_only: true
+    request:
+      method: GET
+      base_url_override: https://api.atlassian.com
+      path: /oauth/token/accessible-resources
+    input: {}
+    output:
+      description: The sites the token can reach.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: string, description: "The cloud id -- record it as the connection's cloudId."}
+          name: {type: string}
+          url: {type: string}
+          scopes: {type: array}

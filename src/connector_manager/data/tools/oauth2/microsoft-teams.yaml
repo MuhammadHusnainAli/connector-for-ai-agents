@@ -1,0 +1,594 @@
+# Microsoft Teams tools (Microsoft Graph).
+#
+# Teams shares Graph with Outlook but a completely different slice of it, so it
+# gets its own pack rather than riding on `microsoft`.
+#
+# Message bodies are HTML by default. A channel message is addressed by team id
+# plus channel id; a chat message only by chat id.
+#
+# Docs: https://learn.microsoft.com/graph/api/resources/teams-api-overview
+
+connector_id: microsoft-teams
+display_name: Microsoft Teams
+docs_url: https://learn.microsoft.com/graph/api/resources/teams-api-overview
+
+scope_rules:
+  case_insensitive: true
+  implies:
+    Chat.ReadWrite: [Chat.Read, Chat.ReadBasic, ChatMessage.Send]
+    Chat.Read: [Chat.ReadBasic]
+    ChannelMessage.ReadWrite: [ChannelMessage.Read.All, ChannelMessage.Send]
+    Group.ReadWrite.All: [Group.Read.All, Team.ReadBasic.All, Channel.ReadBasic.All, TeamMember.Read.All]
+    Team.ReadBasic.All: [Channel.ReadBasic.All]
+    TeamMember.ReadWrite.All: [TeamMember.Read.All]
+    Channel.Create: [Channel.ReadBasic.All]
+    OnlineMeetings.ReadWrite: [OnlineMeetings.Read]
+
+scope_discovery:
+  jwt_claim: scp
+
+tools:
+
+  list_my_teams:
+    title: List the teams I am in
+    description: >-
+      List the teams the signed-in user belongs to, with the ids every channel
+      and message tool takes. Start here.
+    category: teams
+    scopes: [Team.ReadBasic.All]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/joinedTeams
+      query:
+        $top: "${limit}"
+        $select: "${select}"
+    input:
+      limit:
+        type: integer
+        description: How many teams to return.
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 999
+      select:
+        type: array
+        description: Fields to return, e.g. ["id","displayName","description"].
+        optional: true
+        items: {type: string}
+    output:
+      description: The teams the user is a member of.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string, description: "Team id -- what the channel tools take."}
+          displayName: {type: string}
+          description: "{type: string}"
+
+  list_channels:
+    title: List a team's channels
+    description: >-
+      List the channels in a team with their ids. The General channel is always
+      present and is where a team's default conversation lives.
+    category: channels
+    scopes: [Channel.ReadBasic.All]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/teams/${team_id}/channels
+      query:
+        $filter: "${filter}"
+    input:
+      team_id:
+        type: string
+        description: The team id, from list_my_teams.
+      filter:
+        type: string
+        description: OData $filter expression, e.g. "membershipType eq 'private'".
+        optional: true
+    output:
+      description: The team's channels.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          displayName: {type: string}
+          membershipType: {type: string}
+          webUrl: {type: string}
+
+  list_channel_messages:
+    title: Read a channel's messages
+    description: >-
+      Read the top-level messages posted in a channel, newest first. Threaded
+      replies are fetched separately with list_message_replies.
+    category: channels
+    scopes: [ChannelMessage.Read.All]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/teams/${team_id}/channels/${channel_id}/messages
+      query:
+        $top: "${limit}"
+    input:
+      team_id:
+        type: string
+        description: The team id.
+      channel_id:
+        type: string
+        description: The channel id, from list_channels.
+      limit:
+        type: integer
+        description: How many messages to return (1-50).
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 50
+    output:
+      description: The channel's messages.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string, description: "Message id -- pass to reply_to_channel_message."}
+          body: {type: object}
+          from: {type: object}
+          createdDateTime: {type: string}
+
+  send_channel_message:
+    title: Post a message to a channel
+    description: >-
+      Post a new top-level message into a team channel. The body is HTML by
+      default, so <b>bold</b> and <a href> work; mentions need the full Graph
+      mention payload, which this tool does not build.
+    category: channels
+    scopes: [ChannelMessage.Send]
+    destructive: true
+    request:
+      method: POST
+      path: /v1.0/teams/${team_id}/channels/${channel_id}/messages
+      body:
+        subject: "${subject}"
+        body:
+          contentType: "${content_type}"
+          content: "${content}"
+        importance: "${importance}"
+    input:
+      team_id:
+        type: string
+        description: The team id.
+      channel_id:
+        type: string
+        description: The channel id.
+      content:
+        type: string
+        description: The message body.
+      content_type:
+        type: string
+        description: Whether the content is HTML markup or plain text.
+        optional: true
+        default: html
+        enum: [html, text]
+      subject:
+        type: string
+        description: Optional subject line, shown in bold above the message.
+        optional: true
+      importance:
+        type: string
+        description: Message importance.
+        optional: true
+        enum: [normal, high, urgent]
+    output:
+      description: The posted message.
+      type: object
+      properties:
+        id: {type: string}
+        webUrl: {type: string}
+        createdDateTime: {type: string}
+
+  reply_to_channel_message:
+    title: Reply in a channel thread
+    description: >-
+      Post a reply underneath an existing channel message, keeping the
+      conversation threaded rather than starting a new one.
+    category: channels
+    scopes: [ChannelMessage.Send]
+    destructive: true
+    request:
+      method: POST
+      path: /v1.0/teams/${team_id}/channels/${channel_id}/messages/${message_id}/replies
+      body:
+        body:
+          contentType: "${content_type}"
+          content: "${content}"
+    input:
+      team_id:
+        type: string
+        description: The team id.
+      channel_id:
+        type: string
+        description: The channel id.
+      message_id:
+        type: string
+        description: The message being replied to.
+      content:
+        type: string
+        description: The reply body.
+      content_type:
+        type: string
+        description: Whether the content is HTML markup or plain text.
+        optional: true
+        default: html
+        enum: [html, text]
+    output:
+      description: The posted reply.
+      type: object
+      properties:
+        id: {type: string}
+        createdDateTime: {type: string}
+
+  list_message_replies:
+    title: Read a channel thread's replies
+    description: Read the replies under one channel message, oldest first.
+    category: channels
+    scopes: [ChannelMessage.Read.All]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/teams/${team_id}/channels/${channel_id}/messages/${message_id}/replies
+      query:
+        $top: "${limit}"
+    input:
+      team_id:
+        type: string
+        description: The team id.
+      channel_id:
+        type: string
+        description: The channel id.
+      message_id:
+        type: string
+        description: The parent message id.
+      limit:
+        type: integer
+        description: How many replies to return (1-50).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 50
+    output:
+      description: The thread's replies.
+      type: array
+      response_path: value
+      items: {type: object}
+
+  create_channel:
+    title: Create a channel
+    description: >-
+      Add a channel to a team. A standard channel is visible to every member; a
+      private one only to the members added to it.
+    category: channels
+    scopes: [Channel.Create]
+    request:
+      method: POST
+      path: /v1.0/teams/${team_id}/channels
+      body:
+        displayName: "${name}"
+        description: "${description}"
+        membershipType: "${membership_type}"
+    input:
+      team_id:
+        type: string
+        description: The team to add the channel to.
+      name:
+        type: string
+        description: Channel name.
+      description:
+        type: string
+        description: What the channel is for.
+        optional: true
+      membership_type:
+        type: string
+        description: Who can see the channel.
+        optional: true
+        default: standard
+        enum: [standard, private, shared]
+    output:
+      description: The created channel.
+      type: object
+      properties:
+        id: {type: string}
+        displayName: {type: string}
+        webUrl: {type: string}
+
+  list_team_members:
+    title: List a team's members
+    description: List who is in a team, with their roles and Entra user ids.
+    category: teams
+    scopes: [TeamMember.Read.All]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/teams/${team_id}/members
+      query:
+        $top: "${limit}"
+    input:
+      team_id:
+        type: string
+        description: The team id.
+      limit:
+        type: integer
+        description: How many members to return.
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 999
+    output:
+      description: The team's members.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          displayName: {type: string}
+          email: {type: string}
+          roles: {type: array}
+
+  add_team_member:
+    title: Add someone to a team
+    description: >-
+      Add a user to a team, optionally as an owner. The user id is an Entra
+      object id, not an email address.
+    category: teams
+    scopes: [TeamMember.ReadWrite.All]
+    request:
+      method: POST
+      path: /v1.0/teams/${team_id}/members
+      body:
+        "@odata.type": "#microsoft.graph.aadUserConversationMember"
+        roles: "${roles}"
+        "user@odata.bind": "https://graph.microsoft.com/v1.0/users('${user_id}')"
+    input:
+      team_id:
+        type: string
+        description: The team to add them to.
+      user_id:
+        type: string
+        description: Entra object id of the user.
+      roles:
+        type: array
+        description: Roles to grant, e.g. ["owner"]. Omit for an ordinary member.
+        optional: true
+        items: {type: string}
+    output:
+      description: The new membership.
+      type: object
+      properties:
+        id: {type: string}
+        displayName: {type: string}
+        roles: {type: array}
+
+  list_my_chats:
+    title: List my chats
+    description: >-
+      List the one-to-one and group chats the signed-in user is in, with the
+      chat ids the message tools take.
+    category: chats
+    scopes_any: [Chat.Read, Chat.ReadBasic, Chat.ReadWrite]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/chats
+      query:
+        $top: "${limit}"
+        $filter: "${filter}"
+        $expand: "${expand}"
+    input:
+      limit:
+        type: integer
+        description: How many chats to return (1-50).
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 50
+      filter:
+        type: string
+        description: OData $filter expression, e.g. "chatType eq 'oneOnOne'".
+        optional: true
+      expand:
+        type: array
+        description: Related data to inline, e.g. ["members"].
+        optional: true
+        items: {type: string}
+    output:
+      description: The user's chats.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          topic: {type: string}
+          chatType: {type: string}
+          lastUpdatedDateTime: {type: string}
+
+  list_chat_messages:
+    title: Read a chat's messages
+    description: Read the messages in one chat, newest first.
+    category: chats
+    scopes_any: [Chat.Read, Chat.ReadWrite]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/chats/${chat_id}/messages
+      query:
+        $top: "${limit}"
+    input:
+      chat_id:
+        type: string
+        description: The chat id, from list_my_chats.
+      limit:
+        type: integer
+        description: How many messages to return (1-50).
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 50
+    output:
+      description: The chat's messages.
+      type: array
+      response_path: value
+      items: {type: object}
+
+  send_chat_message:
+    title: Send a chat message
+    description: >-
+      Send a message into an existing chat. To start a new conversation, create
+      the chat with create_chat first and send to the id it returns.
+    category: chats
+    scopes_any: [ChatMessage.Send, Chat.ReadWrite]
+    destructive: true
+    request:
+      method: POST
+      path: /v1.0/chats/${chat_id}/messages
+      body:
+        body:
+          contentType: "${content_type}"
+          content: "${content}"
+    input:
+      chat_id:
+        type: string
+        description: The chat to post into.
+      content:
+        type: string
+        description: The message body.
+      content_type:
+        type: string
+        description: Whether the content is HTML markup or plain text.
+        optional: true
+        default: html
+        enum: [html, text]
+    output:
+      description: The sent message.
+      type: object
+      properties:
+        id: {type: string}
+        createdDateTime: {type: string}
+
+  create_chat:
+    title: Start a chat with someone
+    description: >-
+      Create a one-to-one or group chat and return its id, which
+      send_chat_message then posts to. Members are Entra object ids; a
+      one-to-one chat needs exactly two, including the signed-in user.
+    category: chats
+    scopes: [Chat.Create]
+    request:
+      method: POST
+      path: /v1.0/chats
+      body:
+        chatType: "${chat_type}"
+        topic: "${topic}"
+        members:
+          $map:
+            source: "${user_ids}"
+            template:
+              "@odata.type": "#microsoft.graph.aadUserConversationMember"
+              roles: [owner]
+              "user@odata.bind": "https://graph.microsoft.com/v1.0/users('${item}')"
+    input:
+      user_ids:
+        type: array
+        description: Entra object ids of everyone in the chat, the signed-in user included.
+        items: {type: string}
+      chat_type:
+        type: string
+        description: One-to-one or group.
+        optional: true
+        default: group
+        enum: [oneOnOne, group]
+      topic:
+        type: string
+        description: Group chat title. Ignored for a one-to-one chat.
+        optional: true
+    output:
+      description: The created chat.
+      type: object
+      properties:
+        id: {type: string, description: "Chat id -- pass to send_chat_message."}
+        chatType: {type: string}
+
+  create_online_meeting:
+    title: Create a Teams meeting
+    description: >-
+      Create a Teams meeting for the signed-in user and return its join URL,
+      without putting it on anyone's calendar. For a calendar invitation, use
+      the Microsoft 365 connector's create_event with is_online_meeting instead.
+    category: meetings
+    scopes: [OnlineMeetings.ReadWrite]
+    request:
+      method: POST
+      path: /v1.0/me/onlineMeetings
+      body:
+        subject: "${subject}"
+        startDateTime: "${start}"
+        endDateTime: "${end}"
+        allowedPresenters: "${allowed_presenters}"
+        isEntryExitAnnounced: "${announce_entry_exit}"
+    input:
+      subject:
+        type: string
+        description: The meeting's title.
+      start:
+        type: string
+        description: Start time, ISO 8601 with an offset, e.g. 2026-09-01T14:00:00Z.
+        optional: true
+      end:
+        type: string
+        description: End time, ISO 8601 with an offset.
+        optional: true
+      allowed_presenters:
+        type: string
+        description: Who may present.
+        optional: true
+        enum: [everyone, organization, roleIsPresenter, organizer, unknown]
+      announce_entry_exit:
+        type: boolean
+        description: Announce people joining and leaving.
+        optional: true
+    output:
+      description: The created meeting.
+      type: object
+      properties:
+        id: {type: string}
+        joinWebUrl: {type: string, description: "The link attendees open."}
+        subject: {type: string}
+
+  get_team:
+    title: Get a team
+    description: >-
+      Read one team's name, description, visibility and settings. Also the
+      cheapest health check for a Teams connection once a team id is known.
+    category: teams
+    scopes: [Team.ReadBasic.All]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/teams/${team_id}
+    input:
+      team_id:
+        type: string
+        description: The team id.
+    output:
+      description: The team.
+      type: object
+      properties:
+        id: {type: string}
+        displayName: {type: string}
+        description: "{type: string}"
+        visibility: {type: string}
+        webUrl: {type: string}

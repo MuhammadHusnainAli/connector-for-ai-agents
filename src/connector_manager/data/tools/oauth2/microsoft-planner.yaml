@@ -1,0 +1,400 @@
+# Microsoft Planner tools (Microsoft Graph).
+#
+# Plans belong to Microsoft 365 groups, so listing a group's plans needs the
+# group's id. Updating or deleting a task requires the task's current ETag in an
+# If-Match header — read it from a get_task response's @odata.etag and pass it
+# as `etag`.
+#
+# Docs: https://learn.microsoft.com/graph/api/resources/planner-overview
+
+connector_id: microsoft-planner
+display_name: Microsoft Planner
+docs_url: https://learn.microsoft.com/graph/api/resources/planner-overview
+
+scope_rules:
+  case_insensitive: true
+  implies:
+    Tasks.ReadWrite: [Tasks.Read]
+    Group.ReadWrite.All: [Group.Read.All]
+
+scope_discovery:
+  jwt_claim: scp
+
+tools:
+
+  list_my_tasks:
+    title: List the tasks assigned to me
+    description: >-
+      List every Planner task assigned to the signed-in user, across all their
+      plans. The fastest answer to "what is on my plate".
+    category: tasks
+    scopes: [Tasks.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/planner/tasks
+      query:
+        $filter: "${filter}"
+        $top: "${limit}"
+    input:
+      filter:
+        type: string
+        description: OData $filter expression, e.g. "percentComplete ne 100".
+        optional: true
+      limit:
+        type: integer
+        description: How many tasks to return.
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 999
+    output:
+      description: The user's tasks.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          title: "{type: string}"
+          planId: {type: string}
+          bucketId: {type: string}
+          percentComplete: {type: integer}
+          dueDateTime: {type: string}
+
+  list_group_plans:
+    title: List a group's plans
+    description: >-
+      List the Planner plans owned by a Microsoft 365 group, with the plan ids
+      the task tools take.
+    category: plans
+    scopes: [Group.Read.All]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/groups/${group_id}/planner/plans
+    input:
+      group_id:
+        type: string
+        description: The Microsoft 365 group's object id.
+    output:
+      description: The group's plans.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          title: "{type: string}"
+          owner: {type: string}
+
+  list_plan_tasks:
+    title: List a plan's tasks
+    description: List every task in a plan, whoever it is assigned to.
+    category: tasks
+    scopes: [Tasks.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/planner/plans/${plan_id}/tasks
+      query:
+        $filter: "${filter}"
+        $top: "${limit}"
+    input:
+      plan_id:
+        type: string
+        description: The plan id.
+      filter:
+        type: string
+        description: OData $filter expression.
+        optional: true
+      limit:
+        type: integer
+        description: How many tasks to return.
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 999
+    output:
+      description: The plan's tasks.
+      type: array
+      response_path: value
+      items: {type: object}
+
+  list_buckets:
+    title: List a plan's buckets
+    description: >-
+      List a plan's buckets — the columns tasks are grouped into — with the ids
+      create_task takes.
+    category: plans
+    scopes: [Tasks.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/planner/plans/${plan_id}/buckets
+    input:
+      plan_id:
+        type: string
+        description: The plan id.
+    output:
+      description: The plan's buckets.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          name: {type: string}
+          orderHint: {type: string}
+
+  get_task:
+    title: Get a task
+    description: >-
+      Read one task, including its `@odata.etag` — which update_task and
+      delete_task both need, since Planner uses optimistic concurrency.
+    category: tasks
+    scopes: [Tasks.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/planner/tasks/${task_id}
+    input:
+      task_id:
+        type: string
+        description: The task id.
+    output:
+      description: The task.
+      type: object
+      properties:
+        id: {type: string}
+        title: "{type: string}"
+        "@odata.etag": {type: string, description: "Pass as `etag` when updating or deleting."}
+        percentComplete: {type: integer}
+        assignments: {type: object}
+
+  create_task:
+    title: Create a task
+    description: >-
+      Add a task to a plan, optionally in a bucket and assigned to people.
+      Assignees are Entra object ids.
+    category: tasks
+    scopes: [Tasks.ReadWrite]
+    request:
+      method: POST
+      path: /v1.0/planner/tasks
+      body:
+        planId: "${plan_id}"
+        bucketId: "${bucket_id}"
+        title: "${title}"
+        dueDateTime: "${due}"
+        startDateTime: "${start}"
+        percentComplete: "${percent_complete}"
+        priority: "${priority}"
+        assignments:
+          $keyed:
+            source: "${assignee_ids}"
+            key: "${item}"
+            value:
+              "@odata.type": "#microsoft.graph.plannerAssignment"
+              orderHint: " !"
+    input:
+      plan_id:
+        type: string
+        description: The plan to add the task to.
+      title:
+        type: string
+        description: What the task is.
+      bucket_id:
+        type: string
+        description: Bucket to place it in, from list_buckets.
+        optional: true
+      due:
+        type: string
+        description: Due date and time, ISO 8601 with an offset.
+        optional: true
+      start:
+        type: string
+        description: Start date and time, ISO 8601 with an offset.
+        optional: true
+      percent_complete:
+        type: integer
+        description: "Progress: 0 not started, 50 in progress, 100 complete."
+        optional: true
+        minimum: 0
+        maximum: 100
+      priority:
+        type: integer
+        description: "Priority 0-10, where 1 is urgent and 9 is low."
+        optional: true
+        minimum: 0
+        maximum: 10
+      assignee_ids:
+        type: array
+        description: Entra object ids to assign it to.
+        optional: true
+        items: {type: string}
+    output:
+      description: The created task.
+      type: object
+      properties:
+        id: {type: string}
+        title: "{type: string}"
+        planId: {type: string}
+
+  update_task:
+    title: Update a task
+    description: >-
+      Change a task's title, bucket, progress or dates. Planner needs the task's
+      current ETag, from get_task, so a concurrent edit is not silently
+      overwritten.
+    category: tasks
+    scopes: [Tasks.ReadWrite]
+    request:
+      method: PATCH
+      path: /v1.0/planner/tasks/${task_id}
+      headers:
+        If-Match: "${etag}"
+      body:
+        title: "${title}"
+        bucketId: "${bucket_id}"
+        percentComplete: "${percent_complete}"
+        dueDateTime: "${due}"
+        priority: "${priority}"
+    input:
+      task_id:
+        type: string
+        description: The task id.
+      etag:
+        type: string
+        description: The task's current @odata.etag, from get_task.
+      title:
+        type: string
+        description: New title.
+        optional: true
+      bucket_id:
+        type: string
+        description: Bucket to move it to.
+        optional: true
+      percent_complete:
+        type: integer
+        description: New progress, 0 to 100. 100 marks it complete.
+        optional: true
+        minimum: 0
+        maximum: 100
+      due:
+        type: string
+        description: New due date and time, ISO 8601.
+        optional: true
+      priority:
+        type: integer
+        description: New priority, 0 to 10.
+        optional: true
+        minimum: 0
+        maximum: 10
+    output:
+      description: Empty on success -- Graph answers 204 No Content.
+      type: object
+
+  delete_task:
+    title: Delete a task
+    description: >-
+      Delete a task permanently. Needs the task's current ETag, from get_task.
+    category: tasks
+    scopes: [Tasks.ReadWrite]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1.0/planner/tasks/${task_id}
+      headers:
+        If-Match: "${etag}"
+    input:
+      task_id:
+        type: string
+        description: The task to delete.
+      etag:
+        type: string
+        description: The task's current @odata.etag, from get_task.
+    output:
+      description: Empty on success -- Graph answers 204 No Content.
+      type: object
+
+  create_plan:
+    title: Create a plan
+    description: >-
+      Create a Planner plan owned by a Microsoft 365 group. The group must
+      already exist and the signed-in user must be a member.
+    category: plans
+    scopes: [Tasks.ReadWrite]
+    request:
+      method: POST
+      path: /v1.0/planner/plans
+      body:
+        owner: "${group_id}"
+        title: "${title}"
+    input:
+      group_id:
+        type: string
+        description: Object id of the Microsoft 365 group that will own the plan.
+      title:
+        type: string
+        description: The plan's title.
+    output:
+      description: The created plan.
+      type: object
+      properties:
+        id: {type: string}
+        title: "{type: string}"
+
+  create_bucket:
+    title: Create a bucket
+    description: Add a bucket (a column) to a plan for tasks to be grouped into.
+    category: plans
+    scopes: [Tasks.ReadWrite]
+    request:
+      method: POST
+      path: /v1.0/planner/buckets
+      body:
+        planId: "${plan_id}"
+        name: "${name}"
+        orderHint: "${order_hint}"
+    input:
+      plan_id:
+        type: string
+        description: The plan to add the bucket to.
+      name:
+        type: string
+        description: Bucket name.
+      order_hint:
+        type: string
+        description: Planner order hint deciding where it sits. Omit to append.
+        optional: true
+    output:
+      description: The created bucket.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+
+  get_task_details:
+    title: Get a task's description and checklist
+    description: >-
+      Read a task's long description, checklist items and references. These live
+      on a separate resource from the task itself.
+    category: tasks
+    scopes: [Tasks.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/planner/tasks/${task_id}/details
+    input:
+      task_id:
+        type: string
+        description: The task id.
+    output:
+      description: The task's details.
+      type: object
+      properties:
+        description: "{type: string}"
+        checklist: {type: object}
+        references: {type: object}
+        "@odata.etag": {type: string}

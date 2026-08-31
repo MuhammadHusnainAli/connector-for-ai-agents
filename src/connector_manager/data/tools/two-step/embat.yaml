@@ -1,0 +1,441 @@
+# Embat tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://api.embat.io/openapi.json
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: embat
+display_name: Embat
+docs_url: https://api.embat.io/openapi.json
+generated: true
+generated_from: https://api.embat.io/openapi.json
+tools:
+  list_companies_companies_get:
+    title: List user companies
+    description: List user companies Returns the companies your credentials have access to. Use the returned
+      id as the companyId path parameter required by every other endpoint in this API. Calls GET /companies
+      on Embat's API.
+    category: companies
+    request:
+      method: GET
+      path: /companies
+    input: {}
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  get_foreignexchangerates:
+    title: List foreign exchange rates
+    description: 'List foreign exchange rates Returns the daily foreign exchange rates recorded in Embat,
+      most recent first, recalculated to be expressed against baseCurrency. Results are paginated: use
+      limit to control page size and pass the returned nextPageToken to fetch the next page. startDate/endDate
+      filter by rate date: startDate is incl Calls GET /foreignexchangerates on Embat''s API.'
+    category: foreignexchangerates
+    request:
+      method: GET
+      path: /foreignexchangerates
+      query:
+        baseCurrency: ${base_currency}
+        startDate: ${start_date}
+        endDate: ${end_date}
+        limit: ${limit}
+        nextPageToken: ${next_page_token}
+    input:
+      base_currency:
+        type: string
+        description: Currency all returned rates are expressed against.
+        enum:
+        - AED
+        - AFN
+        - ALL
+        - AMD
+        - ANG
+        - AOA
+        - ARS
+        - AUD
+        - AWG
+        - AZN
+        - BAM
+        - BBD
+        - BDT
+        - BGN
+        - BHD
+        - BIF
+        - BMD
+        - BND
+        - BOB
+        - BOV
+      start_date:
+        type: string
+        description: Only return exchange rates dated on or after this date (inclusive).
+        optional: true
+      end_date:
+        type: string
+        description: Only return exchange rates dated before this date (exclusive).
+        optional: true
+      limit:
+        type: integer
+        description: Maximum number of objects to return in the response. Default 500, maximum 2000.
+        optional: true
+        default: 500
+      next_page_token:
+        type: string
+        description: Token to fetch the next page of results, taken from the nextPageToken returned by
+          the previous request with the same filters. Omit it to fetch the first page. An invalid or malformed
+          token is rejected with 404.
+        optional: true
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  auth_token_authentication_token_post:
+    title: Generate access token
+    description: Generate access token Authenticates with email/password and returns a JWT idToken to
+      use as a Bearer token in the Authorization header for every other request. The token expires 60
+      minutes after issuance; call this endpoint again with the same credentials to obtain a new one —
+      there is no separate refresh endpoint. If em Calls POST /authentication/token on Embat's API.
+    category: authentication
+    request:
+      method: POST
+      path: /authentication/token
+      body:
+        email: ${email}
+        password: ${password}
+    input:
+      email:
+        type: string
+        description: Email address of the Embat service user used to authenticate.
+      password:
+        type: string
+        description: Password of the Embat service user. Keep it secret.
+    output:
+      description: Successful Response
+      type: object
+  list_files_emissions_files_emissions_get:
+    title: List file emissions
+    description: 'List file emissions Returns the banking files submitted to banks (e.g. payment order
+      files) across every company accessible to the authenticated user. Results are paginated: use limit
+      to control page size and pass the returned nextPageToken to fetch the next page. Errors from the
+      file service are reported with their or Calls GET /files/emissions on Embat''s API.'
+    category: files
+    request:
+      method: GET
+      path: /files/emissions
+      query:
+        limit: ${limit}
+        nextPageToken: ${next_page_token}
+    input:
+      limit:
+        type: integer
+        description: Maximum number of file emissions to return. Defaults to 500, up to 2000.
+        optional: true
+        default: 500
+      next_page_token:
+        type: string
+        description: Token to fetch the next page of results, returned by a previous call to this endpoint.
+        optional: true
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  list_files_receptions_files_receptions_get:
+    title: List file receptions
+    description: 'List file receptions Returns the banking files received across every company accessible
+      to the authenticated user (e.g. account statements or confirmation files sent by a bank). Results
+      are paginated: use limit to control page size and pass the returned nextPageToken to fetch the next
+      page. Download the content of a spe Calls GET /files/receptions on Embat''s API.'
+    category: files
+    request:
+      method: GET
+      path: /files/receptions
+      query:
+        limit: ${limit}
+        nextPageToken: ${next_page_token}
+    input:
+      limit:
+        type: integer
+        description: Maximum number of file receptions to return. Defaults to 500, up to 2000.
+        optional: true
+        default: 500
+      next_page_token:
+        type: string
+        description: Token to fetch the next page of results, returned by a previous call to this endpoint.
+        optional: true
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  delete_accountingaccounts:
+    title: Delete accounting accounts in bulk
+    description: Delete accounting accounts in bulk Deletes several accounting accounts in a single call,
+      identified by accountingCode. Accounts are deactivated (active set to false) rather than permanently
+      removed, and continue to appear in GET/list responses. The response includes an entry for every
+      requested accountingCode, even ones that do not m Calls DELETE /accountingaccounts/{companyId} on
+      Embat's API.
+    category: accountingaccounts
+    request:
+      method: DELETE
+      path: /accountingaccounts/${company_id}
+      body:
+        data: ${data}
+    input:
+      company_id:
+        type: string
+        description: The companyId parameter.
+      data:
+        type: array
+        description: Accounting accounts to delete, identified by accountingCode.
+        items:
+          type: object
+    output:
+      description: Successful Response
+      type: object
+    destructive: true
+  get_accountingaccounts:
+    title: List accounting accounts
+    description: 'List accounting accounts Returns the accounting accounts (chart of accounts) of a company,
+      including deactivated ones. Results are paginated: use limit to control page size and pass the returned
+      nextPageToken to fetch the next page. Calls GET /accountingaccounts/{companyId} on Embat''s API.'
+    category: accountingaccounts
+    request:
+      method: GET
+      path: /accountingaccounts/${company_id}
+      query:
+        limit: ${limit}
+        nextPageToken: ${next_page_token}
+    input:
+      company_id:
+        type: string
+        description: The companyId parameter.
+      limit:
+        type: integer
+        description: Maximum number of objects to return in the response. Default 500, maximum 2000.
+        optional: true
+        default: 500
+      next_page_token:
+        type: string
+        description: Token to fetch the next page of results, taken from the nextPageToken returned by
+          the previous request with the same filters. Omit it to fetch the first page. An invalid or malformed
+          token is rejected with 404.
+        optional: true
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  update_accountingaccounts:
+    title: Update accounting accounts in bulk
+    description: Update accounting accounts in bulk Updates several accounting accounts in a single call,
+      identified by accountingCode, following the same rules as the single update endpoint. Entries whose
+      accountingCode does not match any existing account are silently skipped — the call returns 200 for
+      the whole batch. Calls PATCH /accountingaccounts/{companyId} on Embat's API.
+    category: accountingaccounts
+    request:
+      method: PATCH
+      path: /accountingaccounts/${company_id}
+      body:
+        data: ${data}
+    input:
+      company_id:
+        type: string
+        description: The companyId parameter.
+      data:
+        type: array
+        description: Accounting accounts to update, identified by accountingCode.
+        items:
+          type: object
+    output:
+      description: Successful Response
+      type: object
+  create_accountingaccounts:
+    title: Create accounting account
+    description: Create accounting account Creates an accounting account identified by accountingCode.
+      If an account with the same accountingCode already exists, this call updates it instead of failing;
+      if the submitted data is identical to the existing account, the call is a no-op. accountingName
+      defaults to accountingCode when omitted. typ Calls POST /accountingaccounts/{companyId} on Embat's
+      API.
+    category: accountingaccounts
+    request:
+      method: POST
+      path: /accountingaccounts/${company_id}
+      body:
+        active: ${active}
+        type: ${type}
+        accountingName: ${accounting_name}
+        collective: ${collective}
+        additionalInfo: ${additional_info}
+        attributes: ${attributes}
+        accountingCode: ${accounting_code}
+    input:
+      company_id:
+        type: string
+        description: The companyId parameter.
+      active:
+        type: string
+        description: Whether the accounting account is active.
+        optional: true
+      type:
+        type: string
+        description: 'Accounting account classification: banks or accountings. The value analytics is
+          deprecated: it is still accepted for backwards compatibility but automatically stored as accountings.
+          If omitted, it is inferred from accountingCode.Once an account exists, any type sent through
+          the create endpoints is silently ignored — the value(inferred, overridden or explicit) only
+          applies when the account is first'
+        optional: true
+      accounting_name:
+        type: string
+        description: Display name of the accounting account. Defaults to accountingCode when omitted.
+        optional: true
+      collective:
+        type: string
+        description: Whether this is a collective (grouping) accounting account rather than an individual
+          one.
+        optional: true
+      additional_info:
+        type: string
+        description: Free-form key/value metadata to attach to the account. Sending an empty object leaves
+          any previously stored metadata unchanged instead of clearing it.
+        optional: true
+      attributes:
+        type: string
+        description: Custom attribute values to attach to the account. Entries with an empty or missing
+          customId or value are silently discarded.
+        optional: true
+      accounting_code:
+        type: string
+        description: Unique code identifying the accounting account in the company's chart of accounts.
+    output:
+      description: Successful Response
+      type: object
+  delete_accountingentries:
+    title: Delete accounting entries in bulk
+    description: Delete accounting entries in bulk Deletes several accounting entries in a single call,
+      identified by customId. The call returns 200 immediately — even for customId values that do not
+      match any existing entry — and entries may still briefly appear in GET results right after deletion.
+      Calls DELETE /accountingentries/{companyId} on Embat's API.
+    category: accountingentries
+    request:
+      method: DELETE
+      path: /accountingentries/${company_id}
+      body:
+        data: ${data}
+    input:
+      company_id:
+        type: string
+        description: The companyId parameter.
+      data:
+        type: array
+        description: Accounting entries to delete, identified by customId.
+        items:
+          type: object
+    output:
+      description: Successful Response
+      type: object
+    destructive: true
+  get_accountingentries:
+    title: List accounting entries
+    description: 'List accounting entries Returns the accounting entries of a company, ordered by accounting
+      date (most recent first). Results are paginated: use limit to control page size and pass the returned
+      nextPageToken to fetch the next page. startDate/endDate filter by accounting date, and startUpdatedAt/endUpdatedAt
+      filter by last m Calls GET /accountingentries/{companyId} on Embat''s API.'
+    category: accountingentries
+    request:
+      method: GET
+      path: /accountingentries/${company_id}
+      query:
+        reconciled: ${reconciled}
+        accountingCode: ${accounting_code}
+        accountingEntryCode: ${accounting_entry_code}
+        startDate: ${start_date}
+        endDate: ${end_date}
+        startUpdatedAt: ${start_updated_at}
+        endUpdatedAt: ${end_updated_at}
+        limit: ${limit}
+        nextPageToken: ${next_page_token}
+    input:
+      company_id:
+        type: string
+        description: The companyId parameter.
+      reconciled:
+        type: boolean
+        description: Filter by reconciliation status. false also matches entries that are not yet reconciled
+          or have no status set.
+        optional: true
+      accounting_code:
+        type: string
+        description: Filter by ledger account code (accountingCode).
+        optional: true
+      accounting_entry_code:
+        type: string
+        description: Filter by accountingEntryCode (does not match accountingEntryCodeId).
+        optional: true
+      start_date:
+        type: string
+        description: 'Only return entries dated on or after this date (inclusive). The range cannot exceed
+          90 days: if endDate is also given, the span between the two cannot exceed 90 days; if endDate
+          is omitted, startDate cannot be more than 90 days in the past.'
+        optional: true
+      end_date:
+        type: string
+        description: Only return entries dated before this date (exclusive). Combined with startDate,
+          the range cannot exceed 90 days. If used without startDate, results start 90 days before this
+          date.
+        optional: true
+      start_updated_at:
+        type: string
+        description: 'Only return entries last modified on or after this timestamp (inclusive). The range
+          cannot exceed 90 days: if endUpdatedAt is also given, the span between the two cannot exceed
+          90 days; if endUpdatedAt is omitted, startUpdatedAt cannot be more than 90 days in the past.'
+        optional: true
+      end_updated_at:
+        type: string
+        description: Only return entries last modified before this timestamp (exclusive). Combined with
+          startUpdatedAt, the range cannot exceed 90 days. If used without startUpdatedAt, results start
+          90 days before this timestamp.
+        optional: true
+      limit:
+        type: integer
+        description: Maximum number of objects to return in the response. Default 500, maximum 2000.
+        optional: true
+        default: 500
+      next_page_token:
+        type: string
+        description: Token to fetch the next page of results, taken from the nextPageToken returned by
+          the previous request with the same filters. Omit it to fetch the first page. An invalid or malformed
+          token is rejected with 404.
+        optional: true
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  update_accountingentries:
+    title: Update accounting entries in bulk
+    description: Update accounting entries in bulk Updates one or more fields of several accounting entries,
+      identified by customId, following the same rules as the single-entry update endpoint — including
+      the description reset-when-omitted behavior. Entries whose customId does not match any existing
+      entry are silently skipped; the call still return Calls PATCH /accountingentries/{companyId} on
+      Embat's API.
+    category: accountingentries
+    request:
+      method: PATCH
+      path: /accountingentries/${company_id}
+      body:
+        data: ${data}
+    input:
+      company_id:
+        type: string
+        description: The companyId parameter.
+      data:
+        type: array
+        description: Accounting entries to update, identified by customId.
+        items:
+          type: object
+    output:
+      description: Successful Response
+      type: object

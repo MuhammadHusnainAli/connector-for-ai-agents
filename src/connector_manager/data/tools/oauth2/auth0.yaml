@@ -1,0 +1,611 @@
+# Auth0 Management API tools.
+#
+# The connection's tenant subdomain is baked into the base url, so paths start
+# at /api/v2. User ids carry their connection as a prefix, e.g.
+# "auth0|65f…" or "google-oauth2|1234".
+#
+# Docs: https://auth0.com/docs/api/management/v2
+
+connector_id: auth0
+display_name: Auth0
+docs_url: https://auth0.com/docs/api/management/v2
+
+scope_rules:
+  implies:
+    "update:users": ["read:users"]
+    "create:users": ["read:users"]
+    "delete:users": ["read:users"]
+    "update:clients": ["read:clients"]
+    "update:connections": ["read:connections"]
+    "update:roles": ["read:roles"]
+    "create:roles": ["read:roles"]
+
+tools:
+
+  list_users:
+    title: List or search users
+    description: >-
+      Search the tenant's users with Lucene syntax, e.g. email:"ada@example.com"
+      or last_login:[2026-01-01 TO *]. Omit the query to list everyone.
+    category: users
+    scopes: ["read:users"]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/users
+      query:
+        q: "${query}"
+        search_engine: "${search_engine}"
+        page: "${page}"
+        per_page: "${per_page}"
+        sort: "${sort}"
+        fields: "${fields}"
+        include_totals: "${include_totals}"
+    input:
+      query:
+        type: string
+        description: Lucene query over the user profile.
+        optional: true
+        example: email:"ada@example.com"
+      search_engine:
+        type: string
+        description: Which search engine to use. v3 is current.
+        optional: true
+        default: v3
+        enum: [v2, v3]
+      page:
+        type: integer
+        description: Zero-based page number.
+        optional: true
+        minimum: 0
+      per_page:
+        type: integer
+        description: How many users per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      sort:
+        type: string
+        description: Sort order, e.g. "created_at:-1".
+        optional: true
+      fields:
+        type: array
+        description: Only return these fields.
+        optional: true
+        items: {type: string}
+      include_totals:
+        type: boolean
+        description: Wrap the result with a total count.
+        optional: true
+    output:
+      description: The matching users.
+      type: array
+      items:
+        type: object
+        properties:
+          user_id: {type: string}
+          email: {type: string}
+          name: {type: string}
+          last_login: {type: string}
+          logins_count: {type: integer}
+
+  get_user:
+    title: Get a user
+    description: >-
+      Read one user's profile, identities, metadata and last login by their
+      user id.
+    category: users
+    scopes: ["read:users"]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/users/${user_id}
+      query:
+        fields: "${fields}"
+    input:
+      user_id:
+        type: string
+        description: The user id, e.g. "auth0|65f1a2b3c4d5e6f7a8b9c0d1".
+      fields:
+        type: array
+        description: Only return these fields.
+        optional: true
+        items: {type: string}
+    output:
+      description: The user.
+      type: object
+      properties:
+        user_id: {type: string}
+        email: {type: string}
+        email_verified: {type: boolean}
+        app_metadata: {type: object}
+        user_metadata: {type: object}
+
+  find_users_by_email:
+    title: Find users by email address
+    description: >-
+      Look up every user with an email address, across connections — useful when
+      the same person signed up more than once.
+    category: users
+    scopes: ["read:users"]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/users-by-email
+      query:
+        email: "${email}"
+        fields: "${fields}"
+    input:
+      email:
+        type: string
+        description: The email address to look up.
+        format: email
+      fields:
+        type: array
+        description: Only return these fields.
+        optional: true
+        items: {type: string}
+    output:
+      description: Users with that email address.
+      type: array
+      items: {type: object}
+
+  create_user:
+    title: Create a user
+    description: >-
+      Create a user in a database connection. The connection must accept
+      sign-ups, and the password must satisfy its policy.
+    category: users
+    scopes: ["create:users"]
+    request:
+      method: POST
+      path: /api/v2/users
+      body:
+        connection: "${connection}"
+        email: "${email}"
+        password: "${password}"
+        name: "${name}"
+        given_name: "${given_name}"
+        family_name: "${family_name}"
+        email_verified: "${email_verified}"
+        verify_email: "${verify_email}"
+        app_metadata: "${app_metadata}"
+        user_metadata: "${user_metadata}"
+    input:
+      connection:
+        type: string
+        description: Database connection name, e.g. "Username-Password-Authentication".
+      email:
+        type: string
+        description: The user's email address.
+        format: email
+      password:
+        type: string
+        description: Initial password. Must satisfy the connection's policy.
+        optional: true
+        secret: true
+      name:
+        type: string
+        description: Display name.
+        optional: true
+      given_name:
+        type: string
+        description: First name.
+        optional: true
+      family_name:
+        type: string
+        description: Last name.
+        optional: true
+      email_verified:
+        type: boolean
+        description: Mark the address already verified.
+        optional: true
+      verify_email:
+        type: boolean
+        description: Send Auth0's verification email.
+        optional: true
+      app_metadata:
+        type: object
+        description: Data the user cannot edit, e.g. {"plan":"pro","roles":["admin"]}.
+        optional: true
+      user_metadata:
+        type: object
+        description: Data the user may edit, e.g. {"theme":"dark"}.
+        optional: true
+    output:
+      description: The created user.
+      type: object
+      properties:
+        user_id: {type: string}
+        email: {type: string}
+        created_at: {type: string}
+
+  update_user:
+    title: Update a user
+    description: >-
+      Change a user's profile or metadata, or block them. Auth0 refuses some
+      combinations in one call — change email and password separately.
+    category: users
+    scopes: ["update:users"]
+    request:
+      method: PATCH
+      path: /api/v2/users/${user_id}
+      body:
+        email: "${email}"
+        name: "${name}"
+        blocked: "${blocked}"
+        email_verified: "${email_verified}"
+        app_metadata: "${app_metadata}"
+        user_metadata: "${user_metadata}"
+        connection: "${connection}"
+    input:
+      user_id:
+        type: string
+        description: The user id.
+      email:
+        type: string
+        description: New email address. Requires `connection` for a database user.
+        optional: true
+        format: email
+      name:
+        type: string
+        description: New display name.
+        optional: true
+      blocked:
+        type: boolean
+        description: Block or unblock the user from signing in.
+        optional: true
+      email_verified:
+        type: boolean
+        description: Mark the address verified or unverified.
+        optional: true
+      app_metadata:
+        type: object
+        description: Metadata to merge in. A key set to null is removed.
+        optional: true
+      user_metadata:
+        type: object
+        description: User-editable metadata to merge in.
+        optional: true
+      connection:
+        type: string
+        description: Connection name, required when changing email or password.
+        optional: true
+    output:
+      description: The updated user.
+      type: object
+      properties:
+        user_id: {type: string}
+        email: {type: string}
+        blocked: {type: boolean}
+
+  delete_user:
+    title: Delete a user
+    description: >-
+      Permanently delete a user and their identities. This cannot be undone —
+      blocking with update_user is usually the safer move.
+    category: users
+    scopes: ["delete:users"]
+    destructive: true
+    request:
+      method: DELETE
+      path: /api/v2/users/${user_id}
+    input:
+      user_id:
+        type: string
+        description: The user to delete.
+    output:
+      description: Empty on success -- Auth0 answers 204 No Content.
+      type: object
+
+  create_password_change_ticket:
+    title: Create a password reset link
+    description: >-
+      Mint a one-time URL that lets a user set a new password, for sending
+      through your own channel instead of Auth0's email.
+    category: users
+    scopes: ["create:user_tickets"]
+    request:
+      method: POST
+      path: /api/v2/tickets/password-change
+      body:
+        user_id: "${user_id}"
+        email: "${email}"
+        connection_id: "${connection_id}"
+        result_url: "${result_url}"
+        ttl_sec: "${ttl_seconds}"
+        mark_email_as_verified: "${mark_email_as_verified}"
+    input:
+      user_id:
+        type: string
+        description: The user id. Use this or email plus connection_id.
+        optional: true
+      email:
+        type: string
+        description: The user's email address, with connection_id.
+        optional: true
+        format: email
+      connection_id:
+        type: string
+        description: Connection id, required when identifying the user by email.
+        optional: true
+      result_url:
+        type: string
+        description: Where to send the user once they have reset.
+        optional: true
+        format: uri
+      ttl_seconds:
+        type: integer
+        description: How long the link stays valid, in seconds.
+        optional: true
+        minimum: 1
+      mark_email_as_verified:
+        type: boolean
+        description: Mark the address verified when they use the link.
+        optional: true
+    output:
+      description: The password change ticket.
+      type: object
+      properties:
+        ticket: {type: string, description: "One-time URL to send the user."}
+
+  list_user_roles:
+    title: List a user's roles
+    description: Read the roles assigned to a user, with their ids and descriptions.
+    category: roles
+    scopes: ["read:roles"]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/users/${user_id}/roles
+      query:
+        page: "${page}"
+        per_page: "${per_page}"
+    input:
+      user_id:
+        type: string
+        description: The user id.
+      page:
+        type: integer
+        description: Zero-based page number.
+        optional: true
+        minimum: 0
+      per_page:
+        type: integer
+        description: How many roles per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+    output:
+      description: The user's roles.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          name: {type: string}
+          description: "{type: string}"
+
+  assign_roles_to_user:
+    title: Assign roles to a user
+    description: >-
+      Grant roles to a user. Roles are added to what they already have, not
+      replaced.
+    category: roles
+    scopes: ["update:users"]
+    request:
+      method: POST
+      path: /api/v2/users/${user_id}/roles
+      body:
+        roles: "${role_ids}"
+    input:
+      user_id:
+        type: string
+        description: The user id.
+      role_ids:
+        type: array
+        description: Role ids to grant, from list_roles.
+        items: {type: string}
+    output:
+      description: Empty on success -- Auth0 answers 204 No Content.
+      type: object
+
+  list_roles:
+    title: List roles
+    description: >-
+      List the tenant's roles with the ids the assignment tools take.
+    category: roles
+    scopes: ["read:roles"]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/roles
+      query:
+        name_filter: "${name_filter}"
+        page: "${page}"
+        per_page: "${per_page}"
+    input:
+      name_filter:
+        type: string
+        description: Match against role names.
+        optional: true
+      page:
+        type: integer
+        description: Zero-based page number.
+        optional: true
+        minimum: 0
+      per_page:
+        type: integer
+        description: How many roles per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+    output:
+      description: The tenant's roles.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          name: {type: string}
+          description: "{type: string}"
+
+  list_logs:
+    title: Search the tenant log
+    description: >-
+      Read Auth0's tenant events — sign-ins, failures, rate limits — with a
+      Lucene query such as type:"f" or user_id:"auth0|...".
+    category: logs
+    scopes: ["read:logs"]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/logs
+      query:
+        q: "${query}"
+        page: "${page}"
+        per_page: "${per_page}"
+        sort: "${sort}"
+        include_totals: "${include_totals}"
+    input:
+      query:
+        type: string
+        description: Lucene query over the log entries.
+        optional: true
+        example: type:"f"
+      page:
+        type: integer
+        description: Zero-based page number.
+        optional: true
+        minimum: 0
+      per_page:
+        type: integer
+        description: How many entries per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      sort:
+        type: string
+        description: Sort order, e.g. "date:-1".
+        optional: true
+      include_totals:
+        type: boolean
+        description: Wrap the result with a total count.
+        optional: true
+    output:
+      description: The matching log entries.
+      type: array
+      items:
+        type: object
+        properties:
+          _id: {type: string}
+          type: {type: string}
+          date: {type: string}
+          user_id: {type: string}
+          ip: {type: string}
+
+  list_clients:
+    title: List applications
+    description: >-
+      List the tenant's applications with their client ids, types and allowed
+      callback URLs.
+    category: clients
+    scopes: ["read:clients"]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/clients
+      query:
+        page: "${page}"
+        per_page: "${per_page}"
+        fields: "${fields}"
+        is_global: "${is_global}"
+        app_type: "${app_type}"
+    input:
+      page:
+        type: integer
+        description: Zero-based page number.
+        optional: true
+        minimum: 0
+      per_page:
+        type: integer
+        description: How many applications per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      fields:
+        type: array
+        description: Only return these fields. Secrets need read:client_keys.
+        optional: true
+        items: {type: string}
+      is_global:
+        type: boolean
+        description: Include the tenant's global client.
+        optional: true
+      app_type:
+        type: string
+        description: Comma-separated app types to filter by, e.g. "spa,native".
+        optional: true
+    output:
+      description: The tenant's applications.
+      type: array
+      items:
+        type: object
+        properties:
+          client_id: {type: string}
+          name: {type: string}
+          app_type: {type: string}
+          callbacks: {type: array}
+
+  list_connections:
+    title: List connections
+    description: >-
+      List the tenant's identity connections — database, social and enterprise —
+      with the names create_user takes.
+    category: connections
+    scopes: ["read:connections"]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/connections
+      query:
+        strategy: "${strategy}"
+        name: "${name}"
+        page: "${page}"
+        per_page: "${per_page}"
+    input:
+      strategy:
+        type: string
+        description: Only connections of this strategy, e.g. "auth0" or "google-oauth2".
+        optional: true
+      name:
+        type: string
+        description: Only the connection with this name.
+        optional: true
+      page:
+        type: integer
+        description: Zero-based page number.
+        optional: true
+        minimum: 0
+      per_page:
+        type: integer
+        description: How many connections per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+    output:
+      description: The tenant's connections.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          name: {type: string}
+          strategy: {type: string}
+          enabled_clients: {type: array}

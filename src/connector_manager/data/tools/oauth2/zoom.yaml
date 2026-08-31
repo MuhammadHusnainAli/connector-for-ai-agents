@@ -1,0 +1,521 @@
+# Zoom tools.
+#
+# The connector's base url already ends in /v2, so paths here start below that.
+#
+# Scopes are the classic names (meeting:read, meeting:write, ...). Zoom apps
+# created since its granular-scope migration hold names like
+# meeting:read:list_meetings instead, in which case discovery will not match and
+# the tools report as disabled -- pass the granted list to check_tools directly,
+# or leave the scopes off by treating the report as advisory.
+#
+# Docs: https://developers.zoom.us/docs/api/
+
+connector_id: zoom
+display_name: Zoom
+docs_url: https://developers.zoom.us/docs/api/
+
+scope_rules:
+  case_insensitive: true
+  implies:
+    "meeting:write": ["meeting:read"]
+    "meeting:write:admin": ["meeting:write", "meeting:read", "meeting:read:admin"]
+    "meeting:read:admin": ["meeting:read"]
+    "user:write": ["user:read"]
+    "user:read:admin": ["user:read"]
+    "webinar:write": ["webinar:read"]
+    "recording:write": ["recording:read"]
+
+tools:
+
+  list_meetings:
+    title: List a user's meetings
+    description: >-
+      List meetings for a user. "me" is the token's own account. Type decides
+      which set comes back -- scheduled, live, upcoming or previous.
+    category: meetings
+    scopes: ["meeting:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /users/${user_id}/meetings
+      query:
+        type: "${type}"
+        page_size: "${limit}"
+        next_page_token: "${next_page_token}"
+        from: "${from}"
+        to: "${to}"
+    input:
+      user_id:
+        type: string
+        description: User id or email. "me" is the token's own account.
+        optional: true
+        default: me
+      type:
+        type: string
+        description: Which meetings to list.
+        optional: true
+        enum: [scheduled, live, upcoming, upcoming_meetings, previous_meetings]
+      limit:
+        type: integer
+        description: How many meetings per page (1-300).
+        optional: true
+        default: 30
+        minimum: 1
+        maximum: 300
+      next_page_token:
+        type: string
+        description: Cursor from the previous response's next_page_token.
+        optional: true
+      from:
+        type: string
+        description: Start of the date range as YYYY-MM-DD, for previous_meetings.
+        optional: true
+      to:
+        type: string
+        description: End of the date range as YYYY-MM-DD.
+        optional: true
+    output:
+      description: A page of meetings.
+      type: object
+      properties:
+        meetings: {type: array, description: "Each with id, topic, start_time and join_url."}
+        next_page_token: {type: string}
+        total_records: {type: integer}
+
+  get_meeting:
+    title: Get a meeting
+    description: >-
+      Read one meeting's details -- topic, agenda, time, settings, join URL and
+      the host's start URL.
+    category: meetings
+    scopes: ["meeting:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /meetings/${meeting_id}
+      query:
+        occurrence_id: "${occurrence_id}"
+        show_previous_occurrences: "${show_previous_occurrences}"
+    input:
+      meeting_id:
+        type: string
+        description: The meeting's numeric id.
+      occurrence_id:
+        type: string
+        description: A specific occurrence of a recurring meeting.
+        optional: true
+      show_previous_occurrences:
+        type: boolean
+        description: Include occurrences that have already happened.
+        optional: true
+    output:
+      description: The meeting.
+      type: object
+      properties:
+        id: {type: integer}
+        topic: {type: string}
+        start_time: {type: string}
+        duration: {type: integer}
+        join_url: {type: string}
+        start_url: {type: string, description: "Host-only URL that starts the meeting."}
+
+  create_meeting:
+    title: Schedule a meeting
+    description: >-
+      Schedule a meeting for a user and get back its join URL. Type 2 is a
+      one-off scheduled meeting, 1 is instant, 8 is recurring with a fixed time.
+    category: meetings
+    scopes: ["meeting:write"]
+    request:
+      method: POST
+      path: /users/${user_id}/meetings
+      body:
+        topic: "${topic}"
+        type: "${type}"
+        start_time: "${start_time}"
+        duration: "${duration}"
+        timezone: "${timezone}"
+        agenda: "${agenda}"
+        password: "${password}"
+        settings:
+          join_before_host: "${join_before_host}"
+          waiting_room: "${waiting_room}"
+          auto_recording: "${auto_recording}"
+          mute_upon_entry: "${mute_upon_entry}"
+        recurrence: "${recurrence}"
+    input:
+      topic:
+        type: string
+        description: The meeting's title.
+      user_id:
+        type: string
+        description: Whose calendar to schedule on. "me" is the token's own account.
+        optional: true
+        default: me
+      type:
+        type: integer
+        description: "Meeting type: 1 instant, 2 scheduled, 3 recurring with no fixed time, 8 recurring with a fixed time."
+        optional: true
+        default: 2
+        enum: [1, 2, 3, 8]
+      start_time:
+        type: string
+        description: When it starts, e.g. 2026-09-01T14:00:00Z, or local time with a timezone.
+        optional: true
+      duration:
+        type: integer
+        description: Length in minutes.
+        optional: true
+        minimum: 1
+      timezone:
+        type: string
+        description: IANA time zone the start_time is in, e.g. America/New_York.
+        optional: true
+      agenda:
+        type: string
+        description: Description shown in the invitation.
+        optional: true
+      password:
+        type: string
+        description: Passcode required to join.
+        optional: true
+        secret: true
+      join_before_host:
+        type: boolean
+        description: Let participants join before the host arrives.
+        optional: true
+      waiting_room:
+        type: boolean
+        description: Hold participants in a waiting room.
+        optional: true
+      mute_upon_entry:
+        type: boolean
+        description: Mute participants as they join.
+        optional: true
+      auto_recording:
+        type: string
+        description: Start recording automatically.
+        optional: true
+        enum: [local, cloud, none]
+      recurrence:
+        type: object
+        description: "Recurrence rule for type 8, e.g. {\"type\": 2, \"repeat_interval\": 1, \"weekly_days\": \"2\"}."
+        optional: true
+    output:
+      description: The scheduled meeting.
+      type: object
+      properties:
+        id: {type: integer}
+        join_url: {type: string}
+        start_url: {type: string}
+        password: {type: string}
+
+  update_meeting:
+    title: Update a meeting
+    description: >-
+      Change a scheduled meeting's topic, time, duration or settings. Only what
+      is supplied is written.
+    category: meetings
+    scopes: ["meeting:write"]
+    request:
+      method: PATCH
+      path: /meetings/${meeting_id}
+      query:
+        occurrence_id: "${occurrence_id}"
+      body:
+        topic: "${topic}"
+        start_time: "${start_time}"
+        duration: "${duration}"
+        timezone: "${timezone}"
+        agenda: "${agenda}"
+        settings: "${settings}"
+    input:
+      meeting_id:
+        type: string
+        description: The meeting's numeric id.
+      topic:
+        type: string
+        description: New title.
+        optional: true
+      start_time:
+        type: string
+        description: New start time.
+        optional: true
+      duration:
+        type: integer
+        description: New length in minutes.
+        optional: true
+        minimum: 1
+      timezone:
+        type: string
+        description: IANA time zone for the new start time.
+        optional: true
+      agenda:
+        type: string
+        description: New description.
+        optional: true
+      settings:
+        type: object
+        description: Meeting settings to change.
+        optional: true
+      occurrence_id:
+        type: string
+        description: Change only this occurrence of a recurring meeting.
+        optional: true
+    output:
+      description: Empty on success -- Zoom answers 204 No Content.
+      type: object
+
+  delete_meeting:
+    title: Cancel a meeting
+    description: >-
+      Delete a scheduled meeting, optionally emailing the registrants and the
+      host that it is cancelled.
+    category: meetings
+    scopes: ["meeting:write"]
+    destructive: true
+    request:
+      method: DELETE
+      path: /meetings/${meeting_id}
+      query:
+        occurrence_id: "${occurrence_id}"
+        schedule_for_reminder: "${notify_host}"
+        cancel_meeting_reminder: "${notify_registrants}"
+    input:
+      meeting_id:
+        type: string
+        description: The meeting's numeric id.
+      occurrence_id:
+        type: string
+        description: Delete only this occurrence of a recurring meeting.
+        optional: true
+      notify_host:
+        type: boolean
+        description: Email the host and any alternative hosts.
+        optional: true
+      notify_registrants:
+        type: boolean
+        description: Email the registrants that it is cancelled.
+        optional: true
+    output:
+      description: Empty on success -- Zoom answers 204 No Content.
+      type: object
+
+  list_meeting_registrants:
+    title: List a meeting's registrants
+    description: >-
+      List who registered for a meeting, with their approval status. Only
+      meaningful for meetings that require registration.
+    category: meetings
+    scopes: ["meeting:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /meetings/${meeting_id}/registrants
+      query:
+        status: "${status}"
+        page_size: "${limit}"
+        next_page_token: "${next_page_token}"
+    input:
+      meeting_id:
+        type: string
+        description: The meeting's numeric id.
+      status:
+        type: string
+        description: Only registrants in this state.
+        optional: true
+        enum: [pending, approved, denied]
+      limit:
+        type: integer
+        description: How many registrants per page (1-300).
+        optional: true
+        default: 30
+        minimum: 1
+        maximum: 300
+      next_page_token:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+    output:
+      description: A page of registrants.
+      type: object
+      properties:
+        registrants: {type: array}
+        next_page_token: {type: string}
+
+  add_meeting_registrant:
+    title: Register someone for a meeting
+    description: >-
+      Register a participant and get back their personal join URL. The meeting
+      must have registration enabled.
+    category: meetings
+    scopes: ["meeting:write"]
+    request:
+      method: POST
+      path: /meetings/${meeting_id}/registrants
+      body:
+        email: "${email}"
+        first_name: "${first_name}"
+        last_name: "${last_name}"
+        job_title: "${job_title}"
+        org: "${organization}"
+        auto_approve: "${auto_approve}"
+    input:
+      meeting_id:
+        type: string
+        description: The meeting's numeric id.
+      email:
+        type: string
+        description: The registrant's email address.
+        format: email
+      first_name:
+        type: string
+        description: The registrant's first name.
+      last_name:
+        type: string
+        description: The registrant's last name.
+        optional: true
+      job_title:
+        type: string
+        description: The registrant's job title.
+        optional: true
+      organization:
+        type: string
+        description: The registrant's organisation.
+        optional: true
+      auto_approve:
+        type: boolean
+        description: Approve the registration immediately.
+        optional: true
+    output:
+      description: The registration, with a personal join URL.
+      type: object
+      properties:
+        registrant_id: {type: string}
+        join_url: {type: string}
+        topic: {type: string}
+
+  list_recordings:
+    title: List cloud recordings
+    description: >-
+      List a user's cloud recordings over a date range, with download URLs for
+      each file. The range may span at most a month.
+    category: recordings
+    scopes: ["recording:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /users/${user_id}/recordings
+      query:
+        from: "${from}"
+        to: "${to}"
+        page_size: "${limit}"
+        next_page_token: "${next_page_token}"
+        trash: "${trash}"
+    input:
+      user_id:
+        type: string
+        description: User id or email. "me" is the token's own account.
+        optional: true
+        default: me
+      from:
+        type: string
+        description: Start of the range as YYYY-MM-DD. At most a month before `to`.
+        optional: true
+      to:
+        type: string
+        description: End of the range as YYYY-MM-DD.
+        optional: true
+      limit:
+        type: integer
+        description: How many meetings per page (1-300).
+        optional: true
+        default: 30
+        minimum: 1
+        maximum: 300
+      next_page_token:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+      trash:
+        type: boolean
+        description: List deleted recordings instead of live ones.
+        optional: true
+    output:
+      description: Meetings with recordings and their files.
+      type: object
+      properties:
+        meetings: {type: array}
+        next_page_token: {type: string}
+
+  list_users:
+    title: List account users
+    description: >-
+      List the Zoom account's users with their ids, emails and licence type.
+      Needs an account-level token.
+    category: users
+    scopes_any: ["user:read:admin", "user:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /users
+      query:
+        status: "${status}"
+        page_size: "${limit}"
+        next_page_token: "${next_page_token}"
+        role_id: "${role_id}"
+    input:
+      status:
+        type: string
+        description: Only users in this state.
+        optional: true
+        enum: [active, inactive, pending]
+      limit:
+        type: integer
+        description: How many users per page (1-300).
+        optional: true
+        default: 30
+        minimum: 1
+        maximum: 300
+      next_page_token:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+      role_id:
+        type: string
+        description: Only users holding this role.
+        optional: true
+    output:
+      description: A page of users.
+      type: object
+      properties:
+        users: {type: array}
+        next_page_token: {type: string}
+
+  get_user:
+    title: Get a user
+    description: >-
+      Read a Zoom user's profile -- name, email, licence type, personal meeting
+      id and time zone. "me" is the cheapest health check for the connection.
+    category: users
+    scopes: ["user:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /users/${user_id}
+    input:
+      user_id:
+        type: string
+        description: User id or email. "me" is the token's own account.
+        optional: true
+        default: me
+    output:
+      description: The user.
+      type: object
+      properties:
+        id: {type: string}
+        email: {type: string}
+        first_name: {type: string}
+        type: {type: integer}
+        pmi: {type: integer}
+        timezone: {type: string}

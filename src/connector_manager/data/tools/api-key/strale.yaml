@@ -1,0 +1,310 @@
+# Strale tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://api.strale.io/openapi.json
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: strale
+display_name: Strale
+docs_url: https://strale.dev/docs
+generated: true
+generated_from: https://api.strale.io/openapi.json
+tools:
+  get_health:
+    title: Health check
+    description: Health check Calls GET /health on the provider's API.
+    category: health
+    request:
+      method: GET
+      path: /health
+    input: {}
+    output:
+      description: Service healthy
+      type: object
+    read_only: true
+  get_well_known_agent_card_json:
+    title: A2A Agent Card
+    description: A2A Agent Card Dynamic Agent Card for the A2A (Agent-to-Agent) protocol. Lists all capabilities
+      as agent skills. Calls GET /.well-known/agent-card.json on the provider's API.
+    category: well_known
+    request:
+      method: GET
+      path: /.well-known/agent-card.json
+    input: {}
+    output:
+      description: Agent Card JSON
+      type: object
+    read_only: true
+  get_v1_capabilities:
+    title: List all capabilities
+    description: List all capabilities Returns the full catalog of active capabilities with their pricing
+      and input schemas. No authentication required. Calls GET /v1/capabilities on the provider's API.
+    category: capabilities
+    request:
+      method: GET
+      path: /v1/capabilities
+    input: {}
+    output:
+      description: Capability catalog
+      type: object
+    read_only: true
+  create_v1_do:
+    title: Execute a capability
+    description: 'Execute a capability Execute a Strale capability. Two patterns: 1. Direct execution:
+      Provide capabilityslug and inputs to execute a specific capability. 2. Semantic matching: Provide
+      task as a natural language description — the system finds and executes the best matching capability.
+      Free-tier capabilities (iban-validate Calls POST /v1/do on the provider''s API.'
+    category: do
+    request:
+      method: POST
+      path: /v1/do
+      body:
+        task: ${task}
+        capability_slug: ${capability_slug}
+        inputs: ${inputs}
+        max_price_cents: ${max_price_cents}
+        timeout_seconds: ${timeout_seconds}
+        dry_run: ${dry_run}
+    input:
+      task:
+        type: string
+        description: Natural language task description. The system finds the best matching capability.
+        optional: true
+      capability_slug:
+        type: string
+        description: Direct capability slug to execute.
+        optional: true
+      inputs:
+        type: object
+        description: Capability-specific input fields.
+        optional: true
+      max_price_cents:
+        type: integer
+        description: Maximum price willing to pay (EUR cents). Required for authenticated requests to
+          paid capabilities.
+        optional: true
+      timeout_seconds:
+        type: integer
+        description: Max execution time (1-60, default 30).
+        optional: true
+      dry_run:
+        type: boolean
+        description: If true, returns matched capability without executing.
+        optional: true
+    output:
+      description: Capability executed successfully (synchronous).
+      type: object
+  get_v1_solutions:
+    title: List all solutions
+    description: List all solutions Returns all active bundled solutions with pricing and step counts.
+      Calls GET /v1/solutions on the provider's API.
+    category: solutions
+    request:
+      method: GET
+      path: /v1/solutions
+      query:
+        category: ${category}
+    input:
+      category:
+        type: string
+        description: Filter by category slug
+        optional: true
+    output:
+      description: Solution catalog
+      type: object
+    read_only: true
+  create_v1_suggest:
+    title: AI capability suggestion
+    description: AI capability suggestion Uses AI to find the best capability or solution for a natural
+      language query. Returns ranked suggestions with confidence scores. Calls POST /v1/suggest on the
+      provider's API.
+    category: suggest
+    request:
+      method: POST
+      path: /v1/suggest
+      body:
+        query: ${query}
+        limit: ${limit}
+    input:
+      query:
+        type: string
+        description: The query field of the request body.
+      limit:
+        type: integer
+        description: The limit field of the request body.
+        optional: true
+    output:
+      description: Suggestions
+      type: object
+  get_v1_transactions:
+    title: List capability transactions
+    description: List capability transactions Returns history of capability executions for the authenticated
+      user. Calls GET /v1/transactions on the provider's API.
+    category: transactions
+    request:
+      method: GET
+      path: /v1/transactions
+    input: {}
+    output:
+      description: Transaction history
+      type: object
+    read_only: true
+  create_v1_web3_assurance:
+    title: Decision-ready answer about an on-chain counterparty
+    description: 'Decision-ready answer about an on-chain counterparty Sister product to Payee Assurance
+      for on-chain targets (wallet, contract, token, DeFi protocol, bridge). Returns a verdict (proceed/review/block/insufficientevidence),
+      reasoncodes (UPPERCASESNAKECASE), criticalflags, suggestedaction, evidence map, and a sidecar auditurl.
+      Two modes: outbound (agent v Calls POST /v1/web3-assurance on the provider''s API.'
+    category: web3_assurance
+    request:
+      method: POST
+      path: /v1/web3-assurance
+      body:
+        target: ${target}
+        target_type: ${target_type}
+        chain: ${chain}
+        action: ${action}
+        amount_usd: ${amount_usd}
+        mode: ${mode}
+        agent_id: ${agent_id}
+        caller_jurisdiction: ${caller_jurisdiction}
+    input:
+      target:
+        type: string
+        description: Wallet address (0x... or Solana), contract, token, protocol slug, or domain.
+      target_type:
+        type: string
+        description: The target_type field of the request body.
+        optional: true
+        enum:
+        - wallet
+        - contract
+        - token
+        - protocol
+        - bridge
+        - domain
+      chain:
+        type: string
+        description: The chain field of the request body.
+        optional: true
+      action:
+        type: string
+        description: The action field of the request body.
+        optional: true
+        enum:
+        - send_payment
+        - swap
+        - stake
+        - mint
+        - interact
+        - bridge
+      amount_usd:
+        type: number
+        description: The amount_usd field of the request body.
+        optional: true
+      mode:
+        type: string
+        description: The mode field of the request body.
+        optional: true
+        enum:
+        - outbound
+        - reverse-call
+      agent_id:
+        type: string
+        description: Optional ERC-8004 agent identifier.
+        optional: true
+      caller_jurisdiction:
+        type: string
+        description: Optional ISO country code for jurisdiction-aware verdict (US, EU, UK, etc.).
+        optional: true
+    output:
+      description: Decision-ready answer.
+      type: object
+  create_auth_recover:
+    title: Request an API key recovery code
+    description: Request an API key recovery code Sends a single-use recovery code to the account's email
+      address. Your current API key keeps working — nothing is rotated until the code is redeemed at /v1/auth/recover/confirm.
+      The response body and status are identical whether or not an account exists. Response TIMING is
+      not equalised, so this is n Calls POST /v1/auth/recover on the provider's API.
+    category: auth
+    request:
+      method: POST
+      path: /v1/auth/recover
+      body:
+        email: ${email}
+    input:
+      email:
+        type: string
+        description: The email field of the request body.
+    output:
+      description: Accepted (whether or not an account exists)
+      type: object
+  create_auth_register:
+    title: Register a new account
+    description: Register a new account Creates a new Strale account and returns the API key — store it
+      securely, it is shown only once. Trial credits (€2.00, no card required) are granted once per email
+      address; when they are withheld the account is still created and walletbalancecents is 0 with a
+      trialcredits object explaining why. Read Calls POST /v1/auth/register on the provider's API.
+    category: auth
+    request:
+      method: POST
+      path: /v1/auth/register
+      body:
+        email: ${email}
+        name: ${name}
+    input:
+      email:
+        type: string
+        description: The email field of the request body.
+      name:
+        type: string
+        description: The name field of the request body.
+        optional: true
+    output:
+      description: Account created
+      type: object
+  get_v2_accessibility_audit:
+    title: Accessibility Audit (x402)
+    description: Accessibility Audit (x402) WCAG 2.1 accessibility audit of a URL. Checks color contrast,
+      alt text, form labels, ARIA roles, heading hierarchy, link text, language. Mostly deterministic.
+      Calls GET /x402/v2/accessibility-audit on the provider's API.
+    category: x402
+    request:
+      method: GET
+      path: /x402/v2/accessibility-audit
+      query:
+        url: ${url}
+    input:
+      url:
+        type: string
+        description: URL to audit
+    output:
+      description: Success
+      type: object
+    read_only: true
+  get_v2_address_geocode:
+    title: Address Geocode (x402)
+    description: Address Geocode (x402) Convert an address to geographic coordinates (latitude/longitude).
+      Also returns structured address components and bounding box via OpenStreetMap Nominatim. Calls GET
+      /x402/v2/address-geocode on the provider's API.
+    category: x402
+    request:
+      method: GET
+      path: /x402/v2/address-geocode
+      query:
+        address: ${address}
+    input:
+      address:
+        type: string
+        description: Address or place name to geocode
+    output:
+      description: Success
+      type: object
+    read_only: true

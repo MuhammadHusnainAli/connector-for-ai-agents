@@ -1,0 +1,495 @@
+# Google Tasks tools.
+#
+# Docs: https://developers.google.com/tasks/reference/rest
+#
+# The tools below the "rest of the API" divider come from Google's own
+# discovery document for this API -- the machine readable contract its client
+# libraries are generated from -- so their paths, parameters and per-tool OAuth
+# scopes are Google's. The hand-authored tools above it are kept because they
+# offer a friendlier shape for the common cases.
+#
+connector_id: google-tasks
+display_name: Google Tasks
+docs_url: https://developers.google.com/tasks/reference/rest
+
+scope_rules:
+  strip_prefixes:
+    - https://www.googleapis.com/auth/
+  implies:
+    tasks: [tasks.readonly]
+
+scope_discovery:
+  method: GET
+  base_url_override: https://oauth2.googleapis.com
+  endpoint: /tokeninfo
+  query:
+    access_token: ${credentials.access_token}
+  scopes_path: scope
+
+tools:
+
+  list_task_lists:
+    title: List task lists
+    description: >-
+      List the user's task lists with their ids. Every task tool needs a list
+      id; "@default" also works and means the user's default list.
+    category: lists
+    scopes_any: [tasks.readonly, tasks]
+    read_only: true
+    request:
+      method: GET
+      path: /tasks/v1/users/@me/lists
+      query:
+        maxResults: "${limit}"
+        pageToken: "${page_token}"
+    input:
+      limit:
+        type: integer
+        description: How many lists per page (1-1000).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 1000
+      page_token:
+        type: string
+        description: Cursor from the previous response's nextPageToken.
+        optional: true
+    output:
+      description: The user's task lists.
+      type: object
+      properties:
+        items: {type: array, description: "Each with id and title."}
+        nextPageToken: {type: string}
+
+  list_tasks:
+    title: List tasks in a list
+    description: >-
+      List a task list's tasks. Completed tasks are hidden unless show_completed
+      is set, and due-date filters take RFC 3339 instants.
+    category: tasks
+    scopes_any: [tasks.readonly, tasks]
+    read_only: true
+    request:
+      method: GET
+      path: /tasks/v1/lists/${list_id}/tasks
+      query:
+        maxResults: "${limit}"
+        pageToken: "${page_token}"
+        showCompleted: "${show_completed}"
+        showHidden: "${show_hidden}"
+        dueMin: "${due_min}"
+        dueMax: "${due_max}"
+    input:
+      list_id:
+        type: string
+        description: Task list id, or "@default" for the default list.
+        optional: true
+        default: "@default"
+      limit:
+        type: integer
+        description: How many tasks per page (1-100).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 100
+      page_token:
+        type: string
+        description: Cursor from the previous response's nextPageToken.
+        optional: true
+      show_completed:
+        type: boolean
+        description: Include completed tasks.
+        optional: true
+      show_hidden:
+        type: boolean
+        description: Include tasks hidden from the default view.
+        optional: true
+      due_min:
+        type: string
+        description: Only tasks due at or after this RFC 3339 instant.
+        optional: true
+      due_max:
+        type: string
+        description: Only tasks due at or before this RFC 3339 instant.
+        optional: true
+    output:
+      description: A page of tasks.
+      type: object
+      properties:
+        items: {type: array, description: "Each with id, title, status, due and notes."}
+        nextPageToken: {type: string}
+
+  get_task:
+    title: Get a task
+    description: Read one task in full — title, notes, due date and completion state.
+    category: tasks
+    scopes_any: [tasks.readonly, tasks]
+    read_only: true
+    request:
+      method: GET
+      path: /tasks/v1/lists/${list_id}/tasks/${task_id}
+    input:
+      list_id:
+        type: string
+        description: Task list id, or "@default".
+      task_id:
+        type: string
+        description: The task id.
+    output:
+      description: The task.
+      type: object
+      properties:
+        id: {type: string}
+        title: "{type: string}"
+        notes: "{type: string}"
+        status: {type: string}
+        due: {type: string}
+
+  create_task:
+    title: Create a task
+    description: >-
+      Add a task to a list. Google Tasks stores only a date for `due`, so the
+      time part of an RFC 3339 value is discarded.
+    category: tasks
+    scopes: [tasks]
+    request:
+      method: POST
+      path: /tasks/v1/lists/${list_id}/tasks
+      query:
+        parent: "${parent_task_id}"
+        previous: "${previous_task_id}"
+      body:
+        title: "${title}"
+        notes: "${notes}"
+        due: "${due}"
+        status: "${status}"
+    input:
+      title:
+        type: string
+        description: What the task is.
+      list_id:
+        type: string
+        description: Task list to add it to, or "@default".
+        optional: true
+        default: "@default"
+      notes:
+        type: string
+        description: Longer description.
+        optional: true
+      due:
+        type: string
+        description: Due date, RFC 3339. Only the date part is kept.
+        optional: true
+        example: "2026-09-01T00:00:00Z"
+      status:
+        type: string
+        description: Initial status.
+        optional: true
+        enum: [needsAction, completed]
+      parent_task_id:
+        type: string
+        description: Make this a subtask of that task.
+        optional: true
+      previous_task_id:
+        type: string
+        description: Place it immediately after that task.
+        optional: true
+    output:
+      description: The created task.
+      type: object
+      properties:
+        id: {type: string}
+        title: "{type: string}"
+        status: {type: string}
+
+  update_task:
+    title: Update a task
+    description: >-
+      Change a task's title, notes, due date or status. Setting status to
+      completed is how a task gets ticked off.
+    category: tasks
+    scopes: [tasks]
+    request:
+      method: PATCH
+      path: /tasks/v1/lists/${list_id}/tasks/${task_id}
+      body:
+        title: "${title}"
+        notes: "${notes}"
+        due: "${due}"
+        status: "${status}"
+    input:
+      list_id:
+        type: string
+        description: Task list id, or "@default".
+      task_id:
+        type: string
+        description: The task id.
+      title:
+        type: string
+        description: New title.
+        optional: true
+      notes:
+        type: string
+        description: New description.
+        optional: true
+      due:
+        type: string
+        description: New due date, RFC 3339.
+        optional: true
+      status:
+        type: string
+        description: New status. "completed" ticks the task off.
+        optional: true
+        enum: [needsAction, completed]
+    output:
+      description: The updated task.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string}
+        completed: {type: string}
+
+  delete_task:
+    title: Delete a task
+    description: Permanently remove a task from its list. This cannot be undone.
+    category: tasks
+    scopes: [tasks]
+    destructive: true
+    request:
+      method: DELETE
+      path: /tasks/v1/lists/${list_id}/tasks/${task_id}
+    input:
+      list_id:
+        type: string
+        description: Task list id, or "@default".
+      task_id:
+        type: string
+        description: The task to delete.
+    output:
+      description: Empty on success -- Google answers 204 No Content.
+      type: object
+
+  move_task:
+    title: Move or re-nest a task
+    description: >-
+      Change a task's position in its list, or make it a subtask of another
+      task.
+    category: tasks
+    scopes: [tasks]
+    request:
+      method: POST
+      path: /tasks/v1/lists/${list_id}/tasks/${task_id}/move
+      query:
+        parent: "${parent_task_id}"
+        previous: "${previous_task_id}"
+    input:
+      list_id:
+        type: string
+        description: Task list id, or "@default".
+      task_id:
+        type: string
+        description: The task to move.
+      parent_task_id:
+        type: string
+        description: Task to nest it under. Omit to make it top-level.
+        optional: true
+      previous_task_id:
+        type: string
+        description: Task to place it after. Omit to put it first.
+        optional: true
+    output:
+      description: The task in its new position.
+      type: object
+      properties:
+        id: {type: string}
+        parent: {type: string}
+        position: {type: string}
+
+  create_task_list:
+    title: Create a task list
+    description: Create a new task list the task tools can then add to.
+    category: lists
+    scopes: [tasks]
+    request:
+      method: POST
+      path: /tasks/v1/users/@me/lists
+      body:
+        title: "${title}"
+    input:
+      title:
+        type: string
+        description: The list's name.
+    output:
+      description: The created list.
+      type: object
+      properties:
+        id: {type: string}
+        title: "{type: string}"
+
+  clear_completed_tasks:
+    title: Clear completed tasks
+    description: >-
+      Hide every completed task in a list from the default view. They are not
+      deleted, but they stop appearing unless show_hidden is set.
+    category: tasks
+    scopes: [tasks]
+    destructive: true
+    request:
+      method: POST
+      path: /tasks/v1/lists/${list_id}/clear
+      body: {}
+    input:
+      list_id:
+        type: string
+        description: Task list id, or "@default".
+    output:
+      description: Empty on success -- Google answers 204 No Content.
+      type: object
+
+  # -- the rest of the API, from Google's own discovery document ------------
+
+  delete_task_list:
+    title: Delete task list
+    description: Deletes the authenticated user's specified task list. If the list contains assigned tasks,
+      both the assigned tasks and the original tasks in the assignment surface (Docs, Chat Spaces) are
+      deleted.
+    category: tasklists
+    request:
+      method: DELETE
+      path: /tasks/v1/users/@me/lists/${tasklist}
+    input:
+      tasklist:
+        type: string
+        description: Task list identifier.
+    output:
+      description: What the API returned.
+      type: object
+    scopes:
+    - tasks
+    destructive: true
+  get_task_list:
+    title: Get task list
+    description: Returns the authenticated user's specified task list.
+    category: tasklists
+    request:
+      method: GET
+      path: /tasks/v1/users/@me/lists/${tasklist}
+    input:
+      tasklist:
+        type: string
+        description: Task list identifier.
+    output:
+      description: The TaskList resource.
+      type: object
+    scopes_any:
+    - tasks
+    - tasks.readonly
+    read_only: true
+  update_task_list:
+    title: Update task list
+    description: Updates the authenticated user's specified task list. This method supports patch semantics.
+    category: tasklists
+    request:
+      method: PATCH
+      path: /tasks/v1/users/@me/lists/${tasklist}
+      body:
+        title: ${title}
+    input:
+      tasklist:
+        type: string
+        description: Task list identifier.
+      title:
+        type: string
+        description: 'Title of the task list. Maximum length allowed: 1024 characters.'
+        optional: true
+    output:
+      description: The TaskList resource.
+      type: object
+    scopes:
+    - tasks
+  replace_task_list:
+    title: Replace task list
+    description: Updates the authenticated user's specified task list.
+    category: tasklists
+    request:
+      method: PUT
+      path: /tasks/v1/users/@me/lists/${tasklist}
+      body:
+        title: ${title}
+    input:
+      tasklist:
+        type: string
+        description: Task list identifier.
+      title:
+        type: string
+        description: 'Title of the task list. Maximum length allowed: 1024 characters.'
+        optional: true
+    output:
+      description: The TaskList resource.
+      type: object
+    scopes:
+    - tasks
+  replace_task:
+    title: Replace task
+    description: Updates the specified task. Calls tasks.update on the Google Tasks API.
+    category: tasks
+    request:
+      method: PUT
+      path: /tasks/v1/lists/${tasklist}/tasks/${task}
+      body:
+        title: ${title}
+        hidden: ${hidden}
+        due: ${due}
+        notes: ${notes}
+        status: ${status}
+        completed: ${completed}
+        deleted: ${deleted}
+    input:
+      task:
+        type: string
+        description: Task identifier.
+      tasklist:
+        type: string
+        description: Task list identifier.
+      title:
+        type: string
+        description: 'Title of the task. Maximum length allowed: 1024 characters.'
+        optional: true
+      hidden:
+        type: boolean
+        description: Flag indicating whether the task is hidden. This is the case if the task had been
+          marked completed when the task list was last cleared. The default is False. This field is read-only.
+        optional: true
+      due:
+        type: string
+        description: Scheduled date for the task (as an RFC 3339 timestamp). Optional. This represents
+          the day that the task should be done, or that the task is visible on the calendar grid. It doesn't
+          represent the deadline of the task. Only date information is recorded; the time portion of the
+          timestamp is discarded w
+        optional: true
+      notes:
+        type: string
+        description: 'Notes describing the task. Tasks assigned from Google Docs cannot have notes. Optional.
+          Maximum length allowed: 8192 characters.'
+        optional: true
+      status:
+        type: string
+        description: Status of the task. This is either "needsAction" or "completed".
+        optional: true
+      completed:
+        type: string
+        description: Completion date of the task (as a RFC 3339 timestamp). This field is omitted if the
+          task has not been completed.
+        optional: true
+      deleted:
+        type: boolean
+        description: Flag indicating whether the task has been deleted. For assigned tasks this field
+          is read-only. They can only be deleted by calling tasks.delete, in which case both the assigned
+          task and the original task (in Docs or Chat Spaces) are deleted. To delete the assigned task
+          only, navigate to the assignme
+        optional: true
+    output:
+      description: The Task resource.
+      type: object
+    scopes:
+    - tasks

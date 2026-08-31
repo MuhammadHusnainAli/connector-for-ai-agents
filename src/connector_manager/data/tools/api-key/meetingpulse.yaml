@@ -1,0 +1,267 @@
+# MeetingPulse tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://app.meet.ps/openapi.json
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: meetingpulse
+display_name: MeetingPulse
+docs_url: https://app.meet.ps/openapi.json
+generated: true
+generated_from: https://app.meet.ps/openapi.json
+tools:
+  create_v1_auth:
+    title: Get an API access token based on classical account credentials
+    description: Get an API access token based on classical account credentials This endpoint is used
+      to exchange the login credentials - a JSON object containing the email and password properties -
+      for the JWT token to be used in the Authorization header for the API calls to protected endpoints.
+      Calls POST /v1/auth on the provider's API.
+    category: auth
+    request:
+      method: POST
+      path: /v1/auth
+      body:
+        email: ${email}
+        password: ${password}
+    input:
+      email:
+        type: string
+        description: The email field of the request body.
+        optional: true
+      password:
+        type: string
+        description: The password field of the request body.
+        optional: true
+    output:
+      description: Account information and access tokens
+      type: object
+  get_v2_meeting_roles:
+    title: List shared meetings
+    description: List shared meetings Get a list of meetings the current user has been granted roles for.
+      Calls GET /v2/meeting-roles on the provider's API.
+    category: meeting_roles
+    request:
+      method: GET
+      path: /v2/meeting-roles
+    input: {}
+    output:
+      description: Whatever GET /v2/meeting-roles returns, as described by the provider's specification.
+      type: object
+    read_only: true
+  get_v2_meetings:
+    title: Get a list of owned meetings
+    description: Get a list of owned meetings Lists data on meetings owned by the user. Calls GET /v2/meetings
+      on the provider's API.
+    category: meetings
+    request:
+      method: GET
+      path: /v2/meetings
+    input: {}
+    output:
+      description: Whatever GET /v2/meetings returns, as described by the provider's specification.
+      type: object
+    read_only: true
+  create_auth_anonymous:
+    title: Create or refresh an anonymous attendee session
+    description: 'Create or refresh an anonymous attendee session Generate a new attendee session for
+      a would-be participant of one or more meetings, or get a refreshed access token for an existing
+      one. The endpoint provides a way to generate and refresh attendee access tokens to manage your attendees''
+      sessions. MeetingPulse supports three types of access tokens: Calls POST /v1/auth/anonymous on the
+      provider''s API.'
+    category: auth
+    request:
+      method: POST
+      path: /v1/auth/anonymous
+      body:
+        refreshToken: ${refresh_token}
+        idToken: ${id_token}
+    input:
+      refresh_token:
+        type: string
+        description: Main account token to get a refresh token for. Required to reuse an existing attendee
+          session - if missing, a new one will be created. Providing this will make the endpoint return
+          an ID token.
+        optional: true
+      id_token:
+        type: boolean
+        description: By default (with no parameters provided) the endpoint issues a normal token only.
+          Use this flag if you need an ID token to go alongside.
+        optional: true
+    output:
+      description: Authentication data for the attendee session
+      type: object
+  delete_v1_meetings:
+    title: Remove a meeting
+    description: Remove a meeting Irrevocably delete the meeting and all data contained therein. Requires
+      an owner role for the meeting in question. Calls DELETE /v1/meetings/{meetingId} on the provider's
+      API.
+    category: meetings
+    request:
+      method: DELETE
+      path: /v1/meetings/${meeting_id}
+    input:
+      meeting_id:
+        type: string
+        description: Meeting name string
+    output:
+      description: Meeting has been successfully removed
+      type: object
+    destructive: true
+  get_v1_meetings:
+    title: Get metadata for a single meeting
+    description: Get metadata for a single meeting The endpoint provides terse info on a meeting, including
+      the meeting owner, its current state and the timestamps of all previously-set states. Requires any
+      meeting role Calls GET /v1/meetings/{meetingId} on the provider's API.
+    category: meetings
+    request:
+      method: GET
+      path: /v1/meetings/${meeting_id}
+    input:
+      meeting_id:
+        type: string
+        description: Meeting name string
+    output:
+      description: Whatever GET /v1/meetings/${meeting_id} returns, as described by the provider's specification.
+      type: object
+    read_only: true
+  update_v1_meetings:
+    title: Edit meeting configuration
+    description: Edit meeting configuration Alter various aspects of a meeting, including meeting status,
+      modules, access control etc. Requires an owner or presenter role. Calls PUT /v1/meetings/{meetingId}
+      on the provider's API.
+    category: meetings
+    request:
+      method: PUT
+      path: /v1/meetings/${meeting_id}
+      body:
+        alias: ${alias}
+        caption: ${caption}
+        altName: ${alt_name}
+        status: ${status}
+        settings: ${settings}
+    input:
+      meeting_id:
+        type: string
+        description: Meeting name string
+      alias:
+        type: string
+        description: Meeting alias to be used for custom URLs, if available.
+        optional: true
+      caption:
+        type: string
+        description: Short & friendly name for the meeting.
+        optional: true
+      alt_name:
+        type: string
+        description: Alternative, internal ID-like name for a meeting. Optional and non-unique.
+        optional: true
+      status:
+        type: string
+        description: A meeting is created by default and is normally not available to participants until
+          it's started. Upon conclusion, meetings are expected to be closed.
+        optional: true
+        enum:
+        - created
+        - started
+        - closed
+      settings:
+        type: object
+        description: A set of control properties defining meeting experience. These settings can be provided
+          both at creation time or later through meeting editing.
+        optional: true
+    output:
+      description: Update OK
+      type: object
+  get_v2_meetings_alt:
+    title: Get information on a single meeting.
+    description: Get information on a single meeting. Yields information on a meeting that you own or
+      have been shared with. Requires any meeting role. Calls GET /v2/meetings/{meetingId} on the provider's
+      API.
+    category: meetings
+    request:
+      method: GET
+      path: /v2/meetings/${meeting_id}
+    input:
+      meeting_id:
+        type: string
+        description: Meeting name string
+    output:
+      description: Whatever GET /v2/meetings/${meeting_id} returns, as described by the provider's specification.
+      type: object
+    read_only: true
+  delete_meetings_announcements:
+    title: Clear any meeting announcement
+    description: Clear any meeting announcement Ensure no announcements are present in-meeting. Note that
+      previous announcement is automatically cleared when setting a new one. Requires a meeting role of
+      owner or presenter. Calls DELETE /v1/meetings/{meetingId}/announcements on the provider's API.
+    category: meetings
+    request:
+      method: DELETE
+      path: /v1/meetings/${meeting_id}/announcements
+    input:
+      meeting_id:
+        type: string
+        description: Meeting name string
+    output:
+      description: Removal OK
+      type: object
+    destructive: true
+  update_meetings_announcements:
+    title: Set the current meeting announcement
+    description: Set the current meeting announcement Push a new announcement message to meeting attendees.
+      Only one announcement is active at a time. New announcement will replace the old one, if it was
+      set earlier. Requires a meeting role of owner or presenter. Calls PUT /v1/meetings/{meetingId}/announcements
+      on the provider's API.
+    category: meetings
+    request:
+      method: PUT
+      path: /v1/meetings/${meeting_id}/announcements
+    input:
+      meeting_id:
+        type: string
+        description: Meeting name string
+    output:
+      description: Update OK
+      type: object
+  get_meetings_ideas:
+    title: Get data of all created Topics in a meeting
+    description: 'Get data of all created Topics in a meeting Meeting role required: owner, presenter,
+      ideas-manager or ideas-moderator. Calls GET /v1/meetings/{meetingId}/ideas on the provider''s API.'
+    category: meetings
+    request:
+      method: GET
+      path: /v1/meetings/${meeting_id}/ideas
+    input:
+      meeting_id:
+        type: string
+        description: Meeting name string
+    output:
+      description: A list of created topics with each contributions and comments.
+      type: object
+    read_only: true
+  get_meetings_invites:
+    title: Get the invite list
+    description: Get the invite list Get all would-be participants provisioned through the Invitation
+      system. This data is provisioned through the app client or via separate API-based CSV upload. Useful
+      for grabbing auto-generated invite codes. Requires a meeting role of owner, manager, reporter, or
+      auditor. Calls GET /v1/meetings/{meetingId}/invites on the provider's API.
+    category: meetings
+    request:
+      method: GET
+      path: /v1/meetings/${meeting_id}/invites
+    input:
+      meeting_id:
+        type: string
+        description: Meeting name string
+    output:
+      description: Whatever GET /v1/meetings/${meeting_id}/invites returns, as described by the provider's
+        specification.
+      type: object
+    read_only: true

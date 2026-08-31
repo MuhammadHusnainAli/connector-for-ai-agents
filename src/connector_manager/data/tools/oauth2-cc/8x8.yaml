@@ -1,0 +1,271 @@
+# 8x8 XCaaS Analytics tools.
+#
+# The connector's client-credentials token from api.8x8.com/oauth/v2/token is an
+# 8x8 XCaaS bearer token, and the token response lists which API products those
+# credentials carry. That entitlement — not a scope on the token — is what
+# decides whether a call here is answered, so a 403 means the credentials are
+# not enabled for that product.
+#
+# Two product families live behind this host:
+#   * Contact Center analytics, at /analytics/cc/{version}/...
+#   * Work analytics, at /analytics/work/{version}/...
+#
+# Both are versioned in the path, so each tool takes the version as an argument
+# with a current default rather than pinning one for you.
+#
+# Docs: https://developer.8x8.com/analytics/
+
+connector_id: 8x8
+display_name: 8x8
+docs_url: https://developer.8x8.com/analytics/
+
+tools:
+
+  get_realtime_queue_metrics:
+    title: Get real-time queue metrics
+    description: >-
+      Read live contact-centre queue statistics — interactions waiting, longest
+      wait, service level and agent availability per queue. The call to make for
+      a wallboard or an alerting check.
+    category: contact_center
+    read_only: true
+    request:
+      method: GET
+      path: /analytics/cc/${version}/realtime-metrics/queues
+      query:
+        queueIds: "${queue_ids}"
+        mediaType: "${media_type}"
+    input:
+      version:
+        type: string
+        description: Real-time metrics API version to call.
+        optional: true
+        default: v5
+        enum: [v1, v2, v3, v4, v5]
+      queue_ids:
+        type: array
+        description: Only these queue ids. Omit for every queue.
+        optional: true
+        items: {type: string}
+      media_type:
+        type: string
+        description: Restrict to one interaction channel, e.g. phone, chat or email.
+        optional: true
+    output:
+      description: Live per-queue statistics.
+      type: object
+      properties:
+        data: {type: array, description: "Each with the queue and its current interaction and agent counts."}
+
+  get_realtime_agent_metrics:
+    title: Get real-time agent metrics
+    description: >-
+      Read live contact-centre agent statistics — who is logged in, their
+      current status and how long they have been in it, and the interactions
+      they are handling.
+    category: contact_center
+    read_only: true
+    request:
+      method: GET
+      path: /analytics/cc/${version}/realtime-metrics/agents
+      query:
+        agentIds: "${agent_ids}"
+        queueIds: "${queue_ids}"
+    input:
+      version:
+        type: string
+        description: Real-time metrics API version to call.
+        optional: true
+        default: v5
+        enum: [v1, v2, v3, v4, v5]
+      agent_ids:
+        type: array
+        description: Only these agent ids. Omit for every agent.
+        optional: true
+        items: {type: string}
+      queue_ids:
+        type: array
+        description: Only agents serving these queues.
+        optional: true
+        items: {type: string}
+    output:
+      description: Live per-agent statistics.
+      type: object
+      properties:
+        data: {type: array, description: "Each with the agent, their status and current interactions."}
+
+  get_historical_metrics:
+    title: Get historical contact-centre metrics
+    description: >-
+      Read contact-centre performance over a past period, summarised by the
+      resource named — queues, agents or interactions. Use this for reporting
+      rather than the real-time tools.
+    category: contact_center
+    read_only: true
+    request:
+      method: GET
+      path: /analytics/cc/${version}/historical-metrics/${resource}
+      query:
+        startTime: "${start_time}"
+        endTime: "${end_time}"
+        timeZone: "${time_zone}"
+        interval: "${interval}"
+        pageSize: "${page_size}"
+        pageNumber: "${page_number}"
+    input:
+      resource:
+        type: string
+        description: Which historical resource to report on, e.g. queues, agents or interactions.
+        example: queues
+      version:
+        type: string
+        description: Historical metrics API version to call.
+        optional: true
+        default: v8
+        enum: [v1, v2, v3, v4, v5, v6, v7, v8]
+      start_time:
+        type: string
+        description: Start of the reporting window, e.g. 2026-08-01 00:00:00.
+        optional: true
+        example: "2026-08-01 00:00:00"
+      end_time:
+        type: string
+        description: End of the reporting window.
+        optional: true
+      time_zone:
+        type: string
+        description: IANA timezone the window is expressed in, e.g. America/New_York.
+        optional: true
+      interval:
+        type: string
+        description: Bucket size for the series, where the report supports one.
+        optional: true
+      page_size:
+        type: integer
+        description: How many rows per page.
+        optional: true
+        minimum: 1
+      page_number:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+    output:
+      description: Historical metric rows for the requested resource.
+      type: object
+      properties:
+        data: {type: array}
+        meta: {type: object}
+
+  list_work_call_records:
+    title: List Work call detail records
+    description: >-
+      Read call detail records for an 8x8 Work PBX over a time window — one row
+      per call, with its participants, duration and disposition. Paged, unlike
+      most of the Work analytics endpoints.
+    category: work
+    read_only: true
+    request:
+      method: GET
+      path: /analytics/work/${version}/call-records
+      query:
+        pbxId: "${pbx_id}"
+        startTime: "${start_time}"
+        endTime: "${end_time}"
+        timeZone: "${time_zone}"
+        pageSize: "${page_size}"
+        pageNumber: "${page_number}"
+    input:
+      pbx_id:
+        type: string
+        description: The PBX whose calls to read.
+      start_time:
+        type: string
+        description: Start of the window, e.g. 2026-08-01 00:00:00.
+        example: "2026-08-01 00:00:00"
+      end_time:
+        type: string
+        description: End of the window.
+      version:
+        type: string
+        description: Work analytics API version to call.
+        optional: true
+        default: v1
+        enum: [v1, v2]
+      time_zone:
+        type: string
+        description: IANA timezone the window is expressed in, e.g. America/New_York.
+        optional: true
+      page_size:
+        type: integer
+        description: How many records per page.
+        optional: true
+        default: 50
+        minimum: 1
+      page_number:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of call detail records.
+      type: object
+      properties:
+        data: {type: array}
+        meta: {type: object}
+
+  list_work_call_legs:
+    title: List Work call legs
+    description: >-
+      Read the individual legs that make up calls on an 8x8 Work PBX — each hop,
+      transfer and forward separately, where call-records gives one row per
+      call. Also paged.
+    category: work
+    read_only: true
+    request:
+      method: GET
+      path: /analytics/work/${version}/call-legs
+      query:
+        pbxId: "${pbx_id}"
+        startTime: "${start_time}"
+        endTime: "${end_time}"
+        timeZone: "${time_zone}"
+        pageSize: "${page_size}"
+        pageNumber: "${page_number}"
+    input:
+      pbx_id:
+        type: string
+        description: The PBX whose call legs to read.
+      start_time:
+        type: string
+        description: Start of the window, e.g. 2026-08-01 00:00:00.
+      end_time:
+        type: string
+        description: End of the window.
+      version:
+        type: string
+        description: Work analytics API version to call.
+        optional: true
+        default: v1
+        enum: [v1, v2]
+      time_zone:
+        type: string
+        description: IANA timezone the window is expressed in.
+        optional: true
+      page_size:
+        type: integer
+        description: How many legs per page.
+        optional: true
+        default: 50
+        minimum: 1
+      page_number:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of call legs.
+      type: object
+      properties:
+        data: {type: array}
+        meta: {type: object}

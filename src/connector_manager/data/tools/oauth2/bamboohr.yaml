@@ -1,0 +1,335 @@
+# BambooHR tools.
+#
+# BambooHR answers XML unless asked for JSON, so every tool sends
+# `Accept: application/json`.
+#
+# The connection's subdomain is baked into the base url, so paths start at /v1.
+#
+# Docs: https://documentation.bamboohr.com/reference
+
+connector_id: bamboohr
+display_name: BambooHR
+docs_url: https://documentation.bamboohr.com/reference
+
+tools:
+
+  list_employees:
+    title: List the employee directory
+    description: >-
+      Read the company's employee directory — everyone's id, name, job title,
+      department and work email in one call.
+    category: employees
+    read_only: true
+    request:
+      method: GET
+      path: /v1/employees/directory
+      headers:
+        Accept: application/json
+    input: {}
+    output:
+      description: The employee directory.
+      type: object
+      properties:
+        employees: {type: array, description: "Each with id, displayName, jobTitle and workEmail."}
+        fields: {type: array}
+
+  get_employee:
+    title: Get an employee
+    description: >-
+      Read one employee's fields. BambooHR returns almost nothing unless
+      `fields` names what you want, so pass the field ids you need.
+    category: employees
+    read_only: true
+    request:
+      method: GET
+      path: /v1/employees/${employee_id}
+      headers:
+        Accept: application/json
+      query:
+        fields: "${fields}"
+        onlyCurrent: "${only_current}"
+    input:
+      employee_id:
+        type: string
+        description: The employee's id, or "0" for the account the token belongs to.
+      fields:
+        type: array
+        description: Field ids to return, e.g. ["firstName","lastName","jobTitle","department","hireDate"].
+        optional: true
+        default: "[firstName, lastName, workEmail, jobTitle, department, hireDate, status]"
+        items: {type: string}
+      only_current:
+        type: boolean
+        description: Restrict to currently effective values for history fields.
+        optional: true
+    output:
+      description: The employee's requested fields.
+      type: object
+      properties:
+        id: {type: string}
+        firstName: {type: string}
+        lastName: {type: string}
+        jobTitle: {type: string}
+
+  update_employee:
+    title: Update an employee
+    description: >-
+      Change an employee's fields. `fields` is keyed by BambooHR field id, e.g.
+      {"jobTitle": "Staff Engineer", "department": "Engineering"}.
+    category: employees
+    request:
+      method: POST
+      path: /v1/employees/${employee_id}
+      headers:
+        Accept: application/json
+      body: "${fields}"
+    input:
+      employee_id:
+        type: string
+        description: The employee's id.
+      fields:
+        type: object
+        description: Field id to new value.
+    output:
+      description: Empty on success -- BambooHR answers 200 with no body.
+      type: object
+
+  create_employee:
+    title: Add an employee
+    description: >-
+      Create an employee record. firstName and lastName are required; anything
+      else BambooHR knows about can go in the same object.
+    category: employees
+    request:
+      method: POST
+      path: /v1/employees
+      headers:
+        Accept: application/json
+      body:
+        firstName: "${first_name}"
+        lastName: "${last_name}"
+        workEmail: "${work_email}"
+        jobTitle: "${job_title}"
+        department: "${department}"
+        hireDate: "${hire_date}"
+        location: "${location}"
+        employeeNumber: "${employee_number}"
+    input:
+      first_name:
+        type: string
+        description: First name.
+      last_name:
+        type: string
+        description: Last name.
+      work_email:
+        type: string
+        description: Work email address.
+        optional: true
+        format: email
+      job_title:
+        type: string
+        description: Job title.
+        optional: true
+      department:
+        type: string
+        description: Department name, which must already exist.
+        optional: true
+      hire_date:
+        type: string
+        description: Hire date as YYYY-MM-DD.
+        optional: true
+      location:
+        type: string
+        description: Work location, which must already exist.
+        optional: true
+      employee_number:
+        type: string
+        description: Your own employee number.
+        optional: true
+    output:
+      description: Empty on success -- the new employee id is in the Location header.
+      type: object
+
+  list_time_off_requests:
+    title: List time-off requests
+    description: >-
+      Read holiday and leave requests over a date range. BambooHR requires both
+      start and end dates.
+    category: time_off
+    read_only: true
+    request:
+      method: GET
+      path: /v1/time_off/requests
+      headers:
+        Accept: application/json
+      query:
+        start: "${start}"
+        end: "${end}"
+        status: "${status}"
+        employeeId: "${employee_id}"
+        type: "${type}"
+    input:
+      start:
+        type: string
+        description: Start of the range as YYYY-MM-DD.
+        example: "2026-01-01"
+      end:
+        type: string
+        description: End of the range as YYYY-MM-DD.
+      status:
+        type: string
+        description: Only requests in this state.
+        optional: true
+        enum: [approved, denied, superseded, requested, canceled]
+      employee_id:
+        type: string
+        description: Only this employee's requests.
+        optional: true
+      type:
+        type: string
+        description: Only this time-off type id.
+        optional: true
+    output:
+      description: The matching time-off requests.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          employeeId: {type: string}
+          start: {type: string}
+          end: {type: string}
+          status: {type: object}
+
+  get_time_off_balances:
+    title: Get an employee's time-off balances
+    description: >-
+      Read how much leave an employee has left, as of a date, per time-off type.
+    category: time_off
+    read_only: true
+    request:
+      method: GET
+      path: /v1/employees/${employee_id}/time_off/calculator
+      headers:
+        Accept: application/json
+      query:
+        end: "${as_of}"
+    input:
+      employee_id:
+        type: string
+        description: The employee's id.
+      as_of:
+        type: string
+        description: Date to calculate the balance for, YYYY-MM-DD. Defaults to today.
+        optional: true
+    output:
+      description: The employee's balance per time-off type.
+      type: array
+      items:
+        type: object
+        properties:
+          timeOffType: {type: string}
+          name: {type: string}
+          balance: {type: string}
+          units: {type: string}
+
+  list_who_is_out:
+    title: See who is out
+    description: >-
+      List who is away over a date range — the fastest answer to "is anyone on
+      holiday next week".
+    category: time_off
+    read_only: true
+    request:
+      method: GET
+      path: /v1/time_off/whos_out
+      headers:
+        Accept: application/json
+      query:
+        start: "${start}"
+        end: "${end}"
+    input:
+      start:
+        type: string
+        description: Start of the range as YYYY-MM-DD. Defaults to today.
+        optional: true
+      end:
+        type: string
+        description: End of the range as YYYY-MM-DD. Defaults to 14 days out.
+        optional: true
+    output:
+      description: Who is away in the range.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          type: {type: string}
+          employeeId: {type: integer}
+          name: {type: string}
+          start: {type: string}
+          end: {type: string}
+
+  list_fields:
+    title: List the available employee fields
+    description: >-
+      Read every field BambooHR knows about, with its id and type. Read this
+      before naming fields in get_employee or update_employee.
+    category: metadata
+    read_only: true
+    request:
+      method: GET
+      path: /v1/meta/fields
+      headers:
+        Accept: application/json
+    input: {}
+    output:
+      description: The account's employee fields.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          name: {type: string}
+          type: {type: string}
+          alias: {type: string}
+
+  run_custom_report:
+    title: Run a custom report
+    description: >-
+      Pull a report across employees by naming the fields you want, which is how
+      to get more than the directory returns in bulk.
+    category: reports
+    request:
+      method: POST
+      path: /v1/reports/custom
+      headers:
+        Accept: application/json
+      query:
+        format: JSON
+      body:
+        title: "${title}"
+        fields: "${fields}"
+        filters: "${filters}"
+    input:
+      fields:
+        type: array
+        description: Field ids to include, e.g. ["firstName","lastName","department","hireDate"].
+        items: {type: string}
+      title:
+        type: string
+        description: Name for the report.
+        optional: true
+      filters:
+        type: object
+        description: >-
+          Row filters, e.g. {"lastChanged": {"includeNull": "no", "value":
+          "2026-01-01T00:00:00Z"}}.
+        optional: true
+    output:
+      description: The report rows.
+      type: object
+      properties:
+        title: "{type: string}"
+        fields: {type: array}
+        employees: {type: array}

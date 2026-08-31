@@ -1,0 +1,206 @@
+# ActiveCalculator tools.
+#
+# ActiveCalculator's public API is six endpoints, and all six are here: the
+# workspace behind the key, the calculators in it, and CRUD over the webhooks
+# that deliver submissions. Its published specification
+# (https://docs.activecalculator.com/openapi.json) lists nothing else, so this
+# pack is the whole API rather than a slice of it -- there is no submissions or
+# leads endpoint to reach for.
+#
+# Two conventions run through the responses:
+#
+#   * every payload except /me is wrapped in a `data` key, so each tool below
+#     unwraps it rather than making the caller do so;
+#   * ids are cuid2 strings (`calculator123`-shaped), not integers.
+#
+# The one write in the API -- registering a webhook -- currently supports the
+# single trigger `newSubmission`, which is why that is the default.
+#
+# Docs: https://docs.activecalculator.com/api-reference/introduction
+
+connector_id: activecalculator
+display_name: ActiveCalculator
+docs_url: https://docs.activecalculator.com/api-reference/introduction
+
+tools:
+
+  get_workspace:
+    title: Get the workspace behind the API key
+    description: >-
+      The workspace the API key belongs to, with its id, name and timestamps.
+      The cheapest call to confirm a key works and to learn which workspace it
+      is scoped to -- every other tool operates inside that workspace.
+    category: workspace
+    read_only: true
+    request:
+      method: GET
+      path: /me
+    input: {}
+    output:
+      description: The workspace the key authenticates as.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        createdAt: {type: string}
+        updatedAt: {type: string}
+
+  list_calculators:
+    title: List calculators
+    description: >-
+      Page through the calculators in the workspace, each with its id, name,
+      slug and the folder it lives in. The ids here are what
+      `register_webhook` takes to scope a webhook to particular calculators.
+    category: calculators
+    read_only: true
+    request:
+      method: GET
+      path: /calculators
+      query:
+        limit: "${limit}"
+        offset: "${offset}"
+    input:
+      limit:
+        type: integer
+        description: How many calculators to return.
+        optional: true
+        minimum: 1
+      offset:
+        type: integer
+        description: How many calculators to skip before returning results, for paging.
+        optional: true
+        minimum: 0
+    output:
+      description: The calculators in the workspace.
+      type: array
+      response_path: data
+      items:
+        type: object
+        description: A calculator with id, name, slug, workspaceId, folderId and timestamps.
+
+  list_webhooks:
+    title: List webhooks
+    description: >-
+      Every webhook registered for the workspace, with the URL it posts to,
+      the integration that created it and when it was last changed.
+    category: webhooks
+    read_only: true
+    request:
+      method: GET
+      path: /webhooks
+    input: {}
+    output:
+      description: The workspace's webhooks.
+      type: array
+      response_path: data
+      items:
+        type: object
+        description: A webhook with id, name, url, source, workspaceId and timestamps.
+
+  get_webhook:
+    title: Get a webhook
+    description: >-
+      One webhook by id, with its target URL, name, source and timestamps --
+      the way to confirm what a webhook is pointed at before changing anything
+      that depends on it.
+    category: webhooks
+    read_only: true
+    request:
+      method: GET
+      path: /webhooks/${webhook_id}
+    input:
+      webhook_id:
+        type: string
+        description: The webhook's id.
+        example: webhook123
+    output:
+      description: The webhook.
+      type: object
+      response_path: data
+      properties:
+        id: {type: string}
+        name: {type: string}
+        url: {type: string}
+        source: {type: string}
+        workspaceId: {type: string}
+        createdAt: {type: string}
+        updatedAt: {type: string}
+
+  register_webhook:
+    title: Register a webhook
+    description: >-
+      Register a webhook and have it start firing immediately. `url` is where
+      ActiveCalculator posts, `calculators` names which calculators it watches,
+      and `triggers` which events -- today only `newSubmission` is supported,
+      which is the default.
+    category: webhooks
+    request:
+      method: POST
+      path: /webhooks
+      body:
+        url: "${url}"
+        name: "${name}"
+        source: "${source}"
+        triggers: "${triggers}"
+        calculators: "${calculators}"
+    input:
+      url:
+        type: string
+        description: The endpoint ActiveCalculator sends submissions to.
+        example: https://hooks.example.com/activecalculator
+      calculators:
+        type: array
+        description: Ids of the calculators this webhook watches. `list_calculators` gives them.
+        items: {type: string}
+      triggers:
+        type: array
+        description: Which events fire the webhook. Only "newSubmission" is supported today.
+        optional: true
+        default: [newSubmission]
+        items: {type: string}
+      name:
+        type: string
+        description: A name for the webhook, for your own reference.
+        optional: true
+      source:
+        type: string
+        description: >-
+          Which integration is registering the webhook. Leave as "user" for a
+          direct API caller.
+        optional: true
+        default: user
+        enum: [user, zapier, make, n8n, pipedream]
+    output:
+      description: The webhook that was registered.
+      type: object
+      response_path: data
+      properties:
+        id: {type: string}
+        name: {type: string}
+        url: {type: string}
+        source: {type: string}
+        workspaceId: {type: string}
+
+  remove_webhook:
+    title: Remove a webhook
+    description: >-
+      Delete a webhook. It stops firing at once, so anything downstream that
+      relies on those submissions goes quiet -- there is no pause, only delete
+      and re-register.
+    category: webhooks
+    destructive: true
+    request:
+      method: DELETE
+      path: /webhooks/${webhook_id}
+    input:
+      webhook_id:
+        type: string
+        description: The webhook's id.
+    output:
+      description: The webhook that was removed.
+      type: object
+      response_path: data
+      properties:
+        id: {type: string}
+        name: {type: string}
+        url: {type: string}

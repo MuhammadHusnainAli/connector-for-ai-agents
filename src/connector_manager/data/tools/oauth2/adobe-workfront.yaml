@@ -1,0 +1,1975 @@
+# Adobe Workfront tools.
+#
+# Workfront's API is one uniform interface over every object in the system
+# rather than a hand-written endpoint per resource. An object type is named by
+# its **objCode** -- `PROJ` for a project, `TASK` for a task, `OPTASK` for an
+# issue -- and each type answers the same operations:
+#
+#   GET    /{version}/{objCode}/search      find, with filters and modifiers
+#   GET    /{version}/{objCode}/{id}        read one
+#   GET    /{version}/{objCode}?id=a,b      read several
+#   GET    /{version}/{objCode}/count       count matches
+#   GET    /{version}/{objCode}/metadata    that type's fields and references
+#   POST   /{version}/{objCode}             create
+#   PUT    /{version}/{objCode}/{id}        update
+#   DELETE /{version}/{objCode}/{id}        delete
+#   POST   /{version}/{objCode}/{id}/{action}   run a named action
+#
+# The conventions that trip people up, and which the tools expose directly:
+#
+#   * **nothing but the default fields comes back** unless `fields` asks for
+#     more. It takes nested paths (`owner:name`), collections (`tasks`) and
+#     custom data (`DE:My Field`), and `*` for everything on a level;
+#   * **filters are query parameters with modifiers**: `status=CUR` narrows,
+#     `status_Mod=ne` inverts, `plannedCompletionDate_Sort=asc` orders. That is
+#     why the search tools take a free-form `filters` object rather than a fixed
+#     set of arguments;
+#   * **paging is `$$LIMIT` and `$$FIRST`**, and `$$LIMIT` is capped at 2000;
+#   * **updates are a JSON object in the `updates` parameter** -- Workfront's own
+#     client sends it that way, and it is how several fields are set at once.
+#
+# The generic tools work for any objCode, including custom objects. The typed
+# ones below them are the same calls with the objCode filled in for the types
+# most integrations touch, so the common cases need no lookup.
+#
+# `version` defaults to v22.0, the newest supported release at the time of
+# writing; Workfront supports each version for three years, and an unversioned
+# path silently uses the instance's default, so it is worth pinning.
+#
+# Docs: https://experienceleague.adobe.com/en/docs/workfront/using/adobe-workfront-api/api-general-information/api-basics
+
+connector_id: adobe-workfront
+display_name: Adobe Workfront
+docs_url: https://experienceleague.adobe.com/en/docs/workfront/using/adobe-workfront-api/api-general-information/api-basics
+
+tools:
+
+  # -- discovery ---------------------------------------------------------------
+
+  list_object_types:
+    title: List every object type
+    description: >-
+      Every objCode this instance exposes, custom objects included. The map to
+      read before anything else: it is the authoritative answer to what
+      `obj_code` may be.
+    category: metadata
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/metadata
+    input:
+      version:
+        type: string
+        description: >-
+          API version to call, e.g. v22.0. Supported for three years from
+          release; an unversioned call uses the instance default.
+        optional: true
+        default: v22.0
+    output:
+      description: The object types available.
+      type: object
+      properties:
+        data: {type: object, description: "Keyed by objCode, each with its name and URL."}
+
+  get_object_metadata:
+    title: Get an object type's fields
+    description: >-
+      One object type's fields, references and collections, each with its label,
+      type and target type. This is how you learn what `fields` may ask for and
+      what a filter may name -- including the custom fields a Workfront admin
+      added.
+    category: metadata
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/${obj_code}/metadata
+    input:
+      obj_code:
+        type: string
+        description: The object type, e.g. PROJ, TASK, OPTASK, USER.
+        example: TASK
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The object type's metadata.
+      type: object
+      properties:
+        objCode: {type: string}
+        fields: {type: object, description: "Field name to definition, including custom fields."}
+        references: {type: object}
+        collections: {type: object}
+
+  # -- generic object operations ----------------------------------------------
+
+  search_objects:
+    title: Search objects of any type
+    description: >-
+      Find objects of one type. `filters` carries Workfront's own query
+      parameters -- field values, `_Mod` modifiers such as `eq`, `ne`, `gte`,
+      `contains`, `isnull`, `_Sort` for ordering, and `OR:n:` prefixes for
+      alternatives. Ask for what you need with `fields`, and page with `limit`
+      and `first`; without `fields` you get the default columns only.
+    category: objects
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/${obj_code}/search
+      query: "${filters}"
+    input:
+      obj_code:
+        type: string
+        description: The object type to search, e.g. PROJ, TASK, OPTASK.
+        example: PROJ
+      filters:
+        type: object
+        description: >-
+          The query, as Workfront's own parameters -- e.g.
+          {"status": "CUR", "fields": "ID,name,status", "$$LIMIT": 100,
+          "plannedCompletionDate_Sort": "asc"}. Include `$$FIRST` to page and
+          `map` true to get results keyed by id.
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The matching objects.
+      type: object
+      properties:
+        data: {type: array, description: "The objects, or an id-keyed object when map=true was sent."}
+
+  get_object:
+    title: Get one object
+    description: >-
+      Read a single object by id. Pass `fields` to widen the response --
+      nested references (`owner:name`), collections (`tasks`) or custom data
+      (`DE:Cost Centre`) -- since only the default columns come back otherwise.
+    category: objects
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/${obj_code}/${object_id}
+      query:
+        fields: "${fields}"
+    input:
+      obj_code:
+        type: string
+        description: The object type, e.g. PROJ.
+      object_id:
+        type: string
+        description: The object's id.
+      fields:
+        type: string
+        description: >-
+          Comma-separated fields to return, e.g. "name,status,owner:name" or
+          "*" for everything at the top level.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The object.
+      type: object
+      properties:
+        data: {type: object}
+
+  get_objects:
+    title: Get several objects by id
+    description: >-
+      Read many objects of one type in a single call, by passing their ids. The
+      efficient shape when you already know what you want -- one request instead
+      of one per id.
+    category: objects
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/${obj_code}
+      query:
+        id: "${object_ids}"
+        fields: "${fields}"
+    input:
+      obj_code:
+        type: string
+        description: The object type, e.g. TASK.
+      object_ids:
+        type: array
+        description: The ids to fetch. Sent as a comma-separated list.
+        items: {type: string}
+      fields:
+        type: string
+        description: Comma-separated fields to return.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The requested objects.
+      type: object
+      properties:
+        data: {type: array}
+
+  count_objects:
+    title: Count objects
+    description: >-
+      How many objects of one type match a query, without fetching them.
+      Returns just `{"count": n}` -- the right call before deciding whether to
+      page through a result set.
+    category: objects
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/${obj_code}/count
+      query: "${filters}"
+    input:
+      obj_code:
+        type: string
+        description: The object type to count, e.g. PROJ.
+      filters:
+        type: object
+        description: The same filter parameters `search_objects` takes.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The number of matches.
+      type: object
+      properties:
+        data: {type: object, description: "Holds count."}
+
+  create_object:
+    title: Create an object
+    description: >-
+      Create an object of any type. `updates` carries the field values as one
+      JSON object, which is how Workfront's own client sends a create. Required
+      fields vary by type -- `get_object_metadata` says which, and a task needs
+      its `projectID` while a project needs a `groupID` on most instances.
+    category: objects
+    request:
+      method: POST
+      path: /${version}/${obj_code}
+      query:
+        updates: "${updates}"
+        fields: "${fields}"
+    input:
+      obj_code:
+        type: string
+        description: The object type to create, e.g. TASK.
+      updates:
+        type: object
+        description: >-
+          The new object's field values, e.g.
+          {"name": "Draft copy", "projectID": "5d8...", "assignedToID": "4c7..."}.
+      fields:
+        type: string
+        description: Fields to return on the created object.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The object that was created.
+      type: object
+      properties:
+        data: {type: object, description: "Includes the ID Workfront assigned."}
+
+  update_object:
+    title: Update an object
+    description: >-
+      Change one object's fields. Only what `updates` names changes. Setting a
+      status, reassigning work or moving a date all happen here -- and some of
+      them trigger Workfront's own recalculation, so read the object back if the
+      derived dates matter.
+    category: objects
+    request:
+      method: PUT
+      path: /${version}/${obj_code}/${object_id}
+      query:
+        updates: "${updates}"
+        fields: "${fields}"
+    input:
+      obj_code:
+        type: string
+        description: The object type, e.g. PROJ.
+      object_id:
+        type: string
+        description: The object's id.
+      updates:
+        type: object
+        description: 'The field values to set, e.g. {"status": "CPL", "percentComplete": 100}.'
+      fields:
+        type: string
+        description: Fields to return on the updated object.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The updated object.
+      type: object
+      properties:
+        data: {type: object}
+
+  update_objects:
+    title: Update several objects
+    description: >-
+      Apply a list of updates to many objects of one type in a single request --
+      Workfront's bulk edit. Each entry needs the object's `ID` alongside the
+      fields to change.
+    category: objects
+    request:
+      method: PUT
+      path: /${version}/${obj_code}
+      query:
+        updates: "${updates}"
+        fields: "${fields}"
+    input:
+      obj_code:
+        type: string
+        description: The object type, e.g. TASK.
+      updates:
+        type: array
+        description: >-
+          One entry per object, each with its ID and the fields to change, e.g.
+          [{"ID": "4c7...", "status": "CPL"}].
+        items: {type: object}
+      fields:
+        type: string
+        description: Fields to return on each updated object.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The updated objects.
+      type: object
+      properties:
+        data: {type: array}
+
+  delete_object:
+    title: Delete an object
+    description: >-
+      Delete an object. Workfront refuses where dependants exist unless `force`
+      is true, which then removes them too -- deleting a project with `force`
+      takes its tasks, issues, hours and documents with it. Not reversible from
+      the API.
+    category: objects
+    destructive: true
+    request:
+      method: DELETE
+      path: /${version}/${obj_code}/${object_id}
+      query:
+        force: "${force}"
+    input:
+      obj_code:
+        type: string
+        description: The object type, e.g. TASK.
+      object_id:
+        type: string
+        description: The object's id.
+      force:
+        type: boolean
+        description: >-
+          Delete even when dependent records exist, removing them as well.
+          Without it Workfront refuses rather than cascading.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: Empty on success.
+      type: object
+
+  copy_object:
+    title: Copy an object
+    description: >-
+      Create a new object as a copy of an existing one, optionally overriding
+      fields on the copy. How a project is cloned from a proven one rather than
+      rebuilt.
+    category: objects
+    request:
+      method: POST
+      path: /${version}/${obj_code}
+      query:
+        copySourceID: "${source_id}"
+        updates: "${updates}"
+        options: "${options}"
+        fields: "${fields}"
+    input:
+      obj_code:
+        type: string
+        description: The object type to copy, e.g. PROJ.
+      source_id:
+        type: string
+        description: Id of the object being copied.
+      updates:
+        type: object
+        description: 'Field values to apply to the copy, e.g. {"name": "Q4 rollout"}.'
+        optional: true
+      options:
+        type: array
+        description: >-
+          Copy options Workfront supports for the type, such as which
+          collections to bring along.
+        optional: true
+        items: {type: string}
+      fields:
+        type: string
+        description: Fields to return on the new object.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The copy that was created.
+      type: object
+      properties:
+        data: {type: object}
+
+  run_object_action:
+    title: Run a named action on an object
+    description: >-
+      Invoke one of the actions an object type exposes -- `calculateTimeline` on
+      a project, `complete` on a task, `convertToProject` on an issue.
+      `get_object_metadata` lists what a type supports, and any arguments the
+      action needs go in `action_arguments`.
+    category: objects
+    request:
+      method: POST
+      path: /${version}/${obj_code}/${object_id}/${action}
+      query: "${action_arguments}"
+    input:
+      obj_code:
+        type: string
+        description: The object type, e.g. PROJ.
+      object_id:
+        type: string
+        description: The object's id.
+      action:
+        type: string
+        description: The action to run, e.g. calculateTimeline.
+        example: calculateTimeline
+      action_arguments:
+        type: object
+        description: >-
+          Arguments the action takes, plus `method` where Workfront's action
+          form requires it.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: What the action returned.
+      type: object
+      properties:
+        data: {type: object}
+
+  run_type_action:
+    title: Run a named action on an object type
+    description: >-
+      Invoke an action that belongs to a type rather than to one record -- the
+      form Workfront uses where there is no object to address. The action name
+      goes in the `action` parameter.
+    category: objects
+    request:
+      method: POST
+      path: /${version}/${obj_code}
+      query: "${arguments}"
+    input:
+      obj_code:
+        type: string
+        description: The object type, e.g. USER.
+      arguments:
+        type: object
+        description: >-
+          The call's parameters, including `action` naming the action to run,
+          e.g. {"action": "clearApiKey"}.
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: What the action returned.
+      type: object
+      properties:
+        data: {type: object}
+
+  move_task:
+    title: Move a task to another project
+    description: >-
+      Relocate a task, optionally under a particular parent task. Workfront
+      recalculates the timeline of both projects, so planned dates on either
+      side can shift.
+    category: tasks
+    request:
+      method: PUT
+      path: /${version}/task/${task_id}/move
+      query:
+        projectID: "${project_id}"
+        parentID: "${parent_task_id}"
+    input:
+      task_id:
+        type: string
+        description: The task to move.
+      project_id:
+        type: string
+        description: Id of the project it moves into.
+      parent_task_id:
+        type: string
+        description: Id of the parent task it should sit under.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The moved task.
+      type: object
+      properties:
+        data: {type: object}
+
+  share_object:
+    title: Share an object
+    description: >-
+      Grant access to an object. `accessor_obj_code` says what kind of accessor
+      is being granted -- `USER`, `TEAMOB`, `ROLE`, `GROUP` -- and
+      `accessor_id` which one. This changes who can see the record, so it is a
+      permissions write, not a cosmetic one.
+    category: objects
+    request:
+      method: PUT
+      path: /${version}/${obj_code}/${object_id}/share
+      query:
+        accessorID: "${accessor_id}"
+        accessorObjCode: "${accessor_obj_code}"
+        coreAction: "${core_action}"
+    input:
+      obj_code:
+        type: string
+        description: The object type being shared, e.g. PROJ.
+      object_id:
+        type: string
+        description: The object's id.
+      accessor_id:
+        type: string
+        description: Id of the user, team, role or group being granted access.
+      accessor_obj_code:
+        type: string
+        description: What kind of accessor `accessor_id` is.
+        example: USER
+      core_action:
+        type: string
+        description: >-
+          Level of access to grant, e.g. VIEW, CONTRIBUTE or MANAGE, as the
+          object type allows.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The resulting share.
+      type: object
+      properties:
+        data: {type: object}
+
+  run_report:
+    title: Run a report query
+    description: >-
+      Run an aggregating query over one object type -- Workfront's report
+      endpoint, which groups and totals rather than returning rows. Grouping and
+      aggregate parameters go in `query`, in the same form the report builder
+      produces.
+    category: reporting
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/${obj_code}/report
+      query: "${query}"
+    input:
+      obj_code:
+        type: string
+        description: The object type to report on, e.g. HOUR.
+        example: HOUR
+      query:
+        type: object
+        description: >-
+          The report definition -- filters plus grouping and aggregate
+          parameters such as {"project:name_1_GroupBy": "project:name",
+          "hours_AggFunc": "sum"}.
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The aggregated report data.
+      type: object
+      properties:
+        data: {type: object}
+
+  run_named_query:
+    title: Run a named query
+    description: >-
+      Call one of Workfront's built-in named queries -- `/work/myWork` for the
+      caller's work list, `/user/myTeams` and the like. These are the shortcuts
+      the product itself uses for common questions.
+    category: reporting
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/${obj_code}/${query_name}
+      query: "${query_arguments}"
+    input:
+      obj_code:
+        type: string
+        description: The object type the query belongs to, e.g. work or user.
+        example: work
+      query_name:
+        type: string
+        description: The named query, e.g. myWork.
+        example: myWork
+      query_arguments:
+        type: object
+        description: Arguments and `fields` for the query.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The query's results.
+      type: object
+      properties:
+        data: {type: array}
+
+  run_batch:
+    title: Run several calls in one request
+    description: >-
+      Send many API URIs in a single request. `atomic` true makes the whole
+      batch succeed or fail together -- the way to keep related writes
+      consistent -- and `concurrent` lets Workfront run them in parallel where
+      order does not matter.
+    category: objects
+    request:
+      method: POST
+      path: /${version}/batch
+      query:
+        uri: "${uris}"
+        atomic: "${atomic}"
+        concurrent: "${concurrent}"
+    input:
+      uris:
+        type: array
+        description: >-
+          The calls to run, each as a relative API URI, e.g.
+          "/task/4c7...?method=PUT&updates={...}".
+        items: {type: string}
+      atomic:
+        type: boolean
+        description: Treat the batch as all-or-nothing.
+        optional: true
+      concurrent:
+        type: boolean
+        description: Let Workfront run the calls in parallel.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: One result per call, or a single success for an atomic batch.
+      type: object
+      properties:
+        data: {type: array}
+
+  # -- projects ----------------------------------------------------------------
+
+  search_projects:
+    title: Search projects
+    description: >-
+      Find projects. Filter on `status` (CUR current, PLN planning, CPL
+      complete, DED dead), `portfolioID`, `groupID`, `ownerID` or dates, and ask
+      for the fields you need -- a project has hundreds.
+    category: projects
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/proj/search
+      query: "${filters}"
+    input:
+      filters:
+        type: object
+        description: >-
+          Workfront query parameters, e.g.
+          {"status": "CUR", "fields": "ID,name,status,percentComplete",
+          "$$LIMIT": 100}.
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The matching projects.
+      type: object
+      properties:
+        data: {type: array}
+
+  get_project:
+    title: Get a project
+    description: >-
+      One project by id. Ask for collections through `fields` -- `tasks`,
+      `issues`, `assignments` -- when you want the work under it rather than
+      just the header.
+    category: projects
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/proj/${project_id}
+      query:
+        fields: "${fields}"
+    input:
+      project_id:
+        type: string
+        description: The project's id.
+      fields:
+        type: string
+        description: Comma-separated fields and collections to return.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The project.
+      type: object
+      properties:
+        data: {type: object}
+
+  create_project:
+    title: Create a project
+    description: >-
+      Create a project. A name is the minimum; most instances also want
+      `groupID`, and a template is usually a better starting point -- create
+      from one with `create_project_from_template`.
+    category: projects
+    request:
+      method: POST
+      path: /${version}/proj
+      query:
+        updates: "${updates}"
+        fields: "${fields}"
+    input:
+      updates:
+        type: object
+        description: >-
+          The project's field values, e.g.
+          {"name": "Website refresh", "groupID": "5d8...", "status": "PLN"}.
+      fields:
+        type: string
+        description: Fields to return on the created project.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The project that was created.
+      type: object
+      properties:
+        data: {type: object}
+
+  create_project_from_template:
+    title: Create a project from a template
+    description: >-
+      Instantiate a project template, which brings its task structure,
+      durations and role assignments with it. `updates` overrides fields on the
+      new project, such as its name and planned start.
+    category: projects
+    request:
+      method: POST
+      path: /${version}/proj
+      query:
+        templateID: "${template_id}"
+        updates: "${updates}"
+        fields: "${fields}"
+    input:
+      template_id:
+        type: string
+        description: Id of the project template to instantiate.
+      updates:
+        type: object
+        description: 'Field values for the new project, e.g. {"name": "Q4 rollout"}.'
+        optional: true
+      fields:
+        type: string
+        description: Fields to return on the created project.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The project that was created.
+      type: object
+      properties:
+        data: {type: object}
+
+  update_project:
+    title: Update a project
+    description: >-
+      Change a project's fields. Moving `plannedStartDate` or changing `status`
+      can trigger a timeline recalculation across its tasks, so read the tasks
+      back if their dates matter.
+    category: projects
+    request:
+      method: PUT
+      path: /${version}/proj/${project_id}
+      query:
+        updates: "${updates}"
+        fields: "${fields}"
+    input:
+      project_id:
+        type: string
+        description: The project's id.
+      updates:
+        type: object
+        description: 'The field values to set, e.g. {"status": "CUR"}.'
+      fields:
+        type: string
+        description: Fields to return on the updated project.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The updated project.
+      type: object
+      properties:
+        data: {type: object}
+
+  delete_project:
+    title: Delete a project
+    description: >-
+      Delete a project. `force` true also removes its tasks, issues, hours and
+      documents -- without it Workfront refuses while dependants exist. Marking
+      the project dead (`status` DED) is the usual alternative.
+    category: projects
+    destructive: true
+    request:
+      method: DELETE
+      path: /${version}/proj/${project_id}
+      query:
+        force: "${force}"
+    input:
+      project_id:
+        type: string
+        description: The project's id.
+      force:
+        type: boolean
+        description: Delete the project's dependent records along with it.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: Empty on success.
+      type: object
+
+  recalculate_project_timeline:
+    title: Recalculate a project's timeline
+    description: >-
+      Run Workfront's timeline calculation over a project, resolving predecessor
+      chains, durations and constraints into planned dates. Worth calling after
+      a batch of task writes, since the calculation is not automatic on every
+      change.
+    category: projects
+    request:
+      method: PUT
+      path: /${version}/proj/${project_id}
+      query:
+        action: calculateTimeline
+    input:
+      project_id:
+        type: string
+        description: The project's id.
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The project after recalculation.
+      type: object
+      properties:
+        data: {type: object}
+
+  # -- tasks -------------------------------------------------------------------
+
+  search_tasks:
+    title: Search tasks
+    description: >-
+      Find tasks. Common filters are `projectID`, `assignedToID`, `status` (NEW,
+      INP in progress, CPL complete) and `plannedCompletionDate` with a `_Mod`
+      such as `lte` for what is due.
+    category: tasks
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/task/search
+      query: "${filters}"
+    input:
+      filters:
+        type: object
+        description: >-
+          Workfront query parameters, e.g.
+          {"projectID": "5d8...", "status": "INP",
+          "fields": "ID,name,assignedToID,plannedCompletionDate"}.
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The matching tasks.
+      type: object
+      properties:
+        data: {type: array}
+
+  get_task:
+    title: Get a task
+    description: >-
+      One task by id, with whatever `fields` asks for -- `assignments`,
+      `predecessors` and `parent` are the usual additions.
+    category: tasks
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/task/${task_id}
+      query:
+        fields: "${fields}"
+    input:
+      task_id:
+        type: string
+        description: The task's id.
+      fields:
+        type: string
+        description: Comma-separated fields and collections to return.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The task.
+      type: object
+      properties:
+        data: {type: object}
+
+  create_task:
+    title: Create a task
+    description: >-
+      Create a task on a project. `projectID` and a name are the minimum;
+      `parentID` nests it under another task, and `assignedToID` puts it on
+      someone's list straight away.
+    category: tasks
+    request:
+      method: POST
+      path: /${version}/task
+      query:
+        updates: "${updates}"
+        fields: "${fields}"
+    input:
+      updates:
+        type: object
+        description: >-
+          The task's field values, e.g.
+          {"name": "Draft copy", "projectID": "5d8...", "assignedToID": "4c7...",
+          "plannedCompletionDate": "2026-10-01T17:00:00:000-0600"}.
+      fields:
+        type: string
+        description: Fields to return on the created task.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The task that was created.
+      type: object
+      properties:
+        data: {type: object}
+
+  update_task:
+    title: Update a task
+    description: >-
+      Change a task -- its name, dates, status, assignee or percent complete.
+      Completing a task means setting `status` to CPL and usually
+      `percentComplete` to 100.
+    category: tasks
+    request:
+      method: PUT
+      path: /${version}/task/${task_id}
+      query:
+        updates: "${updates}"
+        fields: "${fields}"
+    input:
+      task_id:
+        type: string
+        description: The task's id.
+      updates:
+        type: object
+        description: 'The field values to set, e.g. {"status": "CPL", "percentComplete": 100}.'
+      fields:
+        type: string
+        description: Fields to return on the updated task.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The updated task.
+      type: object
+      properties:
+        data: {type: object}
+
+  delete_task:
+    title: Delete a task
+    description: >-
+      Delete a task. `force` true removes its subtasks, hours and documents as
+      well; without it Workfront refuses while those exist.
+    category: tasks
+    destructive: true
+    request:
+      method: DELETE
+      path: /${version}/task/${task_id}
+      query:
+        force: "${force}"
+    input:
+      task_id:
+        type: string
+        description: The task's id.
+      force:
+        type: boolean
+        description: Delete dependent records along with the task.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: Empty on success.
+      type: object
+
+  # -- issues ------------------------------------------------------------------
+
+  search_issues:
+    title: Search issues
+    description: >-
+      Find issues -- Workfront's objCode for them is OPTASK, covering requests,
+      bugs and change orders. Filter by `projectID`, `queueTopicID`, `status` or
+      `assignedToID`.
+    category: issues
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/optask/search
+      query: "${filters}"
+    input:
+      filters:
+        type: object
+        description: >-
+          Workfront query parameters, e.g.
+          {"status": "NEW", "fields": "ID,name,lastUpdateDate", "$$LIMIT": 200}.
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The matching issues.
+      type: object
+      properties:
+        data: {type: array}
+
+  get_issue:
+    title: Get an issue
+    description: One issue (OPTASK) by id, with whatever `fields` asks for.
+    category: issues
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/optask/${issue_id}
+      query:
+        fields: "${fields}"
+    input:
+      issue_id:
+        type: string
+        description: The issue's id.
+      fields:
+        type: string
+        description: Comma-separated fields and collections to return.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The issue.
+      type: object
+      properties:
+        data: {type: object}
+
+  create_issue:
+    title: Create an issue
+    description: >-
+      Raise an issue or request. `projectID` puts it on a project;
+      `queueTopicID` files it into a request queue, which is how inbound
+      requests reach the right team.
+    category: issues
+    request:
+      method: POST
+      path: /${version}/optask
+      query:
+        updates: "${updates}"
+        fields: "${fields}"
+    input:
+      updates:
+        type: object
+        description: >-
+          The issue's field values, e.g.
+          {"name": "Broken link on pricing page", "projectID": "5d8...",
+          "queueTopicID": "4c7..."}.
+      fields:
+        type: string
+        description: Fields to return on the created issue.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The issue that was created.
+      type: object
+      properties:
+        data: {type: object}
+
+  update_issue:
+    title: Update an issue
+    description: >-
+      Change an issue's fields -- status, assignee, priority or resolution. Only
+      what you send changes.
+    category: issues
+    request:
+      method: PUT
+      path: /${version}/optask/${issue_id}
+      query:
+        updates: "${updates}"
+        fields: "${fields}"
+    input:
+      issue_id:
+        type: string
+        description: The issue's id.
+      updates:
+        type: object
+        description: The field values to set.
+      fields:
+        type: string
+        description: Fields to return on the updated issue.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The updated issue.
+      type: object
+      properties:
+        data: {type: object}
+
+  delete_issue:
+    title: Delete an issue
+    description: >-
+      Delete an issue. `force` removes its dependants too. Resolving it is
+      usually preferable, since a deleted request leaves no trail for the
+      requester.
+    category: issues
+    destructive: true
+    request:
+      method: DELETE
+      path: /${version}/optask/${issue_id}
+      query:
+        force: "${force}"
+    input:
+      issue_id:
+        type: string
+        description: The issue's id.
+      force:
+        type: boolean
+        description: Delete dependent records along with the issue.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: Empty on success.
+      type: object
+
+  convert_issue_to_project:
+    title: Convert an issue into a project
+    description: >-
+      Turn an approved request into a project, optionally from a template. The
+      issue is linked to the project it produced, which is what keeps the
+      requester's view intact.
+    category: issues
+    request:
+      method: POST
+      path: /${version}/optask/${issue_id}/convertToProject
+      query:
+        templateID: "${template_id}"
+        updates: "${updates}"
+    input:
+      issue_id:
+        type: string
+        description: The issue to convert.
+      template_id:
+        type: string
+        description: Id of a project template to build the new project from.
+        optional: true
+      updates:
+        type: object
+        description: Field values for the new project.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The project the issue became.
+      type: object
+      properties:
+        data: {type: object}
+
+  # -- people, hours and documents --------------------------------------------
+
+  search_users:
+    title: Search users
+    description: >-
+      Find users. Filter on `isActive`, `emailAddr`, `homeGroupID` or `roleID`;
+      `emailAddr` with `_Mod=cicontains` is how a lookup by partial address is
+      done.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/user/search
+      query: "${filters}"
+    input:
+      filters:
+        type: object
+        description: >-
+          Workfront query parameters, e.g.
+          {"isActive": true, "fields": "ID,name,emailAddr,title"}.
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The matching users.
+      type: object
+      properties:
+        data: {type: array}
+
+  get_user:
+    title: Get a user
+    description: One user by id, with whatever `fields` asks for.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/user/${user_id}
+      query:
+        fields: "${fields}"
+    input:
+      user_id:
+        type: string
+        description: The user's id.
+      fields:
+        type: string
+        description: Comma-separated fields and collections to return.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The user.
+      type: object
+      properties:
+        data: {type: object}
+
+  get_current_user:
+    title: Get the current user
+    description: >-
+      Who the token is acting as, through Workfront's `myself` named query.
+      Useful for resolving "my work" style questions and for confirming a
+      connection.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/user/myself
+      query:
+        fields: "${fields}"
+    input:
+      fields:
+        type: string
+        description: Comma-separated fields to return.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The current user.
+      type: object
+      properties:
+        data: {type: object}
+
+  create_user:
+    title: Create a user
+    description: >-
+      Create a Workfront user. Their licence type and access level are what
+      decide cost and capability, so set them deliberately rather than taking
+      the defaults.
+    category: users
+    request:
+      method: POST
+      path: /${version}/user
+      query:
+        updates: "${updates}"
+        fields: "${fields}"
+    input:
+      updates:
+        type: object
+        description: >-
+          The user's field values, e.g.
+          {"firstName": "Ada", "lastName": "Lovelace",
+          "emailAddr": "ada@example.com", "accessLevelID": "4c7..."}.
+      fields:
+        type: string
+        description: Fields to return on the created user.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The user that was created.
+      type: object
+      properties:
+        data: {type: object}
+
+  update_user:
+    title: Update a user
+    description: >-
+      Change a user's details, access level, role or home group. Setting
+      `isActive` false deactivates them, which is the usual offboarding step and
+      frees their licence.
+    category: users
+    request:
+      method: PUT
+      path: /${version}/user/${user_id}
+      query:
+        updates: "${updates}"
+        fields: "${fields}"
+    input:
+      user_id:
+        type: string
+        description: The user's id.
+      updates:
+        type: object
+        description: 'The field values to set, e.g. {"isActive": false}.'
+      fields:
+        type: string
+        description: Fields to return on the updated user.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The updated user.
+      type: object
+      properties:
+        data: {type: object}
+
+  search_assignments:
+    title: Search assignments
+    description: >-
+      Find work assignments -- who is on which task or issue, and for how much
+      planned time. The objCode is ASSGN, and this is where workload questions
+      are answered.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/assgn/search
+      query: "${filters}"
+    input:
+      filters:
+        type: object
+        description: >-
+          Workfront query parameters, e.g.
+          {"assignedToID": "4c7...", "fields": "ID,taskID,assignmentPercent"}.
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The matching assignments.
+      type: object
+      properties:
+        data: {type: array}
+
+  search_hours:
+    title: Search logged hours
+    description: >-
+      Find time entries. Filter on `ownerID`, `projectID`, `taskID` or
+      `entryDate` with a `_Mod` for a range -- this is the raw material of
+      timesheet and billing reporting.
+    category: hours
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/hour/search
+      query: "${filters}"
+    input:
+      filters:
+        type: object
+        description: >-
+          Workfront query parameters, e.g.
+          {"entryDate": "2026-09-01", "entryDate_Mod": "gte",
+          "fields": "ID,hours,ownerID,taskID,entryDate"}.
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The matching hour entries.
+      type: object
+      properties:
+        data: {type: array}
+
+  log_hours:
+    title: Log hours
+    description: >-
+      Record time against a task, issue or project. `hours`, `entryDate` and an
+      owner are the essentials, plus the `taskID`, `opTaskID` or `projectID` the
+      time belongs to.
+    category: hours
+    request:
+      method: POST
+      path: /${version}/hour
+      query:
+        updates: "${updates}"
+        fields: "${fields}"
+    input:
+      updates:
+        type: object
+        description: >-
+          The entry's field values, e.g.
+          {"hours": 3.5, "entryDate": "2026-09-15", "taskID": "4c7...",
+          "ownerID": "5d8...", "description": "Drafting"}.
+      fields:
+        type: string
+        description: Fields to return on the created entry.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The hour entry that was created.
+      type: object
+      properties:
+        data: {type: object}
+
+  update_hours:
+    title: Update logged hours
+    description: >-
+      Correct a time entry -- its hours, date or description. Entries on an
+      approved timesheet may be locked, in which case Workfront refuses.
+    category: hours
+    request:
+      method: PUT
+      path: /${version}/hour/${hour_id}
+      query:
+        updates: "${updates}"
+        fields: "${fields}"
+    input:
+      hour_id:
+        type: string
+        description: The hour entry's id.
+      updates:
+        type: object
+        description: 'The field values to set, e.g. {"hours": 4}.'
+      fields:
+        type: string
+        description: Fields to return on the updated entry.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The updated entry.
+      type: object
+      properties:
+        data: {type: object}
+
+  delete_hours:
+    title: Delete logged hours
+    description: >-
+      Delete a time entry. Where it has been billed or approved this affects
+      reporting, so prefer correcting the entry.
+    category: hours
+    destructive: true
+    request:
+      method: DELETE
+      path: /${version}/hour/${hour_id}
+      query:
+        force: "${force}"
+    input:
+      hour_id:
+        type: string
+        description: The hour entry's id.
+      force:
+        type: boolean
+        description: Delete even where Workfront would otherwise refuse.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: Empty on success.
+      type: object
+
+  search_timesheets:
+    title: Search timesheets
+    description: >-
+      Find timesheets, by owner, period or status -- the container the hour
+      entries roll up into for approval.
+    category: hours
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/tshet/search
+      query: "${filters}"
+    input:
+      filters:
+        type: object
+        description: >-
+          Workfront query parameters, e.g.
+          {"userID": "4c7...", "fields": "ID,status,totalHours,startDate"}.
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The matching timesheets.
+      type: object
+      properties:
+        data: {type: array}
+
+  search_documents:
+    title: Search documents
+    description: >-
+      Find documents. Filter by what they hang off -- `projectID`, `taskID`,
+      `opTaskID` -- since a Workfront document always belongs to something.
+    category: documents
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/docu/search
+      query: "${filters}"
+    input:
+      filters:
+        type: object
+        description: >-
+          Workfront query parameters, e.g.
+          {"projectID": "5d8...", "fields": "ID,name,lastUpdateDate"}.
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The matching documents.
+      type: object
+      properties:
+        data: {type: array}
+
+  get_document:
+    title: Get a document
+    description: >-
+      One document's record by id -- its name, version and what it is attached
+      to. The file's bytes are fetched from the download URL in the record, not
+      from this call.
+    category: documents
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/docu/${document_id}
+      query:
+        fields: "${fields}"
+    input:
+      document_id:
+        type: string
+        description: The document's id.
+      fields:
+        type: string
+        description: Comma-separated fields to return.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The document record.
+      type: object
+      properties:
+        data: {type: object}
+
+  # -- portfolios, programs, teams and reference data -------------------------
+
+  search_portfolios:
+    title: Search portfolios
+    description: >-
+      Find portfolios -- the top of Workfront's work hierarchy, holding
+      programs and projects.
+    category: structure
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/port/search
+      query: "${filters}"
+    input:
+      filters:
+        type: object
+        description: 'Workfront query parameters, e.g. {"isActive": true, "fields": "ID,name"}.'
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The matching portfolios.
+      type: object
+      properties:
+        data: {type: array}
+
+  search_programs:
+    title: Search programs
+    description: >-
+      Find programs -- the middle layer between a portfolio and its projects.
+    category: structure
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/prgm/search
+      query: "${filters}"
+    input:
+      filters:
+        type: object
+        description: 'Workfront query parameters, e.g. {"portfolioID": "5d8...", "fields": "ID,name"}.'
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The matching programs.
+      type: object
+      properties:
+        data: {type: array}
+
+  search_teams:
+    title: Search teams
+    description: >-
+      Find teams. Teams own work queues and are the accessor type shares are
+      most often granted to.
+    category: structure
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/teamob/search
+      query: "${filters}"
+    input:
+      filters:
+        type: object
+        description: 'Workfront query parameters, e.g. {"fields": "ID,name,groupID"}.'
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The matching teams.
+      type: object
+      properties:
+        data: {type: array}
+
+  search_groups:
+    title: Search groups
+    description: >-
+      Find groups -- Workfront's organisational units, which own projects and
+      scope permissions and custom forms.
+    category: structure
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/group/search
+      query: "${filters}"
+    input:
+      filters:
+        type: object
+        description: 'Workfront query parameters, e.g. {"fields": "ID,name,parentID"}.'
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The matching groups.
+      type: object
+      properties:
+        data: {type: array}
+
+  search_companies:
+    title: Search companies
+    description: >-
+      Find companies -- the client or vendor records projects and users are
+      attributed to.
+    category: structure
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/cmpy/search
+      query: "${filters}"
+    input:
+      filters:
+        type: object
+        description: 'Workfront query parameters, e.g. {"fields": "ID,name,isActive"}.'
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The matching companies.
+      type: object
+      properties:
+        data: {type: array}
+
+  search_job_roles:
+    title: Search job roles
+    description: >-
+      Find job roles -- what work is assigned to when it is scheduled by role
+      rather than by named person, and what billing rates hang off.
+    category: structure
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/role/search
+      query: "${filters}"
+    input:
+      filters:
+        type: object
+        description: 'Workfront query parameters, e.g. {"fields": "ID,name,billingPerHour"}.'
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The matching job roles.
+      type: object
+      properties:
+        data: {type: array}
+
+  search_templates:
+    title: Search project templates
+    description: >-
+      Find project templates. Their ids are what `create_project_from_template`
+      and `convert_issue_to_project` take.
+    category: structure
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/tmpl/search
+      query: "${filters}"
+    input:
+      filters:
+        type: object
+        description: 'Workfront query parameters, e.g. {"isActive": true, "fields": "ID,name"}.'
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The matching templates.
+      type: object
+      properties:
+        data: {type: array}
+
+  search_expenses:
+    title: Search expenses
+    description: >-
+      Find expenses recorded against projects and tasks, with their amounts and
+      types -- the cost side of a project's actuals.
+    category: structure
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/expns/search
+      query: "${filters}"
+    input:
+      filters:
+        type: object
+        description: >-
+          Workfront query parameters, e.g.
+          {"projectID": "5d8...", "fields": "ID,amount,expenseTypeID"}.
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The matching expenses.
+      type: object
+      properties:
+        data: {type: array}
+
+  search_notes:
+    title: Search notes and updates
+    description: >-
+      Find notes -- the comment stream on projects, tasks and issues. Filter by
+      the object they hang off, and note that Workfront threads replies through
+      `parentNoteID`.
+    category: structure
+    read_only: true
+    request:
+      method: GET
+      path: /${version}/note/search
+      query: "${filters}"
+    input:
+      filters:
+        type: object
+        description: >-
+          Workfront query parameters, e.g.
+          {"projectID": "5d8...", "fields": "ID,noteText,ownerID,entryDate"}.
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The matching notes.
+      type: object
+      properties:
+        data: {type: array}
+
+  create_note:
+    title: Add a note
+    description: >-
+      Post a note to a project, task or issue -- the API equivalent of the
+      Updates stream, and how a bot reports back where people will see it.
+      Name the object it belongs to (`projectID`, `taskID`, `opTaskID`) plus
+      `objCode`.
+    category: structure
+    request:
+      method: POST
+      path: /${version}/note
+      query:
+        updates: "${updates}"
+        fields: "${fields}"
+    input:
+      updates:
+        type: object
+        description: >-
+          The note's field values, e.g.
+          {"noteText": "Deployed to staging", "objCode": "TASK",
+          "objID": "4c7...", "taskID": "4c7..."}.
+      fields:
+        type: string
+        description: Fields to return on the created note.
+        optional: true
+      version:
+        type: string
+        description: API version to call, e.g. v22.0.
+        optional: true
+        default: v22.0
+    output:
+      description: The note that was created.
+      type: object
+      properties:
+        data: {type: object}

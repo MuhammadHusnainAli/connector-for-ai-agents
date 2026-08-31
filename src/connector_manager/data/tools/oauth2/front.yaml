@@ -1,0 +1,549 @@
+# Front tools.
+#
+# Ids carry a type prefix: conversations are "cnv_…", messages "msg_…", inboxes
+# "inb_…", teammates "tea_…", contacts "crd_…". Paged endpoints return
+# {_results, _pagination}.
+#
+# Front grants an app access to the shared resources it was installed on rather
+# than issuing per-endpoint scopes, so no tool declares any.
+#
+# Docs: https://dev.frontapp.com/reference/introduction
+
+connector_id: front
+display_name: Front
+docs_url: https://dev.frontapp.com/reference/introduction
+
+tools:
+
+  list_conversations:
+    title: List conversations
+    description: >-
+      Page through the account's conversations, newest activity first. Use
+      search_conversations for anything narrower.
+    category: conversations
+    read_only: true
+    request:
+      method: GET
+      path: /conversations
+      query:
+        limit: "${limit}"
+        page_token: "${page_token}"
+        q: "${filter}"
+    input:
+      limit:
+        type: integer
+        description: How many conversations per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      page_token:
+        type: string
+        description: Token from the previous response's _pagination.next.
+        optional: true
+      filter:
+        type: string
+        description: Front filter JSON, e.g. {"statuses":["unassigned"]}.
+        optional: true
+    output:
+      description: A page of conversations.
+      type: object
+      properties:
+        _results: {type: array, description: "Each with id, subject, status and assignee."}
+        _pagination: {type: object}
+
+  search_conversations:
+    title: Search conversations
+    description: >-
+      Search with Front's query syntax, e.g. "is:open tag:urgent" or
+      "from:ada@example.com after:2026-01-01".
+    category: conversations
+    read_only: true
+    request:
+      method: GET
+      path: /conversations/search/${query}
+      query:
+        limit: "${limit}"
+        page_token: "${page_token}"
+    input:
+      query:
+        type: string
+        description: Front search query.
+        example: "is:open tag:urgent"
+      limit:
+        type: integer
+        description: How many results per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      page_token:
+        type: string
+        description: Token from the previous response.
+        optional: true
+    output:
+      description: Matching conversations.
+      type: object
+      properties:
+        _results: {type: array}
+        _total: {type: integer}
+
+  get_conversation:
+    title: Get a conversation
+    description: >-
+      Read one conversation's subject, status, assignee, tags and recipient.
+    category: conversations
+    read_only: true
+    request:
+      method: GET
+      path: /conversations/${conversation_id}
+    input:
+      conversation_id:
+        type: string
+        description: The conversation id, starting cnv_.
+        example: cnv_55c8c149
+    output:
+      description: The conversation.
+      type: object
+      properties:
+        id: {type: string}
+        subject: {type: string}
+        status: {type: string}
+        assignee: {type: object}
+        tags: {type: array}
+
+  list_conversation_messages:
+    title: Read a conversation's messages
+    description: Read the messages in a conversation, so the whole thread can be reviewed.
+    category: conversations
+    read_only: true
+    request:
+      method: GET
+      path: /conversations/${conversation_id}/messages
+      query:
+        limit: "${limit}"
+        page_token: "${page_token}"
+    input:
+      conversation_id:
+        type: string
+        description: The conversation id.
+      limit:
+        type: integer
+        description: How many messages per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      page_token:
+        type: string
+        description: Token from the previous response.
+        optional: true
+    output:
+      description: The conversation's messages.
+      type: object
+      properties:
+        _results: {type: array}
+        _pagination: {type: object}
+
+  reply_to_conversation:
+    title: Reply to a conversation
+    description: >-
+      Send a reply that goes out to the customer on the conversation's own
+      channel. Use add_comment for an internal note instead.
+    category: conversations
+    destructive: true
+    request:
+      method: POST
+      path: /conversations/${conversation_id}/messages
+      body:
+        body: "${body}"
+        text: "${text}"
+        subject: "${subject}"
+        author_id: "${author_id}"
+        channel_id: "${channel_id}"
+        to: "${to}"
+        cc: "${cc}"
+        bcc: "${bcc}"
+        options: "${options}"
+    input:
+      conversation_id:
+        type: string
+        description: The conversation to reply in.
+      body:
+        type: string
+        description: The reply as HTML.
+      text:
+        type: string
+        description: Plain-text alternative body.
+        optional: true
+      subject:
+        type: string
+        description: Subject line, when replying on an email channel.
+        optional: true
+      author_id:
+        type: string
+        description: Teammate id the reply is sent as, starting tea_.
+        optional: true
+      channel_id:
+        type: string
+        description: Channel to send from, when the conversation has several.
+        optional: true
+      to:
+        type: array
+        description: Override the recipients.
+        optional: true
+        items: {type: string}
+      cc:
+        type: array
+        description: Addresses to copy.
+        optional: true
+        items: {type: string}
+      bcc:
+        type: array
+        description: Addresses to blind-copy.
+        optional: true
+        items: {type: string}
+      options:
+        type: object
+        description: "Sending options, e.g. {\"archive\": true, \"tag_ids\": [\"tag_123\"]}."
+        optional: true
+    output:
+      description: The sent message.
+      type: object
+      properties:
+        id: {type: string}
+        created_at: {type: number}
+        is_inbound: {type: boolean}
+
+  send_new_message:
+    title: Start a new conversation
+    description: >-
+      Send a fresh outbound message from a channel, opening a new conversation
+      rather than replying to one.
+    category: conversations
+    destructive: true
+    request:
+      method: POST
+      path: /channels/${channel_id}/messages
+      body:
+        to: "${to}"
+        cc: "${cc}"
+        subject: "${subject}"
+        body: "${body}"
+        text: "${text}"
+        author_id: "${author_id}"
+        options: "${options}"
+    input:
+      channel_id:
+        type: string
+        description: Channel to send from, starting cha_.
+      to:
+        type: array
+        description: Recipient addresses or handles.
+        items: {type: string}
+      body:
+        type: string
+        description: The message as HTML.
+      subject:
+        type: string
+        description: Subject line, for email channels.
+        optional: true
+      text:
+        type: string
+        description: Plain-text alternative body.
+        optional: true
+      cc:
+        type: array
+        description: Addresses to copy.
+        optional: true
+        items: {type: string}
+      author_id:
+        type: string
+        description: Teammate id the message is sent as.
+        optional: true
+      options:
+        type: object
+        description: "Sending options, e.g. {\"tag_ids\": [\"tag_123\"]}."
+        optional: true
+    output:
+      description: The sent message.
+      type: object
+      properties:
+        id: {type: string}
+        created_at: {type: number}
+
+  add_comment:
+    title: Add an internal comment
+    description: >-
+      Post a comment only teammates can see. Mention someone with @ to notify
+      them; the customer never sees it.
+    category: conversations
+    request:
+      method: POST
+      path: /conversations/${conversation_id}/comments
+      body:
+        body: "${body}"
+        author_id: "${author_id}"
+    input:
+      conversation_id:
+        type: string
+        description: The conversation to comment on.
+      body:
+        type: string
+        description: The comment text.
+      author_id:
+        type: string
+        description: Teammate id the comment is attributed to.
+        optional: true
+    output:
+      description: The created comment.
+      type: object
+      properties:
+        id: {type: string}
+        body: {type: string}
+        posted_at: {type: number}
+
+  update_conversation:
+    title: Update a conversation
+    description: >-
+      Change a conversation's status, assignee or inbox — archive it, reopen it,
+      or hand it to a teammate.
+    category: conversations
+    request:
+      method: PATCH
+      path: /conversations/${conversation_id}
+      body:
+        assignee_id: "${assignee_id}"
+        status: "${status}"
+        inbox_id: "${inbox_id}"
+        tag_ids: "${tag_ids}"
+    input:
+      conversation_id:
+        type: string
+        description: The conversation id.
+      assignee_id:
+        type: string
+        description: Teammate id to assign it to. Pass null to unassign.
+        optional: true
+      status:
+        type: string
+        description: New status.
+        optional: true
+        enum: [archived, open, deleted, spam]
+      inbox_id:
+        type: string
+        description: Inbox to move it to.
+        optional: true
+      tag_ids:
+        type: array
+        description: Replaces the tag set entirely.
+        optional: true
+        items: {type: string}
+    output:
+      description: Empty on success -- Front answers 204 No Content.
+      type: object
+
+  add_conversation_tags:
+    title: Tag a conversation
+    description: Add tags to a conversation without disturbing the ones already on it.
+    category: conversations
+    request:
+      method: POST
+      path: /conversations/${conversation_id}/tags
+      body:
+        tag_ids: "${tag_ids}"
+    input:
+      conversation_id:
+        type: string
+        description: The conversation id.
+      tag_ids:
+        type: array
+        description: Tag ids to add, from list_tags.
+        items: {type: string}
+    output:
+      description: Empty on success -- Front answers 204 No Content.
+      type: object
+
+  list_inboxes:
+    title: List inboxes
+    description: List the account's inboxes with the ids conversations are filed under.
+    category: settings
+    read_only: true
+    request:
+      method: GET
+      path: /inboxes
+      query:
+        limit: "${limit}"
+        page_token: "${page_token}"
+    input:
+      limit:
+        type: integer
+        description: How many inboxes per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      page_token:
+        type: string
+        description: Token from the previous response.
+        optional: true
+    output:
+      description: The account's inboxes.
+      type: object
+      properties:
+        _results: {type: array}
+
+  list_teammates:
+    title: List teammates
+    description: >-
+      List the account's teammates with their ids, which the assignee and author
+      arguments take.
+    category: settings
+    read_only: true
+    request:
+      method: GET
+      path: /teammates
+    input: {}
+    output:
+      description: The account's teammates.
+      type: object
+      properties:
+        _results: {type: array, description: "Each with id, email, username and is_available."}
+
+  list_tags:
+    title: List tags
+    description: List the account's tags with the ids the tagging tools take.
+    category: settings
+    read_only: true
+    request:
+      method: GET
+      path: /tags
+      query:
+        limit: "${limit}"
+        page_token: "${page_token}"
+    input:
+      limit:
+        type: integer
+        description: How many tags per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      page_token:
+        type: string
+        description: Token from the previous response.
+        optional: true
+    output:
+      description: The account's tags.
+      type: object
+      properties:
+        _results: {type: array}
+
+  search_contacts:
+    title: Find a contact
+    description: >-
+      Look up a contact by handle — an email address, phone number or social
+      handle — to get the Front contact id.
+    category: contacts
+    read_only: true
+    request:
+      method: GET
+      path: /contacts
+      query:
+        limit: "${limit}"
+        page_token: "${page_token}"
+        q: "${filter}"
+        sort_by: "${sort_by}"
+    input:
+      limit:
+        type: integer
+        description: How many contacts per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      page_token:
+        type: string
+        description: Token from the previous response.
+        optional: true
+      filter:
+        type: string
+        description: "Front filter JSON, e.g. {\"updated_after\": 1750000000}."
+        optional: true
+      sort_by:
+        type: string
+        description: Field to sort by, e.g. "updated_at".
+        optional: true
+    output:
+      description: A page of contacts.
+      type: object
+      properties:
+        _results: {type: array}
+        _pagination: {type: object}
+
+  create_contact:
+    title: Create a contact
+    description: >-
+      Add a contact with one or more handles, so future messages from those
+      addresses are attributed to them.
+    category: contacts
+    request:
+      method: POST
+      path: /contacts
+      body:
+        name: "${name}"
+        description: "${description}"
+        handles: "${handles}"
+        links: "${links}"
+        custom_fields: "${custom_fields}"
+    input:
+      handles:
+        type: array
+        description: >-
+          How to reach them, each {"handle": "ada@example.com", "source":
+          "email"}. Source is email, phone, twitter, front_chat or custom.
+        items: {type: object}
+      name:
+        type: string
+        description: The contact's display name.
+        optional: true
+      description:
+        type: string
+        description: Note about the contact.
+        optional: true
+      links:
+        type: array
+        description: URLs associated with the contact.
+        optional: true
+        items: {type: string}
+      custom_fields:
+        type: object
+        description: Custom field values keyed by field name.
+        optional: true
+    output:
+      description: The created contact.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        handles: {type: array}
+
+  get_me:
+    title: Get the authenticated teammate
+    description: >-
+      Read the Front teammate the token belongs to. The cheapest health check
+      for a Front connection.
+    category: settings
+    read_only: true
+    request:
+      method: GET
+      path: /me
+    input: {}
+    output:
+      description: The authenticated teammate.
+      type: object
+      properties:
+        id: {type: string}
+        email: {type: string}
+        username: {type: string}
+        first_name: {type: string}

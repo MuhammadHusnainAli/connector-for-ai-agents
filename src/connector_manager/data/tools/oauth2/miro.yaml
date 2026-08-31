@@ -1,0 +1,563 @@
+# Miro tools.
+#
+# Board ids look like "uXjVP…=" and appear in a board's URL. Item positions are
+# in board coordinates, where {"x": 0, "y": 0} is the board's centre.
+#
+# Docs: https://developers.miro.com/reference/api-reference
+
+connector_id: miro
+display_name: Miro
+docs_url: https://developers.miro.com/reference/api-reference
+
+scope_rules:
+  implies:
+    boards:write: ["boards:read"]
+
+tools:
+
+  list_boards:
+    title: List boards
+    description: >-
+      List the boards the token can see, with the ids every item tool takes.
+      Narrow with a team id or a text query.
+    category: boards
+    scopes: ["boards:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/boards
+      query:
+        limit: "${limit}"
+        offset: "${offset}"
+        query: "${query}"
+        team_id: "${team_id}"
+        sort: "${sort}"
+    input:
+      limit:
+        type: integer
+        description: How many boards per page (1-50).
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 50
+      offset:
+        type: integer
+        description: Zero-based index to start from.
+        optional: true
+        minimum: 0
+      query:
+        type: string
+        description: Match against board names and descriptions.
+        optional: true
+      team_id:
+        type: string
+        description: Only boards owned by this team.
+        optional: true
+      sort:
+        type: string
+        description: Sort order.
+        optional: true
+        enum: [default, last_created, last_modified, last_opened, alphabetically]
+    output:
+      description: A page of boards.
+      type: object
+      properties:
+        data: {type: array, description: "Each with id, name and viewLink."}
+        total: {type: integer}
+
+  get_board:
+    title: Get a board
+    description: Read one board's name, description, policy and sharing settings.
+    category: boards
+    scopes: ["boards:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/boards/${board_id}
+    input:
+      board_id:
+        type: string
+        description: The board id, from its URL.
+    output:
+      description: The board.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        description: "{type: string}"
+        viewLink: {type: string}
+
+  create_board:
+    title: Create a board
+    description: >-
+      Create a board, optionally in a team and with sharing policy set up front.
+    category: boards
+    scopes: ["boards:write"]
+    request:
+      method: POST
+      path: /v2/boards
+      body:
+        name: "${name}"
+        description: "${description}"
+        teamId: "${team_id}"
+        policy:
+          $when: "${sharing_access}"
+          sharingPolicy:
+            access: "${sharing_access}"
+            teamAccess: "${team_access}"
+    input:
+      name:
+        type: string
+        description: Board name.
+      description:
+        type: string
+        description: What the board is for.
+        optional: true
+      team_id:
+        type: string
+        description: Team to create it in. Defaults to the user's default team.
+        optional: true
+      sharing_access:
+        type: string
+        description: What people outside the team may do with the link.
+        optional: true
+        enum: [private, view, edit, comment]
+      team_access:
+        type: string
+        description: What the team may do with the board.
+        optional: true
+        enum: [private, view, edit, comment]
+    output:
+      description: The created board.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        viewLink: {type: string}
+
+  list_items:
+    title: List a board's items
+    description: >-
+      List the items on a board — sticky notes, shapes, text, images, frames.
+      Filter by type to read just one kind.
+    category: items
+    scopes: ["boards:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/boards/${board_id}/items
+      query:
+        limit: "${limit}"
+        cursor: "${cursor}"
+        type: "${type}"
+    input:
+      board_id:
+        type: string
+        description: The board id.
+      limit:
+        type: integer
+        description: How many items per page (1-50).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 50
+      cursor:
+        type: string
+        description: Cursor from the previous response's cursor.
+        optional: true
+      type:
+        type: string
+        description: Only items of this kind.
+        optional: true
+        enum: [app_card, card, document, embed, frame, image, shape, sticky_note, text]
+    output:
+      description: A page of board items.
+      type: object
+      properties:
+        data: {type: array, description: "Each with id, type, data and position."}
+        cursor: {type: string}
+
+  create_sticky_note:
+    title: Add a sticky note
+    description: >-
+      Put a sticky note on a board. Position is in board coordinates, where
+      {"x": 0, "y": 0} is the centre.
+    category: items
+    scopes: ["boards:write"]
+    request:
+      method: POST
+      path: /v2/boards/${board_id}/sticky_notes
+      body:
+        data:
+          content: "${content}"
+          shape: "${shape}"
+        style:
+          $when: "${fill_color}"
+          fillColor: "${fill_color}"
+        position:
+          $when: "${x}"
+          x: "${x}"
+          y: "${y}"
+        parent:
+          $when: "${parent_frame_id}"
+          id: "${parent_frame_id}"
+    input:
+      board_id:
+        type: string
+        description: The board to add it to.
+      content:
+        type: string
+        description: The note's text. Basic HTML is allowed.
+      x:
+        type: number
+        description: Horizontal board coordinate. 0 is the centre.
+        optional: true
+      y:
+        type: number
+        description: Vertical board coordinate. 0 is the centre.
+        optional: true
+      shape:
+        type: string
+        description: Note shape.
+        optional: true
+        enum: [square, rectangle]
+      fill_color:
+        type: string
+        description: Miro colour name, e.g. yellow, light_green, blue.
+        optional: true
+      parent_frame_id:
+        type: string
+        description: Frame id to place the note inside.
+        optional: true
+    output:
+      description: The created sticky note.
+      type: object
+      properties:
+        id: {type: string}
+        type: {type: string}
+        position: {type: object}
+
+  create_shape:
+    title: Add a shape
+    description: >-
+      Draw a shape on a board with optional text inside it. Geometry sets its
+      width and height in board units.
+    category: items
+    scopes: ["boards:write"]
+    request:
+      method: POST
+      path: /v2/boards/${board_id}/shapes
+      body:
+        data:
+          content: "${content}"
+          shape: "${shape}"
+        style: "${style}"
+        position:
+          $when: "${x}"
+          x: "${x}"
+          y: "${y}"
+        geometry:
+          $when: "${width}"
+          width: "${width}"
+          height: "${height}"
+    input:
+      board_id:
+        type: string
+        description: The board to add it to.
+      shape:
+        type: string
+        description: Which shape to draw.
+        optional: true
+        default: rectangle
+        enum: [rectangle, round_rectangle, circle, triangle, rhombus, star, cloud, cross, arrow_right]
+      content:
+        type: string
+        description: Text to show inside the shape.
+        optional: true
+      x:
+        type: number
+        description: Horizontal board coordinate.
+        optional: true
+      y:
+        type: number
+        description: Vertical board coordinate.
+        optional: true
+      width:
+        type: number
+        description: Width in board units.
+        optional: true
+      height:
+        type: number
+        description: Height in board units.
+        optional: true
+      style:
+        type: object
+        description: "Style object, e.g. {\"fillColor\": \"#2d9bf0\", \"borderWidth\": \"2\"}."
+        optional: true
+    output:
+      description: The created shape.
+      type: object
+      properties:
+        id: {type: string}
+        type: {type: string}
+
+  create_text:
+    title: Add a text item
+    description: Place a free-standing block of text on a board.
+    category: items
+    scopes: ["boards:write"]
+    request:
+      method: POST
+      path: /v2/boards/${board_id}/texts
+      body:
+        data:
+          content: "${content}"
+        style: "${style}"
+        position:
+          $when: "${x}"
+          x: "${x}"
+          y: "${y}"
+        geometry:
+          $when: "${width}"
+          width: "${width}"
+    input:
+      board_id:
+        type: string
+        description: The board to add it to.
+      content:
+        type: string
+        description: The text. Basic HTML is allowed.
+      x:
+        type: number
+        description: Horizontal board coordinate.
+        optional: true
+      y:
+        type: number
+        description: Vertical board coordinate.
+        optional: true
+      width:
+        type: number
+        description: Width in board units, which decides where the text wraps.
+        optional: true
+      style:
+        type: object
+        description: "Style object, e.g. {\"fontSize\": \"24\", \"color\": \"#1a1a1a\"}."
+        optional: true
+    output:
+      description: The created text item.
+      type: object
+      properties:
+        id: {type: string}
+        type: {type: string}
+
+  create_card:
+    title: Add a card
+    description: >-
+      Add a card to a board — a titled block with a description and an optional
+      due date, used for task-like content.
+    category: items
+    scopes: ["boards:write"]
+    request:
+      method: POST
+      path: /v2/boards/${board_id}/cards
+      body:
+        data:
+          title: "${title}"
+          description: "${description}"
+          dueDate: "${due_date}"
+          assigneeId: "${assignee_id}"
+        position:
+          $when: "${x}"
+          x: "${x}"
+          y: "${y}"
+    input:
+      board_id:
+        type: string
+        description: The board to add it to.
+      title:
+        type: string
+        description: The card's title.
+      description:
+        type: string
+        description: The card's body text.
+        optional: true
+      due_date:
+        type: string
+        description: Due date, ISO 8601.
+        optional: true
+      assignee_id:
+        type: string
+        description: Miro user id to assign it to.
+        optional: true
+      x:
+        type: number
+        description: Horizontal board coordinate.
+        optional: true
+      y:
+        type: number
+        description: Vertical board coordinate.
+        optional: true
+    output:
+      description: The created card.
+      type: object
+      properties:
+        id: {type: string}
+        type: {type: string}
+
+  create_frame:
+    title: Add a frame
+    description: >-
+      Add a frame to a board — a titled region other items can be placed inside
+      by passing its id as parent_frame_id.
+    category: items
+    scopes: ["boards:write"]
+    request:
+      method: POST
+      path: /v2/boards/${board_id}/frames
+      body:
+        data:
+          title: "${title}"
+          format: custom
+          type: freeform
+        style: "${style}"
+        position:
+          $when: "${x}"
+          x: "${x}"
+          y: "${y}"
+        geometry:
+          $when: "${width}"
+          width: "${width}"
+          height: "${height}"
+    input:
+      board_id:
+        type: string
+        description: The board to add it to.
+      title:
+        type: string
+        description: The frame's title.
+      x:
+        type: number
+        description: Horizontal board coordinate of the frame's centre.
+        optional: true
+      y:
+        type: number
+        description: Vertical board coordinate of the frame's centre.
+        optional: true
+      width:
+        type: number
+        description: Width in board units.
+        optional: true
+      height:
+        type: number
+        description: Height in board units.
+        optional: true
+      style:
+        type: object
+        description: "Style object, e.g. {\"fillColor\": \"#ffffff\"}."
+        optional: true
+    output:
+      description: The created frame.
+      type: object
+      properties:
+        id: {type: string}
+        type: {type: string}
+
+  update_item_position:
+    title: Move an item
+    description: Move an item to new board coordinates, or into a different frame.
+    category: items
+    scopes: ["boards:write"]
+    request:
+      method: PATCH
+      path: /v2/boards/${board_id}/items/${item_id}
+      body:
+        position:
+          x: "${x}"
+          y: "${y}"
+        parent:
+          $when: "${parent_frame_id}"
+          id: "${parent_frame_id}"
+    input:
+      board_id:
+        type: string
+        description: The board id.
+      item_id:
+        type: string
+        description: The item to move.
+      x:
+        type: number
+        description: New horizontal board coordinate.
+      y:
+        type: number
+        description: New vertical board coordinate.
+      parent_frame_id:
+        type: string
+        description: Frame to move the item into.
+        optional: true
+    output:
+      description: The item at its new position.
+      type: object
+      properties:
+        id: {type: string}
+        position: {type: object}
+
+  delete_item:
+    title: Delete an item
+    description: Remove an item from a board permanently. This cannot be undone.
+    category: items
+    scopes: ["boards:write"]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/boards/${board_id}/items/${item_id}
+    input:
+      board_id:
+        type: string
+        description: The board id.
+      item_id:
+        type: string
+        description: The item to delete.
+    output:
+      description: Empty on success -- Miro answers 204 No Content.
+      type: object
+
+  share_board:
+    title: Invite people to a board
+    description: >-
+      Invite people to a board by email, with a role. Miro emails each of them
+      an invitation.
+    category: boards
+    scopes: ["boards:write"]
+    request:
+      method: POST
+      path: /v2/boards/${board_id}/members
+      body:
+        emails: "${emails}"
+        role: "${role}"
+        message: "${message}"
+    input:
+      board_id:
+        type: string
+        description: The board to share.
+      emails:
+        type: array
+        description: Email addresses to invite.
+        items: {type: string, format: email}
+      role:
+        type: string
+        description: What the invitees may do.
+        optional: true
+        default: commenter
+        enum: [viewer, commenter, editor, coowner, owner]
+      message:
+        type: string
+        description: Note included in the invitation email.
+        optional: true
+    output:
+      description: The created memberships.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          role: {type: string}

@@ -1,0 +1,274 @@
+# DocumentPro tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://docs.documentpro.ai/openapi.json
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: documentpro
+display_name: DocumentPro
+docs_url: https://docs.documentpro.ai/openapi.json
+generated: true
+generated_from: https://docs.documentpro.ai/openapi.json
+tools:
+  delete_files:
+    title: Delete an extraction job's result
+    description: Delete an extraction job's result Irreversible. Deletes a parsing job and its associated
+      result data. Calls DELETE /files on the provider's API.
+    category: files
+    request:
+      method: DELETE
+      path: /files
+      query:
+        request_id: ${request_id}
+    input:
+      request_id:
+        type: string
+        description: The request_id parameter.
+    output:
+      description: Deleted.
+      type: object
+    destructive: true
+  get_files:
+    title: Poll an extraction job's result
+    description: Poll an extraction job's result Calls GET /files on the provider's API.
+    category: files
+    request:
+      method: GET
+      path: /files
+      query:
+        request_id: ${request_id}
+    input:
+      request_id:
+        type: string
+        description: The request_id parameter.
+    output:
+      description: Current job state. resultjsondata is populated once requeststatus is completed.
+      type: object
+    read_only: true
+  get_v1_classifiers:
+    title: List Classifiers
+    description: List Classifiers Calls GET /v1/classifiers on the provider's API.
+    category: classifiers
+    request:
+      method: GET
+      path: /v1/classifiers
+      query:
+        pagination_key: ${pagination_key}
+    input:
+      pagination_key:
+        type: string
+        description: classifierid of the last item from a previous response.
+        optional: true
+    output:
+      description: Paginated list of Classifiers.
+      type: object
+    read_only: true
+  create_v1_classifiers:
+    title: Create a Classifier
+    description: Create a Classifier A Classifier is a reusable, named set of categories. Create once,
+      then run it against many documents with POST /v1/classifiers/{classifierid}/classify. Calls POST
+      /v1/classifiers on the provider's API.
+    category: classifiers
+    request:
+      method: POST
+      path: /v1/classifiers
+      body:
+        name: ${name}
+        configs: ${configs}
+    input:
+      name:
+        type: string
+        description: The name field of the request body.
+      configs:
+        type: object
+        description: The configs field of the request body.
+    output:
+      description: Classifier created.
+      type: object
+  create_v1_classify:
+    title: Classify a document inline
+    description: Classify a document inline Classifies a document into one of the categories provided
+      in the request body. No saved Classifier required. The document must already be uploaded and OCR-processed
+      (see Run Extract) before it can be classified. Calls POST /v1/classify on the provider's API.
+    category: classify
+    request:
+      method: POST
+      path: /v1/classify
+      body:
+        document_id: ${document_id}
+        classification_schema: ${classification_schema}
+        page_range: ${page_range}
+        query_model: ${query_model}
+    input:
+      document_id:
+        type: string
+        description: The document_id field of the request body.
+      classification_schema:
+        type: array
+        description: The classification_schema field of the request body.
+        items:
+          type: object
+      page_range:
+        type: string
+        description: The page_range field of the request body.
+        optional: true
+      query_model:
+        type: string
+        description: The query_model field of the request body.
+        optional: true
+        enum:
+        - gpt-4o-mini
+        - gpt-4o
+    output:
+      description: Classification result.
+      type: object
+  get_v1_documents:
+    title: List documents
+    description: List documents Calls GET /v1/documents on the provider's API.
+    category: documents
+    request:
+      method: GET
+      path: /v1/documents
+      query:
+        limit: ${limit}
+        document_id: ${document_id}
+        created_at: ${created_at}
+        search_term: ${search_term}
+    input:
+      limit:
+        type: integer
+        description: Number of documents to return.
+        optional: true
+        default: 100
+      document_id:
+        type: string
+        description: Filter by a specific document ID.
+        optional: true
+      created_at:
+        type: string
+        description: Filter by creation date.
+        optional: true
+      search_term:
+        type: string
+        description: Search documents by name or content.
+        optional: true
+    output:
+      description: Paginated list of documents.
+      type: object
+    read_only: true
+  create_v1_documents:
+    title: Upload a document
+    description: Upload a document Uploads a document up to 6MB via multipart/form-data. For files over
+      6MB, first request a pre-signed URL from GET /v1/documents/uploadurl, PUT the file there, then confirm
+      the upload by calling this same endpoint with application/json and the documentid from that step.
+      Calls POST /v1/documents on the provider's API.
+    category: documents
+    request:
+      method: POST
+      path: /v1/documents
+      body:
+        document_id: ${document_id}
+        file_name: ${file_name}
+    input:
+      document_id:
+        type: string
+        description: The document_id field of the request body.
+      file_name:
+        type: string
+        description: The file_name field of the request body.
+    output:
+      description: Document uploaded (or confirmed).
+      type: object
+  get_v1_templates:
+    title: List Workflows
+    description: List Workflows Calls GET /v1/templates on the provider's API.
+    category: templates
+    request:
+      method: GET
+      path: /v1/templates
+      query:
+        pagination_key: ${pagination_key}
+    input:
+      pagination_key:
+        type: string
+        description: templateid returned as paginationkey from a previous call.
+        optional: true
+    output:
+      description: Paginated list of Workflows. Up to 50 per page.
+      type: object
+    read_only: true
+  create_v1_templates:
+    title: Create a Workflow
+    description: Create a Workflow Calls POST /v1/templates on the provider's API.
+    category: templates
+    request:
+      method: POST
+      path: /v1/templates
+      body:
+        template_title: ${template_title}
+        template_type: ${template_type}
+        template_schema: ${template_schema}
+        webhook_url: ${webhook_url}
+        parser_config: ${parser_config}
+    input:
+      template_title:
+        type: string
+        description: Must be unique within your account.
+      template_type:
+        type: string
+        description: The template_type field of the request body.
+      template_schema:
+        type: object
+        description: The template_schema field of the request body.
+      webhook_url:
+        type: string
+        description: The webhook_url field of the request body.
+        optional: true
+      parser_config:
+        type: object
+        description: The parser_config field of the request body.
+        optional: true
+    output:
+      description: Workflow created.
+      type: object
+  get_documents_upload_url:
+    title: Get a pre-signed upload URL (files over 6MB)
+    description: Get a pre-signed upload URL (files over 6MB) Calls GET /v1/documents/upload_url on the
+      provider's API.
+    category: documents
+    request:
+      method: GET
+      path: /v1/documents/upload_url
+      query:
+        file_name: ${file_name}
+    input:
+      file_name:
+        type: string
+        description: The file_name parameter.
+    output:
+      description: Pre-signed URL and a reserved documentid.
+      type: object
+    read_only: true
+  delete_v1_classifiers:
+    title: Delete a Classifier
+    description: Delete a Classifier Irreversible. Future calls to Run Classification with this classifierid
+      return 404. Calls DELETE /v1/classifiers/{classifier_id} on the provider's API.
+    category: classifiers
+    request:
+      method: DELETE
+      path: /v1/classifiers/${classifier_id}
+    input:
+      classifier_id:
+        type: string
+        description: The classifier_id parameter.
+    output:
+      description: Deleted.
+      type: object
+    destructive: true

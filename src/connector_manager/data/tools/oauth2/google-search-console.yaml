@@ -1,0 +1,373 @@
+# Google Search Console API tools.
+#
+# Built from Google's own discovery document for the API, which is the machine
+# readable contract its client libraries are generated from -- so every path,
+# parameter, enum, default and description here is Google's, and so are the
+# per-tool OAuth scopes. That last part is what makes `check_tools()` useful on
+# this connector: it can say which of these a given grant actually permits.
+#
+# The useful call here is `query_search_analytics`: it returns impressions,
+# clicks, CTR and average position, grouped by whichever dimensions you ask for
+# -- query, page, country, device, date. Everything else is site and sitemap
+# management around it.
+#
+# Two things shape the data rather than the API. Search Console holds roughly
+# 16 months of history, and rows whose query is rare are withheld entirely for
+# privacy, so totals never quite reconcile with the sum of the query rows.
+#
+# The connector's own base url ends at /webmasters, which is not where these
+# paths resolve, so every tool addresses searchconsole.googleapis.com directly.
+#
+# Docs: https://developers.google.com/webmaster-tools/v1/api_reference_index
+
+connector_id: google-search-console
+display_name: Google Search Console
+docs_url: https://developers.google.com/webmaster-tools/about
+scope_rules:
+  strip_prefixes:
+  - https://www.googleapis.com/auth/
+  implies:
+    webmasters:
+    - webmasters.readonly
+scope_discovery:
+  method: GET
+  base_url_override: https://oauth2.googleapis.com
+  endpoint: /tokeninfo
+  query:
+    access_token: ${credentials.access_token}
+  scopes_path: scope
+tools:
+  query_searchanalytic:
+    title: Query searchanalytic
+    description: Query your data with filters and parameters that you define. Returns zero or more rows
+      grouped by the row keys that you define. You must define a date range of one or more days. When
+      date is one of the group by values, any days without data are omitted from the result list. If you
+      need to know which days have data, issue a broad date range query grouped by date for any metric,
+      and see which day rows are returned.
+    category: searchanalytics
+    request:
+      method: POST
+      path: /webmasters/v3/sites/${site_url}/searchAnalytics/query
+      base_url_override: https://searchconsole.googleapis.com
+      body:
+        searchType: ${search_type}
+        aggregationType: ${aggregation_type}
+        startDate: ${start_date}
+        type: ${type}
+        rowLimit: ${row_limit}
+        dimensions: ${dimensions}
+        endDate: ${end_date}
+        startRow: ${start_row}
+        dimensionFilterGroups: ${dimension_filter_groups}
+        dataState: ${data_state}
+    input:
+      site_url:
+        type: string
+        description: 'The site''s URL, including protocol. For example: http://www.example.com/.'
+      search_type:
+        type: string
+        description: '[Optional; Default is \"web\"] The search type to filter for.'
+        optional: true
+        enum:
+        - WEB
+        - IMAGE
+        - VIDEO
+        - NEWS
+        - DISCOVER
+        - GOOGLE_NEWS
+      aggregation_type:
+        type: string
+        description: '[Optional; Default is \"auto\"] How data is aggregated. If aggregated by property,
+          all data for the same property is aggregated; if aggregated by page, all data is aggregated
+          by canonical URI. If you filter or group by page, choose AUTO; otherwise you can aggregate either
+          by property or by page, dep'
+        optional: true
+        enum:
+        - AUTO
+        - BY_PROPERTY
+        - BY_PAGE
+        - BY_NEWS_SHOWCASE_PANEL
+      start_date:
+        type: string
+        description: '[Required] Start date of the requested date range, in YYYY-MM-DD format, in PST
+          time (UTC - 8:00). Must be less than or equal to the end date. This value is included in the
+          range.'
+        optional: true
+      type:
+        type: string
+        description: 'Optional. [Optional; Default is \"web\"] Type of report: search type, or either
+          Discover or Gnews.'
+        optional: true
+        enum:
+        - WEB
+        - IMAGE
+        - VIDEO
+        - NEWS
+        - DISCOVER
+        - GOOGLE_NEWS
+      row_limit:
+        type: integer
+        description: '[Optional; Default is 1000] The maximum number of rows to return. Must be a number
+          from 1 to 25,000 (inclusive).'
+        optional: true
+      dimensions:
+        type: array
+        items:
+          type: string
+        description: '[Optional] Zero or more dimensions to group results by. Dimensions are the group-by
+          values in the Search Analytics page. Dimensions are combined to create a unique row key for
+          each row. Results are grouped in the order that you supply these dimensions.'
+        optional: true
+      end_date:
+        type: string
+        description: '[Required] End date of the requested date range, in YYYY-MM-DD format, in PST (UTC
+          - 8:00). Must be greater than or equal to the start date. This value is included in the range.'
+        optional: true
+      start_row:
+        type: integer
+        description: '[Optional; Default is 0] Zero-based index of the first row in the response. Must
+          be a non-negative number.'
+        optional: true
+      dimension_filter_groups:
+        type: array
+        items:
+          type: string
+        description: '[Optional] Zero or more filters to apply to the dimension grouping values; for example,
+          ''query contains \"buy\"'' to see only data where the query string contains the substring \"buy\"
+          (not case-sensitive). You can filter by a dimension without grouping by it.'
+        optional: true
+      data_state:
+        type: string
+        description: The data state to be fetched, can be full or all, the latter including full and partial
+          data.
+        optional: true
+        enum:
+        - DATA_STATE_UNSPECIFIED
+        - FINAL
+        - ALL
+        - HOURLY_ALL
+    output:
+      description: The SearchAnalyticsQueryResponse resource.
+      type: object
+    scopes_any:
+    - webmasters
+    - webmasters.readonly
+  delete_sitemap:
+    title: Delete sitemap
+    description: Deletes a sitemap from the Sitemaps report. Does not stop Google from crawling this sitemap
+      or the URLs that were previously crawled in the deleted sitemap.
+    category: sitemaps
+    request:
+      method: DELETE
+      path: /webmasters/v3/sites/${site_url}/sitemaps/${feedpath}
+      base_url_override: https://searchconsole.googleapis.com
+    input:
+      feedpath:
+        type: string
+        description: 'The URL of the actual sitemap. For example: http://www.example.com/sitemap.xml.'
+      site_url:
+        type: string
+        description: 'The site''s URL, including protocol. For example: http://www.example.com/.'
+    output:
+      description: What the API returned.
+      type: object
+    scopes:
+    - webmasters
+    destructive: true
+  get_sitemap:
+    title: Get sitemap
+    description: Retrieves information about a specific sitemap.
+    category: sitemaps
+    request:
+      method: GET
+      path: /webmasters/v3/sites/${site_url}/sitemaps/${feedpath}
+      base_url_override: https://searchconsole.googleapis.com
+    input:
+      feedpath:
+        type: string
+        description: 'The URL of the actual sitemap. For example: http://www.example.com/sitemap.xml.'
+      site_url:
+        type: string
+        description: 'The site''s URL, including protocol. For example: http://www.example.com/.'
+    output:
+      description: The WmxSitemap resource.
+      type: object
+    scopes_any:
+    - webmasters
+    - webmasters.readonly
+    read_only: true
+  list_sitemaps:
+    title: List sitemaps
+    description: Lists the [sitemaps-entries](/webmaster-tools/v3/sitemaps) submitted for this site, or
+      included in the sitemap index file (if sitemapIndex is specified in the request).
+    category: sitemaps
+    request:
+      method: GET
+      path: /webmasters/v3/sites/${site_url}/sitemaps
+      base_url_override: https://searchconsole.googleapis.com
+      query:
+        sitemapIndex: ${sitemap_index}
+    input:
+      site_url:
+        type: string
+        description: 'The site''s URL, including protocol. For example: http://www.example.com/.'
+      sitemap_index:
+        type: string
+        description: 'A URL of a site''s sitemap index. For example: http://www.example.com/sitemapindex.xml.'
+        optional: true
+    output:
+      description: The SitemapsListResponse resource.
+      type: object
+    scopes_any:
+    - webmasters
+    - webmasters.readonly
+    read_only: true
+  submit_sitemap:
+    title: Submit sitemap
+    description: Submits a sitemap for a site. Calls sitemaps.submit on the Google Search Console API.
+    category: sitemaps
+    request:
+      method: PUT
+      path: /webmasters/v3/sites/${site_url}/sitemaps/${feedpath}
+      base_url_override: https://searchconsole.googleapis.com
+    input:
+      feedpath:
+        type: string
+        description: 'The URL of the actual sitemap. For example: http://www.example.com/sitemap.xml.'
+      site_url:
+        type: string
+        description: 'The site''s URL, including protocol. For example: http://www.example.com/.'
+    output:
+      description: What the API returned.
+      type: object
+    scopes:
+    - webmasters
+  add_site:
+    title: Add site
+    description: Adds a site to the set of the user's sites in Search Console.
+    category: sites
+    request:
+      method: PUT
+      path: /webmasters/v3/sites/${site_url}
+      base_url_override: https://searchconsole.googleapis.com
+    input:
+      site_url:
+        type: string
+        description: The URL of the site to add.
+    output:
+      description: What the API returned.
+      type: object
+    scopes:
+    - webmasters
+  delete_site:
+    title: Delete site
+    description: Removes a site from the set of the user's Search Console sites.
+    category: sites
+    request:
+      method: DELETE
+      path: /webmasters/v3/sites/${site_url}
+      base_url_override: https://searchconsole.googleapis.com
+    input:
+      site_url:
+        type: string
+        description: The URI of the property as defined in Search Console. **Examples:** http://www.example.com/
+          or sc-domain:example.com.
+    output:
+      description: What the API returned.
+      type: object
+    scopes:
+    - webmasters
+    destructive: true
+  get_site:
+    title: Get site
+    description: Retrieves information about specific site.
+    category: sites
+    request:
+      method: GET
+      path: /webmasters/v3/sites/${site_url}
+      base_url_override: https://searchconsole.googleapis.com
+    input:
+      site_url:
+        type: string
+        description: The URI of the property as defined in Search Console. **Examples:** http://www.example.com/
+          or sc-domain:example.com.
+    output:
+      description: The WmxSite resource.
+      type: object
+    scopes_any:
+    - webmasters
+    - webmasters.readonly
+    read_only: true
+  list_sites:
+    title: List sites
+    description: Lists the user's Search Console sites. Calls sites.list on the Google Search Console
+      API.
+    category: sites
+    request:
+      method: GET
+      path: /webmasters/v3/sites
+      base_url_override: https://searchconsole.googleapis.com
+    input: {}
+    output:
+      description: The SitesListResponse resource.
+      type: object
+    scopes_any:
+    - webmasters
+    - webmasters.readonly
+    read_only: true
+  inspect_index:
+    title: Inspect index
+    description: Index inspection. Calls urlInspection.index.inspect on the Google Search Console API.
+    category: url_inspection
+    request:
+      method: POST
+      path: /v1/urlInspection/index:inspect
+      base_url_override: https://searchconsole.googleapis.com
+      body:
+        siteUrl: ${site_url}
+        languageCode: ${language_code}
+        inspectionUrl: ${inspection_url}
+    input:
+      site_url:
+        type: string
+        description: Required. The URL of the property as defined in Search Console. **Examples:** http://www.example.com/
+          for a URL-prefix property, or sc-domain:example.com for a Domain property.
+        optional: true
+      language_code:
+        type: string
+        description: Optional. An IETF BCP-47 language code representing the requested language for translated
+          issue messages, e.g. "en-US", "or "de-CH". Default value is "en-US".
+        optional: true
+      inspection_url:
+        type: string
+        description: Required. URL to inspect. Must be under the property specified in "site_url".
+        optional: true
+    output:
+      description: The InspectUrlIndexResponse resource.
+      type: object
+    scopes_any:
+    - webmasters
+    - webmasters.readonly
+  run_mobile_friendly_test:
+    title: Run mobile friendly test
+    description: Runs Mobile-Friendly Test for a given URL.
+    category: url_testing_tools
+    request:
+      method: POST
+      path: /v1/urlTestingTools/mobileFriendlyTest:run
+      base_url_override: https://searchconsole.googleapis.com
+      body:
+        requestScreenshot: ${request_screenshot}
+        url: ${url}
+    input:
+      request_screenshot:
+        type: boolean
+        description: Whether or not screenshot is requested. Default is false.
+        optional: true
+      url:
+        type: string
+        description: URL for inspection.
+        optional: true
+    output:
+      description: The RunMobileFriendlyTestResponse resource.
+      type: object

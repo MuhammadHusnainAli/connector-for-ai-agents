@@ -1,4 +1,4 @@
-"""connector_manager -- 950+ API connectors, their auth requirements, and connections.
+"""connector_manager -- 1,586 API connectors, their auth, their tools, and connections.
 
 What this package does:
 
@@ -9,10 +9,20 @@ What this package does:
    provider needs one, verify the credentials against a live endpoint, and
    return a ``Connection``.
 4. **Use** -- refresh tokens and make authenticated requests with a connection.
+5. **Tools** -- what each connector can actually *do*, as named capabilities with
+   typed inputs and described outputs, and which of them a given credential's
+   scopes allow. See :mod:`connector_manager.tools`.
 
 What it deliberately does *not* do: store connections, encrypt secrets, or run
 OAuth redirect flows. ``connect()`` returns a plain ``Connection`` object;
 persistence and the OAuth/security layer stay in your application.
+
+Tools -- what a connector can do, and what this credential may do::
+
+    manager.list_tools("outlook")                    # 54 named capabilities
+    report = manager.check_tools(connection)         # enabled / disabled / unknown
+    report.status("send_email").missing_scopes       # ['Mail.Send']
+    manager.call_tool(connection, "create_draft", {"subject": "Hi", "body": "..."})
 
 Sync::
 
@@ -50,6 +60,10 @@ from .errors import (
     RequestError,
     TokenExchangeError,
     UnknownConnectorError,
+    ToolError,
+    ToolPermissionError,
+    ToolValidationError,
+    UnknownToolError,
     UnsupportedAuthModeError,
     ValidationError,
     VerificationError,
@@ -71,16 +85,28 @@ from .models import (
 )
 from .proxy import RequestBuilder
 from .registry import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, ConnectorRegistry
+from .tools import (
+    ScopeDiscoverer,
+    ScopeDiscovery,
+    ScopeDiscoverySpec,
+    ScopeRules,
+    Tool,
+    ToolAvailability,
+    ToolExecutor,
+    ToolOutput,
+    ToolPack,
+    ToolParameter,
+    ToolRegistry,
+    ToolReport,
+    ToolRequest,
+    ToolResult,
+    ToolStatus,
+)
 from .verification import CredentialVerifier, VerificationResult
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
-    "DEFAULT_PAGE_SIZE",
-    "EXTERNAL_OAUTH_MODES",
-    "MAX_PAGE_SIZE",
-    "SELF_SERVICE_MODES",
-    "UNSUPPORTED_MODES",
     "AsyncConnectorManager",
     "AsyncFlowRunner",
     "AsyncHttpClient",
@@ -97,6 +123,8 @@ __all__ = [
     "ConnectorPage",
     "ConnectorRegistry",
     "CredentialVerifier",
+    "DEFAULT_PAGE_SIZE",
+    "EXTERNAL_OAUTH_MODES",
     "ExternalAuthRequiredError",
     "FieldGroup",
     "Flow",
@@ -104,11 +132,33 @@ __all__ = [
     "HttpClient",
     "HttpResponse",
     "InterpolationError",
+    "MAX_PAGE_SIZE",
     "Request",
     "RequestBuilder",
     "RequestError",
+    "SELF_SERVICE_MODES",
+    "ScopeDiscoverer",
+    "ScopeDiscovery",
+    "ScopeDiscoverySpec",
+    "ScopeRules",
     "TokenExchangeError",
+    "Tool",
+    "ToolAvailability",
+    "ToolError",
+    "ToolExecutor",
+    "ToolOutput",
+    "ToolPack",
+    "ToolParameter",
+    "ToolPermissionError",
+    "ToolRegistry",
+    "ToolReport",
+    "ToolRequest",
+    "ToolResult",
+    "ToolStatus",
+    "ToolValidationError",
+    "UNSUPPORTED_MODES",
     "UnknownConnectorError",
+    "UnknownToolError",
     "UnsupportedAuthModeError",
     "ValidationError",
     "VerificationError",

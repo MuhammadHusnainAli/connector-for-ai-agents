@@ -1,0 +1,563 @@
+# API Key tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://public.api.foreplay.co/openapi.json
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: foreplay-co
+display_name: API Key
+docs_url: https://www.foreplay.co/page/terms-of-service
+generated: true
+generated_from: https://public.api.foreplay.co/openapi.json
+tools:
+  get_ad_by_ad_id:
+    title: Get ad details
+    description: 'Get ad details Retrieve a single ad by its public Foreplay ad id. Credit cost: 1 credit
+      per successful lookup. Errors are free. Viewing ads on Foreplay: Each ad in the response includes
+      a foreplayurl field — the canonical platform URL for that ad, computed server-side from its internal
+      id. When you reference a spe Calls GET /api/ad on the provider''s API.'
+    category: api
+    request:
+      method: GET
+      path: /api/ad
+      query:
+        ad_id: ${ad_id}
+    input:
+      ad_id:
+        type: string
+        description: The ad_id parameter.
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  get_boards:
+    title: List the authenticated user's boards (optionally with folders)
+    description: 'List the authenticated user''s boards (optionally with folders) Return the boards the
+      authenticated user has access to. Two response shapes, picked by the folders query parameter. ────
+      folders=false (default) ──────────────────────────────────── Returns a flat list of boards. limit
+      controls page size: • limit omitted → ALL boards for the user/team in one respons Calls GET /api/boards
+      on the provider''s API.'
+    category: api
+    request:
+      method: GET
+      path: /api/boards
+      query:
+        folders: ${folders}
+        offset: ${offset}
+        limit: ${limit}
+    input:
+      folders:
+        type: boolean
+        description: 'When false (default), the response is a flat array of boards. When true, the response
+          is a nested tree: {folders: [{...folder, boards: [...]}], unfiledboards: [...]} — each folder
+          carries its full boards inline (no client-side join needed) and boards that don''t belong to
+          any folder are exposed as unfiledboards. offset / limit are ignored when folders=true; the tree
+          is always returned in full.'
+        optional: true
+        default: false
+      offset:
+        type: integer
+        description: Offset for pagination. Only used when limit is also set and folders=false. Ignored
+          otherwise.
+        optional: true
+        default: 0
+      limit:
+        type: string
+        description: Page size when folders=false. Omit (or pass nothing) to return ALL boards for the
+          user/team. Ignored when folders=true (the tree is always full).
+        optional: true
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  get_user_usage:
+    title: Get user usage information
+    description: 'Get user usage information Retrieve the authenticated user''s account usage state —
+      remaining credits, total credits, billing-cycle window. Credit cost: Free. Since it''s an account-state
+      read and is not billed. Calls GET /api/usage on the provider''s API.'
+    category: api
+    request:
+      method: GET
+      path: /api/usage
+    input: {}
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  get_board_ads:
+    title: Get Ads by board id and Filters
+    description: 'Get Ads by board id and Filters Retrieve ads associated with a specific board ID, applying
+      the supplied filters. Pagination via cursor-based navigation. Credit cost: 1 credit per ad returned.
+      Each ad in the response is a full creative asset (media URLs, transcription, metadata). Empty /
+      error responses are free. Viewing ads on For Calls GET /api/board/ads on the provider''s API.'
+    category: api
+    request:
+      method: GET
+      path: /api/board/ads
+      query:
+        board_id: ${board_id}
+        start_date: ${start_date}
+        end_date: ${end_date}
+        live: ${live}
+        display_format: ${display_format}
+        publisher_platform: ${publisher_platform}
+        niches: ${niches}
+        market_target: ${market_target}
+        languages: ${languages}
+        video_duration_min: ${video_duration_min}
+        video_duration_max: ${video_duration_max}
+        running_duration_min_days: ${running_duration_min_days}
+        running_duration_max_days: ${running_duration_max_days}
+        cursor: ${cursor}
+        limit: ${limit}
+        order: ${order}
+    input:
+      board_id:
+        type: string
+        description: Board ID to search for
+      start_date:
+        type: string
+        description: 'Start date (inclusive). Format: ''YYYY-MM-DD'', ''YYYY-MM-DDTHH:MM:SS'', or ''YYYY-MM-DD
+          HH:MM:SS''. If you provide only the date (e.g. ''2024-11-12''), it will be interpreted as ''2024-11-12
+          00:00:00''. To get all ads from a specific day, set enddate to ''YYYY-MM-DD 23:59:59'' or to
+          the next day at ''00:00:00''. Examples: startdate=2024-11-12 00:00:00, enddate=2024-11-12 23:59:59.'
+        optional: true
+      end_date:
+        type: string
+        description: 'End date (inclusive). Format: ''YYYY-MM-DD'', ''YYYY-MM-DDTHH:MM:SS'', or ''YYYY-MM-DD
+          HH:MM:SS''. If you provide only the date (e.g. ''2024-11-12''), it will be interpreted as ''2024-11-12
+          00:00:00''. To include all results for a given day, set enddate to ''YYYY-MM-DD 23:59:59'' or
+          to the next day at ''00:00:00''. Examples: startdate=2024-11-12 00:00:00, enddate=2024-11-12
+          23:59:59.'
+        optional: true
+      live:
+        type: string
+        description: Filter ads by live status. true means currently active, false means not live.
+        optional: true
+      display_format:
+        type: string
+        description: 'Filter by one or more display formats. Example: ?displayformat=video&displayformat=carousel'
+        optional: true
+      publisher_platform:
+        type: string
+        description: 'Filter by one or more publisher platforms. Example: ?publisherplatform=facebook&publisherplatform=instagram'
+        optional: true
+      niches:
+        type: string
+        description: 'Filter by one or more niches. Example: ?niche=travel&niche=other'
+        optional: true
+      market_target:
+        type: string
+        description: 'Filter by market target. Example: ?markettarget=b2b'
+        optional: true
+      languages:
+        type: string
+        description: Filter by languages. Accepts values like 'french', 'FR', 'romanian', 'ro', etc.
+        optional: true
+      video_duration_min:
+        type: string
+        description: Filter ads by minimum video duration in seconds. Only applies to video ads.
+        optional: true
+      video_duration_max:
+        type: string
+        description: Filter ads by maximum video duration in seconds. Only applies to video ads.
+        optional: true
+      running_duration_min_days:
+        type: string
+        description: Filter ads by minimum running duration in days. Must be a positive integer.
+        optional: true
+      running_duration_max_days:
+        type: string
+        description: Filter ads by maximum running duration in days. Must be a positive integer.
+        optional: true
+      cursor:
+        type: string
+        description: Cursor for pagination. Use the cursor value from the previous response's metadata
+          to get the next page of results.
+        optional: true
+      limit:
+        type: integer
+        description: Pagination limit (max 250).
+        optional: true
+        default: 10
+      order:
+        type: string
+        description: 'Order of results: ''newest'' (default), ''oldest'', ''longestrunning'', or ''mostrelevant''.
+          Sorts ads by creation date, or by longest running duration.'
+        optional: true
+        default: newest
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  get_brands_by_board_id:
+    title: Get all brands for a specific board
+    description: 'Get all brands for a specific board Retrieve every brand associated with a board the
+      caller already owns. Returns brand metadata (id, name, domain, logo) — for the per-board AD content
+      see /api/board/ads. Pagination supported via offset and limit query parameters. Credit cost: 1 credit
+      per call, flat-rate — regardless of how many bran Calls GET /api/board/brands on the provider''s
+      API.'
+    category: api
+    request:
+      method: GET
+      path: /api/board/brands
+      query:
+        board_id: ${board_id}
+        offset: ${offset}
+        limit: ${limit}
+    input:
+      board_id:
+        type: string
+        description: The ID of the board to retrieve brands from.
+      offset:
+        type: string
+        description: The offset for pagination. (int)
+        optional: true
+        default: 0
+      limit:
+        type: integer
+        description: Pagination limit (max 10). (int)
+        optional: true
+        default: 10
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  get_brands_analytics:
+    title: Get Brand Analytics by Brand ID or Page ID, gives running ads distribu
+    description: 'Get Brand Analytics by Brand ID or Page ID, gives running ads distribution and creative
+      velocity Get analytics for a brand (running-ads distribution, creative velocity). Returns a series
+      of analytics rows. Credit cost: 1 credit per analytics row returned. Empty / error responses are
+      free. Calls GET /api/brand/analytics on the provider''s API.'
+    category: api
+    request:
+      method: GET
+      path: /api/brand/analytics
+      query:
+        id: ${id}
+        start_date: ${start_date}
+        end_date: ${end_date}
+        order: ${order}
+    input:
+      id:
+        type: string
+        description: Page ID or Brand ID. Brand IDs are 20-25 character alphanumeric strings with mixed
+          case. Page IDs are numeric Facebook page identifiers.
+      start_date:
+        type: string
+        description: 'Start date (inclusive). Format: ''YYYY-MM-DD'', ''YYYY-MM-DDTHH:MM:SS'', or ''YYYY-MM-DD
+          HH:MM:SS''. If you provide only the date (e.g. ''2024-11-12''), it will be interpreted as ''2024-11-12
+          00:00:00''. To get all ads from a specific day, set enddate to ''YYYY-MM-DD 23:59:59'' or to
+          the next day at ''00:00:00''. Examples: startdate=2024-11-12 00:00:00, enddate=2024-11-12 23:59:59.'
+        optional: true
+      end_date:
+        type: string
+        description: 'End date (inclusive). Format: ''YYYY-MM-DD'', ''YYYY-MM-DDTHH:MM:SS'', or ''YYYY-MM-DD
+          HH:MM:SS''. If you provide only the date (e.g. ''2024-11-12''), it will be interpreted as ''2024-11-12
+          00:00:00''. To include all results for a given day, set enddate to ''YYYY-MM-DD 23:59:59'' or
+          to the next day at ''00:00:00''. Examples: startdate=2024-11-12 00:00:00, enddate=2024-11-12
+          23:59:59.'
+        optional: true
+      order:
+        type: string
+        description: 'Order of results: ''newest'' (default), ''oldest'', ''longestrunning'', or ''relevance''.
+          Sorts ads by creation date, or by longest running duration.'
+        optional: true
+        default: newest
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  get_ads_by_brand_ids:
+    title: Get Ads by Brand IDs and Filters
+    description: 'Get Ads by Brand IDs and Filters Retrieve ads for one or more brand IDs, applying the
+      supplied filters. Each result is a full ad object. Credit cost: 1 credit per ad returned. Empty
+      / error responses are free. Empty results? Pass collect=true to kick off a best-effort live fetch
+      from Meta for the brands'' Facebook pages and wait up Calls GET /api/brand/getAdsByBrandId on the
+      provider''s API.'
+    category: api
+    request:
+      method: GET
+      path: /api/brand/getAdsByBrandId
+      query:
+        brand_ids: ${brand_ids}
+        live: ${live}
+        display_format: ${display_format}
+        publisher_platform: ${publisher_platform}
+        niches: ${niches}
+        market_target: ${market_target}
+        languages: ${languages}
+        video_duration_min: ${video_duration_min}
+        video_duration_max: ${video_duration_max}
+        running_duration_min_days: ${running_duration_min_days}
+        running_duration_max_days: ${running_duration_max_days}
+        start_date: ${start_date}
+        end_date: ${end_date}
+        order: ${order}
+        cursor: ${cursor}
+        limit: ${limit}
+        collect: ${collect}
+    input:
+      brand_ids:
+        type: array
+        description: Brand ID(s) to search for. Can be a single ID or multiple IDs separated by commas.
+        items:
+          type: string
+      live:
+        type: string
+        description: Filter ads by live status. true means currently active ads, false means inactive
+          ads. Leave empty to include both.
+        optional: true
+      display_format:
+        type: string
+        description: 'Filter by one or more display formats. Available formats: video, carousel, image,
+          dco, dpa, multiimages, multivideos, multimedias, event, text Example: ?displayformat=video&displayformat=carousel'
+        optional: true
+      publisher_platform:
+        type: string
+        description: 'Filter by one or more publisher platforms. Available platforms: facebook, instagram,
+          audiencenetwork, messenger Example: ?publisherplatform=facebook&publisherplatform=instagram'
+        optional: true
+      niches:
+        type: string
+        description: 'Filter by one or more niches. Available niches: travel, food, fashion, beauty, health,
+          technology, automotive, finance, education, entertainment, sports, home, pets, business, other
+          Example: ?niches=travel&niches=fashion'
+        optional: true
+      market_target:
+        type: string
+        description: 'Filter by market target. Available targets: b2b (business-to-business), b2c (business-to-consumer)
+          Example: ?markettarget=b2b'
+        optional: true
+      languages:
+        type: string
+        description: 'Filter by languages. Accepts various language formats: ''french'', ''FR'', ''romanian'',
+          ''ro'', ''english'', ''en'', etc. Example: ?languages=en&languages=fr'
+        optional: true
+      video_duration_min:
+        type: string
+        description: Filter ads by minimum video duration in seconds. Only applies to video ads.
+        optional: true
+      video_duration_max:
+        type: string
+        description: Filter ads by maximum video duration in seconds. Only applies to video ads.
+        optional: true
+      running_duration_min_days:
+        type: string
+        description: Filter ads by minimum running duration in days. Must be a positive integer.
+        optional: true
+      running_duration_max_days:
+        type: string
+        description: Filter ads by maximum running duration in days. Must be a positive integer.
+        optional: true
+      start_date:
+        type: string
+        description: 'Start date (inclusive). Format: ''YYYY-MM-DD'', ''YYYY-MM-DDTHH:MM:SS'', or ''YYYY-MM-DD
+          HH:MM:SS''. If you provide only the date (e.g. ''2024-11-12''), it will be interpreted as ''2024-11-12
+          00:00:00''. To get all ads from a specific day, set enddate to ''YYYY-MM-DD 23:59:59'' or to
+          the next day at ''00:00:00''. Examples: startdate=2024-11-12 00:00:00, enddate=2024-11-12 23:59:59.'
+        optional: true
+      end_date:
+        type: string
+        description: 'End date (inclusive). Format: ''YYYY-MM-DD'', ''YYYY-MM-DDTHH:MM:SS'', or ''YYYY-MM-DD
+          HH:MM:SS''. If you provide only the date (e.g. ''2024-11-12''), it will be interpreted as ''2024-11-12
+          00:00:00''. To include all results for a given day, set enddate to ''YYYY-MM-DD 23:59:59'' or
+          to the next day at ''00:00:00''. Examples: startdate=2024-11-12 00:00:00, enddate=2024-11-12
+          23:59:59.'
+        optional: true
+      order:
+        type: string
+        description: 'Order of results: ''newest'' (default), ''oldest'', ''longestrunning'', or ''mostrelevant''.
+          Sorts ads by creation date, or by longest running duration.'
+        optional: true
+        default: newest
+      cursor:
+        type: string
+        description: Cursor for pagination. Use the cursor value from the previous response's metadata
+          to get the next page of results.
+        optional: true
+      limit:
+        type: integer
+        description: Pagination limit (max 250). Controls the number of ads returned per request.
+        optional: true
+        default: 10
+      collect:
+        type: string
+        description: Best-effort live fallback. If the cached results are empty and collect=true, the
+          API translates each brand id to its Meta page id (adlibraryid), kicks off a live fetch through
+          our Spyder pipeline, and polls for ~30 seconds. Returns whatever is available at the end of
+          the window — may still be empty if a brand has no Meta page on file, the page is restricted,
+          deleted, or simply isn't running ads. N
+        optional: true
+        default: false
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  get_brands_ads_by_page_id:
+    title: Get Ads by Page ID and Filters
+    description: Get Ads by Page ID and Filters Retrieve ads for a Facebook page id, applying the supplied
+      filters. Each result is a full ad object. Empty response? Try collect=true. If the default call
+      comes back with no ads, it means we don't have cached data for this page yet. Re-issue the SAME
+      request with collect=true to kick off a best-effo Calls GET /api/brand/getAdsByPageId on the provider's
+      API.
+    category: api
+    request:
+      method: GET
+      path: /api/brand/getAdsByPageId
+      query:
+        page_id: ${page_id}
+        start_date: ${start_date}
+        end_date: ${end_date}
+        order: ${order}
+        live: ${live}
+        display_format: ${display_format}
+        publisher_platform: ${publisher_platform}
+        niches: ${niches}
+        market_target: ${market_target}
+        languages: ${languages}
+        video_duration_min: ${video_duration_min}
+        video_duration_max: ${video_duration_max}
+        running_duration_min_days: ${running_duration_min_days}
+        running_duration_max_days: ${running_duration_max_days}
+        cursor: ${cursor}
+        limit: ${limit}
+        collect: ${collect}
+    input:
+      page_id:
+        type: string
+        description: Facebook page ID to search for. This should be the numeric ID of the Facebook page.
+      start_date:
+        type: string
+        description: 'Start date (inclusive). Format: ''YYYY-MM-DD'', ''YYYY-MM-DDTHH:MM:SS'', or ''YYYY-MM-DD
+          HH:MM:SS''. If you provide only the date (e.g. ''2024-11-12''), it will be interpreted as ''2024-11-12
+          00:00:00''. To get all ads from a specific day, set enddate to ''YYYY-MM-DD 23:59:59'' or to
+          the next day at ''00:00:00''. Examples: startdate=2024-11-12 00:00:00, enddate=2024-11-12 23:59:59.'
+        optional: true
+      end_date:
+        type: string
+        description: 'End date (inclusive). Format: ''YYYY-MM-DD'', ''YYYY-MM-DDTHH:MM:SS'', or ''YYYY-MM-DD
+          HH:MM:SS''. If you provide only the date (e.g. ''2024-11-12''), it will be interpreted as ''2024-11-12
+          00:00:00''. To include all results for a given day, set enddate to ''YYYY-MM-DD 23:59:59'' or
+          to the next day at ''00:00:00''. Examples: startdate=2024-11-12 00:00:00, enddate=2024-11-12
+          23:59:59.'
+        optional: true
+      order:
+        type: string
+        description: 'Order of results: ''newest'' (default), ''oldest'', ''longestrunning'', or ''mostrelevant''.
+          Sorts ads by creation date, or by longest running duration.'
+        optional: true
+        default: newest
+      live:
+        type: string
+        description: Filter ads by live status. true means currently active ads, false means inactive
+          ads. Leave empty to include both.
+        optional: true
+      display_format:
+        type: string
+        description: 'Filter by one or more display formats. Available formats: video, carousel, image,
+          dco, dpa, multiimages, multivideos, multimedias, event, text Example: ?displayformat=video&displayformat=carousel'
+        optional: true
+      publisher_platform:
+        type: string
+        description: 'Filter by one or more publisher platforms. Available platforms: facebook, instagram,
+          audiencenetwork, messenger Example: ?publisherplatform=facebook&publisherplatform=instagram'
+        optional: true
+      niches:
+        type: string
+        description: 'Filter by one or more niches. Available niches: travel, food, fashion, beauty, health,
+          technology, automotive, finance, education, entertainment, sports, home, pets, business, other
+          Example: ?niches=travel&niches=fashion'
+        optional: true
+      market_target:
+        type: string
+        description: 'Filter by market target. Available targets: b2b (business-to-business), b2c (business-to-consumer)
+          Example: ?markettarget=b2b'
+        optional: true
+      languages:
+        type: string
+        description: 'Filter by languages. Accepts various language formats: ''french'', ''FR'', ''romanian'',
+          ''ro'', ''english'', ''en'', etc. Example: ?languages=en&languages=fr'
+        optional: true
+      video_duration_min:
+        type: string
+        description: Filter ads by minimum video duration in seconds. Only applies to video ads.
+        optional: true
+      video_duration_max:
+        type: string
+        description: Filter ads by maximum video duration in seconds. Only applies to video ads.
+        optional: true
+      running_duration_min_days:
+        type: string
+        description: Filter ads by minimum running duration in days. Must be a positive integer.
+        optional: true
+      running_duration_max_days:
+        type: string
+        description: Filter ads by maximum running duration in days. Must be a positive integer.
+        optional: true
+      cursor:
+        type: string
+        description: Cursor for pagination. Use the cursor value from the previous response's metadata
+          to get the next page of results.
+        optional: true
+      limit:
+        type: integer
+        description: Pagination limit (max 250). Controls the number of ads returned per request.
+        optional: true
+        default: 10
+      collect:
+        type: string
+        description: Best-effort live collection. Only meaningful when the default response is empty.
+          Set to true to trigger a background fetch of this page's ads from Meta; the request blocks for
+          up to ~30 seconds while polling, then returns whatever the collector grabbed. May still return
+          empty, may return a partial set, and adds significant latency. Don't enable on every call —
+          only as a follow-up after an empty re
+        optional: true
+        default: false
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  get_brands_by_domain:
+    title: Get Brands by Domain
+    description: 'Get Brands by Domain Find brands that advertise from a given domain. This is DISCOVERY
+      — you don''t need to already track or own the brands to find them this way. Credit cost: 1 credit
+      per brand returned. Empty / error responses are free. Calls GET /api/brand/getBrandsByDomain on
+      the provider''s API.'
+    category: api
+    request:
+      method: GET
+      path: /api/brand/getBrandsByDomain
+      query:
+        domain: ${domain}
+        limit: ${limit}
+        order: ${order}
+    input:
+      domain:
+        type: string
+        description: Domain name to search for. This can be a full URL (e.g., 'https://example.com') or
+          just the domain (e.g., 'example.com'). The system will automatically format and clean the domain.
+          This endpoint looks up candidate brands based on the provided domain. The returned brands are
+          potential matches and are not guaranteed to be definitively associated with the domain.
+      limit:
+        type: integer
+        description: Pagination limit (max 10). Controls the number of brands returned per request.
+        optional: true
+        default: 10
+      order:
+        type: string
+        description: 'Order of results: ''mostranked'' (default) or ''leastranked''. Sorts brands by relevance
+          ranking.'
+        optional: true
+        default: most_ranked
+    output:
+      description: Successful Response
+      type: object
+    read_only: true

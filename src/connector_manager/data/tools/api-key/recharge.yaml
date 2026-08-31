@@ -1,0 +1,513 @@
+# Recharge tools.
+#
+# Recharge pins its API by version through the X-Recharge-Version header, which
+# every tool sends. Subscriptions are the core object: a customer has addresses,
+# and each subscription sits on an address.
+#
+# Docs: https://developer.rechargepayments.com/2021-11
+
+connector_id: recharge
+display_name: Recharge
+docs_url: https://developer.rechargepayments.com/2021-11
+
+tools:
+
+  list_subscriptions:
+    title: List subscriptions
+    description: >-
+      Page through subscriptions, optionally for one customer or in one status.
+      This is the heart of a Recharge account.
+    category: subscriptions
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions
+      headers:
+        X-Recharge-Version: "${api_version}"
+      query:
+        limit: "${limit}"
+        cursor: "${cursor}"
+        customer_id: "${customer_id}"
+        status: "${status}"
+        address_id: "${address_id}"
+        created_at_min: "${created_at_min}"
+    input:
+      limit:
+        type: integer
+        description: How many subscriptions per page (1-250).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 250
+      cursor:
+        type: string
+        description: Cursor from the previous response's Link header.
+        optional: true
+      customer_id:
+        type: string
+        description: Only subscriptions for this customer.
+        optional: true
+      status:
+        type: string
+        description: Only subscriptions in this state.
+        optional: true
+        enum: [active, cancelled, expired]
+      address_id:
+        type: string
+        description: Only subscriptions shipping to this address.
+        optional: true
+      created_at_min:
+        type: string
+        description: Only subscriptions created at or after this ISO 8601 instant.
+        optional: true
+      api_version:
+        type: string
+        description: Recharge API version to pin the call to.
+        optional: true
+        default: "2021-11"
+    output:
+      description: A page of subscriptions.
+      type: object
+      properties:
+        subscriptions: {type: array}
+        next_cursor: {type: string}
+
+  get_subscription:
+    title: Get a subscription
+    description: >-
+      Read one subscription's product, quantity, price, charge interval and next
+      charge date.
+    category: subscriptions
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${subscription_id}
+      headers:
+        X-Recharge-Version: "${api_version}"
+    input:
+      subscription_id:
+        type: string
+        description: The subscription id.
+      api_version:
+        type: string
+        description: Recharge API version.
+        optional: true
+        default: "2021-11"
+    output:
+      description: The subscription.
+      type: object
+      response_path: subscription
+      properties:
+        id: {type: integer}
+        status: {type: string}
+        quantity: {type: integer}
+        next_charge_scheduled_at: {type: string}
+        product_title: {type: string}
+
+  update_subscription:
+    title: Update a subscription
+    description: >-
+      Change a subscription's quantity, price or charge interval. Changes take
+      effect from the next charge.
+    category: subscriptions
+    request:
+      method: PUT
+      path: /subscriptions/${subscription_id}
+      headers:
+        X-Recharge-Version: "${api_version}"
+      body:
+        quantity: "${quantity}"
+        price: "${price}"
+        order_interval_unit: "${order_interval_unit}"
+        order_interval_frequency: "${order_interval_frequency}"
+        charge_interval_frequency: "${charge_interval_frequency}"
+        variant_id: "${variant_id}"
+    input:
+      subscription_id:
+        type: string
+        description: The subscription id.
+      quantity:
+        type: integer
+        description: New quantity per delivery.
+        optional: true
+        minimum: 1
+      price:
+        type: string
+        description: New per-unit price, as a decimal string.
+        optional: true
+      order_interval_unit:
+        type: string
+        description: Unit the delivery interval is counted in.
+        optional: true
+        enum: [day, week, month]
+      order_interval_frequency:
+        type: string
+        description: How many units between deliveries.
+        optional: true
+      charge_interval_frequency:
+        type: string
+        description: How many units between charges. Usually matches the order interval.
+        optional: true
+      variant_id:
+        type: string
+        description: Swap the subscription to a different product variant.
+        optional: true
+      api_version:
+        type: string
+        description: Recharge API version.
+        optional: true
+        default: "2021-11"
+    output:
+      description: The updated subscription.
+      type: object
+      response_path: subscription
+      properties:
+        id: {type: integer}
+        quantity: {type: integer}
+        next_charge_scheduled_at: {type: string}
+
+  cancel_subscription:
+    title: Cancel a subscription
+    description: >-
+      Cancel a subscription so it stops charging. Recharge records the reason;
+      reactivating is a separate call.
+    category: subscriptions
+    destructive: true
+    request:
+      method: POST
+      path: /subscriptions/${subscription_id}/cancel
+      headers:
+        X-Recharge-Version: "${api_version}"
+      body:
+        cancellation_reason: "${reason}"
+        cancellation_reason_comments: "${comments}"
+        send_email: "${send_email}"
+    input:
+      subscription_id:
+        type: string
+        description: The subscription to cancel.
+      reason:
+        type: string
+        description: Why the customer is cancelling.
+      comments:
+        type: string
+        description: Free-text detail on the reason.
+        optional: true
+      send_email:
+        type: boolean
+        description: Send the customer Recharge's cancellation email.
+        optional: true
+      api_version:
+        type: string
+        description: Recharge API version.
+        optional: true
+        default: "2021-11"
+    output:
+      description: The cancelled subscription.
+      type: object
+      response_path: subscription
+      properties:
+        id: {type: integer}
+        status: {type: string}
+        cancelled_at: {type: string}
+
+  skip_charge:
+    title: Skip a subscription's next charge
+    description: >-
+      Skip one upcoming charge without cancelling the subscription, moving the
+      next charge date forward by one interval.
+    category: subscriptions
+    request:
+      method: POST
+      path: /charges/${charge_id}/skip
+      headers:
+        X-Recharge-Version: "${api_version}"
+      body:
+        purchase_item_ids: "${subscription_ids}"
+    input:
+      charge_id:
+        type: string
+        description: The upcoming charge to skip, from list_charges.
+      subscription_ids:
+        type: array
+        description: Which subscriptions on that charge to skip.
+        items: {type: integer}
+      api_version:
+        type: string
+        description: Recharge API version.
+        optional: true
+        default: "2021-11"
+    output:
+      description: The charge after skipping.
+      type: object
+      response_path: charge
+      properties:
+        id: {type: integer}
+        status: {type: string}
+        scheduled_at: {type: string}
+
+  list_customers:
+    title: List customers
+    description: Page through the store's Recharge customers with their email addresses.
+    category: customers
+    read_only: true
+    request:
+      method: GET
+      path: /customers
+      headers:
+        X-Recharge-Version: "${api_version}"
+      query:
+        limit: "${limit}"
+        cursor: "${cursor}"
+        email: "${email}"
+        created_at_min: "${created_at_min}"
+    input:
+      limit:
+        type: integer
+        description: How many customers per page (1-250).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 250
+      cursor:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+      email:
+        type: string
+        description: Only the customer with this email address.
+        optional: true
+        format: email
+      created_at_min:
+        type: string
+        description: Only customers created at or after this ISO 8601 instant.
+        optional: true
+      api_version:
+        type: string
+        description: Recharge API version.
+        optional: true
+        default: "2021-11"
+    output:
+      description: A page of customers.
+      type: object
+      properties:
+        customers: {type: array}
+        next_cursor: {type: string}
+
+  get_customer:
+    title: Get a customer
+    description: >-
+      Read one customer's details, including how many active subscriptions they
+      have.
+    category: customers
+    read_only: true
+    request:
+      method: GET
+      path: /customers/${customer_id}
+      headers:
+        X-Recharge-Version: "${api_version}"
+    input:
+      customer_id:
+        type: string
+        description: The customer id.
+      api_version:
+        type: string
+        description: Recharge API version.
+        optional: true
+        default: "2021-11"
+    output:
+      description: The customer.
+      type: object
+      response_path: customer
+      properties:
+        id: {type: integer}
+        email: {type: string}
+        first_name: {type: string}
+        subscriptions_active_count: {type: integer}
+
+  list_charges:
+    title: List charges
+    description: >-
+      Read past and upcoming charges, optionally for one customer or in one
+      status — how to see what a subscriber has been billed.
+    category: charges
+    read_only: true
+    request:
+      method: GET
+      path: /charges
+      headers:
+        X-Recharge-Version: "${api_version}"
+      query:
+        limit: "${limit}"
+        cursor: "${cursor}"
+        customer_id: "${customer_id}"
+        status: "${status}"
+        scheduled_at_min: "${scheduled_at_min}"
+        scheduled_at_max: "${scheduled_at_max}"
+    input:
+      limit:
+        type: integer
+        description: How many charges per page (1-250).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 250
+      cursor:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+      customer_id:
+        type: string
+        description: Only charges for this customer.
+        optional: true
+      status:
+        type: string
+        description: Only charges in this state.
+        optional: true
+        enum: [success, queued, error, refunded, partially_refunded, skipped]
+      scheduled_at_min:
+        type: string
+        description: Only charges scheduled at or after this ISO 8601 instant.
+        optional: true
+      scheduled_at_max:
+        type: string
+        description: Only charges scheduled at or before this ISO 8601 instant.
+        optional: true
+      api_version:
+        type: string
+        description: Recharge API version.
+        optional: true
+        default: "2021-11"
+    output:
+      description: A page of charges.
+      type: object
+      properties:
+        charges: {type: array}
+        next_cursor: {type: string}
+
+  list_orders:
+    title: List orders
+    description: >-
+      Read the orders Recharge has generated from charges, with their line items
+      and fulfilment state.
+    category: orders
+    read_only: true
+    request:
+      method: GET
+      path: /orders
+      headers:
+        X-Recharge-Version: "${api_version}"
+      query:
+        limit: "${limit}"
+        cursor: "${cursor}"
+        customer_id: "${customer_id}"
+        status: "${status}"
+        created_at_min: "${created_at_min}"
+    input:
+      limit:
+        type: integer
+        description: How many orders per page (1-250).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 250
+      cursor:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+      customer_id:
+        type: string
+        description: Only orders for this customer.
+        optional: true
+      status:
+        type: string
+        description: Only orders in this state.
+        optional: true
+        enum: [success, error, queued, cancelled]
+      created_at_min:
+        type: string
+        description: Only orders created at or after this ISO 8601 instant.
+        optional: true
+      api_version:
+        type: string
+        description: Recharge API version.
+        optional: true
+        default: "2021-11"
+    output:
+      description: A page of orders.
+      type: object
+      properties:
+        orders: {type: array}
+        next_cursor: {type: string}
+
+  list_addresses:
+    title: List a customer's addresses
+    description: >-
+      Read a customer's shipping addresses. Subscriptions hang off an address,
+      so this is how to find where a subscription ships.
+    category: customers
+    read_only: true
+    request:
+      method: GET
+      path: /addresses
+      headers:
+        X-Recharge-Version: "${api_version}"
+      query:
+        customer_id: "${customer_id}"
+        limit: "${limit}"
+        cursor: "${cursor}"
+    input:
+      customer_id:
+        type: string
+        description: Only addresses for this customer.
+        optional: true
+      limit:
+        type: integer
+        description: How many addresses per page (1-250).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 250
+      cursor:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+      api_version:
+        type: string
+        description: Recharge API version.
+        optional: true
+        default: "2021-11"
+    output:
+      description: A page of addresses.
+      type: object
+      properties:
+        addresses: {type: array}
+        next_cursor: {type: string}
+
+  get_store:
+    title: Get the connected store
+    description: >-
+      Read the Recharge store the key belongs to — its name, domain, currency
+      and timezone. The cheapest health check for the connection.
+    category: store
+    read_only: true
+    request:
+      method: GET
+      path: /store
+      headers:
+        X-Recharge-Version: "${api_version}"
+    input:
+      api_version:
+        type: string
+        description: Recharge API version.
+        optional: true
+        default: "2021-11"
+    output:
+      description: The store.
+      type: object
+      response_path: store
+      properties:
+        name: {type: string}
+        domain: {type: string}
+        currency: {type: string}
+        timezone: {type: string}

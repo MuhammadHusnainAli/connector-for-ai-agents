@@ -1,0 +1,370 @@
+# Gusto tools.
+#
+# Most calls hang off a company uuid, which get_current_user returns under the
+# roles the token holds. Money is a decimal string, e.g. "5000.00".
+#
+# Docs: https://docs.gusto.com/embedded-payroll/reference
+
+connector_id: gusto
+display_name: Gusto
+docs_url: https://docs.gusto.com/embedded-payroll/reference
+applies_to:
+  - gusto-demo
+
+tools:
+
+  get_current_user:
+    title: Get the authenticated user and their companies
+    description: >-
+      Read who the token belongs to and which companies it can act on, with the
+      company uuids every other tool needs. Start here.
+    category: account
+    read_only: true
+    request:
+      method: GET
+      path: /v1/me
+    input: {}
+    output:
+      description: The authenticated user.
+      type: object
+      properties:
+        email: {type: string}
+        roles: {type: object, description: "Holds payroll_admin.companies with each company's uuid."}
+
+  list_employees:
+    title: List a company's employees
+    description: >-
+      List the people employed by a company, with their ids, names and
+      employment status.
+    category: employees
+    read_only: true
+    request:
+      method: GET
+      path: /v1/companies/${company_id}/employees
+      query:
+        page: "${page}"
+        per: "${per_page}"
+        terminated: "${terminated}"
+        include: "${include}"
+    input:
+      company_id:
+        type: string
+        description: The company uuid, from get_current_user.
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      per_page:
+        type: integer
+        description: How many employees per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      terminated:
+        type: boolean
+        description: Return terminated employees instead of active ones.
+        optional: true
+      include:
+        type: array
+        description: Extra blocks to inline, e.g. ["all_compensations","custom_fields"].
+        optional: true
+        items: {type: string}
+    output:
+      description: A page of employees.
+      type: array
+      items:
+        type: object
+        properties:
+          uuid: {type: string}
+          first_name: {type: string}
+          last_name: {type: string}
+          email: {type: string}
+          jobs: {type: array}
+
+  get_employee:
+    title: Get an employee
+    description: >-
+      Read one employee in full — their jobs, compensations, and onboarding
+      status.
+    category: employees
+    read_only: true
+    request:
+      method: GET
+      path: /v1/employees/${employee_id}
+      query:
+        include: "${include}"
+    input:
+      employee_id:
+        type: string
+        description: The employee uuid.
+      include:
+        type: array
+        description: Extra blocks to inline, e.g. ["all_compensations"].
+        optional: true
+        items: {type: string}
+    output:
+      description: The employee.
+      type: object
+      properties:
+        uuid: {type: string}
+        first_name: {type: string}
+        last_name: {type: string}
+        jobs: {type: array}
+        terminated: {type: boolean}
+
+  create_employee:
+    title: Add an employee
+    description: >-
+      Create an employee on a company. Gusto then walks them through its own
+      onboarding for tax and bank details.
+    category: employees
+    request:
+      method: POST
+      path: /v1/companies/${company_id}/employees
+      body:
+        first_name: "${first_name}"
+        last_name: "${last_name}"
+        middle_initial: "${middle_initial}"
+        email: "${email}"
+        date_of_birth: "${date_of_birth}"
+        ssn: "${ssn}"
+        self_onboarding: "${self_onboarding}"
+    input:
+      company_id:
+        type: string
+        description: The company uuid.
+      first_name:
+        type: string
+        description: First name.
+      last_name:
+        type: string
+        description: Last name.
+      email:
+        type: string
+        description: Personal email address Gusto invites them at.
+        optional: true
+        format: email
+      middle_initial:
+        type: string
+        description: Middle initial.
+        optional: true
+        max_length: 1
+      date_of_birth:
+        type: string
+        description: Date of birth as YYYY-MM-DD.
+        optional: true
+      ssn:
+        type: string
+        description: Social security number, digits only.
+        optional: true
+        secret: true
+      self_onboarding:
+        type: boolean
+        description: Let the employee fill in their own details.
+        optional: true
+    output:
+      description: The created employee.
+      type: object
+      properties:
+        uuid: {type: string}
+        first_name: {type: string}
+        onboarded: {type: boolean}
+
+  list_payrolls:
+    title: List payrolls
+    description: >-
+      List a company's payrolls over a date range, with their state and pay
+      periods.
+    category: payroll
+    read_only: true
+    request:
+      method: GET
+      path: /v1/companies/${company_id}/payrolls
+      query:
+        start_date: "${start_date}"
+        end_date: "${end_date}"
+        processing_statuses: "${processing_statuses}"
+        payroll_types: "${payroll_types}"
+        include: "${include}"
+    input:
+      company_id:
+        type: string
+        description: The company uuid.
+      start_date:
+        type: string
+        description: Only payrolls with a period starting on or after this date, YYYY-MM-DD.
+        optional: true
+      end_date:
+        type: string
+        description: Only payrolls with a period ending on or before this date.
+        optional: true
+      processing_statuses:
+        type: array
+        description: Only payrolls in these states, e.g. ["processed","unprocessed"].
+        optional: true
+        items: {type: string}
+      payroll_types:
+        type: array
+        description: Only these kinds, e.g. ["regular","off_cycle"].
+        optional: true
+        items: {type: string}
+      include:
+        type: array
+        description: Extra blocks to inline, e.g. ["totals","payroll_status_meta"].
+        optional: true
+        items: {type: string}
+    output:
+      description: The company's payrolls.
+      type: array
+      items:
+        type: object
+        properties:
+          payroll_uuid: {type: string}
+          check_date: {type: string}
+          processed: {type: boolean}
+          pay_period: {type: object}
+
+  get_payroll:
+    title: Get a payroll
+    description: >-
+      Read one payroll in full — its pay period, totals and per-employee
+      compensations.
+    category: payroll
+    read_only: true
+    request:
+      method: GET
+      path: /v1/companies/${company_id}/payrolls/${payroll_id}
+      query:
+        include: "${include}"
+    input:
+      company_id:
+        type: string
+        description: The company uuid.
+      payroll_id:
+        type: string
+        description: The payroll uuid.
+      include:
+        type: array
+        description: Extra blocks to inline, e.g. ["totals","benefits"].
+        optional: true
+        items: {type: string}
+    output:
+      description: The payroll.
+      type: object
+      properties:
+        payroll_uuid: {type: string}
+        check_date: {type: string}
+        totals: {type: object}
+        employee_compensations: {type: array}
+
+  list_time_off_requests:
+    title: List time-off requests
+    description: List a company's holiday and sick-leave requests, with their status.
+    category: time_off
+    read_only: true
+    request:
+      method: GET
+      path: /v1/companies/${company_id}/time_off_requests
+      query:
+        start_date: "${start_date}"
+        end_date: "${end_date}"
+        types: "${types}"
+        statuses: "${statuses}"
+    input:
+      company_id:
+        type: string
+        description: The company uuid.
+      start_date:
+        type: string
+        description: Only requests on or after this date, YYYY-MM-DD.
+        optional: true
+      end_date:
+        type: string
+        description: Only requests on or before this date.
+        optional: true
+      types:
+        type: array
+        description: Only these kinds, e.g. ["vacation","sick"].
+        optional: true
+        items: {type: string}
+      statuses:
+        type: array
+        description: Only these states, e.g. ["approved","pending"].
+        optional: true
+        items: {type: string}
+    output:
+      description: The matching time-off requests.
+      type: array
+      items:
+        type: object
+        properties:
+          uuid: {type: string}
+          employee_uuid: {type: string}
+          status: {type: string}
+          request_type: {type: string}
+
+  list_company_locations:
+    title: List a company's locations
+    description: >-
+      List the company's work locations with their ids, which employee jobs
+      refer to.
+    category: company
+    read_only: true
+    request:
+      method: GET
+      path: /v1/companies/${company_id}/locations
+      query:
+        page: "${page}"
+        per: "${per_page}"
+    input:
+      company_id:
+        type: string
+        description: The company uuid.
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      per_page:
+        type: integer
+        description: How many locations per page.
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+    output:
+      description: The company's locations.
+      type: array
+      items:
+        type: object
+        properties:
+          uuid: {type: string}
+          street_1: {type: string}
+          city: {type: string}
+          state: {type: string}
+
+  get_company:
+    title: Get a company
+    description: >-
+      Read a company's legal name, EIN, entity type and onboarding state. The
+      cheapest health check once a company uuid is known.
+    category: company
+    read_only: true
+    request:
+      method: GET
+      path: /v1/companies/${company_id}
+    input:
+      company_id:
+        type: string
+        description: The company uuid.
+    output:
+      description: The company.
+      type: object
+      properties:
+        uuid: {type: string}
+        name: {type: string}
+        trade_name: {type: string}
+        ein: {type: string}
+        company_status: {type: string}

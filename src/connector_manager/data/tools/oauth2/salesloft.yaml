@@ -1,0 +1,523 @@
+# Salesloft tools.
+#
+# Endpoints carry a .json suffix. Reads come back as {"data": [...],
+# "metadata": {"paging": {...}}}; page with `page` and `per_page`.
+#
+# A "cadence" is Salesloft's sequence, and putting a person on one is a cadence
+# membership.
+#
+# Docs: https://developers.salesloft.com/docs/api
+
+connector_id: salesloft
+display_name: Salesloft
+docs_url: https://developers.salesloft.com/docs/api
+
+tools:
+
+  list_people:
+    title: List people
+    description: >-
+      Page through prospects, optionally filtered by email address, owner or
+      when they last changed.
+    category: people
+    read_only: true
+    request:
+      method: GET
+      path: /v2/people.json
+      query:
+        page: "${page}"
+        per_page: "${per_page}"
+        email_addresses: "${email_addresses}"
+        owner_id: "${owner_id}"
+        account_id: "${account_id}"
+        updated_at[gte]: "${updated_since}"
+        sort_by: "${sort_by}"
+    input:
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      per_page:
+        type: integer
+        description: How many people per page (1-100).
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 100
+      email_addresses:
+        type: array
+        description: Only people with one of these email addresses.
+        optional: true
+        items: {type: string}
+      owner_id:
+        type: integer
+        description: Only people owned by this user.
+        optional: true
+      account_id:
+        type: integer
+        description: Only people at this account.
+        optional: true
+      updated_since:
+        type: string
+        description: Only people changed at or after this ISO 8601 instant.
+        optional: true
+      sort_by:
+        type: string
+        description: Field to order by, e.g. updated_at.
+        optional: true
+    output:
+      description: A page of people.
+      type: array
+      response_path: data
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          email_address: {type: string}
+          first_name: {type: string}
+          title: "{type: string}"
+
+  create_person:
+    title: Create a person
+    description: >-
+      Add a prospect. Salesloft deduplicates on email address, so supply one
+      wherever possible.
+    category: people
+    request:
+      method: POST
+      path: /v2/people.json
+      body:
+        email_address: "${email_address}"
+        first_name: "${first_name}"
+        last_name: "${last_name}"
+        title: "${title}"
+        phone: "${phone}"
+        account_id: "${account_id}"
+        owner_id: "${owner_id}"
+        linkedin_url: "${linkedin_url}"
+        city: "${city}"
+        country: "${country}"
+        custom_fields: "${custom_fields}"
+    input:
+      email_address:
+        type: string
+        description: The prospect's email address.
+        optional: true
+        format: email
+      first_name:
+        type: string
+        description: First name.
+        optional: true
+      last_name:
+        type: string
+        description: Last name.
+        optional: true
+      title:
+        type: string
+        description: Job title.
+        optional: true
+      phone:
+        type: string
+        description: Phone number.
+        optional: true
+      account_id:
+        type: integer
+        description: Account they belong to.
+        optional: true
+      owner_id:
+        type: integer
+        description: Salesloft user who owns the record.
+        optional: true
+      linkedin_url:
+        type: string
+        description: Their LinkedIn profile.
+        optional: true
+      city:
+        type: string
+        description: City.
+        optional: true
+      country:
+        type: string
+        description: Country.
+        optional: true
+      custom_fields:
+        type: object
+        description: Custom field values keyed by field name.
+        optional: true
+    output:
+      description: The created person.
+      type: object
+      response_path: data
+      properties:
+        id: {type: integer}
+        email_address: {type: string}
+
+  update_person:
+    title: Update a person
+    description: Change a prospect's details. Only what is supplied is written.
+    category: people
+    request:
+      method: PUT
+      path: /v2/people/${person_id}.json
+      body:
+        email_address: "${email_address}"
+        first_name: "${first_name}"
+        last_name: "${last_name}"
+        title: "${title}"
+        phone: "${phone}"
+        owner_id: "${owner_id}"
+        do_not_contact: "${do_not_contact}"
+        custom_fields: "${custom_fields}"
+    input:
+      person_id:
+        type: integer
+        description: The person's numeric id.
+      email_address:
+        type: string
+        description: New email address.
+        optional: true
+        format: email
+      first_name:
+        type: string
+        description: New first name.
+        optional: true
+      last_name:
+        type: string
+        description: New last name.
+        optional: true
+      title:
+        type: string
+        description: New job title.
+        optional: true
+      phone:
+        type: string
+        description: New phone number.
+        optional: true
+      owner_id:
+        type: integer
+        description: New owner's user id.
+        optional: true
+      do_not_contact:
+        type: boolean
+        description: Mark them as not to be contacted, which stops all outreach.
+        optional: true
+      custom_fields:
+        type: object
+        description: Custom field values to write.
+        optional: true
+    output:
+      description: The updated person.
+      type: object
+      response_path: data
+      properties:
+        id: {type: integer}
+        updated_at: {type: string}
+
+  list_cadences:
+    title: List cadences
+    description: >-
+      List the team's cadences — Salesloft's outreach sequences — with the ids
+      add_person_to_cadence takes.
+    category: cadences
+    read_only: true
+    request:
+      method: GET
+      path: /v2/cadences.json
+      query:
+        page: "${page}"
+        per_page: "${per_page}"
+        owned_by_id: "${owned_by_id}"
+        team_cadence: "${team_cadence}"
+    input:
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      per_page:
+        type: integer
+        description: How many cadences per page (1-100).
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 100
+      owned_by_id:
+        type: integer
+        description: Only cadences owned by this user.
+        optional: true
+      team_cadence:
+        type: boolean
+        description: Only shared team cadences.
+        optional: true
+    output:
+      description: A page of cadences.
+      type: array
+      response_path: data
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          name: {type: string}
+          cadence_function: {type: string}
+
+  add_person_to_cadence:
+    title: Put a person on a cadence
+    description: >-
+      Start a prospect on an outreach cadence, as a given user. This begins real
+      outreach to that person.
+    category: cadences
+    destructive: true
+    request:
+      method: POST
+      path: /v2/cadence_memberships.json
+      body:
+        person_id: "${person_id}"
+        cadence_id: "${cadence_id}"
+        user_id: "${user_id}"
+    input:
+      person_id:
+        type: integer
+        description: The prospect to enrol.
+      cadence_id:
+        type: integer
+        description: The cadence to put them on.
+      user_id:
+        type: integer
+        description: Salesloft user the outreach is sent as.
+        optional: true
+    output:
+      description: The cadence membership.
+      type: object
+      response_path: data
+      properties:
+        id: {type: integer}
+        current_state: {type: string}
+        added_at: {type: string}
+
+  list_accounts:
+    title: List accounts
+    description: Page through company accounts with their domains and owners.
+    category: accounts
+    read_only: true
+    request:
+      method: GET
+      path: /v2/accounts.json
+      query:
+        page: "${page}"
+        per_page: "${per_page}"
+        domain: "${domain}"
+        owner_id: "${owner_id}"
+        name: "${name}"
+    input:
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      per_page:
+        type: integer
+        description: How many accounts per page (1-100).
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 100
+      domain:
+        type: array
+        description: Only accounts on these domains.
+        optional: true
+        items: {type: string}
+      owner_id:
+        type: integer
+        description: Only accounts owned by this user.
+        optional: true
+      name:
+        type: array
+        description: Only accounts with these names.
+        optional: true
+        items: {type: string}
+    output:
+      description: A page of accounts.
+      type: array
+      response_path: data
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          name: {type: string}
+          domain: {type: string}
+
+  create_account:
+    title: Create an account
+    description: Add a company account that people can be attached to.
+    category: accounts
+    request:
+      method: POST
+      path: /v2/accounts.json
+      body:
+        name: "${name}"
+        domain: "${domain}"
+        owner_id: "${owner_id}"
+        industry: "${industry}"
+        website: "${website}"
+        description: "${description}"
+        custom_fields: "${custom_fields}"
+    input:
+      name:
+        type: string
+        description: The company's name.
+      domain:
+        type: string
+        description: The company's email domain, which Salesloft deduplicates on.
+        optional: true
+      owner_id:
+        type: integer
+        description: Salesloft user who owns the account.
+        optional: true
+      industry:
+        type: string
+        description: Industry.
+        optional: true
+      website:
+        type: string
+        description: Company website.
+        optional: true
+      description:
+        type: string
+        description: Free-text note.
+        optional: true
+      custom_fields:
+        type: object
+        description: Custom field values keyed by field name.
+        optional: true
+    output:
+      description: The created account.
+      type: object
+      response_path: data
+      properties:
+        id: {type: integer}
+        name: {type: string}
+
+  log_call:
+    title: Log a call
+    description: >-
+      Record a call against a person, with its outcome and sentiment — how call
+      activity gets into Salesloft from another dialler.
+    category: activities
+    request:
+      method: POST
+      path: /v2/activities/calls.json
+      body:
+        person_id: "${person_id}"
+        duration: "${duration}"
+        notes: "${notes}"
+        disposition: "${disposition}"
+        sentiment: "${sentiment}"
+        to: "${to}"
+        called_at: "${called_at}"
+    input:
+      person_id:
+        type: integer
+        description: The person who was called.
+      duration:
+        type: integer
+        description: Call length in seconds.
+        optional: true
+        minimum: 0
+      notes:
+        type: string
+        description: What was discussed.
+        optional: true
+      disposition:
+        type: string
+        description: How the call ended, e.g. "Connected" or "Voicemail".
+        optional: true
+      sentiment:
+        type: string
+        description: How it went, from the team's configured sentiment list.
+        optional: true
+      to:
+        type: string
+        description: The number that was dialled.
+        optional: true
+      called_at:
+        type: string
+        description: When the call happened, ISO 8601. Defaults to now.
+        optional: true
+    output:
+      description: The logged call.
+      type: object
+      response_path: data
+      properties:
+        id: {type: integer}
+        duration: {type: integer}
+        created_at: {type: string}
+
+  list_users:
+    title: List Salesloft users
+    description: >-
+      List the team's users with the ids that owner and sender arguments take.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /v2/users.json
+      query:
+        page: "${page}"
+        per_page: "${per_page}"
+        email: "${email}"
+        active: "${active}"
+    input:
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      per_page:
+        type: integer
+        description: How many users per page (1-100).
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 100
+      email:
+        type: string
+        description: Only the user with this email address.
+        optional: true
+        format: email
+      active:
+        type: boolean
+        description: Only active users.
+        optional: true
+    output:
+      description: A page of users.
+      type: array
+      response_path: data
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          name: {type: string}
+          email: {type: string}
+          active: {type: boolean}
+
+  get_me:
+    title: Get the authenticated user
+    description: >-
+      Read the Salesloft user the token belongs to. The cheapest health check
+      for the connection.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /v2/me.json
+    input: {}
+    output:
+      description: The authenticated user.
+      type: object
+      response_path: data
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        email: {type: string}
+        group: {type: object}

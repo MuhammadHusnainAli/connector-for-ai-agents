@@ -1,0 +1,306 @@
+# Getprospect tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://api.getprospect.com/openapi.json
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: getprospect
+display_name: Getprospect
+docs_url: https://api.getprospect.com/openapi.json
+generated: true
+generated_from: https://api.getprospect.com/openapi.json
+tools:
+  enums_v2_get_all:
+    title: List all filter enums
+    description: 'List all filter enums Returns every filter vocabulary used by the /v2 search endpoints
+      in a single payload. Useful for building filter UIs at integration time. data maps each enum name
+      to its accepted filter values - a flat array for most (e.g. { "companytypes": ["Privately Held",
+      ...] }), except industries and departmen Calls GET /v2/enums on the provider''s API.'
+    category: enums
+    request:
+      method: GET
+      path: /v2/enums
+    input: {}
+    output:
+      description: Entity given
+      type: object
+    read_only: true
+  properties_find_all:
+    title: Get all properties
+    description: Get all properties This API endpoint retrieves all the properties you have in your workspace
+      Calls GET /api/v1/properties on the provider's API.
+    category: api
+    request:
+      method: GET
+      path: /api/v1/properties
+    input: {}
+    output:
+      description: Entity given
+      type: object
+    read_only: true
+  companies_enrich_v2_companies_bulk_enrich:
+    title: Companies Bulk Enrich
+    description: Companies Bulk Enrich Enrich up to 50 companies in one request. Each item takes the same
+      identifiers as Companies Enrich and is matched independently (id, then linkedinid, linkedinurl,
+      domain, name); the response buckets items into matched, notmatched and invalid, echoing each item's
+      identifier so you can correlate resul Calls POST /v2/companies/bulk-enrich on the provider's API.
+    category: companies
+    request:
+      method: POST
+      path: /v2/companies/bulk-enrich
+      body:
+        data: ${data}
+    input:
+      data:
+        type: array
+        description: Array of company lookup items (1-50). Each item is matched independently using priority
+          order id linkedinid linkedinurl domain name.
+        items:
+          type: object
+    output:
+      description: Entity given
+      type: object
+  companies_enrich_v2_companies_enrich:
+    title: Companies Enrich
+    description: Companies Enrich Retrieve the full profile of one company - industry, headcount, locations,
+      domains and LinkedIn data. Look it up by GetProspect id, LinkedIn id or URL, web domain, or name;
+      when several identifiers are sent the strongest wins (id, then linkedinid, linkedinurl, domain,
+      name). Enriching a company spen Calls POST /v2/companies/enrich on the provider's API.
+    category: companies
+    request:
+      method: POST
+      path: /v2/companies/enrich
+      body:
+        data: ${data}
+    input:
+      data:
+        type: string
+        description: Lookup identifiers. Provide at least one of id, linkedinid, linkedinurl, domain,
+          or name.
+    output:
+      description: Entity given
+      type: object
+  companies_search_v2_search:
+    title: Companies Search
+    description: 'Companies Search Search our company database by identity, company attributes and free-text
+      keywords. Look up specific companies by name, domain or LinkedIn id, or build a target list by industry,
+      country, headcount, founded year, company type, business type, revenue stream and NAICS codes: filters
+      AND together, and Calls POST /v2/companies/search on the provider''s API.'
+    category: companies
+    request:
+      method: POST
+      path: /v2/companies/search
+      body:
+        filters: ${filters}
+        sort_by: ${sort_by}
+        sort_direction: ${sort_direction}
+        page: ${page}
+    input:
+      filters:
+        type: string
+        description: Filter configuration. Active filters AND together and at least one include condition
+          is required (exclude-only searches are rejected). A request can carry at most 20,000 filter
+          values in total. See GET /v2/enums for allowed values per enum filter.
+      sort_by:
+        type: string
+        description: 'Sort key. Omit for the smart default: relevance when filters.companykeywords is
+          present, followers desc otherwise.'
+        optional: true
+        enum:
+        - company_name
+        - company_employee_count
+        - company_industry
+        - company_country
+        - company_founded
+      sort_direction:
+        type: string
+        description: 'Sort direction. Per-key defaults: companyname=asc, companyemployeecount=desc (largest
+          first), companyindustry=asc, companycountry=asc, companyfounded=asc (oldest first). Ignored
+          when sortby is omitted.'
+        optional: true
+        enum:
+        - asc
+        - desc
+      page:
+        type: number
+        description: Page number, 1-based.
+        optional: true
+    output:
+      description: Entity given
+      type: object
+  email_v2_find_email:
+    title: Find Email
+    description: Find Email Find the verified business email address of a specific person. Inside data,
+      provide the person's name (fullname, or firstname + lastname) plus their company (domain preferred,
+      or company name). Costs 1 email credit only when a valid email is found - not-found and accept-all
+      outcomes are free. Authen Calls POST /v2/email/find on the provider's API.
+    category: email
+    request:
+      method: POST
+      path: /v2/email/find
+      body:
+        data: ${data}
+    input:
+      data:
+        type: string
+        description: Lookup identifiers. Provide fullname or firstname + lastname, plus domain or company.
+    output:
+      description: Entity given
+      type: object
+  email_v2_verify_email:
+    title: Verify Email
+    description: Verify Email Check whether an email address is deliverable. Pass the email inside data;
+      the response reports its verification status along with domain health and whether the mailbox is
+      free or disposable. Costs 1 email verification credit per check; syntactically invalid emails are
+      rejected without spending cred Calls POST /v2/email/verify on the provider's API.
+    category: email
+    request:
+      method: POST
+      path: /v2/email/verify
+      body:
+        data: ${data}
+    input:
+      data:
+        type: string
+        description: Lookup identifiers.
+    output:
+      description: Entity given
+      type: object
+  people_enrich_v2_people_bulk_enrich:
+    title: People Bulk Enrich
+    description: People Bulk Enrich Enrich up to 50 people in one request. Each item takes the same identifiers
+      as People Enrich and is matched independently (strongest identifier wins); the response buckets
+      items into matched, notmatched and invalid, echoing each item's identifier so you can correlate
+      results. One failed item never f Calls POST /v2/people/bulk-enrich on the provider's API.
+    category: people
+    request:
+      method: POST
+      path: /v2/people/bulk-enrich
+      body:
+        data: ${data}
+        enrich_email: ${enrich_email}
+        enrich_phone: ${enrich_phone}
+    input:
+      data:
+        type: array
+        description: Array of person lookup items (1-50). Each item is matched independently.
+        items:
+          type: object
+      enrich_email:
+        type: boolean
+        description: Enrich a verified business email for every matched item; set false to skip. Pre-flight
+          credit check requires up to one email credit per item.
+        optional: true
+      enrich_phone:
+        type: boolean
+        description: If true, attempt to enrich a mobile phone for every matched item. Pre-flight credit
+          check.
+        optional: true
+    output:
+      description: Entity given
+      type: object
+  people_enrich_v2_people_enrich:
+    title: People Enrich
+    description: People Enrich Retrieve the full profile of one person you already know - identity, location,
+      work history and contact fields. Look them up by GetProspect id, LinkedIn id or URL, email, or first
+      name + last name + company; when several identifiers are sent the strongest wins (id, then linkedinid,
+      linkedinurl, emai Calls POST /v2/people/enrich on the provider's API.
+    category: people
+    request:
+      method: POST
+      path: /v2/people/enrich
+      body:
+        data: ${data}
+        enrich_email: ${enrich_email}
+        enrich_phone: ${enrich_phone}
+    input:
+      data:
+        type: string
+        description: Lookup identifiers. Provide at least one of id, linkedinid, linkedinurl, email, or
+          (firstname + lastname + companydomain|companyname).
+      enrich_email:
+        type: boolean
+        description: Find a verified business email for the matched person; set false to skip. Consumes
+          1 email credit per newly revealed email (re-revealing the same email for a workspace is free).
+        optional: true
+      enrich_phone:
+        type: boolean
+        description: If true, attempt to find a mobile phone for the matched person. Consumes 1 phone
+          credit.
+        optional: true
+    output:
+      description: Entity given
+      type: object
+  people_enrich_v2_people_exists:
+    title: People Exists
+    description: People Exists Checks up to 50 LinkedIn person URLs against Mongo and returns bucketed
+      matched, notmatched, and invalid results. Matched people use the people search response shape, without
+      otherpositions, and with primaryposition limited to jobtitle, normalizedjobtitle, and company.name.
+      Calls POST /v2/people/exists on the provider's API.
+    category: people
+    request:
+      method: POST
+      path: /v2/people/exists
+      body:
+        linkedin_urls: ${linkedin_urls}
+    input:
+      linkedin_urls:
+        type: array
+        description: LinkedIn person profile URLs to check in Mongo (1-50).
+        items:
+          type: string
+    output:
+      description: Entity given
+      type: object
+  company_create:
+    title: Create company
+    description: Create company This API endpoint creates a new company. Calls POST /api/v1/companies/company
+      on the provider's API.
+    category: api
+    request:
+      method: POST
+      path: /api/v1/companies/company
+      body:
+        properties: ${properties}
+    input:
+      properties:
+        type: array
+        description: The properties field of the request body.
+        items:
+          type: object
+    output:
+      description: Entity created
+      type: object
+  contact_create:
+    title: Create contact
+    description: Create contact This API endpoint creates a new contact. Calls POST /api/v1/contacts/contact
+      on the provider's API.
+    category: api
+    request:
+      method: POST
+      path: /api/v1/contacts/contact
+      body:
+        properties: ${properties}
+        listRelations: ${list_relations}
+    input:
+      properties:
+        type: array
+        description: The properties field of the request body.
+        items:
+          type: object
+      list_relations:
+        type: array
+        description: Array of list ids
+        optional: true
+        items:
+          type: string
+    output:
+      description: Entity created
+      type: object

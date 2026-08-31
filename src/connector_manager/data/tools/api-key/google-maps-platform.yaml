@@ -1,0 +1,453 @@
+# Google Maps Platform (Places API) tools.
+#
+# An API key carries no scope grant, so no tool here declares one.
+#
+# The Places API (New) on places.googleapis.com -- text search, nearby search,
+# place details, photo media and autocomplete. It is the successor to the
+# classic Places web service, and the differences are worth knowing:
+#
+#   * **a field mask is required.** Every call must say which fields it wants,
+#     through the `X-Goog-FieldMask` header. Google both bills and validates on
+#     it, and a request without one is rejected rather than defaulted;
+#   * **searches are POSTs with a JSON body**, not query strings;
+#   * **place ids are resource names** -- `places/ChIJ...` -- rather than bare
+#     ids.
+#
+# The classic web services (geocoding, directions, distance matrix, static
+# maps, Street View) are the `google-maps` connector.
+#
+# The connector's base url points at /v1/places, which these paths also carry,
+# so each tool addresses the host directly.
+#
+# Docs: https://developers.google.com/maps/documentation/places/web-service
+
+connector_id: google-maps-platform
+display_name: Google Maps Platform
+docs_url: https://mapsplatform.google.com/maps-products/#places-section
+tools:
+  autocomplete_place:
+    title: Autocomplete place
+    description: Returns predictions for the given input.
+    category: places
+    request:
+      method: POST
+      path: /v1/places:autocomplete
+      base_url_override: https://places.googleapis.com
+      body:
+        inputOffset: ${input_offset}
+        origin: ${origin}
+        includedRegionCodes: ${included_region_codes}
+        input: ${input}
+        sessionToken: ${session_token}
+        includePureServiceAreaBusinesses: ${include_pure_service_area_businesses}
+        includedPrimaryTypes: ${included_primary_types}
+        includeFutureOpeningBusinesses: ${include_future_opening_businesses}
+        languageCode: ${language_code}
+        locationBias: ${location_bias}
+        includeQueryPredictions: ${include_query_predictions}
+        locationRestriction: ${location_restriction}
+        regionCode: ${region_code}
+    input:
+      input_offset:
+        type: integer
+        description: Optional. A zero-based Unicode character offset of input indicating the cursor position
+          in input. The cursor position may influence what predictions are returned. If empty, defaults
+          to the length of input.
+        optional: true
+      origin:
+        type: string
+        description: Optional. The origin point from which to calculate geodesic distance to the destination
+          (returned as distance_meters). If this value is omitted, geodesic distance will not be returned.
+        optional: true
+      included_region_codes:
+        type: array
+        items:
+          type: string
+        description: Optional. Only include results in the specified regions, specified as up to 15 CLDR
+          two-character region codes. An empty set will not restrict the results. If both location_restriction
+          and included_region_codes are set, the results will be located in the area of intersection.
+        optional: true
+      input:
+        type: string
+        description: Required. The text string on which to search.
+        optional: true
+      session_token:
+        type: string
+        description: Optional. A string which identifies an Autocomplete session for billing purposes.
+          Must be a URL and filename safe base64 string with at most 36 ASCII characters in length. Otherwise
+          an INVALID_ARGUMENT error is returned. The session begins when the user starts typing a query,
+          and concludes when they
+        optional: true
+      include_pure_service_area_businesses:
+        type: boolean
+        description: Optional. Include pure service area businesses if the field is set to true. Pure
+          service area business is a business that visits or delivers to customers directly but does not
+          serve customers at their business address. For example, businesses like cleaning services or
+          plumbers. Those businesses do n
+        optional: true
+      included_primary_types:
+        type: array
+        items:
+          type: string
+        description: Optional. Included primary Place type (for example, "restaurant" or "gas_station")
+          in Place Types (https://developers.google.com/maps/documentation/places/web-service/place-types),
+          or only (regions), or only (cities). A Place is only returned if its primary type is included
+          in this list. Up to 5 val
+        optional: true
+      include_future_opening_businesses:
+        type: boolean
+        description: Optional. If true, include businesses that are not yet open but will open in the
+          future.
+        optional: true
+      language_code:
+        type: string
+        description: Optional. The language in which to return results. Defaults to en-US. The results
+          may be in mixed languages if the language used in input is different from language_code or if
+          the returned Place does not have a translation from the local language to language_code.
+        optional: true
+      location_bias:
+        type: string
+        description: Optional. Bias results to a specified location. At most one of location_bias or location_restriction
+          should be set. If neither are set, the results will be biased by IP address, meaning the IP
+          address will be mapped to an imprecise location and used as a biasing signal.
+        optional: true
+      include_query_predictions:
+        type: boolean
+        description: Optional. If true, the response will include both Place and query predictions. Otherwise
+          the response will only return Place predictions.
+        optional: true
+      location_restriction:
+        type: string
+        description: Optional. Restrict results to a specified location. At most one of location_bias
+          or location_restriction should be set. If neither are set, the results will be biased by IP
+          address, meaning the IP address will be mapped to an imprecise location and used as a biasing
+          signal.
+        optional: true
+      region_code:
+        type: string
+        description: Optional. The region code, specified as a CLDR two-character region code. This affects
+          address formatting, result ranking, and may influence what results are returned. This does not
+          restrict results to the specified region. To restrict results to a region, use region_code_restriction.
+        optional: true
+    output:
+      description: The GoogleMapsPlacesV1AutocompletePlacesResponse resource.
+      type: object
+  get_place:
+    title: Get place
+    description: Get the details of a place based on its resource name, which is a string in the places/{place_id}
+      format.
+    category: places
+    request:
+      method: GET
+      path: /v1/${name}
+      base_url_override: https://places.googleapis.com
+      query:
+        languageCode: ${language_code}
+        regionCode: ${region_code}
+        sessionToken: ${session_token}
+    input:
+      name:
+        type: string
+        description: Required. The resource name of a place, in the places/{place_id} format.
+      language_code:
+        type: string
+        description: 'Optional. Place details will be displayed with the preferred language if available.
+          Current list of supported languages: https://developers.google.com/maps/faq#languagesupport.'
+        optional: true
+      region_code:
+        type: string
+        description: Optional. The Unicode country/region code (CLDR) of the location where the request
+          is coming from. This parameter is used to display the place details, like region-specific place
+          name, if available. The parameter can affect results based on applicable law. For more information,
+          see https://www.unico
+        optional: true
+      session_token:
+        type: string
+        description: Optional. A string which identifies an Autocomplete session for billing purposes.
+          Must be a URL and filename safe base64 string with at most 36 ASCII characters in length. Otherwise
+          an INVALID_ARGUMENT error is returned. The session begins when the user starts typing a query,
+          and concludes when they
+        optional: true
+    output:
+      description: The GoogleMapsPlacesV1Place resource.
+      type: object
+    read_only: true
+  get_media_photo:
+    title: Get media photo
+    description: Get a photo media with a photo reference string.
+    category: places
+    request:
+      method: GET
+      path: /v1/${name}
+      base_url_override: https://places.googleapis.com
+      query:
+        maxHeightPx: ${max_height_px}
+        maxWidthPx: ${max_width_px}
+        skipHttpRedirect: ${skip_http_redirect}
+    input:
+      name:
+        type: string
+        description: 'Required. The resource name of a photo media in the format: places/{place_id}/photos/{photo_reference}/media.
+          The resource name of a photo as returned in a Place object''s photos.name field comes with the
+          format places/{place_id}/photos/{photo_reference}. You need to append /media at the end of the
+          p'
+      max_height_px:
+        type: integer
+        description: Optional. Specifies the maximum desired height, in pixels, of the image. If the image
+          is smaller than the values specified, the original image will be returned. If the image is larger
+          in either dimension, it will be scaled to match the smaller of the two dimensions, restricted
+          to its original aspect
+        optional: true
+      max_width_px:
+        type: integer
+        description: Optional. Specifies the maximum desired width, in pixels, of the image. If the image
+          is smaller than the values specified, the original image will be returned. If the image is larger
+          in either dimension, it will be scaled to match the smaller of the two dimensions, restricted
+          to its original aspect
+        optional: true
+      skip_http_redirect:
+        type: boolean
+        description: Optional. If set, skip the default HTTP redirect behavior and render a text format
+          (for example, in JSON format for HTTP use case) response. If not set, an HTTP redirect will
+          be issued to redirect the call to the image media. This option is ignored for non-HTTP requests.
+        optional: true
+    output:
+      description: The GoogleMapsPlacesV1PhotoMedia resource.
+      type: object
+    read_only: true
+  search_nearby_place:
+    title: Search nearby place
+    description: Search for places near locations. Calls places.searchNearby on the Places API (New).
+    category: places
+    request:
+      method: POST
+      path: /v1/places:searchNearby
+      base_url_override: https://places.googleapis.com
+      body:
+        excludedTypes: ${excluded_types}
+        maxResultCount: ${max_result_count}
+        includedTypes: ${included_types}
+        rankPreference: ${rank_preference}
+        routingParameters: ${routing_parameters}
+        includeFutureOpeningBusinesses: ${include_future_opening_businesses}
+        includedPrimaryTypes: ${included_primary_types}
+        locationRestriction: ${location_restriction}
+        excludedPrimaryTypes: ${excluded_primary_types}
+        regionCode: ${region_code}
+        languageCode: ${language_code}
+    input:
+      excluded_types:
+        type: array
+        items:
+          type: string
+        description: Excluded Place type (eg, "restaurant" or "gas_station") from https://developers.google.com/maps/documentation/places/web-service/place-types.
+          Up to 50 types from Table A may be specified. If the client provides both included_types (e.g.
+          restaurant) and excluded_types (e.g. cafe), then the response s
+        optional: true
+      max_result_count:
+        type: integer
+        description: Maximum number of results to return. It must be between 1 and 20 (default), inclusively.
+          If the number is unset, it falls back to the upper limit. If the number is set to negative or
+          exceeds the upper limit, an INVALID_ARGUMENT error is returned.
+        optional: true
+      included_types:
+        type: array
+        items:
+          type: string
+        description: Included Place type (eg, "restaurant" or "gas_station") from https://developers.google.com/maps/documentation/places/web-service/place-types.
+          Up to 50 types from Table A may be specified. If there are any conflicting types, i.e. a type
+          appears in both included_types and excluded_types, an INVALID_AR
+        optional: true
+      rank_preference:
+        type: string
+        description: How results will be ranked in the response.
+        optional: true
+        enum:
+        - RANK_PREFERENCE_UNSPECIFIED
+        - DISTANCE
+        - POPULARITY
+      routing_parameters:
+        type: string
+        description: Optional. Parameters that affect the routing to the search results.
+        optional: true
+      include_future_opening_businesses:
+        type: boolean
+        description: Optional. If true, include businesses that are not yet open but will open in the
+          future.
+        optional: true
+      included_primary_types:
+        type: array
+        items:
+          type: string
+        description: Included primary Place type (e.g. "restaurant" or "gas_station") from https://developers.google.com/maps/documentation/places/web-service/place-types.
+          A place can only have a single primary type from the supported types table associated with it.
+          Up to 50 types from Table A may be specified. If there
+        optional: true
+      location_restriction:
+        type: string
+        description: Required. The region to search.
+        optional: true
+      excluded_primary_types:
+        type: array
+        items:
+          type: string
+        description: Excluded primary Place type (e.g. "restaurant" or "gas_station") from https://developers.google.com/maps/documentation/places/web-service/place-types.
+          Up to 50 types from Table A may be specified. If there are any conflicting primary types, i.e.
+          a type appears in both included_primary_types and excl
+        optional: true
+      region_code:
+        type: string
+        description: The Unicode country/region code (CLDR) of the location where the request is coming
+          from. This parameter is used to display the place details, like region-specific place name,
+          if available. The parameter can affect results based on applicable law. For more information,
+          see https://www.unicode.org/cld
+        optional: true
+      language_code:
+        type: string
+        description: 'Place details will be displayed with the preferred language if available. If the
+          language code is unspecified or unrecognized, place details of any language may be returned,
+          with a preference for English if such details exist. Current list of supported languages: https://developers.google.com/maps/f'
+        optional: true
+    output:
+      description: The GoogleMapsPlacesV1SearchNearbyResponse resource.
+      type: object
+  search_text_place:
+    title: Search text place
+    description: Text query based place search. Calls places.searchText on the Places API (New).
+    category: places
+    request:
+      method: POST
+      path: /v1/places:searchText
+      base_url_override: https://places.googleapis.com
+      body:
+        searchAlongRouteParameters: ${search_along_route_parameters}
+        languageCode: ${language_code}
+        routingParameters: ${routing_parameters}
+        minRating: ${min_rating}
+        locationRestriction: ${location_restriction}
+        pageSize: ${page_size}
+        maxResultCount: ${max_result_count}
+        includePureServiceAreaBusinesses: ${include_pure_service_area_businesses}
+        includedType: ${included_type}
+        openNow: ${open_now}
+        textQuery: ${text_query}
+        strictTypeFiltering: ${strict_type_filtering}
+        regionCode: ${region_code}
+        includeFutureOpeningBusinesses: ${include_future_opening_businesses}
+        evOptions: ${ev_options}
+        pageToken: ${page_token}
+        priceLevels: ${price_levels}
+        rankPreference: ${rank_preference}
+        locationBias: ${location_bias}
+    input:
+      search_along_route_parameters:
+        type: string
+        description: Optional. Additional parameters proto for searching along a route.
+        optional: true
+      language_code:
+        type: string
+        description: 'Place details will be displayed with the preferred language if available. If the
+          language code is unspecified or unrecognized, place details of any language may be returned,
+          with a preference for English if such details exist. Current list of supported languages: https://developers.google.com/maps/f'
+        optional: true
+      routing_parameters:
+        type: string
+        description: Optional. Additional parameters for routing to results.
+        optional: true
+      min_rating:
+        type: number
+        description: Filter out results whose average user rating is strictly less than this limit. A
+          valid value must be a float between 0 and 5 (inclusively) at a 0.5 cadence i.e. [0, 0.5, 1.0,
+          ... , 5.0] inclusively. The input rating will round up to the nearest 0.5(ceiling). For instance,
+          a rating of 0.6 will elimin
+        optional: true
+      location_restriction:
+        type: string
+        description: The region to search. This location serves as a restriction which means results outside
+          given location will not be returned. Cannot be set along with location_bias.
+        optional: true
+      page_size:
+        type: integer
+        description: Optional. The maximum number of results per page that can be returned. If the number
+          of available results is larger than page_size, a next_page_token is returned which can be passed
+          to page_token to get the next page of results in subsequent requests. If 0 or no value is provided,
+          a default of 20 is
+        optional: true
+      max_result_count:
+        type: integer
+        description: 'Deprecated: Use page_size instead. The maximum number of results per page that can
+          be returned. If the number of available results is larger than max_result_count, a next_page_token
+          is returned which can be passed to page_token to get the next page of results in subsequent
+          requests. If 0 or no value'
+        optional: true
+      include_pure_service_area_businesses:
+        type: boolean
+        description: Optional. Include pure service area businesses if the field is set to true. Pure
+          service area business is a business that visits or delivers to customers directly but does not
+          serve customers at their business address. For example, businesses like cleaning services or
+          plumbers. Those businesses do n
+        optional: true
+      included_type:
+        type: string
+        description: 'The requested place type. Full list of types supported: https://developers.google.com/maps/documentation/places/web-service/place-types.
+          Only support one included type.'
+        optional: true
+      open_now:
+        type: boolean
+        description: Used to restrict the search to places that are currently open. The default is false.
+        optional: true
+      text_query:
+        type: string
+        description: Required. The text query for textual search.
+        optional: true
+      strict_type_filtering:
+        type: boolean
+        description: Used to set strict type filtering for included_type. If set to true, only results
+          of the same type will be returned. Default to false.
+        optional: true
+      region_code:
+        type: string
+        description: The Unicode country/region code (CLDR) of the location where the request is coming
+          from. This parameter is used to display the place details, like region-specific place name,
+          if available. The parameter can affect results based on applicable law. For more information,
+          see https://www.unicode.org/cld
+        optional: true
+      include_future_opening_businesses:
+        type: boolean
+        description: Optional. If true, include businesses that are not yet open but will open in the
+          future.
+        optional: true
+      ev_options:
+        type: string
+        description: Optional. Set the searchable EV options of a place search request.
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token, received from a previous TextSearch call. Provide this to
+          retrieve the subsequent page. When paginating, all parameters other than page_token, page_size,
+          and max_result_count provided to TextSearch must match the initial call that provided the page
+          token. Otherwise an INVALID
+        optional: true
+      price_levels:
+        type: array
+        items:
+          type: string
+        description: Used to restrict the search to places that are marked as certain price levels. Users
+          can choose any combinations of price levels. Default to select all price levels.
+        optional: true
+      rank_preference:
+        type: string
+        description: How results will be ranked in the response.
+        optional: true
+        enum:
+        - RANK_PREFERENCE_UNSPECIFIED
+        - DISTANCE
+        - RELEVANCE
+      location_bias:
+        type: string
+        description: The region to search. This location serves as a bias which means results around given
+          location might be returned. Cannot be set along with location_restriction.
+        optional: true
+    output:
+      description: The GoogleMapsPlacesV1SearchTextResponse resource.
+      type: object

@@ -1,0 +1,314 @@
+# Fiber AI tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://api.fiber.ai/openapi.json
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: fiber-ai
+display_name: Fiber AI
+docs_url: https://api.fiber.ai/openapi.json
+generated: true
+generated_from: https://api.fiber.ai/openapi.json
+tools:
+  health_check:
+    title: Health check
+    description: Health check Health check endpoint to check if the server is running Calls GET /health
+      on the provider's API.
+    category: health
+    request:
+      method: GET
+      path: /health
+    input: {}
+    output:
+      description: Default Response
+      type: object
+    read_only: true
+  get_open_api:
+    title: Get OpenAPI schema
+    description: 'Get OpenAPI schema Get the comprehensive, auto-generated OpenAPI spec for all Fiber
+      APIs. Note: This file is very large, so we don''t recommend feeding it into LLMs directly. Agents
+      should instead fetch /llms.txt for routing instructions and /ai-docs/ .md for per-operation context.
+      If you''d like to work with Fiber from Calls GET /openapi.json on the provider''s API.'
+    category: openapi_json
+    request:
+      method: GET
+      path: /openapi.json
+    input: {}
+    output:
+      description: Default Response
+      type: object
+    read_only: true
+  get_quickstart_script:
+    title: Get quickstart install script
+    description: 'Get quickstart install script Returns a bash script that signs up for a Fiber API trial
+      and prints your API key. The one-liner is: bash curl -fsSL https://api.fiber.ai/quickstart | bash
+      The script handles the full flow end to end: 1. Prompts for a work email and OTP (agents run non-interactively
+      with --json). 2. Calls POST /v1/a Calls GET /quickstart on the provider''s API.'
+    category: quickstart
+    request:
+      method: GET
+      path: /quickstart
+    input: {}
+    output:
+      description: Default Response
+      type: object
+    read_only: true
+  get_all_api_keys:
+    title: List API keys
+    description: 'List API keys List all API keys for your organization, including each key''s name, prefix,
+      expiration, and per-key credit usage. The secret value of a key is only shown once at creation and
+      is never returned here. ⚡ Rate limit: 30 requests per 1 minute 💰 Cost: FREE! No credits are charged
+      for this API.&nbsp; ⓘ Calls POST /v1/api-keys on the provider''s API.'
+    category: api_keys
+    request:
+      method: POST
+      path: /v1/api-keys
+      body:
+        apiKey: ${api_key}
+        includeRevoked: ${include_revoked}
+    input:
+      api_key:
+        type: string
+        description: Your Fiber API key
+      include_revoked:
+        type: boolean
+        description: Include revoked keys in the results. Defaults to false, returning only active keys.
+        optional: true
+    output:
+      description: Default Response
+      type: object
+  list_audiences:
+    title: List all audiences
+    description: 'List all audiences Lists all audiences for your organization. Returns basic info and
+      counts for each audience. Only visible audiences are returned (hidden system audiences are excluded).
+      Pass your apiKey in the query string. ⚡ Rate limit: 120 requests per 1 minute 💰 Cost: FREE! No credits
+      are charged for this API.&nbs Calls GET /v1/audiences on the provider''s API.'
+    category: audiences
+    request:
+      method: GET
+      path: /v1/audiences
+      query:
+        apiKey: ${api_key}
+    input:
+      api_key:
+        type: string
+        description: Your Fiber API key
+    output:
+      description: Default Response
+      type: object
+    read_only: true
+  buy_credits:
+    title: Buy credits
+    description: 'Buy credits Purchase additional credits for your organization at $20.00 per 1,000 credits.
+      This endpoint immediately charges real money to your organization''s saved payment method via Stripe.
+      AI agents are strongly recommended to confirm with their human operator before calling this endpoint.
+      ⚡ Rate limit: 2 re Calls POST /v1/buy-credits on the provider''s API.'
+    category: buy_credits
+    request:
+      method: POST
+      path: /v1/buy-credits
+      body:
+        apiKey: ${api_key}
+        subscriptionId: ${subscription_id}
+        creditsToBuy: ${credits_to_buy}
+        idempotencyKey: ${idempotency_key}
+    input:
+      api_key:
+        type: string
+        description: Your Fiber API key
+      subscription_id:
+        type: string
+        description: The subscription to add credits to. An organization can have multiple subscriptions,
+          each with its own credit balance.
+      credits_to_buy:
+        type: integer
+        description: Number of credits to purchase. This will immediately charge your saved payment method.
+      idempotency_key:
+        type: string
+        description: A unique key to safely retry a purchase. If a request fails or times out, resend
+          with the same key to avoid being charged twice. When omitted, each call is a new purchase.
+        optional: true
+    output:
+      description: Default Response
+      type: object
+  company_count:
+    title: Company count
+    description: 'Company count Get count of companies matching search filters ⚡ Rate limit: 180 requests
+      per 1 minute 💰 Cost: 1 credit per request&nbsp; ⓘ Calls POST /v1/company-count on the provider''s
+      API.'
+    category: company_count
+    request:
+      method: POST
+      path: /v1/company-count
+      body:
+        apiKey: ${api_key}
+        searchParams: ${search_params}
+        companyExclusionListIDs: ${company_exclusion_list_ids}
+    input:
+      api_key:
+        type: string
+        description: Your Fiber API key
+      search_params:
+        type: object
+        description: Search parameters for company search API.
+      company_exclusion_list_ids:
+        type: array
+        description: The IDs of company exclusion lists to filter out matching companies.
+        optional: true
+        items:
+          type: string
+    output:
+      description: Default Response
+      type: object
+  quick_company_resolve:
+    title: Quickly resolve company identifiers
+    description: 'Quickly resolve company identifiers Resolves many company identifiers — LinkedIn slug,
+      LinkedIn organization ID, LinkedIn company URL, or domain — to full company records in a single
+      request. ⚡ Rate limit: 1500 requests per 1 minute 💰 Cost: 1 credit per company resolved&nbsp; ⓘ
+      Calls POST /v1/company-resolve on the provider''s API.'
+    category: company_resolve
+    request:
+      method: POST
+      path: /v1/company-resolve
+      body:
+        apiKey: ${api_key}
+        companies: ${companies}
+    input:
+      api_key:
+        type: string
+        description: Your Fiber API key
+      companies:
+        type: array
+        description: Companies to resolve. Each entry is an { identifier, value } pair where identifier
+          is "linkedinSlug", "linkedinOrgId", "linkedinUrl", or "domain". Max 100 per request. You are
+          charged only for the ones that resolve.
+        items:
+          type: string
+    output:
+      description: Default Response
+      type: object
+  get_company_revenue:
+    title: Get company revenue estimate
+    description: 'Get company revenue estimate Fetches the most recent annual revenue estimate for a company.
+      Pass a LinkedIn company URL, domain, and/or company name. ⚡ Rate limit: 120 requests per 1 minute
+      💰 Cost: 4 credits per company lookup&nbsp; ⓘ Calls POST /v1/company-revenue on the provider''s API.'
+    category: company_revenue
+    request:
+      method: POST
+      path: /v1/company-revenue
+      body:
+        apiKey: ${api_key}
+        companyMetadata: ${company_metadata}
+    input:
+      api_key:
+        type: string
+        description: Your Fiber API key
+      company_metadata:
+        type: object
+        description: The companyMetadata field of the request body.
+    output:
+      description: Default Response
+      type: object
+  company_search:
+    title: Company search
+    description: 'Company search Search for companies using filters ⚡ Rate limit: 180 requests per 1 minute
+      💰 Cost: 1 credit per company found&nbsp; ⓘ Calls POST /v1/company-search on the provider''s API.'
+    category: company_search
+    request:
+      method: POST
+      path: /v1/company-search
+      body:
+        apiKey: ${api_key}
+        searchParams: ${search_params}
+        pageSize: ${page_size}
+        cursor: ${cursor}
+        companyExclusionListIDs: ${company_exclusion_list_ids}
+        includeCount: ${include_count}
+    input:
+      api_key:
+        type: string
+        description: Your Fiber API key
+      search_params:
+        type: object
+        description: Search parameters for company search API.
+      page_size:
+        type: integer
+        description: The number of companies to return per page.
+        optional: true
+      cursor:
+        type: string
+        description: A pagination cursor returned from a previous search response. Use this to fetch the
+          next page of results.
+        optional: true
+      company_exclusion_list_ids:
+        type: array
+        description: The IDs of company exclusion lists to filter out matching companies.
+        optional: true
+        items:
+          type: string
+      include_count:
+        type: boolean
+        description: When true, returns an estimated total count of matching companies in the response.
+          The count does not account for exclusion lists.
+        optional: true
+    output:
+      description: Default Response
+      type: object
+  get_department_size:
+    title: Count employees per department
+    description: Count employees per department Counts how many current employees at a company fall into
+      each department you define. Unlike the depth-chart endpoint, this Synchronous endpoint provides
+      immediate results without waiting for background job generation. You supply the job titles that
+      define each department (no seniority is considered) Calls POST /v1/department-size on the provider's
+      API.
+    category: department_size
+    request:
+      method: POST
+      path: /v1/department-size
+      body:
+        apiKey: ${api_key}
+        company: ${company}
+        departments: ${departments}
+    input:
+      api_key:
+        type: string
+        description: Your Fiber API key
+      company:
+        type: string
+        description: Company identifier. Set identifier to 'linkedinUrl', 'linkedinSlug', 'linkedinOrgId',
+          or 'domain' and provide the corresponding value.
+      departments:
+        type: array
+        description: Departments to size. Each is counted independently against ALL current employees,
+          so overlapping definitions may count the same person in more than one department.
+        items:
+          type: object
+    output:
+      description: Default Response
+      type: object
+  get_org_credits:
+    title: Get organization credits
+    description: 'Get organization credits Get credits for an organization ⚡ Rate limit: 120 requests
+      per 1 minute 💰 Cost: FREE! No credits are charged for this API.&nbsp; ⓘ Calls GET /v1/get-org-credits
+      on the provider''s API.'
+    category: get_org_credits
+    request:
+      method: GET
+      path: /v1/get-org-credits
+      query:
+        apiKey: ${api_key}
+    input:
+      api_key:
+        type: string
+        description: Your Fiber API key
+    output:
+      description: Default Response
+      type: object
+    read_only: true

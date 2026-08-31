@@ -1,0 +1,319 @@
+# Adobe IMS tools.
+#
+# This connector points at Adobe's Identity Management Service
+# (ims-na1.adobelogin.com/ims), not at a product API: it is the identity layer
+# every Adobe API sits behind. So the surface here is who the token belongs to,
+# which organisations it can act in, and the token's own lifecycle -- not
+# Photoshop, Analytics or Experience Manager, each of which is a separate
+# connector with its own host.
+#
+# The pack covers the endpoints IMS actually exposes on this host, confirmed
+# against its own OpenID discovery document and by probing the service
+# (existing routes answer 400/401; absent ones answer 404).
+#
+# Two things to know:
+#
+#   * `client_id` is required on the token-lifecycle calls even though the
+#     bearer token is already sent, because IMS validates the pair;
+#   * the default grant here is `offline_access` only. `openid`, `profile` and
+#     `email` are what make `get_user_info` return name and email, so a
+#     connection without them gets a thin profile back rather than an error.
+#
+# Docs: https://developer.adobe.com/developer-console/docs/guides/authentication/UserAuthentication/ims
+
+connector_id: adobe
+display_name: Adobe
+docs_url: https://developer.adobe.com/developer-console/docs/guides/authentication/UserAuthentication/ims
+
+tools:
+
+  get_user_info:
+    title: Get the signed-in user's profile
+    description: >-
+      The OpenID Connect profile behind the access token -- subject id, name,
+      email, account type and, where granted, address. Requires the `openid`
+      scope, and `profile` and `email` for those fields; without them the
+      response is present but sparse.
+    category: identity
+    read_only: true
+    request:
+      method: GET
+      path: /userinfo/v2
+      query:
+        client_id: "${client_id}"
+    input:
+      client_id:
+        type: string
+        description: The integration's client id, when IMS asks for it alongside the token.
+        optional: true
+    output:
+      description: The user's profile claims.
+      type: object
+      properties:
+        sub: {type: string, description: "Stable user id -- the value to key your own records on."}
+        name: {type: string}
+        given_name: {type: string}
+        family_name: {type: string}
+        email: {type: string}
+        email_verified: {type: boolean}
+        account_type: {type: string, description: "type1 (Adobe ID), type2 (Enterprise ID) or type3 (Federated ID)."}
+
+  get_user_id_info:
+    title: Get the signed-in user's identifiers
+    description: >-
+      The identifier-only view of the profile: the user's id, account type and
+      authenticating identity provider, without the personal fields. The
+      cheaper call when all you need is to know who this token is.
+    category: identity
+    read_only: true
+    request:
+      method: GET
+      path: /userinfo/v2/id
+      query:
+        client_id: "${client_id}"
+    input:
+      client_id:
+        type: string
+        description: The integration's client id, when IMS asks for it alongside the token.
+        optional: true
+    output:
+      description: The user's identifiers.
+      type: object
+      properties:
+        userId: {type: string}
+        account_type: {type: string}
+        authId: {type: string}
+
+  get_profile:
+    title: Get the IMS profile
+    description: >-
+      Adobe's own profile record for the token holder -- display name, email,
+      country and preferred languages, as IMS stores it rather than as OpenID
+      Connect presents it.
+    category: identity
+    read_only: true
+    request:
+      method: GET
+      path: /profile/v1
+      query:
+        client_id: "${client_id}"
+    input:
+      client_id:
+        type: string
+        description: The integration's client id, when IMS asks for it alongside the token.
+        optional: true
+    output:
+      description: The IMS profile.
+      type: object
+      properties:
+        userId: {type: string}
+        displayName: {type: string}
+        email: {type: string}
+        countryCode: {type: string}
+        preferred_languages: {type: array, description: "Locale codes, most preferred first."}
+
+  list_organizations:
+    title: List the user's organisations
+    description: >-
+      The Adobe organisations the token holder belongs to, each with its
+      org id -- the `@AdobeOrg` value every enterprise Adobe API wants -- and
+      the roles they hold in it. This is how you discover which org to address
+      before calling a product API.
+    category: identity
+    read_only: true
+    request:
+      method: GET
+      path: /organizations/v6
+      query:
+        client_id: "${client_id}"
+    input:
+      client_id:
+        type: string
+        description: The integration's client id, when IMS asks for it alongside the token.
+        optional: true
+    output:
+      description: The organisations the user belongs to.
+      type: array
+      items:
+        type: object
+        description: An organisation with its orgRef, name, type and the user's roles in it.
+
+  get_session:
+    title: Get the current IMS session
+    description: >-
+      The session behind the token: when it was authenticated, how, and which
+      identity provider vouched for it. Useful when deciding whether to trust a
+      long-lived session or force a fresh sign-in.
+    category: identity
+    read_only: true
+    request:
+      method: GET
+      path: /session/v1
+      query:
+        client_id: "${client_id}"
+    input:
+      client_id:
+        type: string
+        description: The integration's client id, when IMS asks for it alongside the token.
+        optional: true
+    output:
+      description: The session's details.
+      type: object
+      properties:
+        sessionId: {type: string}
+        authenticatedAt: {type: string}
+        authenticationMethod: {type: string}
+
+  validate_token:
+    title: Validate a token
+    description: >-
+      Ask IMS whether a token is still good. Answers `{"valid": true}` or a
+      `reason` such as `bad_signature` or `expired_token`, rather than an HTTP
+      error -- so read the body, not the status. The cheap pre-flight check
+      before a batch of calls, and the way to tell an expired token from a
+      permissions problem.
+    category: tokens
+    read_only: true
+    request:
+      method: POST
+      path: /validate_token/v1
+      query:
+        client_id: "${client_id}"
+        token: "${token}"
+        type: "${type}"
+    input:
+      client_id:
+        type: string
+        description: Client id of the integration the token was issued to. Required.
+      token:
+        type: string
+        description: The token to validate.
+        secret: true
+      type:
+        type: string
+        description: Which kind of token is being validated.
+        optional: true
+        default: access_token
+        enum: [access_token, refresh_token, authorization_code]
+    output:
+      description: Whether the token is valid, and why not when it is not.
+      type: object
+      properties:
+        valid: {type: boolean}
+        reason: {type: string, description: "Present when invalid, e.g. bad_signature or expired_token."}
+
+  check_token:
+    title: Check a token (legacy endpoint)
+    description: >-
+      IMS's older token check. It answers the same question as
+      `validate_token`, and remains in place for integrations built against it;
+      new code should prefer `validate_token`. POST only -- a GET is refused.
+    category: tokens
+    read_only: true
+    request:
+      method: POST
+      path: /check/v6/token
+      query:
+        client_id: "${client_id}"
+        token: "${token}"
+        type: "${type}"
+    input:
+      client_id:
+        type: string
+        description: Client id of the integration the token was issued to. Required.
+      token:
+        type: string
+        description: The token to check.
+        secret: true
+      type:
+        type: string
+        description: Which kind of token is being checked.
+        optional: true
+        default: access_token
+        enum: [access_token, refresh_token]
+    output:
+      description: The token's state, or an error object describing why the check failed.
+      type: object
+      properties:
+        valid: {type: boolean}
+        error: {type: string}
+
+  revoke_token:
+    title: Revoke a token
+    description: >-
+      Invalidate an access or refresh token at Adobe. Everything holding that
+      token stops working immediately and revoking a refresh token ends the
+      whole grant, so this is the sign-out and the kill switch for a leaked
+      credential -- including, if you pass this connection's own token, for this
+      connection. Answers 200 with an empty body.
+    category: tokens
+    destructive: true
+    request:
+      method: POST
+      path: /revoke
+      query:
+        client_id: "${client_id}"
+        token: "${token}"
+        token_type_hint: "${token_type_hint}"
+    input:
+      client_id:
+        type: string
+        description: Client id of the integration the token was issued to. Required.
+      token:
+        type: string
+        description: The token to revoke.
+        secret: true
+      token_type_hint:
+        type: string
+        description: >-
+          Which kind of token is being revoked. Revoking the refresh token ends
+          the entire grant, not just one access token.
+        optional: true
+        enum: [access_token, refresh_token]
+    output:
+      description: Empty on success -- IMS answers 200 with no body.
+      type: object
+
+  get_signing_keys:
+    title: Get Adobe's token signing keys
+    description: >-
+      The JWKS public keys IMS signs ID tokens with, so you can verify one
+      locally instead of calling the service for every request. Unauthenticated
+      and cacheable; refetch when a token's `kid` is not among them.
+    category: tokens
+    read_only: true
+    request:
+      method: GET
+      path: /keys
+    input: {}
+    output:
+      description: The JSON Web Key Set.
+      type: object
+      properties:
+        keys: {type: array, description: "Each a JWK with kid, kty, n and e."}
+
+  get_openid_configuration:
+    title: Get the OpenID Connect configuration
+    description: >-
+      IMS's own discovery document: its authorisation, token, userinfo and
+      revocation endpoints, the scopes and response types it supports, and the
+      claims it issues. Read this rather than hard-coding endpoints, since it is
+      the service's authoritative statement about itself.
+    category: tokens
+    read_only: true
+    request:
+      method: GET
+      path: /.well-known/openid-configuration
+    input: {}
+    output:
+      description: The OpenID Connect discovery document.
+      type: object
+      properties:
+        issuer: {type: string}
+        authorization_endpoint: {type: string}
+        token_endpoint: {type: string}
+        userinfo_endpoint: {type: string}
+        revocation_endpoint: {type: string}
+        jwks_uri: {type: string}
+        scopes_supported: {type: array}
+        claims_supported: {type: array}

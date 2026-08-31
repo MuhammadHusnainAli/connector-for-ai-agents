@@ -1,0 +1,533 @@
+# Notion API tools.
+#
+# Notion grants capabilities to an integration when it is added to a page or
+# database rather than issuing OAuth scopes, so no tool declares scopes and
+# every one reports as enabled. What actually limits a token is which pages have
+# been shared with the integration -- a 404 from Notion usually means "not
+# shared", not "missing".
+#
+# Docs: https://developers.notion.com/reference/intro
+
+connector_id: notion
+display_name: Notion
+docs_url: https://developers.notion.com/reference/intro
+
+tools:
+
+  search:
+    title: Search pages and databases
+    description: >-
+      Search every page and database shared with the integration by title. With
+      no query it lists everything the integration can reach, which is how to
+      discover ids to work with.
+    category: search
+    read_only: true
+    request:
+      method: POST
+      path: /v1/search
+      body:
+        query: "${query}"
+        filter:
+          $when: "${object_type}"
+          value: "${object_type}"
+          property: object
+        page_size: "${page_size}"
+        start_cursor: "${start_cursor}"
+    input:
+      query:
+        type: string
+        description: Text to match against page and database titles. Omit to list everything shared.
+        optional: true
+      object_type:
+        type: string
+        description: Restrict results to pages or to databases.
+        optional: true
+        enum: [page, database]
+      page_size:
+        type: integer
+        description: How many results per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      start_cursor:
+        type: string
+        description: Cursor from the previous response's next_cursor.
+        optional: true
+    output:
+      description: Matching pages and databases.
+      type: object
+      properties:
+        results: {type: array}
+        has_more: {type: boolean}
+        next_cursor: {type: string}
+
+  get_page:
+    title: Get a page
+    description: >-
+      Read a page's properties -- title, select values, relations, dates. This
+      does not return the page's content; use get_page_content for the blocks.
+    category: pages
+    read_only: true
+    request:
+      method: GET
+      path: /v1/pages/${page_id}
+    input:
+      page_id:
+        type: string
+        description: The page id, with or without dashes.
+    output:
+      description: The page and its properties.
+      type: object
+      properties:
+        id: {type: string}
+        properties: {type: object}
+        parent: {type: object}
+        url: {type: string}
+
+  get_page_content:
+    title: Read a page's content
+    description: >-
+      List the blocks that make up a page -- paragraphs, headings, lists, code,
+      tables. Blocks with has_children true hold nested content, fetched by
+      calling this again with the child block's id.
+    category: pages
+    read_only: true
+    request:
+      method: GET
+      path: /v1/blocks/${block_id}/children
+      query:
+        page_size: "${page_size}"
+        start_cursor: "${start_cursor}"
+    input:
+      block_id:
+        type: string
+        description: A page id, or a block id to read nested content.
+      page_size:
+        type: integer
+        description: How many blocks per page (1-100).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 100
+      start_cursor:
+        type: string
+        description: Cursor from the previous response's next_cursor.
+        optional: true
+    output:
+      description: The page's blocks in order.
+      type: object
+      properties:
+        results: {type: array}
+        has_more: {type: boolean}
+        next_cursor: {type: string}
+
+  create_page:
+    title: Create a page
+    description: >-
+      Create a page inside a database or under another page. When the parent is
+      a database, properties must match that database's schema; when it is a
+      page, only a title property applies.
+    category: pages
+    request:
+      method: POST
+      path: /v1/pages
+      body:
+        parent: "${parent}"
+        properties: "${properties}"
+        children: "${children}"
+        icon: "${icon}"
+        cover: "${cover}"
+    input:
+      parent:
+        type: object
+        description: "Where the page goes, e.g. {\"database_id\": \"...\"} or {\"page_id\": \"...\"}."
+        properties:
+          database_id: {type: string}
+          page_id: {type: string}
+      properties:
+        type: object
+        description: >-
+          Property values keyed by name, in Notion's value shape, e.g.
+          {"Name": {"title": [{"text": {"content": "Report"}}]}}.
+      children:
+        type: array
+        description: Block objects to fill the new page with.
+        optional: true
+        items: {type: object}
+      icon:
+        type: object
+        description: "Page icon, e.g. {\"emoji\": \"📄\"}."
+        optional: true
+      cover:
+        type: object
+        description: "Cover image, e.g. {\"external\": {\"url\": \"https://...\"}}."
+        optional: true
+    output:
+      description: The created page.
+      type: object
+      properties:
+        id: {type: string}
+        url: {type: string}
+        properties: {type: object}
+
+  update_page:
+    title: Update a page's properties
+    description: >-
+      Change a page's property values, icon or cover, or archive it. Only the
+      properties supplied are written.
+    category: pages
+    request:
+      method: PATCH
+      path: /v1/pages/${page_id}
+      body:
+        properties: "${properties}"
+        icon: "${icon}"
+        cover: "${cover}"
+        archived: "${archived}"
+    input:
+      page_id:
+        type: string
+        description: The page id.
+      properties:
+        type: object
+        description: Property values to write, in Notion's value shape.
+        optional: true
+      icon:
+        type: object
+        description: New page icon.
+        optional: true
+      cover:
+        type: object
+        description: New cover image.
+        optional: true
+      archived:
+        type: boolean
+        description: Set true to move the page to the trash.
+        optional: true
+    output:
+      description: The updated page.
+      type: object
+      properties:
+        id: {type: string}
+        properties: {type: object}
+
+  append_blocks:
+    title: Append content to a page
+    description: >-
+      Add blocks to the end of a page or block. Each block is a Notion block
+      object, e.g. {"paragraph": {"rich_text": [{"text": {"content": "Hi"}}]}}.
+    category: blocks
+    request:
+      method: PATCH
+      path: /v1/blocks/${block_id}/children
+      body:
+        children: "${children}"
+        after: "${after}"
+    input:
+      block_id:
+        type: string
+        description: Page id, or block id to nest inside.
+      children:
+        type: array
+        description: Block objects to append, up to 100 per call.
+        max_length: 100
+        items: {type: object}
+      after:
+        type: string
+        description: Insert after this existing child block instead of at the end.
+        optional: true
+    output:
+      description: The blocks that were added.
+      type: object
+      properties:
+        results: {type: array}
+
+  delete_block:
+    title: Delete a block
+    description: >-
+      Move a block, or a whole page, to the trash. Notion keeps it recoverable
+      from the UI, but this tool cannot restore it.
+    category: blocks
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/blocks/${block_id}
+    input:
+      block_id:
+        type: string
+        description: The block or page id to trash.
+    output:
+      description: The block, now marked archived.
+      type: object
+      properties:
+        id: {type: string}
+        archived: {type: boolean}
+
+  query_database:
+    title: Query a database
+    description: >-
+      List a database's rows, optionally filtered and sorted. `filter` uses
+      Notion's filter shape, e.g. {"property":"Status","status":{"equals":"Done"}}.
+    category: databases
+    read_only: true
+    request:
+      method: POST
+      path: /v1/databases/${database_id}/query
+      body:
+        filter: "${filter}"
+        sorts: "${sorts}"
+        page_size: "${page_size}"
+        start_cursor: "${start_cursor}"
+    input:
+      database_id:
+        type: string
+        description: The database id.
+      filter:
+        type: object
+        description: Notion filter object narrowing which rows come back.
+        optional: true
+      sorts:
+        type: array
+        description: Sort order, e.g. [{"property":"Due","direction":"ascending"}].
+        optional: true
+        items: {type: object}
+      page_size:
+        type: integer
+        description: How many rows per page (1-100).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 100
+      start_cursor:
+        type: string
+        description: Cursor from the previous response's next_cursor.
+        optional: true
+    output:
+      description: A page of database rows, each a page object.
+      type: object
+      properties:
+        results: {type: array}
+        has_more: {type: boolean}
+        next_cursor: {type: string}
+
+  get_database:
+    title: Get a database's schema
+    description: >-
+      Read a database's property definitions -- names, types and select options.
+      Read this before writing rows, so property values match the schema.
+    category: databases
+    read_only: true
+    request:
+      method: GET
+      path: /v1/databases/${database_id}
+    input:
+      database_id:
+        type: string
+        description: The database id.
+    output:
+      description: The database and its schema.
+      type: object
+      properties:
+        id: {type: string}
+        title: "{type: array}"
+        properties: {type: object, description: "Property name to its type definition."}
+
+  create_database:
+    title: Create a database
+    description: >-
+      Create a database as a child of a page, defining its columns. Every
+      database needs exactly one property of type title.
+    category: databases
+    request:
+      method: POST
+      path: /v1/databases
+      body:
+        parent:
+          type: page_id
+          page_id: "${parent_page_id}"
+        title:
+          - type: text
+            text:
+              content: "${title}"
+        properties: "${properties}"
+        is_inline: "${is_inline}"
+    input:
+      parent_page_id:
+        type: string
+        description: Page the database is created inside.
+      title:
+        type: string
+        description: The database's title.
+      properties:
+        type: object
+        description: >-
+          Column definitions keyed by name, e.g. {"Name": {"title": {}},
+          "Status": {"select": {"options": [{"name": "Todo"}]}}}.
+      is_inline:
+        type: boolean
+        description: Render it inline in the parent page rather than as a sub-page.
+        optional: true
+    output:
+      description: The created database.
+      type: object
+      properties:
+        id: {type: string}
+        url: {type: string}
+
+  update_database:
+    title: Update a database's schema
+    description: >-
+      Rename a database or change its columns -- add a property, rename one, or
+      remove one by setting it to null.
+    category: databases
+    request:
+      method: PATCH
+      path: /v1/databases/${database_id}
+      body:
+        title: "${title}"
+        properties: "${properties}"
+        description: "${description}"
+    input:
+      database_id:
+        type: string
+        description: The database id.
+      title:
+        type: array
+        description: "New title as rich text, e.g. [{\"text\": {\"content\": \"Projects\"}}]."
+        optional: true
+        items: {type: object}
+      properties:
+        type: object
+        description: Column changes keyed by current name. A null value removes a column.
+        optional: true
+      description:
+        type: array
+        description: New description as rich text.
+        optional: true
+        items: {type: object}
+    output:
+      description: The updated database.
+      type: object
+      properties:
+        id: {type: string}
+        properties: {type: object}
+
+  list_users:
+    title: List workspace members
+    description: >-
+      List the people and bots in the workspace with their ids, for filling
+      person-type properties.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /v1/users
+      query:
+        page_size: "${page_size}"
+        start_cursor: "${start_cursor}"
+    input:
+      page_size:
+        type: integer
+        description: How many users per page (1-100).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 100
+      start_cursor:
+        type: string
+        description: Cursor from the previous response's next_cursor.
+        optional: true
+    output:
+      description: The workspace's users.
+      type: object
+      properties:
+        results: {type: array}
+        has_more: {type: boolean}
+
+  get_self:
+    title: Get the integration's own identity
+    description: >-
+      Read the bot user the token belongs to, including the workspace name. The
+      cheapest health check for a Notion connection.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /v1/users/me
+    input: {}
+    output:
+      description: The integration's bot user.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        bot: {type: object}
+
+  add_comment:
+    title: Comment on a page
+    description: >-
+      Start a comment thread on a page, or reply to an existing discussion. The
+      integration needs comment capabilities on the page.
+    category: comments
+    request:
+      method: POST
+      path: /v1/comments
+      body:
+        parent:
+          page_id: "${page_id}"
+        discussion_id: "${discussion_id}"
+        rich_text: "${rich_text}"
+    input:
+      rich_text:
+        type: array
+        description: "The comment as rich text, e.g. [{\"text\": {\"content\": \"Looks good\"}}]."
+        items: {type: object}
+      page_id:
+        type: string
+        description: Page to comment on. Omit when replying to a discussion.
+        optional: true
+      discussion_id:
+        type: string
+        description: Existing discussion to reply to. Omit when starting a new thread.
+        optional: true
+    output:
+      description: The created comment.
+      type: object
+      properties:
+        id: {type: string}
+        discussion_id: {type: string}
+
+  list_comments:
+    title: List a page's comments
+    description: Read the unresolved comment threads attached to a page or block.
+    category: comments
+    read_only: true
+    request:
+      method: GET
+      path: /v1/comments
+      query:
+        block_id: "${block_id}"
+        page_size: "${page_size}"
+        start_cursor: "${start_cursor}"
+    input:
+      block_id:
+        type: string
+        description: Page or block id whose comments to read.
+      page_size:
+        type: integer
+        description: How many comments per page (1-100).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 100
+      start_cursor:
+        type: string
+        description: Cursor from the previous response's next_cursor.
+        optional: true
+    output:
+      description: The comments on that page or block.
+      type: object
+      properties:
+        results: {type: array}
+        has_more: {type: boolean}

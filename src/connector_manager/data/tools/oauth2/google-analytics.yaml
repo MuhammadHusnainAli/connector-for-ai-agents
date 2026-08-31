@@ -1,0 +1,2718 @@
+# Google Analytics 4 tools.
+#
+# Built from Google's own discovery document for the API, which is the machine
+# readable contract its client libraries are generated from -- so every path,
+# parameter, enum, default and description here is Google's, and so are the
+# per-tool OAuth scopes. That last part is what makes `check_tools()` useful on
+# this connector: it can say which of these a given grant actually permits.
+#
+# Two APIs, because GA4 splits them: the **Data API** runs reports over a
+# property's own data, and the **Admin API** manages the property itself.
+#
+#   * `run_report` is the workhorse -- dimensions, metrics, date ranges and
+#     filters, returning rows. `run_realtime_report` covers the last 30 minutes,
+#     `run_pivot_report` cross-tabulates, and `batch_run_reports` sends several
+#     at once. `check_compatibility` says whether a dimension and metric can be
+#     combined before a report fails on it;
+#   * the Admin tools cover accounts, properties, data streams, custom
+#     dimensions and metrics, conversion events, audiences, Google Ads links and
+#     access bindings.
+#
+# A property is addressed as `properties/{propertyId}` throughout, not by a
+# bare id, and the two APIs live on different hosts -- which is why each tool
+# names the one it belongs to.
+#
+# Docs: https://developers.google.com/analytics/devguides/reporting/data/v1
+
+connector_id: google-analytics
+display_name: Google Analytics
+docs_url: https://developers.google.com/analytics/devguides/reporting/data/v1/
+scope_rules:
+  strip_prefixes:
+  - https://www.googleapis.com/auth/
+  implies:
+    analytics:
+    - analytics.readonly
+scope_discovery:
+  method: GET
+  base_url_override: https://oauth2.googleapis.com
+  endpoint: /tokeninfo
+  query:
+    access_token: ${credentials.access_token}
+  scopes_path: scope
+tools:
+  create_audience_export:
+    title: Create audience export
+    description: Creates an audience export for later retrieval. This method quickly returns the audience
+      export's resource name and initiates a long running asynchronous request to form an audience export.
+      To export the users in an audience export, first create the audience export through this method
+      and then send the audience resource name to the QueryAudienceExport method. See Creating an Audience
+      Export for an introduction to Aud
+    category: properties
+    request:
+      method: POST
+      path: /v1beta/${parent}/audienceExports
+      base_url_override: https://analyticsdata.googleapis.com
+      body:
+        audience: ${audience}
+        dimensions: ${dimensions}
+    input:
+      parent:
+        type: string
+        description: 'Required. The parent resource where this audience export will be created. Format:
+          properties/{property}'
+      audience:
+        type: string
+        description: 'Required. The audience resource name. This resource name identifies the audience
+          being listed and is shared between the Analytics Data & Admin APIs. Format: properties/{property}/audiences/{audience}'
+        optional: true
+      dimensions:
+        type: array
+        items:
+          type: string
+        description: Required. The dimensions requested and displayed in the query response.
+        optional: true
+    output:
+      description: The Operation resource.
+      type: object
+    scopes_any:
+    - analytics
+    - analytics.readonly
+  get_audience_export:
+    title: Get audience export
+    description: Gets configuration metadata about a specific audience export. This method can be used
+      to understand an audience export after it has been created. See Creating an Audience Export for
+      an introduction to Audience Exports with examples. Audience Export APIs have some methods at alpha
+      and other methods at beta stability. The intention is to advance methods to beta stability after
+      some feedback and adoption. To give your f
+    category: properties
+    request:
+      method: GET
+      path: /v1beta/${name}
+      base_url_override: https://analyticsdata.googleapis.com
+    input:
+      name:
+        type: string
+        description: 'Required. The audience export resource name. Format: properties/{property}/audienceExports/{audience_export}'
+    output:
+      description: The AudienceExport resource.
+      type: object
+    scopes_any:
+    - analytics
+    - analytics.readonly
+    read_only: true
+  list_audience_exports:
+    title: List audience exports
+    description: Lists all audience exports for a property. This method can be used for you to find and
+      reuse existing audience exports rather than creating unnecessary new audience exports. The same
+      audience can have multiple audience exports that represent the export of users that were in an audience
+      on different days. See Creating an Audience Export for an introduction to Audience Exports with
+      examples. Audience Export APIs have s
+    category: properties
+    request:
+      method: GET
+      path: /v1beta/${parent}/audienceExports
+      base_url_override: https://analyticsdata.googleapis.com
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      parent:
+        type: string
+        description: 'Required. All audience exports for this property will be listed in the response.
+          Format: properties/{property}'
+      page_size:
+        type: integer
+        description: Optional. The maximum number of audience exports to return. The service may return
+          fewer than this value. If unspecified, at most 200 audience exports will be returned. The maximum
+          value is 1000 (higher values will be coerced to the maximum).
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token, received from a previous ListAudienceExports call. Provide
+          this to retrieve the subsequent page. When paginating, all other parameters provided to ListAudienceExports
+          must match the call that provided the page token.
+        optional: true
+    output:
+      description: The ListAudienceExportsResponse resource.
+      type: object
+    scopes_any:
+    - analytics
+    - analytics.readonly
+    read_only: true
+  query_audience_export:
+    title: Query audience export
+    description: Retrieves an audience export of users. After creating an audience, the users are not
+      immediately available for exporting. First, a request to CreateAudienceExport is necessary to create
+      an audience export of users, and then second, this method is used to retrieve the users in the audience
+      export. See Creating an Audience Export for an introduction to Audience Exports with examples. Audiences
+      in Google Analytics 4 all
+    category: properties
+    request:
+      method: POST
+      path: /v1beta/${name}:query
+      base_url_override: https://analyticsdata.googleapis.com
+      body:
+        limit: ${limit}
+        offset: ${offset}
+    input:
+      name:
+        type: string
+        description: 'Required. The name of the audience export to retrieve users from. Format: properties/{property}/audienceExports/{audience_export}'
+      limit:
+        type: string
+        description: Optional. The number of rows to return. If unspecified, 10,000 rows are returned.
+          The API returns a maximum of 250,000 rows per request, no matter how many you ask for. limit
+          must be positive. The API can also return fewer rows than the requested limit, if there aren't
+          as many dimension values as th
+        optional: true
+      offset:
+        type: string
+        description: Optional. The row count of the start row. The first row is counted as row 0. When
+          paging, the first request does not specify offset; or equivalently, sets offset to 0; the first
+          request returns the first limit of rows. The second request sets offset to the limit of the
+          first request; the second requ
+        optional: true
+    output:
+      description: The QueryAudienceExportResponse resource.
+      type: object
+    scopes_any:
+    - analytics
+    - analytics.readonly
+  batch_run_pivot_reports_property:
+    title: Batch run pivot reports property
+    description: Returns multiple pivot reports in a batch. All reports must be for the same Google Analytics
+      property.
+    category: properties
+    request:
+      method: POST
+      path: /v1beta/${property}:batchRunPivotReports
+      base_url_override: https://analyticsdata.googleapis.com
+      body:
+        requests: ${requests}
+    input:
+      property:
+        type: string
+        description: A Google Analytics property identifier whose events are tracked. Specified in the
+          URL path and not the body. To learn more, see where to find your Property ID. This property
+          must be specified for the batch. The property within RunPivotReportRequest may either be unspecified
+          or consistent with this p
+      requests:
+        type: array
+        items:
+          type: string
+        description: Individual requests. Each request has a separate pivot report response. Each batch
+          request is allowed up to 5 requests.
+        optional: true
+    output:
+      description: The BatchRunPivotReportsResponse resource.
+      type: object
+    scopes_any:
+    - analytics
+    - analytics.readonly
+  batch_run_reports_property:
+    title: Batch run reports property
+    description: Returns multiple reports in a batch. All reports must be for the same Google Analytics
+      property.
+    category: properties
+    request:
+      method: POST
+      path: /v1beta/${property}:batchRunReports
+      base_url_override: https://analyticsdata.googleapis.com
+      body:
+        requests: ${requests}
+    input:
+      property:
+        type: string
+        description: A Google Analytics property identifier whose events are tracked. Specified in the
+          URL path and not the body. To learn more, see where to find your Property ID. This property
+          must be specified for the batch. The property within RunReportRequest may either be unspecified
+          or consistent with this proper
+      requests:
+        type: array
+        items:
+          type: string
+        description: Individual requests. Each request has a separate report response. Each batch request
+          is allowed up to 5 requests.
+        optional: true
+    output:
+      description: The BatchRunReportsResponse resource.
+      type: object
+    scopes_any:
+    - analytics
+    - analytics.readonly
+  check_compatibility_property:
+    title: Check compatibility property
+    description: This compatibility method lists dimensions and metrics that can be added to a report
+      request and maintain compatibility. This method fails if the request's dimensions and metrics are
+      incompatible. In Google Analytics, reports fail if they request incompatible dimensions and/or metrics;
+      in that case, you will need to remove dimensions and/or metrics from the incompatible report until
+      the report is compatible. The Real
+    category: properties
+    request:
+      method: POST
+      path: /v1beta/${property}:checkCompatibility
+      base_url_override: https://analyticsdata.googleapis.com
+      body:
+        dimensions: ${dimensions}
+        dimensionFilter: ${dimension_filter}
+        metricFilter: ${metric_filter}
+        compatibilityFilter: ${compatibility_filter}
+        metrics: ${metrics}
+    input:
+      property:
+        type: string
+        description: 'A Google Analytics property identifier whose events are tracked. To learn more,
+          see where to find your Property ID. property should be the same value as in your runReport request.
+          Example: properties/1234'
+      dimensions:
+        type: array
+        items:
+          type: string
+        description: The dimensions in this report. dimensions should be the same value as in your runReport
+          request.
+        optional: true
+      dimension_filter:
+        type: string
+        description: The filter clause of dimensions. dimensionFilter should be the same value as in your
+          runReport request.
+        optional: true
+      metric_filter:
+        type: string
+        description: The filter clause of metrics. metricFilter should be the same value as in your runReport
+          request
+        optional: true
+      compatibility_filter:
+        type: string
+        description: 'Filters the dimensions and metrics in the response to just this compatibility. Commonly
+          used as ”compatibilityFilter”: “COMPATIBLE” to only return compatible dimensions & metrics.'
+        optional: true
+        enum:
+        - COMPATIBILITY_UNSPECIFIED
+        - COMPATIBLE
+        - INCOMPATIBLE
+      metrics:
+        type: array
+        items:
+          type: string
+        description: The metrics in this report. metrics should be the same value as in your runReport
+          request.
+        optional: true
+    output:
+      description: The CheckCompatibilityResponse resource.
+      type: object
+    scopes_any:
+    - analytics
+    - analytics.readonly
+  get_metadata_property:
+    title: Get metadata property
+    description: Returns metadata for dimensions and metrics available in reporting methods. Used to explore
+      the dimensions and metrics. In this method, a Google Analytics property identifier is specified
+      in the request, and the metadata response includes Custom dimensions and metrics as well as Universal
+      metadata. For example if a custom metric with parameter name levels_unlocked is registered to a
+      property, the Metadata response wi
+    category: properties
+    request:
+      method: GET
+      path: /v1beta/${name}
+      base_url_override: https://analyticsdata.googleapis.com
+    input:
+      name:
+        type: string
+        description: 'Required. The resource name of the metadata to retrieve. This name field is specified
+          in the URL path and not URL parameters. Property is a numeric Google Analytics property identifier.
+          To learn more, see where to find your Property ID. Example: properties/1234/metadata Set the
+          Property ID to 0 for'
+    output:
+      description: The Metadata resource.
+      type: object
+    scopes_any:
+    - analytics
+    - analytics.readonly
+    read_only: true
+  run_pivot_report_property:
+    title: Run pivot report property
+    description: Returns a customized pivot report of your Google Analytics event data. Pivot reports
+      are more advanced and expressive formats than regular reports. In a pivot report, dimensions are
+      only visible if they are included in a pivot. Multiple pivots can be specified to further dissect
+      your data.
+    category: properties
+    request:
+      method: POST
+      path: /v1beta/${property}:runPivotReport
+      base_url_override: https://analyticsdata.googleapis.com
+      body:
+        dimensionFilter: ${dimension_filter}
+        pivots: ${pivots}
+        property: ${body_property}
+        dimensions: ${dimensions}
+        keepEmptyRows: ${keep_empty_rows}
+        metricFilter: ${metric_filter}
+        returnPropertyQuota: ${return_property_quota}
+        comparisons: ${comparisons}
+        dateRanges: ${date_ranges}
+        currencyCode: ${currency_code}
+        cohortSpec: ${cohort_spec}
+        metrics: ${metrics}
+    input:
+      property:
+        type: string
+        description: 'A Google Analytics property identifier whose events are tracked. Specified in the
+          URL path and not the body. To learn more, see where to find your Property ID. Within a batch
+          request, this property should either be unspecified or consistent with the batch-level property.
+          Example: properties/1234'
+      dimension_filter:
+        type: string
+        description: The filter clause of dimensions. Dimensions must be requested to be used in this
+          filter. Metrics cannot be used in this filter.
+        optional: true
+      pivots:
+        type: array
+        items:
+          type: string
+        description: Describes the visual format of the report's dimensions in columns or rows. The union
+          of the fieldNames (dimension names) in all pivots must be a subset of dimension names defined
+          in Dimensions. No two pivots can share a dimension. A dimension is only visible if it appears
+          in a pivot.
+        optional: true
+      body_property:
+        type: string
+        description: 'A Google Analytics property identifier whose events are tracked. Specified in the
+          URL path and not the body. To learn more, see where to find your Property ID. Within a batch
+          request, this property should either be unspecified or consistent with the batch-level property.
+          Example: properties/1234'
+        optional: true
+      dimensions:
+        type: array
+        items:
+          type: string
+        description: 'The dimensions requested. All defined dimensions must be used by one of the following:
+          dimension_expression, dimension_filter, pivots, order_bys.'
+        optional: true
+      keep_empty_rows:
+        type: boolean
+        description: If false or unspecified, each row with all metrics equal to 0 will not be returned.
+          If true, these rows will be returned if they are not separately removed by a filter. Regardless
+          of this keep_empty_rows setting, only data recorded by the Google Analytics property can be
+          displayed in a report. For e
+        optional: true
+      metric_filter:
+        type: string
+        description: The filter clause of metrics. Applied at post aggregation phase, similar to SQL having-clause.
+          Metrics must be requested to be used in this filter. Dimensions cannot be used in this filter.
+        optional: true
+      return_property_quota:
+        type: boolean
+        description: Toggles whether to return the current state of this Google Analytics property's quota.
+          Quota is returned in [PropertyQuota](#PropertyQuota).
+        optional: true
+      comparisons:
+        type: array
+        items:
+          type: string
+        description: Optional. The configuration of comparisons requested and displayed. The request requires
+          both a comparisons field and a comparisons dimension to receive a comparison column in the response.
+        optional: true
+      date_ranges:
+        type: array
+        items:
+          type: string
+        description: The date range to retrieve event data for the report. If multiple date ranges are
+          specified, event data from each date range is used in the report. A special dimension with field
+          name "dateRange" can be included in a Pivot's field names; if included, the report compares
+          between date ranges. In a coh
+        optional: true
+      currency_code:
+        type: string
+        description: A currency code in ISO4217 format, such as "AED", "USD", "JPY". If the field is empty,
+          the report uses the property's default currency.
+        optional: true
+      cohort_spec:
+        type: string
+        description: Cohort group associated with this request. If there is a cohort group in the request
+          the 'cohort' dimension must be present.
+        optional: true
+      metrics:
+        type: array
+        items:
+          type: string
+        description: 'The metrics requested, at least one metric needs to be specified. All defined metrics
+          must be used by one of the following: metric_expression, metric_filter, order_bys.'
+        optional: true
+    output:
+      description: The RunPivotReportResponse resource.
+      type: object
+    scopes_any:
+    - analytics
+    - analytics.readonly
+  run_realtime_report_property:
+    title: Run realtime report property
+    description: Returns a customized report of realtime event data for your property. Events appear in
+      realtime reports seconds after they have been sent to the Google Analytics. Realtime reports show
+      events and usage data for the periods of time ranging from the present moment to 30 minutes ago
+      (up to 60 minutes for Google Analytics 360 properties). For a guide to constructing realtime requests
+      & understanding responses, see Creati
+    category: properties
+    request:
+      method: POST
+      path: /v1beta/${property}:runRealtimeReport
+      base_url_override: https://analyticsdata.googleapis.com
+      body:
+        limit: ${limit}
+        orderBys: ${order_bys}
+        metrics: ${metrics}
+        minuteRanges: ${minute_ranges}
+        dimensionFilter: ${dimension_filter}
+        returnPropertyQuota: ${return_property_quota}
+        metricAggregations: ${metric_aggregations}
+        dimensions: ${dimensions}
+        metricFilter: ${metric_filter}
+    input:
+      property:
+        type: string
+        description: 'A Google Analytics property identifier whose events are tracked. Specified in the
+          URL path and not the body. To learn more, see where to find your Property ID. Example: properties/1234'
+      limit:
+        type: string
+        description: The number of rows to return. If unspecified, 10,000 rows are returned. The API returns
+          a maximum of 250,000 rows per request, no matter how many you ask for. limit must be positive.
+          The API can also return fewer rows than the requested limit, if there aren't as many dimension
+          values as the limit. F
+        optional: true
+      order_bys:
+        type: array
+        items:
+          type: string
+        description: Specifies how rows are ordered in the response.
+        optional: true
+      metrics:
+        type: array
+        items:
+          type: string
+        description: The metrics requested and displayed.
+        optional: true
+      minute_ranges:
+        type: array
+        items:
+          type: string
+        description: The minute ranges of event data to read. If unspecified, one minute range for the
+          last 30 minutes will be used. If multiple minute ranges are requested, each response row will
+          contain a zero based minute range index. If two minute ranges overlap, the event data for the
+          overlapping minutes is include
+        optional: true
+      dimension_filter:
+        type: string
+        description: The filter clause of dimensions. Metrics cannot be used in this filter.
+        optional: true
+      return_property_quota:
+        type: boolean
+        description: Toggles whether to return the current state of this Google Analytics property's Realtime
+          quota. Quota is returned in [PropertyQuota](#PropertyQuota).
+        optional: true
+      metric_aggregations:
+        type: array
+        items:
+          type: string
+        description: Aggregation of metrics. Aggregated metric values will be shown in rows where the
+          dimension_values are set to "RESERVED_(MetricAggregation)".
+        optional: true
+      dimensions:
+        type: array
+        items:
+          type: string
+        description: The dimensions requested and displayed.
+        optional: true
+      metric_filter:
+        type: string
+        description: The filter clause of metrics. Applied at post aggregation phase, similar to SQL having-clause.
+          Dimensions cannot be used in this filter.
+        optional: true
+    output:
+      description: The RunRealtimeReportResponse resource.
+      type: object
+    scopes_any:
+    - analytics
+    - analytics.readonly
+  run_report_property:
+    title: Run report property
+    description: Returns a customized report of your Google Analytics event data. Reports contain statistics
+      derived from data collected by the Google Analytics tracking code. The data returned from the API
+      is as a table with columns for the requested dimensions and metrics. Metrics are individual measurements
+      of user activity on your property, such as active users or event count. Dimensions break down metrics
+      across some common crit
+    category: properties
+    request:
+      method: POST
+      path: /v1beta/${property}:runReport
+      base_url_override: https://analyticsdata.googleapis.com
+      body:
+        returnPropertyQuota: ${return_property_quota}
+        dimensionFilter: ${dimension_filter}
+        metricFilter: ${metric_filter}
+        property: ${body_property}
+        keepEmptyRows: ${keep_empty_rows}
+        offset: ${offset}
+        metricAggregations: ${metric_aggregations}
+        dimensions: ${dimensions}
+        currencyCode: ${currency_code}
+        cohortSpec: ${cohort_spec}
+        orderBys: ${order_bys}
+        comparisons: ${comparisons}
+        limit: ${limit}
+        dateRanges: ${date_ranges}
+        metrics: ${metrics}
+    input:
+      property:
+        type: string
+        description: 'A Google Analytics property identifier whose events are tracked. Specified in the
+          URL path and not the body. To learn more, see where to find your Property ID. Within a batch
+          request, this property should either be unspecified or consistent with the batch-level property.
+          Example: properties/1234'
+      return_property_quota:
+        type: boolean
+        description: Toggles whether to return the current state of this Google Analytics property's quota.
+          Quota is returned in [PropertyQuota](#PropertyQuota).
+        optional: true
+      dimension_filter:
+        type: string
+        description: Dimension filters let you ask for only specific dimension values in the report. To
+          learn more, see Fundamentals of Dimension Filters for examples. Metrics cannot be used in this
+          filter.
+        optional: true
+      metric_filter:
+        type: string
+        description: The filter clause of metrics. Applied after aggregating the report's rows, similar
+          to SQL having-clause. Dimensions cannot be used in this filter.
+        optional: true
+      body_property:
+        type: string
+        description: 'A Google Analytics property identifier whose events are tracked. Specified in the
+          URL path and not the body. To learn more, see where to find your Property ID. Within a batch
+          request, this property should either be unspecified or consistent with the batch-level property.
+          Example: properties/1234'
+        optional: true
+      keep_empty_rows:
+        type: boolean
+        description: If false or unspecified, each row with all metrics equal to 0 will not be returned.
+          If true, these rows will be returned if they are not separately removed by a filter. Regardless
+          of this keep_empty_rows setting, only data recorded by the Google Analytics property can be
+          displayed in a report. For e
+        optional: true
+      offset:
+        type: string
+        description: The row count of the start row. The first row is counted as row 0. When paging, the
+          first request does not specify offset; or equivalently, sets offset to 0; the first request
+          returns the first limit of rows. The second request sets offset to the limit of the first request;
+          the second request return
+        optional: true
+      metric_aggregations:
+        type: array
+        items:
+          type: string
+        description: Aggregation of metrics. Aggregated metric values will be shown in rows where the
+          dimension_values are set to "RESERVED_(MetricAggregation)". Aggregates including both comparisons
+          and multiple date ranges will be aggregated based on the date ranges.
+        optional: true
+      dimensions:
+        type: array
+        items:
+          type: string
+        description: The dimensions requested and displayed.
+        optional: true
+      currency_code:
+        type: string
+        description: A currency code in ISO4217 format, such as "AED", "USD", "JPY". If the field is empty,
+          the report uses the property's default currency.
+        optional: true
+      cohort_spec:
+        type: string
+        description: Cohort group associated with this request. If there is a cohort group in the request
+          the 'cohort' dimension must be present.
+        optional: true
+      order_bys:
+        type: array
+        items:
+          type: string
+        description: Specifies how rows are ordered in the response. Requests including both comparisons
+          and multiple date ranges will have order bys applied on the comparisons.
+        optional: true
+      comparisons:
+        type: array
+        items:
+          type: string
+        description: Optional. The configuration of comparisons requested and displayed. The request only
+          requires a comparisons field in order to receive a comparison column in the response.
+        optional: true
+      limit:
+        type: string
+        description: The number of rows to return. If unspecified, 10,000 rows are returned. The API returns
+          a maximum of 250,000 rows per request, no matter how many you ask for. limit must be positive.
+          The API can also return fewer rows than the requested limit, if there aren't as many dimension
+          values as the limit. F
+        optional: true
+      date_ranges:
+        type: array
+        items:
+          type: string
+        description: Date ranges of data to read. If multiple date ranges are requested, each response
+          row will contain a zero based date range index. If two date ranges overlap, the event data for
+          the overlapping days is included in the response rows for both date ranges. In a cohort request,
+          this dateRanges must be un
+        optional: true
+      metrics:
+        type: array
+        items:
+          type: string
+        description: The metrics requested and displayed.
+        optional: true
+    output:
+      description: The RunReportResponse resource.
+      type: object
+    scopes_any:
+    - analytics
+    - analytics.readonly
+
+  # -- the rest of the API, from Google's own discovery document ------------
+
+  list_account_summaries:
+    title: List account summaries
+    description: Returns summaries of all accounts accessible by the caller.
+    category: account_summaries
+    request:
+      method: GET
+      path: /v1beta/accountSummaries
+      base_url_override: https://analyticsadmin.googleapis.com
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      page_size:
+        type: integer
+        description: Optional. The maximum number of AccountSummary resources to return. The service may
+          return fewer than this value, even if there are additional pages. If unspecified, at most 50
+          resources will be returned. The maximum value is 200; (higher values will be coerced to the
+          maximum)
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token, received from a previous ListAccountSummaries call. Provide
+          this to retrieve the subsequent page. When paginating, all other parameters provided to ListAccountSummaries
+          must match the call that provided the page token.
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaListAccountSummariesResponse resource.
+      type: object
+    scopes_any:
+    - analytics.edit
+    - analytics.readonly
+    read_only: true
+  delete_account:
+    title: Delete account
+    description: 'Marks target Account as soft-deleted (ie: "trashed") and returns it. This API does not
+      have a method to restore soft-deleted accounts. However, they can be restored using the Trash Can
+      UI. If the accounts are not restored before the expiration time, the account and all child resources
+      (eg: Properties, GoogleAdsLinks, Streams, AccessBindings) will be permanently purged. https://support.google.com/analytics/answer/6154'
+    category: accounts
+    request:
+      method: DELETE
+      path: /v1beta/${name}
+      base_url_override: https://analyticsadmin.googleapis.com
+    input:
+      name:
+        type: string
+        description: 'Required. The name of the Account to soft-delete. Format: accounts/{account} Example:
+          "accounts/100"'
+    output:
+      description: The GoogleProtobufEmpty resource.
+      type: object
+    scopes:
+    - analytics.edit
+    destructive: true
+  list_accounts:
+    title: List accounts
+    description: 'Returns all accounts accessible by the caller. Note that these accounts might not currently
+      have GA properties. Soft-deleted (ie: "trashed") accounts are excluded by default. Returns an empty
+      list if no relevant accounts are found. Note: The easiest way to retrieve a list of all properties
+      you have access to is by using ListAccountSummaries.'
+    category: accounts
+    request:
+      method: GET
+      path: /v1beta/accounts
+      base_url_override: https://analyticsadmin.googleapis.com
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+        showDeleted: ${show_deleted}
+    input:
+      page_size:
+        type: integer
+        description: Optional. The maximum number of resources to return. The service may return fewer
+          than this value, even if there are additional pages. If unspecified, at most 50 resources will
+          be returned. The maximum value is 200; (higher values will be coerced to the maximum)
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token, received from a previous ListAccounts call. Provide this
+          to retrieve the subsequent page. When paginating, all other parameters provided to ListAccounts
+          must match the call that provided the page token.
+        optional: true
+      show_deleted:
+        type: boolean
+        description: 'Whether to include soft-deleted (ie: "trashed") Accounts in the results. Accounts
+          can be inspected to determine whether they are deleted or not.'
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaListAccountsResponse resource.
+      type: object
+    scopes_any:
+    - analytics.edit
+    - analytics.readonly
+    read_only: true
+  update_account:
+    title: Update account
+    description: Updates an account. Calls accounts.patch on the Google Analytics Admin API.
+    category: accounts
+    request:
+      method: PATCH
+      path: /v1beta/${name}
+      base_url_override: https://analyticsadmin.googleapis.com
+      query:
+        updateMask: ${update_mask}
+      body:
+        regionCode: ${region_code}
+        displayName: ${display_name}
+        name: ${body_name}
+    input:
+      name:
+        type: string
+        description: 'Identifier. Resource name of this account. Format: accounts/{account} Example: "accounts/100"'
+      update_mask:
+        type: string
+        description: Required. The list of fields to be updated. Field names must be in snake case (for
+          example, "field_to_update"). Omitted fields will not be updated. To replace the entire entity,
+          use one path with the string "*" to match all fields.
+        optional: true
+      region_code:
+        type: string
+        description: Country of business. Must be a Unicode CLDR region code.
+        optional: true
+      display_name:
+        type: string
+        description: Required. Human-readable display name for this account.
+        optional: true
+      body_name:
+        type: string
+        description: 'Identifier. Resource name of this account. Format: accounts/{account} Example: "accounts/100"'
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaAccount resource.
+      type: object
+    scopes:
+    - analytics.edit
+  provision_account_ticket_account:
+    title: Provision account ticket account
+    description: Requests a ticket for creating an account.
+    category: accounts
+    request:
+      method: POST
+      path: /v1beta/accounts:provisionAccountTicket
+      base_url_override: https://analyticsadmin.googleapis.com
+      body:
+        account: ${account}
+        redirectUri: ${redirect_uri}
+    input:
+      account:
+        type: string
+        description: The account to create.
+        optional: true
+      redirect_uri:
+        type: string
+        description: Redirect URI where the user will be sent after accepting Terms of Service. Must be
+          configured in Cloud Console as a Redirect URI.
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaProvisionAccountTicketResponse resource.
+      type: object
+    scopes:
+    - analytics.edit
+  run_access_report_account:
+    title: Run access report account
+    description: Returns a customized report of data access records. The report provides records of each
+      time a user reads Google Analytics reporting data. Access records are retained for up to 2 years.
+      Data Access Reports can be requested for a property. Reports may be requested for any property,
+      but dimensions that aren't related to quota can only be requested on Google Analytics 360 properties.
+      This method is only available to Adm
+    category: accounts
+    request:
+      method: POST
+      path: /v1beta/${entity}:runAccessReport
+      base_url_override: https://analyticsadmin.googleapis.com
+      body:
+        returnEntityQuota: ${return_entity_quota}
+        metricFilter: ${metric_filter}
+        includeAllUsers: ${include_all_users}
+        timeZone: ${time_zone}
+        orderBys: ${order_bys}
+        dateRanges: ${date_ranges}
+        offset: ${offset}
+        dimensionFilter: ${dimension_filter}
+        metrics: ${metrics}
+        expandGroups: ${expand_groups}
+        dimensions: ${dimensions}
+        limit: ${limit}
+    input:
+      entity:
+        type: string
+        description: The Data Access Report supports requesting at the property level or account level.
+          If requested at the account level, Data Access Reports include all access for all properties
+          under that account. To request at the property level, entity should be for example 'properties/123'
+          if "123" is your Google
+      return_entity_quota:
+        type: boolean
+        description: Toggles whether to return the current state of this Analytics Property's quota. Quota
+          is returned in [AccessQuota](#AccessQuota). For account-level requests, this field must be false.
+        optional: true
+      metric_filter:
+        type: string
+        description: Metric filters allow you to restrict report response to specific metric values which
+          match the filter. Metric filters are applied after aggregating the report's rows, similar to
+          SQL having-clause. Dimensions cannot be used in this filter.
+        optional: true
+      include_all_users:
+        type: boolean
+        description: Optional. Determines whether to include users who have never made an API call in
+          the response. If true, all users with access to the specified property or account are included
+          in the response, regardless of whether they have made an API call or not. If false, only the
+          users who have made an API call
+        optional: true
+      time_zone:
+        type: string
+        description: This request's time zone if specified. If unspecified, the property's time zone is
+          used. The request's time zone is used to interpret the start & end dates of the report. Formatted
+          as strings from the IANA Time Zone database (https://www.iana.org/time-zones); for example "America/New_York"
+          or "Asia/
+        optional: true
+      order_bys:
+        type: array
+        items:
+          type: string
+        description: Specifies how rows are ordered in the response.
+        optional: true
+      date_ranges:
+        type: array
+        items:
+          type: string
+        description: Date ranges of access records to read. If multiple date ranges are requested, each
+          response row will contain a zero based date range index. If two date ranges overlap, the access
+          records for the overlapping days is included in the response rows for both date ranges. Requests
+          are allowed up to 2 date
+        optional: true
+      offset:
+        type: string
+        description: The row count of the start row. The first row is counted as row 0. If offset is unspecified,
+          it is treated as 0. If offset is zero, then this method will return the first page of results
+          with limit entries. To learn more about this pagination parameter, see Pagination.
+        optional: true
+      dimension_filter:
+        type: string
+        description: Dimension filters let you restrict report response to specific dimension values which
+          match the filter. For example, filtering on access records of a single user. To learn more,
+          see Fundamentals of Dimension Filters for examples. Metrics cannot be used in this filter.
+        optional: true
+      metrics:
+        type: array
+        items:
+          type: string
+        description: The metrics requested and displayed in the response. Requests are allowed up to 10
+          metrics.
+        optional: true
+      expand_groups:
+        type: boolean
+        description: Optional. Decides whether to return the users within user groups. This field works
+          only when include_all_users is set to true. If true, it will return all users with access to
+          the specified property or account. If false, only the users with direct access will be returned.
+        optional: true
+      dimensions:
+        type: array
+        items:
+          type: string
+        description: The dimensions requested and displayed in the response. Requests are allowed up to
+          9 dimensions.
+        optional: true
+      limit:
+        type: string
+        description: The number of rows to return. If unspecified, 10,000 rows are returned. The API returns
+          a maximum of 100,000 rows per request, no matter how many you ask for. limit must be positive.
+          The API may return fewer rows than the requested limit, if there aren't as many remaining rows
+          as the limit. For inst
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaRunAccessReportResponse resource.
+      type: object
+    scopes_any:
+    - analytics.edit
+    - analytics.readonly
+  search_change_history_events_account:
+    title: Search change history events account
+    description: Searches through all changes to an account or its children given the specified set of
+      filters. Only returns the subset of changes supported by the API. The UI may return additional changes.
+    category: accounts
+    request:
+      method: POST
+      path: /v1beta/${account}:searchChangeHistoryEvents
+      base_url_override: https://analyticsadmin.googleapis.com
+      body:
+        resourceType: ${resource_type}
+        actorEmail: ${actor_email}
+        action: ${action}
+        property: ${property}
+        earliestChangeTime: ${earliest_change_time}
+        latestChangeTime: ${latest_change_time}
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      account:
+        type: string
+        description: 'Required. The account resource for which to return change history resources. Format:
+          accounts/{account} Example: accounts/100'
+      resource_type:
+        type: array
+        items:
+          type: string
+        description: Optional. If set, only return changes if they are for a resource that matches at
+          least one of these types.
+        optional: true
+      actor_email:
+        type: array
+        items:
+          type: string
+        description: Optional. If set, only return changes if they are made by a user in this list.
+        optional: true
+      action:
+        type: array
+        items:
+          type: string
+        description: Optional. If set, only return changes that match one or more of these types of actions.
+        optional: true
+      property:
+        type: string
+        description: 'Optional. Resource name for a child property. If set, only return changes made to
+          this property or its child resources. Format: properties/{propertyId} Example: properties/100'
+        optional: true
+      earliest_change_time:
+        type: string
+        description: Optional. If set, only return changes made after this time (inclusive).
+        optional: true
+      latest_change_time:
+        type: string
+        description: Optional. If set, only return changes made before this time (inclusive).
+        optional: true
+      page_size:
+        type: integer
+        description: Optional. The maximum number of ChangeHistoryEvent items to return. If unspecified,
+          at most 50 items will be returned. The maximum value is 200 (higher values will be coerced to
+          the maximum). Note that the service may return a page with fewer items than this value specifies
+          (potentially even zero),
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token, received from a previous SearchChangeHistoryEvents call.
+          Provide this to retrieve the subsequent page. When paginating, all other parameters provided
+          to SearchChangeHistoryEvents must match the call that provided the page token.
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaSearchChangeHistoryEventsResponse resource.
+      type: object
+    scopes:
+    - analytics.edit
+  acknowledge_user_data_collection_property:
+    title: Acknowledge user data collection property
+    description: Acknowledges the terms of user data collection for the specified property. This acknowledgement
+      must be completed (either in the Google Analytics UI or through this API) before MeasurementProtocolSecret
+      resources may be created.
+    category: properties
+    request:
+      method: POST
+      path: /v1beta/${property}:acknowledgeUserDataCollection
+      base_url_override: https://analyticsadmin.googleapis.com
+      body:
+        acknowledgement: ${acknowledgement}
+    input:
+      property:
+        type: string
+        description: Required. The property for which to acknowledge user data collection.
+      acknowledgement:
+        type: string
+        description: 'Required. An acknowledgement that the caller of this method understands the terms
+          of user data collection. This field must contain the exact value: "I acknowledge that I have
+          the necessary privacy disclosures and rights from my end users for the collection and processing
+          of their data, including the'
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaAcknowledgeUserDataCollectionResponse resource.
+      type: object
+    scopes:
+    - analytics.edit
+  create_conversion_event:
+    title: Create conversion event
+    description: 'Deprecated: Use CreateKeyEvent instead. Creates a conversion event with the specified
+      attributes.'
+    category: properties
+    request:
+      method: POST
+      path: /v1beta/${parent}/conversionEvents
+      base_url_override: https://analyticsadmin.googleapis.com
+      body:
+        countingMethod: ${counting_method}
+        defaultConversionValue: ${default_conversion_value}
+        eventName: ${event_name}
+        name: ${name}
+    input:
+      parent:
+        type: string
+        description: 'Required. The resource name of the parent property where this conversion event will
+          be created. Format: properties/123'
+      counting_method:
+        type: string
+        description: Optional. The method by which conversions will be counted across multiple events
+          within a session. If this value is not provided, it will be set to ONCE_PER_EVENT.
+        optional: true
+        enum:
+        - CONVERSION_COUNTING_METHOD_UNSPECIFIED
+        - ONCE_PER_EVENT
+        - ONCE_PER_SESSION
+      default_conversion_value:
+        type: string
+        description: Optional. Defines a default value/currency for a conversion event.
+        optional: true
+      event_name:
+        type: string
+        description: 'Immutable. The event name for this conversion event. Examples: ''click'', ''purchase'''
+        optional: true
+      name:
+        type: string
+        description: 'Identifier. Resource name of this conversion event. Format: properties/{property}/conversionEvents/{conversion_event}'
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaConversionEvent resource.
+      type: object
+    scopes:
+    - analytics.edit
+  delete_conversion_event:
+    title: Delete conversion event
+    description: 'Deprecated: Use DeleteKeyEvent instead. Deletes a conversion event in a property.'
+    category: properties
+    request:
+      method: DELETE
+      path: /v1beta/${name}
+      base_url_override: https://analyticsadmin.googleapis.com
+    input:
+      name:
+        type: string
+        description: 'Required. The resource name of the conversion event to delete. Format: properties/{property}/conversionEvents/{conversion_event}
+          Example: "properties/123/conversionEvents/456"'
+    output:
+      description: The GoogleProtobufEmpty resource.
+      type: object
+    scopes:
+    - analytics.edit
+    destructive: true
+  list_conversion_events:
+    title: List conversion events
+    description: 'Deprecated: Use ListKeyEvents instead. Returns a list of conversion events in the specified
+      parent property. Returns an empty list if no conversion events are found.'
+    category: properties
+    request:
+      method: GET
+      path: /v1beta/${parent}/conversionEvents
+      base_url_override: https://analyticsadmin.googleapis.com
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      parent:
+        type: string
+        description: 'Required. The resource name of the parent property. Example: ''properties/123'''
+      page_size:
+        type: integer
+        description: Optional. The maximum number of resources to return. If unspecified, at most 50 resources
+          will be returned. The maximum value is 200; (higher values will be coerced to the maximum)
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token, received from a previous ListConversionEvents call. Provide
+          this to retrieve the subsequent page. When paginating, all other parameters provided to ListConversionEvents
+          must match the call that provided the page token.
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaListConversionEventsResponse resource.
+      type: object
+    scopes_any:
+    - analytics.edit
+    - analytics.readonly
+    read_only: true
+  update_conversion_event:
+    title: Update conversion event
+    description: 'Deprecated: Use UpdateKeyEvent instead. Updates a conversion event with the specified
+      attributes.'
+    category: properties
+    request:
+      method: PATCH
+      path: /v1beta/${name}
+      base_url_override: https://analyticsadmin.googleapis.com
+      query:
+        updateMask: ${update_mask}
+      body:
+        countingMethod: ${counting_method}
+        defaultConversionValue: ${default_conversion_value}
+        eventName: ${event_name}
+        name: ${body_name}
+    input:
+      name:
+        type: string
+        description: 'Identifier. Resource name of this conversion event. Format: properties/{property}/conversionEvents/{conversion_event}'
+      update_mask:
+        type: string
+        description: Required. The list of fields to be updated. Field names must be in snake case (e.g.,
+          "field_to_update"). Omitted fields will not be updated. To replace the entire entity, use one
+          path with the string "*" to match all fields.
+        optional: true
+      counting_method:
+        type: string
+        description: Optional. The method by which conversions will be counted across multiple events
+          within a session. If this value is not provided, it will be set to ONCE_PER_EVENT.
+        optional: true
+        enum:
+        - CONVERSION_COUNTING_METHOD_UNSPECIFIED
+        - ONCE_PER_EVENT
+        - ONCE_PER_SESSION
+      default_conversion_value:
+        type: string
+        description: Optional. Defines a default value/currency for a conversion event.
+        optional: true
+      event_name:
+        type: string
+        description: 'Immutable. The event name for this conversion event. Examples: ''click'', ''purchase'''
+        optional: true
+      body_name:
+        type: string
+        description: 'Identifier. Resource name of this conversion event. Format: properties/{property}/conversionEvents/{conversion_event}'
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaConversionEvent resource.
+      type: object
+    scopes:
+    - analytics.edit
+  create_property:
+    title: Create property
+    description: Creates a Google Analytics property with the specified location and attributes.
+    category: properties
+    request:
+      method: POST
+      path: /v1beta/properties
+      base_url_override: https://analyticsadmin.googleapis.com
+      body:
+        timeZone: ${time_zone}
+        propertyType: ${property_type}
+        industryCategory: ${industry_category}
+        currencyCode: ${currency_code}
+        parent: ${parent}
+        account: ${account}
+        displayName: ${display_name}
+        name: ${name}
+    input:
+      time_zone:
+        type: string
+        description: 'Required. Reporting Time Zone, used as the day boundary for reports, regardless
+          of where the data originates. If the time zone honors DST, Analytics will automatically adjust
+          for the changes. NOTE: Changing the time zone only affects data going forward, and is not applied
+          retroactively. Format: http'
+        optional: true
+      property_type:
+        type: string
+        description: Immutable. The property type for this Property resource. When creating a property,
+          if the type is "PROPERTY_TYPE_UNSPECIFIED", then "ORDINARY_PROPERTY" will be implied.
+        optional: true
+        enum:
+        - PROPERTY_TYPE_UNSPECIFIED
+        - PROPERTY_TYPE_ORDINARY
+        - PROPERTY_TYPE_SUBPROPERTY
+        - PROPERTY_TYPE_ROLLUP
+      industry_category:
+        type: string
+        description: 'Industry associated with this property Example: AUTOMOTIVE, FOOD_AND_DRINK'
+        optional: true
+        enum:
+        - INDUSTRY_CATEGORY_UNSPECIFIED
+        - AUTOMOTIVE
+        - BUSINESS_AND_INDUSTRIAL_MARKETS
+        - FINANCE
+        - HEALTHCARE
+        - TECHNOLOGY
+        - TRAVEL
+        - OTHER
+        - ARTS_AND_ENTERTAINMENT
+        - BEAUTY_AND_FITNESS
+        - BOOKS_AND_LITERATURE
+        - FOOD_AND_DRINK
+        - GAMES
+        - HOBBIES_AND_LEISURE
+        - HOME_AND_GARDEN
+        - INTERNET_AND_TELECOM
+        - LAW_AND_GOVERNMENT
+        - NEWS
+        - ONLINE_COMMUNITIES
+        - PEOPLE_AND_SOCIETY
+        - PETS_AND_ANIMALS
+        - REAL_ESTATE
+        - REFERENCE
+        - SCIENCE
+        - SPORTS
+        - JOBS_AND_EDUCATION
+        - SHOPPING
+      currency_code:
+        type: string
+        description: 'The currency type used in reports involving monetary values. Format: https://en.wikipedia.org/wiki/ISO_4217
+          Examples: "USD", "EUR", "JPY"'
+        optional: true
+      parent:
+        type: string
+        description: 'Immutable. Resource name of this property''s logical parent. Note: The Property-Moving
+          UI can be used to change the parent. Format: accounts/{account}, properties/{property} Example:
+          "accounts/100", "properties/101"'
+        optional: true
+      account:
+        type: string
+        description: 'Immutable. The resource name of the parent account Format: accounts/{account_id}
+          Example: "accounts/123"'
+        optional: true
+      display_name:
+        type: string
+        description: Required. Human-readable display name for this property. The max allowed display
+          name length is 100 UTF-16 code units.
+        optional: true
+      name:
+        type: string
+        description: 'Identifier. Resource name of this property. Format: properties/{property_id} Example:
+          "properties/1000"'
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaProperty resource.
+      type: object
+    scopes:
+    - analytics.edit
+  archive_custom_dimension:
+    title: Archive custom dimension
+    description: Archives a CustomDimension on a property.
+    category: properties
+    request:
+      method: POST
+      path: /v1beta/${name}:archive
+      base_url_override: https://analyticsadmin.googleapis.com
+      body: ${body}
+    input:
+      name:
+        type: string
+        description: 'Required. The name of the CustomDimension to archive. Example format: properties/1234/customDimensions/5678'
+      body:
+        type: object
+        description: The GoogleAnalyticsAdminV1betaArchiveCustomDimensionRequest resource, as the API's
+          own reference defines it.
+    output:
+      description: The GoogleProtobufEmpty resource.
+      type: object
+    scopes:
+    - analytics.edit
+  create_custom_dimension:
+    title: Create custom dimension
+    description: 'Creates a CustomDimension. Warning: It''s not permissible to use this method to collect
+      data on individual users. In particular, sending user IDs in custom dimensions violates the Google
+      Analytics Terms of Service.'
+    category: properties
+    request:
+      method: POST
+      path: /v1beta/${parent}/customDimensions
+      base_url_override: https://analyticsadmin.googleapis.com
+      body:
+        parameterName: ${parameter_name}
+        name: ${name}
+        displayName: ${display_name}
+        disallowAdsPersonalization: ${disallow_ads_personalization}
+        scope: ${scope}
+        description: ${description}
+    input:
+      parent:
+        type: string
+        description: 'Required. Example format: properties/1234'
+      parameter_name:
+        type: string
+        description: Required. Immutable. Tagging parameter name for this custom dimension. If this is
+          a user-scoped dimension, then this is the user property name. If this is an event-scoped dimension,
+          then this is the event parameter name. If this is an item-scoped dimension, then this is the
+          parameter name found in t
+        optional: true
+      name:
+        type: string
+        description: 'Identifier. Resource name for this CustomDimension resource. Format: properties/{property}/customDimensions/{customDimension}'
+        optional: true
+      display_name:
+        type: string
+        description: Required. Display name for this custom dimension as shown in the Analytics UI. Max
+          length of 82 characters, alphanumeric plus space and underscore starting with a letter. Legacy
+          system-generated display names may contain square brackets, but updates to this field will never
+          permit square brackets.
+        optional: true
+      disallow_ads_personalization:
+        type: boolean
+        description: Optional. If set to true, sets this dimension as NPA and excludes it from ads personalization.
+          This is currently only supported by user-scoped custom dimensions.
+        optional: true
+      scope:
+        type: string
+        description: Required. Immutable. The scope of this dimension.
+        optional: true
+        enum:
+        - DIMENSION_SCOPE_UNSPECIFIED
+        - EVENT
+        - USER
+        - ITEM
+      description:
+        type: string
+        description: Optional. Description for this custom dimension. Max length of 150 characters.
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaCustomDimension resource.
+      type: object
+    scopes:
+    - analytics.edit
+  list_custom_dimensions:
+    title: List custom dimensions
+    description: Lists CustomDimensions on a property. Calls properties.customDimensions.list on the Google
+      Analytics Admin API.
+    category: properties
+    request:
+      method: GET
+      path: /v1beta/${parent}/customDimensions
+      base_url_override: https://analyticsadmin.googleapis.com
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      parent:
+        type: string
+        description: 'Required. Example format: properties/1234'
+      page_size:
+        type: integer
+        description: Optional. The maximum number of resources to return. If unspecified, at most 50 resources
+          will be returned. The maximum value is 200 (higher values will be coerced to the maximum).
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token, received from a previous ListCustomDimensions call. Provide
+          this to retrieve the subsequent page. When paginating, all other parameters provided to ListCustomDimensions
+          must match the call that provided the page token.
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaListCustomDimensionsResponse resource.
+      type: object
+    scopes_any:
+    - analytics.edit
+    - analytics.readonly
+    read_only: true
+  update_custom_dimension:
+    title: Update custom dimension
+    description: Updates a CustomDimension on a property.
+    category: properties
+    request:
+      method: PATCH
+      path: /v1beta/${name}
+      base_url_override: https://analyticsadmin.googleapis.com
+      query:
+        updateMask: ${update_mask}
+      body:
+        parameterName: ${parameter_name}
+        name: ${body_name}
+        displayName: ${display_name}
+        disallowAdsPersonalization: ${disallow_ads_personalization}
+        scope: ${scope}
+        description: ${description}
+    input:
+      name:
+        type: string
+        description: 'Identifier. Resource name for this CustomDimension resource. Format: properties/{property}/customDimensions/{customDimension}'
+      update_mask:
+        type: string
+        description: Required. The list of fields to be updated. Omitted fields will not be updated. To
+          replace the entire entity, use one path with the string "*" to match all fields.
+        optional: true
+      parameter_name:
+        type: string
+        description: Required. Immutable. Tagging parameter name for this custom dimension. If this is
+          a user-scoped dimension, then this is the user property name. If this is an event-scoped dimension,
+          then this is the event parameter name. If this is an item-scoped dimension, then this is the
+          parameter name found in t
+        optional: true
+      body_name:
+        type: string
+        description: 'Identifier. Resource name for this CustomDimension resource. Format: properties/{property}/customDimensions/{customDimension}'
+        optional: true
+      display_name:
+        type: string
+        description: Required. Display name for this custom dimension as shown in the Analytics UI. Max
+          length of 82 characters, alphanumeric plus space and underscore starting with a letter. Legacy
+          system-generated display names may contain square brackets, but updates to this field will never
+          permit square brackets.
+        optional: true
+      disallow_ads_personalization:
+        type: boolean
+        description: Optional. If set to true, sets this dimension as NPA and excludes it from ads personalization.
+          This is currently only supported by user-scoped custom dimensions.
+        optional: true
+      scope:
+        type: string
+        description: Required. Immutable. The scope of this dimension.
+        optional: true
+        enum:
+        - DIMENSION_SCOPE_UNSPECIFIED
+        - EVENT
+        - USER
+        - ITEM
+      description:
+        type: string
+        description: Optional. Description for this custom dimension. Max length of 150 characters.
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaCustomDimension resource.
+      type: object
+    scopes:
+    - analytics.edit
+  archive_custom_metric:
+    title: Archive custom metric
+    description: Archives a CustomMetric on a property. Calls properties.customMetrics.archive on the
+      Google Analytics Admin API.
+    category: properties
+    request:
+      method: POST
+      path: /v1beta/${name}:archive
+      base_url_override: https://analyticsadmin.googleapis.com
+      body: ${body}
+    input:
+      name:
+        type: string
+        description: 'Required. The name of the CustomMetric to archive. Example format: properties/1234/customMetrics/5678'
+      body:
+        type: object
+        description: The GoogleAnalyticsAdminV1betaArchiveCustomMetricRequest resource, as the API's own
+          reference defines it.
+    output:
+      description: The GoogleProtobufEmpty resource.
+      type: object
+    scopes:
+    - analytics.edit
+  create_custom_metric:
+    title: Create custom metric
+    description: Creates a CustomMetric. Calls properties.customMetrics.create on the Google Analytics
+      Admin API.
+    category: properties
+    request:
+      method: POST
+      path: /v1beta/${parent}/customMetrics
+      base_url_override: https://analyticsadmin.googleapis.com
+      body:
+        scope: ${scope}
+        parameterName: ${parameter_name}
+        measurementUnit: ${measurement_unit}
+        description: ${description}
+        restrictedMetricType: ${restricted_metric_type}
+        name: ${name}
+        displayName: ${display_name}
+    input:
+      parent:
+        type: string
+        description: 'Required. Example format: properties/1234'
+      scope:
+        type: string
+        description: Required. Immutable. The scope of this custom metric.
+        optional: true
+        enum:
+        - METRIC_SCOPE_UNSPECIFIED
+        - EVENT
+      parameter_name:
+        type: string
+        description: Required. Immutable. Tagging name for this custom metric. If this is an event-scoped
+          metric, then this is the event parameter name. May only contain alphanumeric and underscore
+          charactes, starting with a letter. Max length of 40 characters for event-scoped metrics.
+        optional: true
+      measurement_unit:
+        type: string
+        description: Required. The type for the custom metric's value.
+        optional: true
+        enum:
+        - MEASUREMENT_UNIT_UNSPECIFIED
+        - STANDARD
+        - CURRENCY
+        - FEET
+        - METERS
+        - KILOMETERS
+        - MILES
+        - MILLISECONDS
+        - SECONDS
+        - MINUTES
+        - HOURS
+      description:
+        type: string
+        description: Optional. Description for this custom dimension. Max length of 150 characters.
+        optional: true
+      restricted_metric_type:
+        type: array
+        items:
+          type: string
+        description: Optional. Types of restricted data that this metric may contain. Required for metrics
+          with CURRENCY measurement unit. Must be empty for metrics with a non-CURRENCY measurement unit.
+        optional: true
+      name:
+        type: string
+        description: 'Identifier. Resource name for this CustomMetric resource. Format: properties/{property}/customMetrics/{customMetric}'
+        optional: true
+      display_name:
+        type: string
+        description: Required. Display name for this custom metric as shown in the Analytics UI. Max length
+          of 82 characters, alphanumeric plus space and underscore starting with a letter. Legacy system-generated
+          display names may contain square brackets, but updates to this field will never permit square
+          brackets.
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaCustomMetric resource.
+      type: object
+    scopes:
+    - analytics.edit
+  list_custom_metrics:
+    title: List custom metrics
+    description: Lists CustomMetrics on a property. Calls properties.customMetrics.list on the Google
+      Analytics Admin API.
+    category: properties
+    request:
+      method: GET
+      path: /v1beta/${parent}/customMetrics
+      base_url_override: https://analyticsadmin.googleapis.com
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      parent:
+        type: string
+        description: 'Required. Example format: properties/1234'
+      page_size:
+        type: integer
+        description: The maximum number of resources to return. If unspecified, at most 50 resources will
+          be returned. The maximum value is 200 (higher values will be coerced to the maximum).
+        optional: true
+      page_token:
+        type: string
+        description: A page token, received from a previous ListCustomMetrics call. Provide this to retrieve
+          the subsequent page. When paginating, all other parameters provided to ListCustomMetrics must
+          match the call that provided the page token.
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaListCustomMetricsResponse resource.
+      type: object
+    scopes_any:
+    - analytics.edit
+    - analytics.readonly
+    read_only: true
+  update_custom_metric:
+    title: Update custom metric
+    description: Updates a CustomMetric on a property. Calls properties.customMetrics.patch on the Google
+      Analytics Admin API.
+    category: properties
+    request:
+      method: PATCH
+      path: /v1beta/${name}
+      base_url_override: https://analyticsadmin.googleapis.com
+      query:
+        updateMask: ${update_mask}
+      body:
+        scope: ${scope}
+        parameterName: ${parameter_name}
+        measurementUnit: ${measurement_unit}
+        description: ${description}
+        restrictedMetricType: ${restricted_metric_type}
+        name: ${body_name}
+        displayName: ${display_name}
+    input:
+      name:
+        type: string
+        description: 'Identifier. Resource name for this CustomMetric resource. Format: properties/{property}/customMetrics/{customMetric}'
+      update_mask:
+        type: string
+        description: Required. The list of fields to be updated. Omitted fields will not be updated. To
+          replace the entire entity, use one path with the string "*" to match all fields.
+        optional: true
+      scope:
+        type: string
+        description: Required. Immutable. The scope of this custom metric.
+        optional: true
+        enum:
+        - METRIC_SCOPE_UNSPECIFIED
+        - EVENT
+      parameter_name:
+        type: string
+        description: Required. Immutable. Tagging name for this custom metric. If this is an event-scoped
+          metric, then this is the event parameter name. May only contain alphanumeric and underscore
+          charactes, starting with a letter. Max length of 40 characters for event-scoped metrics.
+        optional: true
+      measurement_unit:
+        type: string
+        description: Required. The type for the custom metric's value.
+        optional: true
+        enum:
+        - MEASUREMENT_UNIT_UNSPECIFIED
+        - STANDARD
+        - CURRENCY
+        - FEET
+        - METERS
+        - KILOMETERS
+        - MILES
+        - MILLISECONDS
+        - SECONDS
+        - MINUTES
+        - HOURS
+      description:
+        type: string
+        description: Optional. Description for this custom dimension. Max length of 150 characters.
+        optional: true
+      restricted_metric_type:
+        type: array
+        items:
+          type: string
+        description: Optional. Types of restricted data that this metric may contain. Required for metrics
+          with CURRENCY measurement unit. Must be empty for metrics with a non-CURRENCY measurement unit.
+        optional: true
+      body_name:
+        type: string
+        description: 'Identifier. Resource name for this CustomMetric resource. Format: properties/{property}/customMetrics/{customMetric}'
+        optional: true
+      display_name:
+        type: string
+        description: Required. Display name for this custom metric as shown in the Analytics UI. Max length
+          of 82 characters, alphanumeric plus space and underscore starting with a letter. Legacy system-generated
+          display names may contain square brackets, but updates to this field will never permit square
+          brackets.
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaCustomMetric resource.
+      type: object
+    scopes:
+    - analytics.edit
+  create_data_stream:
+    title: Create data stream
+    description: Creates a DataStream. Calls properties.dataStreams.create on the Google Analytics Admin
+      API.
+    category: properties
+    request:
+      method: POST
+      path: /v1beta/${parent}/dataStreams
+      base_url_override: https://analyticsadmin.googleapis.com
+      body:
+        webStreamData: ${web_stream_data}
+        name: ${name}
+        androidAppStreamData: ${android_app_stream_data}
+        type: ${type}
+        iosAppStreamData: ${ios_app_stream_data}
+        displayName: ${display_name}
+    input:
+      parent:
+        type: string
+        description: 'Required. Example format: properties/1234'
+      web_stream_data:
+        type: string
+        description: Data specific to web streams. Must be populated if type is WEB_DATA_STREAM.
+        optional: true
+      name:
+        type: string
+        description: 'Identifier. Resource name of this Data Stream. Format: properties/{property_id}/dataStreams/{stream_id}
+          Example: "properties/1000/dataStreams/2000"'
+        optional: true
+      android_app_stream_data:
+        type: string
+        description: Data specific to Android app streams. Must be populated if type is ANDROID_APP_DATA_STREAM.
+        optional: true
+      type:
+        type: string
+        description: Required. Immutable. The type of this DataStream resource.
+        optional: true
+        enum:
+        - DATA_STREAM_TYPE_UNSPECIFIED
+        - WEB_DATA_STREAM
+        - ANDROID_APP_DATA_STREAM
+        - IOS_APP_DATA_STREAM
+      ios_app_stream_data:
+        type: string
+        description: Data specific to iOS app streams. Must be populated if type is IOS_APP_DATA_STREAM.
+        optional: true
+      display_name:
+        type: string
+        description: Human-readable display name for the Data Stream. Required for web data streams. The
+          max allowed display name length is 255 UTF-16 code units.
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaDataStream resource.
+      type: object
+    scopes:
+    - analytics.edit
+  delete_data_stream:
+    title: Delete data stream
+    description: Deletes a DataStream on a property. Calls properties.dataStreams.delete on the Google
+      Analytics Admin API.
+    category: properties
+    request:
+      method: DELETE
+      path: /v1beta/${name}
+      base_url_override: https://analyticsadmin.googleapis.com
+    input:
+      name:
+        type: string
+        description: 'Required. The name of the DataStream to delete. Example format: properties/1234/dataStreams/5678'
+    output:
+      description: The GoogleProtobufEmpty resource.
+      type: object
+    scopes:
+    - analytics.edit
+    destructive: true
+  list_data_streams:
+    title: List data streams
+    description: Lists DataStreams on a property. Calls properties.dataStreams.list on the Google Analytics
+      Admin API.
+    category: properties
+    request:
+      method: GET
+      path: /v1beta/${parent}/dataStreams
+      base_url_override: https://analyticsadmin.googleapis.com
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      parent:
+        type: string
+        description: 'Required. Example format: properties/1234'
+      page_size:
+        type: integer
+        description: The maximum number of resources to return. If unspecified, at most 50 resources will
+          be returned. The maximum value is 200 (higher values will be coerced to the maximum).
+        optional: true
+      page_token:
+        type: string
+        description: A page token, received from a previous ListDataStreams call. Provide this to retrieve
+          the subsequent page. When paginating, all other parameters provided to ListDataStreams must
+          match the call that provided the page token.
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaListDataStreamsResponse resource.
+      type: object
+    scopes_any:
+    - analytics.edit
+    - analytics.readonly
+    read_only: true
+  create_measurement_protocol_secret:
+    title: Create measurement protocol secret
+    description: Creates a measurement protocol secret. Calls properties.dataStreams.measurementProtocolSecrets.create
+      on the Google Analytics Admin API.
+    category: properties
+    request:
+      method: POST
+      path: /v1beta/${parent}/measurementProtocolSecrets
+      base_url_override: https://analyticsadmin.googleapis.com
+      body:
+        displayName: ${display_name}
+        name: ${name}
+    input:
+      parent:
+        type: string
+        description: 'Required. The parent resource where this secret will be created. Format: properties/{property}/dataStreams/{dataStream}'
+      display_name:
+        type: string
+        description: Required. Human-readable display name for this secret.
+        optional: true
+      name:
+        type: string
+        description: 'Identifier. Resource name of this secret. This secret may be a child of any type
+          of stream. Format: properties/{property}/dataStreams/{dataStream}/measurementProtocolSecrets/{measurementProtocolSecret}'
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaMeasurementProtocolSecret resource.
+      type: object
+    scopes:
+    - analytics.edit
+  delete_measurement_protocol_secret:
+    title: Delete measurement protocol secret
+    description: Deletes target MeasurementProtocolSecret.
+    category: properties
+    request:
+      method: DELETE
+      path: /v1beta/${name}
+      base_url_override: https://analyticsadmin.googleapis.com
+    input:
+      name:
+        type: string
+        description: 'Required. The name of the MeasurementProtocolSecret to delete. Format: properties/{property}/dataStreams/{dataStream}/measurementProtocolSecrets/{measurementProtocolSecret}'
+    output:
+      description: The GoogleProtobufEmpty resource.
+      type: object
+    scopes:
+    - analytics.edit
+    destructive: true
+  list_measurement_protocol_secrets:
+    title: List measurement protocol secrets
+    description: Returns child MeasurementProtocolSecrets under the specified parent Property.
+    category: properties
+    request:
+      method: GET
+      path: /v1beta/${parent}/measurementProtocolSecrets
+      base_url_override: https://analyticsadmin.googleapis.com
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      parent:
+        type: string
+        description: 'Required. The resource name of the parent stream. Format: properties/{property}/dataStreams/{dataStream}/measurementProtocolSecrets'
+      page_size:
+        type: integer
+        description: Optional. The maximum number of resources to return. If unspecified, at most 10 resources
+          will be returned. The maximum value is 10. Higher values will be coerced to the maximum.
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token, received from a previous ListMeasurementProtocolSecrets call.
+          Provide this to retrieve the subsequent page. When paginating, all other parameters provided
+          to ListMeasurementProtocolSecrets must match the call that provided the page token.
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaListMeasurementProtocolSecretsResponse resource.
+      type: object
+    scopes_any:
+    - analytics.edit
+    - analytics.readonly
+    read_only: true
+  update_measurement_protocol_secret:
+    title: Update measurement protocol secret
+    description: Updates a measurement protocol secret. Calls properties.dataStreams.measurementProtocolSecrets.patch
+      on the Google Analytics Admin API.
+    category: properties
+    request:
+      method: PATCH
+      path: /v1beta/${name}
+      base_url_override: https://analyticsadmin.googleapis.com
+      query:
+        updateMask: ${update_mask}
+      body:
+        displayName: ${display_name}
+        name: ${body_name}
+    input:
+      name:
+        type: string
+        description: 'Identifier. Resource name of this secret. This secret may be a child of any type
+          of stream. Format: properties/{property}/dataStreams/{dataStream}/measurementProtocolSecrets/{measurementProtocolSecret}'
+      update_mask:
+        type: string
+        description: Required. The list of fields to be updated. Omitted fields will not be updated.
+        optional: true
+      display_name:
+        type: string
+        description: Required. Human-readable display name for this secret.
+        optional: true
+      body_name:
+        type: string
+        description: 'Identifier. Resource name of this secret. This secret may be a child of any type
+          of stream. Format: properties/{property}/dataStreams/{dataStream}/measurementProtocolSecrets/{measurementProtocolSecret}'
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaMeasurementProtocolSecret resource.
+      type: object
+    scopes:
+    - analytics.edit
+  update_data_stream:
+    title: Update data stream
+    description: Updates a DataStream on a property. Calls properties.dataStreams.patch on the Google
+      Analytics Admin API.
+    category: properties
+    request:
+      method: PATCH
+      path: /v1beta/${name}
+      base_url_override: https://analyticsadmin.googleapis.com
+      query:
+        updateMask: ${update_mask}
+      body:
+        webStreamData: ${web_stream_data}
+        name: ${body_name}
+        androidAppStreamData: ${android_app_stream_data}
+        type: ${type}
+        iosAppStreamData: ${ios_app_stream_data}
+        displayName: ${display_name}
+    input:
+      name:
+        type: string
+        description: 'Identifier. Resource name of this Data Stream. Format: properties/{property_id}/dataStreams/{stream_id}
+          Example: "properties/1000/dataStreams/2000"'
+      update_mask:
+        type: string
+        description: Required. The list of fields to be updated. Omitted fields will not be updated. To
+          replace the entire entity, use one path with the string "*" to match all fields.
+        optional: true
+      web_stream_data:
+        type: string
+        description: Data specific to web streams. Must be populated if type is WEB_DATA_STREAM.
+        optional: true
+      body_name:
+        type: string
+        description: 'Identifier. Resource name of this Data Stream. Format: properties/{property_id}/dataStreams/{stream_id}
+          Example: "properties/1000/dataStreams/2000"'
+        optional: true
+      android_app_stream_data:
+        type: string
+        description: Data specific to Android app streams. Must be populated if type is ANDROID_APP_DATA_STREAM.
+        optional: true
+      type:
+        type: string
+        description: Required. Immutable. The type of this DataStream resource.
+        optional: true
+        enum:
+        - DATA_STREAM_TYPE_UNSPECIFIED
+        - WEB_DATA_STREAM
+        - ANDROID_APP_DATA_STREAM
+        - IOS_APP_DATA_STREAM
+      ios_app_stream_data:
+        type: string
+        description: Data specific to iOS app streams. Must be populated if type is IOS_APP_DATA_STREAM.
+        optional: true
+      display_name:
+        type: string
+        description: Human-readable display name for the Data Stream. Required for web data streams. The
+          max allowed display name length is 255 UTF-16 code units.
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaDataStream resource.
+      type: object
+    scopes:
+    - analytics.edit
+  delete_property:
+    title: Delete property
+    description: 'Marks target Property as soft-deleted (ie: "trashed") and returns it. This API does
+      not have a method to restore soft-deleted properties. However, they can be restored using the Trash
+      Can UI. If the properties are not restored before the expiration time, the Property and all child
+      resources (eg: GoogleAdsLinks, Streams, AccessBindings) will be permanently purged. https://support.google.com/analytics/answer/6154772
+      Re'
+    category: properties
+    request:
+      method: DELETE
+      path: /v1beta/${name}
+      base_url_override: https://analyticsadmin.googleapis.com
+    input:
+      name:
+        type: string
+        description: 'Required. The name of the Property to soft-delete. Format: properties/{property_id}
+          Example: "properties/1000"'
+    output:
+      description: The GoogleAnalyticsAdminV1betaProperty resource.
+      type: object
+    scopes:
+    - analytics.edit
+    destructive: true
+  create_firebase_link:
+    title: Create firebase link
+    description: Creates a FirebaseLink. Properties can have at most one FirebaseLink.
+    category: properties
+    request:
+      method: POST
+      path: /v1beta/${parent}/firebaseLinks
+      base_url_override: https://analyticsadmin.googleapis.com
+      body:
+        project: ${project}
+        name: ${name}
+    input:
+      parent:
+        type: string
+        description: 'Required. Format: properties/{property_id} Example: properties/1234'
+      project:
+        type: string
+        description: 'Immutable. Firebase project resource name. When creating a FirebaseLink, you may
+          provide this resource name using either a project number or project ID. Once this resource has
+          been created, returned FirebaseLinks will always have a project_name that contains a project
+          number. Format: ''projects/{proj'
+        optional: true
+      name:
+        type: string
+        description: 'Identifier. Example format: properties/1234/firebaseLinks/5678'
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaFirebaseLink resource.
+      type: object
+    scopes:
+    - analytics.edit
+  delete_firebase_link:
+    title: Delete firebase link
+    description: Deletes a FirebaseLink on a property Calls properties.firebaseLinks.delete on the Google
+      Analytics Admin API.
+    category: properties
+    request:
+      method: DELETE
+      path: /v1beta/${name}
+      base_url_override: https://analyticsadmin.googleapis.com
+    input:
+      name:
+        type: string
+        description: 'Required. Format: properties/{property_id}/firebaseLinks/{firebase_link_id} Example:
+          properties/1234/firebaseLinks/5678'
+    output:
+      description: The GoogleProtobufEmpty resource.
+      type: object
+    scopes:
+    - analytics.edit
+    destructive: true
+  list_firebase_links:
+    title: List firebase links
+    description: Lists FirebaseLinks on a property. Properties can have at most one FirebaseLink.
+    category: properties
+    request:
+      method: GET
+      path: /v1beta/${parent}/firebaseLinks
+      base_url_override: https://analyticsadmin.googleapis.com
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      parent:
+        type: string
+        description: 'Required. Format: properties/{property_id} Example: properties/1234'
+      page_size:
+        type: integer
+        description: Optional. The maximum number of resources to return. The service may return fewer
+          than this value, even if there are additional pages. If unspecified, at most 50 resources will
+          be returned. The maximum value is 200; (higher values will be coerced to the maximum)
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token, received from a previous ListFirebaseLinks call. Provide
+          this to retrieve the subsequent page. When paginating, all other parameters provided to ListFirebaseLinks
+          must match the call that provided the page token.
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaListFirebaseLinksResponse resource.
+      type: object
+    scopes_any:
+    - analytics.edit
+    - analytics.readonly
+    read_only: true
+  create_google_ads_link:
+    title: Create google ads link
+    description: Creates a GoogleAdsLink. Calls properties.googleAdsLinks.create on the Google Analytics
+      Admin API.
+    category: properties
+    request:
+      method: POST
+      path: /v1beta/${parent}/googleAdsLinks
+      base_url_override: https://analyticsadmin.googleapis.com
+      body:
+        customerId: ${customer_id}
+        adsPersonalizationEnabled: ${ads_personalization_enabled}
+        name: ${name}
+    input:
+      parent:
+        type: string
+        description: 'Required. Example format: properties/1234'
+      customer_id:
+        type: string
+        description: Immutable. Google Ads customer ID.
+        optional: true
+      ads_personalization_enabled:
+        type: boolean
+        description: Enable personalized advertising features with this integration. Automatically publish
+          my Google Analytics audience lists and Google Analytics remarketing events/parameters to the
+          linked Google Ads account. If this field is not set on create/update, it will be defaulted to
+          true.
+        optional: true
+      name:
+        type: string
+        description: 'Identifier. Format: properties/{propertyId}/googleAdsLinks/{googleAdsLinkId} Note:
+          googleAdsLinkId is not the Google Ads customer ID.'
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaGoogleAdsLink resource.
+      type: object
+    scopes:
+    - analytics.edit
+  delete_google_ads_link:
+    title: Delete google ads link
+    description: Deletes a GoogleAdsLink on a property Calls properties.googleAdsLinks.delete on the Google
+      Analytics Admin API.
+    category: properties
+    request:
+      method: DELETE
+      path: /v1beta/${name}
+      base_url_override: https://analyticsadmin.googleapis.com
+    input:
+      name:
+        type: string
+        description: 'Required. Example format: properties/1234/googleAdsLinks/5678'
+    output:
+      description: The GoogleProtobufEmpty resource.
+      type: object
+    scopes:
+    - analytics.edit
+    destructive: true
+  list_google_ads_links:
+    title: List google ads links
+    description: Lists GoogleAdsLinks on a property. Calls properties.googleAdsLinks.list on the Google
+      Analytics Admin API.
+    category: properties
+    request:
+      method: GET
+      path: /v1beta/${parent}/googleAdsLinks
+      base_url_override: https://analyticsadmin.googleapis.com
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      parent:
+        type: string
+        description: 'Required. Example format: properties/1234'
+      page_size:
+        type: integer
+        description: Optional. The maximum number of resources to return. If unspecified, at most 50 resources
+          will be returned. The maximum value is 200 (higher values will be coerced to the maximum).
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token, received from a previous ListGoogleAdsLinks call. Provide
+          this to retrieve the subsequent page. When paginating, all other parameters provided to ListGoogleAdsLinks
+          must match the call that provided the page token.
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaListGoogleAdsLinksResponse resource.
+      type: object
+    scopes_any:
+    - analytics.edit
+    - analytics.readonly
+    read_only: true
+  update_google_ads_link:
+    title: Update google ads link
+    description: Updates a GoogleAdsLink on a property Calls properties.googleAdsLinks.patch on the Google
+      Analytics Admin API.
+    category: properties
+    request:
+      method: PATCH
+      path: /v1beta/${name}
+      base_url_override: https://analyticsadmin.googleapis.com
+      query:
+        updateMask: ${update_mask}
+      body:
+        customerId: ${customer_id}
+        adsPersonalizationEnabled: ${ads_personalization_enabled}
+        name: ${body_name}
+    input:
+      name:
+        type: string
+        description: 'Identifier. Format: properties/{propertyId}/googleAdsLinks/{googleAdsLinkId} Note:
+          googleAdsLinkId is not the Google Ads customer ID.'
+      update_mask:
+        type: string
+        description: Required. The list of fields to be updated. Field names must be in snake case (e.g.,
+          "field_to_update"). Omitted fields will not be updated. To replace the entire entity, use one
+          path with the string "*" to match all fields.
+        optional: true
+      customer_id:
+        type: string
+        description: Immutable. Google Ads customer ID.
+        optional: true
+      ads_personalization_enabled:
+        type: boolean
+        description: Enable personalized advertising features with this integration. Automatically publish
+          my Google Analytics audience lists and Google Analytics remarketing events/parameters to the
+          linked Google Ads account. If this field is not set on create/update, it will be defaulted to
+          true.
+        optional: true
+      body_name:
+        type: string
+        description: 'Identifier. Format: properties/{propertyId}/googleAdsLinks/{googleAdsLinkId} Note:
+          googleAdsLinkId is not the Google Ads customer ID.'
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaGoogleAdsLink resource.
+      type: object
+    scopes:
+    - analytics.edit
+  create_key_event:
+    title: Create key event
+    description: Creates a Key Event. Calls properties.keyEvents.create on the Google Analytics Admin
+      API.
+    category: properties
+    request:
+      method: POST
+      path: /v1beta/${parent}/keyEvents
+      base_url_override: https://analyticsadmin.googleapis.com
+      body:
+        eventName: ${event_name}
+        countingMethod: ${counting_method}
+        defaultValue: ${default_value}
+    input:
+      parent:
+        type: string
+        description: 'Required. The resource name of the parent property where this Key Event will be
+          created. Format: properties/123'
+      event_name:
+        type: string
+        description: 'Immutable. The event name for this key event. Examples: ''click'', ''purchase'''
+        optional: true
+      counting_method:
+        type: string
+        description: Required. The method by which Key Events will be counted across multiple events within
+          a session.
+        optional: true
+        enum:
+        - COUNTING_METHOD_UNSPECIFIED
+        - ONCE_PER_EVENT
+        - ONCE_PER_SESSION
+      default_value:
+        type: string
+        description: Optional. Defines a default value/currency for a key event.
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaKeyEvent resource.
+      type: object
+    scopes:
+    - analytics.edit
+  delete_key_event:
+    title: Delete key event
+    description: Deletes a Key Event. Calls properties.keyEvents.delete on the Google Analytics Admin
+      API.
+    category: properties
+    request:
+      method: DELETE
+      path: /v1beta/${name}
+      base_url_override: https://analyticsadmin.googleapis.com
+    input:
+      name:
+        type: string
+        description: 'Required. The resource name of the Key Event to delete. Format: properties/{property}/keyEvents/{key_event}
+          Example: "properties/123/keyEvents/456"'
+    output:
+      description: The GoogleProtobufEmpty resource.
+      type: object
+    scopes:
+    - analytics.edit
+    destructive: true
+  list_key_events:
+    title: List key events
+    description: Returns a list of Key Events in the specified parent property. Returns an empty list
+      if no Key Events are found.
+    category: properties
+    request:
+      method: GET
+      path: /v1beta/${parent}/keyEvents
+      base_url_override: https://analyticsadmin.googleapis.com
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      parent:
+        type: string
+        description: 'Required. The resource name of the parent property. Example: ''properties/123'''
+      page_size:
+        type: integer
+        description: Optional. The maximum number of resources to return. If unspecified, at most 50 resources
+          will be returned. The maximum value is 200; (higher values will be coerced to the maximum)
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token, received from a previous ListKeyEvents call. Provide this
+          to retrieve the subsequent page. When paginating, all other parameters provided to ListKeyEvents
+          must match the call that provided the page token.
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaListKeyEventsResponse resource.
+      type: object
+    scopes_any:
+    - analytics.edit
+    - analytics.readonly
+    read_only: true
+  update_key_event:
+    title: Update key event
+    description: Updates a Key Event. Calls properties.keyEvents.patch on the Google Analytics Admin API.
+    category: properties
+    request:
+      method: PATCH
+      path: /v1beta/${name}
+      base_url_override: https://analyticsadmin.googleapis.com
+      query:
+        updateMask: ${update_mask}
+      body:
+        eventName: ${event_name}
+        countingMethod: ${counting_method}
+        defaultValue: ${default_value}
+    input:
+      name:
+        type: string
+        description: 'Output only. Resource name of this key event. Format: properties/{property}/keyEvents/{key_event}'
+      update_mask:
+        type: string
+        description: Required. The list of fields to be updated. Field names must be in snake case (e.g.,
+          "field_to_update"). Omitted fields will not be updated. To replace the entire entity, use one
+          path with the string "*" to match all fields.
+        optional: true
+      event_name:
+        type: string
+        description: 'Immutable. The event name for this key event. Examples: ''click'', ''purchase'''
+        optional: true
+      counting_method:
+        type: string
+        description: Required. The method by which Key Events will be counted across multiple events within
+          a session.
+        optional: true
+        enum:
+        - COUNTING_METHOD_UNSPECIFIED
+        - ONCE_PER_EVENT
+        - ONCE_PER_SESSION
+      default_value:
+        type: string
+        description: Optional. Defines a default value/currency for a key event.
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaKeyEvent resource.
+      type: object
+    scopes:
+    - analytics.edit
+  list_properties:
+    title: List properties
+    description: 'Returns child Properties under the specified parent Account. Properties will be excluded
+      if the caller does not have access. Soft-deleted (ie: "trashed") properties are excluded by default.
+      Returns an empty list if no relevant properties are found.'
+    category: properties
+    request:
+      method: GET
+      path: /v1beta/properties
+      base_url_override: https://analyticsadmin.googleapis.com
+      query:
+        filter: ${filter}
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+        showDeleted: ${show_deleted}
+    input:
+      filter:
+        type: string
+        description: 'Required. An expression for filtering the results of the request. Fields eligible
+          for filtering are: parent:(The resource name of the parent account/property) or ancestor:(The
+          resource name of the parent account) or firebase_project:(The id or number of the linked firebase
+          project). Some examples of'
+        optional: true
+      page_size:
+        type: integer
+        description: Optional. The maximum number of resources to return. The service may return fewer
+          than this value, even if there are additional pages. If unspecified, at most 50 resources will
+          be returned. The maximum value is 200; (higher values will be coerced to the maximum)
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token, received from a previous ListProperties call. Provide this
+          to retrieve the subsequent page. When paginating, all other parameters provided to ListProperties
+          must match the call that provided the page token.
+        optional: true
+      show_deleted:
+        type: boolean
+        description: 'Whether to include soft-deleted (ie: "trashed") Properties in the results. Properties
+          can be inspected to determine whether they are deleted or not.'
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaListPropertiesResponse resource.
+      type: object
+    scopes_any:
+    - analytics.edit
+    - analytics.readonly
+    read_only: true
+  update_property:
+    title: Update property
+    description: Updates a property. Calls properties.patch on the Google Analytics Admin API.
+    category: properties
+    request:
+      method: PATCH
+      path: /v1beta/${name}
+      base_url_override: https://analyticsadmin.googleapis.com
+      query:
+        updateMask: ${update_mask}
+      body:
+        timeZone: ${time_zone}
+        propertyType: ${property_type}
+        industryCategory: ${industry_category}
+        currencyCode: ${currency_code}
+        parent: ${parent}
+        account: ${account}
+        displayName: ${display_name}
+        name: ${body_name}
+    input:
+      name:
+        type: string
+        description: 'Identifier. Resource name of this property. Format: properties/{property_id} Example:
+          "properties/1000"'
+      update_mask:
+        type: string
+        description: Required. The list of fields to be updated. Field names must be in snake case (e.g.,
+          "field_to_update"). Omitted fields will not be updated. To replace the entire entity, use one
+          path with the string "*" to match all fields.
+        optional: true
+      time_zone:
+        type: string
+        description: 'Required. Reporting Time Zone, used as the day boundary for reports, regardless
+          of where the data originates. If the time zone honors DST, Analytics will automatically adjust
+          for the changes. NOTE: Changing the time zone only affects data going forward, and is not applied
+          retroactively. Format: http'
+        optional: true
+      property_type:
+        type: string
+        description: Immutable. The property type for this Property resource. When creating a property,
+          if the type is "PROPERTY_TYPE_UNSPECIFIED", then "ORDINARY_PROPERTY" will be implied.
+        optional: true
+        enum:
+        - PROPERTY_TYPE_UNSPECIFIED
+        - PROPERTY_TYPE_ORDINARY
+        - PROPERTY_TYPE_SUBPROPERTY
+        - PROPERTY_TYPE_ROLLUP
+      industry_category:
+        type: string
+        description: 'Industry associated with this property Example: AUTOMOTIVE, FOOD_AND_DRINK'
+        optional: true
+        enum:
+        - INDUSTRY_CATEGORY_UNSPECIFIED
+        - AUTOMOTIVE
+        - BUSINESS_AND_INDUSTRIAL_MARKETS
+        - FINANCE
+        - HEALTHCARE
+        - TECHNOLOGY
+        - TRAVEL
+        - OTHER
+        - ARTS_AND_ENTERTAINMENT
+        - BEAUTY_AND_FITNESS
+        - BOOKS_AND_LITERATURE
+        - FOOD_AND_DRINK
+        - GAMES
+        - HOBBIES_AND_LEISURE
+        - HOME_AND_GARDEN
+        - INTERNET_AND_TELECOM
+        - LAW_AND_GOVERNMENT
+        - NEWS
+        - ONLINE_COMMUNITIES
+        - PEOPLE_AND_SOCIETY
+        - PETS_AND_ANIMALS
+        - REAL_ESTATE
+        - REFERENCE
+        - SCIENCE
+        - SPORTS
+        - JOBS_AND_EDUCATION
+        - SHOPPING
+      currency_code:
+        type: string
+        description: 'The currency type used in reports involving monetary values. Format: https://en.wikipedia.org/wiki/ISO_4217
+          Examples: "USD", "EUR", "JPY"'
+        optional: true
+      parent:
+        type: string
+        description: 'Immutable. Resource name of this property''s logical parent. Note: The Property-Moving
+          UI can be used to change the parent. Format: accounts/{account}, properties/{property} Example:
+          "accounts/100", "properties/101"'
+        optional: true
+      account:
+        type: string
+        description: 'Immutable. The resource name of the parent account Format: accounts/{account_id}
+          Example: "accounts/123"'
+        optional: true
+      display_name:
+        type: string
+        description: Required. Human-readable display name for this property. The max allowed display
+          name length is 100 UTF-16 code units.
+        optional: true
+      body_name:
+        type: string
+        description: 'Identifier. Resource name of this property. Format: properties/{property_id} Example:
+          "properties/1000"'
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaProperty resource.
+      type: object
+    scopes:
+    - analytics.edit
+  run_access_report_property:
+    title: Run access report property
+    description: Returns a customized report of data access records. The report provides records of each
+      time a user reads Google Analytics reporting data. Access records are retained for up to 2 years.
+      Data Access Reports can be requested for a property. Reports may be requested for any property,
+      but dimensions that aren't related to quota can only be requested on Google Analytics 360 properties.
+      This method is only available to Adm
+    category: properties
+    request:
+      method: POST
+      path: /v1beta/${entity}:runAccessReport
+      base_url_override: https://analyticsadmin.googleapis.com
+      body:
+        returnEntityQuota: ${return_entity_quota}
+        metricFilter: ${metric_filter}
+        includeAllUsers: ${include_all_users}
+        timeZone: ${time_zone}
+        orderBys: ${order_bys}
+        dateRanges: ${date_ranges}
+        offset: ${offset}
+        dimensionFilter: ${dimension_filter}
+        metrics: ${metrics}
+        expandGroups: ${expand_groups}
+        dimensions: ${dimensions}
+        limit: ${limit}
+    input:
+      entity:
+        type: string
+        description: The Data Access Report supports requesting at the property level or account level.
+          If requested at the account level, Data Access Reports include all access for all properties
+          under that account. To request at the property level, entity should be for example 'properties/123'
+          if "123" is your Google
+      return_entity_quota:
+        type: boolean
+        description: Toggles whether to return the current state of this Analytics Property's quota. Quota
+          is returned in [AccessQuota](#AccessQuota). For account-level requests, this field must be false.
+        optional: true
+      metric_filter:
+        type: string
+        description: Metric filters allow you to restrict report response to specific metric values which
+          match the filter. Metric filters are applied after aggregating the report's rows, similar to
+          SQL having-clause. Dimensions cannot be used in this filter.
+        optional: true
+      include_all_users:
+        type: boolean
+        description: Optional. Determines whether to include users who have never made an API call in
+          the response. If true, all users with access to the specified property or account are included
+          in the response, regardless of whether they have made an API call or not. If false, only the
+          users who have made an API call
+        optional: true
+      time_zone:
+        type: string
+        description: This request's time zone if specified. If unspecified, the property's time zone is
+          used. The request's time zone is used to interpret the start & end dates of the report. Formatted
+          as strings from the IANA Time Zone database (https://www.iana.org/time-zones); for example "America/New_York"
+          or "Asia/
+        optional: true
+      order_bys:
+        type: array
+        items:
+          type: string
+        description: Specifies how rows are ordered in the response.
+        optional: true
+      date_ranges:
+        type: array
+        items:
+          type: string
+        description: Date ranges of access records to read. If multiple date ranges are requested, each
+          response row will contain a zero based date range index. If two date ranges overlap, the access
+          records for the overlapping days is included in the response rows for both date ranges. Requests
+          are allowed up to 2 date
+        optional: true
+      offset:
+        type: string
+        description: The row count of the start row. The first row is counted as row 0. If offset is unspecified,
+          it is treated as 0. If offset is zero, then this method will return the first page of results
+          with limit entries. To learn more about this pagination parameter, see Pagination.
+        optional: true
+      dimension_filter:
+        type: string
+        description: Dimension filters let you restrict report response to specific dimension values which
+          match the filter. For example, filtering on access records of a single user. To learn more,
+          see Fundamentals of Dimension Filters for examples. Metrics cannot be used in this filter.
+        optional: true
+      metrics:
+        type: array
+        items:
+          type: string
+        description: The metrics requested and displayed in the response. Requests are allowed up to 10
+          metrics.
+        optional: true
+      expand_groups:
+        type: boolean
+        description: Optional. Decides whether to return the users within user groups. This field works
+          only when include_all_users is set to true. If true, it will return all users with access to
+          the specified property or account. If false, only the users with direct access will be returned.
+        optional: true
+      dimensions:
+        type: array
+        items:
+          type: string
+        description: The dimensions requested and displayed in the response. Requests are allowed up to
+          9 dimensions.
+        optional: true
+      limit:
+        type: string
+        description: The number of rows to return. If unspecified, 10,000 rows are returned. The API returns
+          a maximum of 100,000 rows per request, no matter how many you ask for. limit must be positive.
+          The API may return fewer rows than the requested limit, if there aren't as many remaining rows
+          as the limit. For inst
+        optional: true
+    output:
+      description: The GoogleAnalyticsAdminV1betaRunAccessReportResponse resource.
+      type: object
+    scopes_any:
+    - analytics.edit
+    - analytics.readonly
+  update_data_retention_settings_property:
+    title: Update data retention settings property
+    description: Updates the singleton data retention settings for this property.
+    category: properties
+    request:
+      method: PATCH
+      path: /v1beta/${name}
+      base_url_override: https://analyticsadmin.googleapis.com
+      query:
+        updateMask: ${update_mask}
+      body:
+        userDataRetention: ${user_data_retention}
+        name: ${body_name}
+        resetUserDataOnNewActivity: ${reset_user_data_on_new_activity}
+        eventDataRetention: ${event_data_retention}
+    input:
+      name:
+        type: string
+        description: 'Identifier. Resource name for this DataRetentionSetting resource. Format: properties/{property}/dataRetentionSettings'
+      update_mask:
+        type: string
+        description: Required. The list of fields to be updated. Field names must be in snake case (e.g.,
+          "field_to_update"). Omitted fields will not be updated. To replace the entire entity, use one
+          path with the string "*" to match all fields.
+        optional: true
+      user_data_retention:
+        type: string
+        description: Required. The length of time that user-level data is retained.
+        optional: true
+        enum:
+        - RETENTION_DURATION_UNSPECIFIED
+        - TWO_MONTHS
+        - FOURTEEN_MONTHS
+        - TWENTY_SIX_MONTHS
+        - THIRTY_EIGHT_MONTHS
+        - FIFTY_MONTHS
+      body_name:
+        type: string
+        description: 'Identifier. Resource name for this DataRetentionSetting resource. Format: properties/{property}/dataRetentionSettings'
+        optional: true
+      reset_user_data_on_new_activity:
+        type: boolean
+        description: If true, reset the retention period for the user identifier with every event from
+          that user.
+        optional: true
+      event_data_retention:
+        type: string
+        description: Required. The length of time that event-level data is retained.
+        optional: true
+        enum:
+        - RETENTION_DURATION_UNSPECIFIED
+        - TWO_MONTHS
+        - FOURTEEN_MONTHS
+        - TWENTY_SIX_MONTHS
+        - THIRTY_EIGHT_MONTHS
+        - FIFTY_MONTHS
+    output:
+      description: The GoogleAnalyticsAdminV1betaDataRetentionSettings resource.
+      type: object
+    scopes:
+    - analytics.edit

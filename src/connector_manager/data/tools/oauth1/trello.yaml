@@ -1,0 +1,473 @@
+# Trello tools.
+#
+# Trello authenticates with OAuth 1.0a request signing, which the connector
+# handles -- the tools only describe paths and arguments.
+#
+# The hierarchy is board -> list -> card. Ids are 24-character hex strings; a
+# board can also be addressed by the short link in its URL.
+#
+# Docs: https://developer.atlassian.com/cloud/trello/rest/
+
+connector_id: trello
+display_name: Trello
+docs_url: https://developer.atlassian.com/cloud/trello/rest/
+
+tools:
+
+  list_boards:
+    title: List the user's boards
+    description: >-
+      List the boards the authenticated member can see, with their ids and
+      names. Every other lookup starts from a board id.
+    category: boards
+    read_only: true
+    request:
+      method: GET
+      path: /1/members/me/boards
+      query:
+        filter: "${filter}"
+        fields: "${fields}"
+    input:
+      filter:
+        type: string
+        description: Which boards to include.
+        optional: true
+        default: open
+        enum: [all, closed, members, open, organization, public, starred]
+      fields:
+        type: array
+        description: Board fields to return, e.g. ["name","url","closed"].
+        optional: true
+        items: {type: string}
+    output:
+      description: The member's boards.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          name: {type: string}
+          url: {type: string}
+          closed: {type: boolean}
+
+  get_board:
+    title: Get a board
+    description: >-
+      Read one board's details, and optionally inline its lists, cards, labels
+      and members in the same call.
+    category: boards
+    read_only: true
+    request:
+      method: GET
+      path: /1/boards/${board_id}
+      query:
+        lists: "${lists}"
+        cards: "${cards}"
+        labels: "${labels}"
+        members: "${members}"
+    input:
+      board_id:
+        type: string
+        description: The board id, or the short link from its URL.
+      lists:
+        type: string
+        description: Inline the board's lists.
+        optional: true
+        enum: [all, closed, none, open]
+      cards:
+        type: string
+        description: Inline the board's cards.
+        optional: true
+        enum: [all, closed, none, open, visible]
+      labels:
+        type: string
+        description: Inline the board's labels.
+        optional: true
+        enum: [all, none]
+      members:
+        type: string
+        description: Inline the board's members.
+        optional: true
+        enum: [all, none, normal, admins, owners]
+    output:
+      description: The board.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        url: {type: string}
+        lists: {type: array}
+
+  list_board_lists:
+    title: List a board's lists
+    description: >-
+      List the columns on a board with their ids, which the card tools take as
+      idList.
+    category: lists
+    read_only: true
+    request:
+      method: GET
+      path: /1/boards/${board_id}/lists
+      query:
+        filter: "${filter}"
+        cards: "${cards}"
+    input:
+      board_id:
+        type: string
+        description: The board id.
+      filter:
+        type: string
+        description: Which lists to include.
+        optional: true
+        default: open
+        enum: [all, closed, none, open]
+      cards:
+        type: string
+        description: Inline each list's cards.
+        optional: true
+        enum: [all, closed, none, open]
+    output:
+      description: The board's lists.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          name: {type: string}
+          closed: {type: boolean}
+          pos: {type: number}
+
+  list_cards:
+    title: List a list's cards
+    description: Read the cards in one board column, with their names, labels and due dates.
+    category: cards
+    read_only: true
+    request:
+      method: GET
+      path: /1/lists/${list_id}/cards
+      query:
+        fields: "${fields}"
+        members: "${members}"
+    input:
+      list_id:
+        type: string
+        description: The list id, from list_board_lists.
+      fields:
+        type: array
+        description: Card fields to return, e.g. ["name","due","idMembers","labels"].
+        optional: true
+        items: {type: string}
+      members:
+        type: boolean
+        description: Inline each card's members.
+        optional: true
+    output:
+      description: The list's cards.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          name: {type: string}
+          desc: {type: string}
+          due: {type: string}
+          shortUrl: {type: string}
+
+  get_card:
+    title: Get a card
+    description: Read one card in full -- description, labels, members, due date and checklists.
+    category: cards
+    read_only: true
+    request:
+      method: GET
+      path: /1/cards/${card_id}
+      query:
+        checklists: "${checklists}"
+        members: "${members}"
+        attachments: "${attachments}"
+    input:
+      card_id:
+        type: string
+        description: The card id, or the short link from its URL.
+      checklists:
+        type: string
+        description: Inline the card's checklists.
+        optional: true
+        enum: [all, none]
+      members:
+        type: boolean
+        description: Inline the card's members.
+        optional: true
+      attachments:
+        type: boolean
+        description: Inline the card's attachments.
+        optional: true
+    output:
+      description: The card.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        desc: {type: string}
+        due: {type: string}
+        idList: {type: string}
+        shortUrl: {type: string}
+
+  create_card:
+    title: Create a card
+    description: >-
+      Add a card to a list. Position accepts "top", "bottom" or a number. Due
+      dates are ISO 8601 instants.
+    category: cards
+    request:
+      method: POST
+      path: /1/cards
+      query:
+        idList: "${list_id}"
+        name: "${name}"
+        desc: "${description}"
+        pos: "${position}"
+        due: "${due}"
+        idMembers: "${member_ids}"
+        idLabels: "${label_ids}"
+    input:
+      list_id:
+        type: string
+        description: The list to add the card to.
+      name:
+        type: string
+        description: The card's title.
+      description:
+        type: string
+        description: The card's description, in Markdown.
+        optional: true
+      position:
+        type: string
+        description: Where in the list to put it -- "top", "bottom" or a number.
+        optional: true
+      due:
+        type: string
+        description: Due date, ISO 8601.
+        optional: true
+      member_ids:
+        type: array
+        description: Member ids to assign.
+        optional: true
+        items: {type: string}
+      label_ids:
+        type: array
+        description: Label ids to apply.
+        optional: true
+        items: {type: string}
+    output:
+      description: The created card.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        shortUrl: {type: string}
+
+  update_card:
+    title: Update a card
+    description: >-
+      Change a card -- rename it, edit its description, move it to another list,
+      set a due date, or archive it by setting closed.
+    category: cards
+    request:
+      method: PUT
+      path: /1/cards/${card_id}
+      query:
+        name: "${name}"
+        desc: "${description}"
+        idList: "${list_id}"
+        pos: "${position}"
+        due: "${due}"
+        dueComplete: "${due_complete}"
+        closed: "${closed}"
+        idMembers: "${member_ids}"
+        idLabels: "${label_ids}"
+    input:
+      card_id:
+        type: string
+        description: The card id.
+      name:
+        type: string
+        description: New title.
+        optional: true
+      description:
+        type: string
+        description: New description.
+        optional: true
+      list_id:
+        type: string
+        description: List id to move the card to.
+        optional: true
+      position:
+        type: string
+        description: New position -- "top", "bottom" or a number.
+        optional: true
+      due:
+        type: string
+        description: New due date, ISO 8601.
+        optional: true
+      due_complete:
+        type: boolean
+        description: Mark the due date done.
+        optional: true
+      closed:
+        type: boolean
+        description: Archive the card, or restore it.
+        optional: true
+      member_ids:
+        type: array
+        description: Replaces the assigned members entirely.
+        optional: true
+        items: {type: string}
+      label_ids:
+        type: array
+        description: Replaces the applied labels entirely.
+        optional: true
+        items: {type: string}
+    output:
+      description: The updated card.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        idList: {type: string}
+
+  delete_card:
+    title: Delete a card
+    description: >-
+      Permanently delete a card. Archiving it with update_card's closed flag is
+      usually the safer choice, since a delete cannot be undone.
+    category: cards
+    destructive: true
+    request:
+      method: DELETE
+      path: /1/cards/${card_id}
+    input:
+      card_id:
+        type: string
+        description: The card to delete.
+    output:
+      description: An empty result on success.
+      type: object
+
+  comment_on_card:
+    title: Comment on a card
+    description: Add a comment to a card's activity feed, in Markdown.
+    category: cards
+    request:
+      method: POST
+      path: /1/cards/${card_id}/actions/comments
+      query:
+        text: "${text}"
+    input:
+      card_id:
+        type: string
+        description: The card id.
+      text:
+        type: string
+        description: The comment, in Markdown.
+    output:
+      description: The comment action.
+      type: object
+      properties:
+        id: {type: string}
+        data: {type: object}
+        date: {type: string}
+
+  search:
+    title: Search cards, boards and members
+    description: >-
+      Search Trello with its query syntax, e.g. "deploy board:Engineering",
+      "@me due:week", "label:red is:open".
+    category: search
+    read_only: true
+    request:
+      method: GET
+      path: /1/search
+      query:
+        query: "${query}"
+        modelTypes: "${model_types}"
+        cards_limit: "${limit}"
+        idBoards: "${board_ids}"
+    input:
+      query:
+        type: string
+        description: Trello search query.
+        example: "deploy board:Engineering"
+      model_types:
+        type: array
+        description: What to search, e.g. ["cards","boards","members"].
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: How many cards to return (1-1000).
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 1000
+      board_ids:
+        type: array
+        description: Only search these boards; "mine" searches the member's own.
+        optional: true
+        items: {type: string}
+    output:
+      description: The matches, grouped by type.
+      type: object
+      properties:
+        cards: {type: array}
+        boards: {type: array}
+        members: {type: array}
+
+  create_list:
+    title: Create a list on a board
+    description: Add a column to a board, at the top or the bottom.
+    category: lists
+    request:
+      method: POST
+      path: /1/lists
+      query:
+        name: "${name}"
+        idBoard: "${board_id}"
+        pos: "${position}"
+    input:
+      name:
+        type: string
+        description: The list's name.
+      board_id:
+        type: string
+        description: The board to add it to.
+      position:
+        type: string
+        description: Where to put it -- "top", "bottom" or a number.
+        optional: true
+    output:
+      description: The created list.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+
+  get_me:
+    title: Get the authenticated member
+    description: >-
+      Read the Trello member the token belongs to, with their id, username and
+      boards. The cheapest health check for a Trello connection.
+    category: members
+    read_only: true
+    request:
+      method: GET
+      path: /1/members/me
+    input: {}
+    output:
+      description: The authenticated member.
+      type: object
+      properties:
+        id: {type: string}
+        username: {type: string}
+        fullName: {type: string}
+        email: {type: string}

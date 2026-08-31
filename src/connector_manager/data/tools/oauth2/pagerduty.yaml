@@ -1,0 +1,603 @@
+# PagerDuty tools.
+#
+# Writes want a From header carrying the email address of a PagerDuty user, so
+# the action is attributed to a person -- that is the `from_email` argument.
+#
+# Triggering an alert uses the Events API on a different host, which
+# trigger_incident handles with a base_url_override and a routing key rather
+# than the OAuth token.
+#
+# Docs: https://developer.pagerduty.com/api-reference/
+
+connector_id: pagerduty
+display_name: PagerDuty
+docs_url: https://developer.pagerduty.com/api-reference/
+
+scope_rules:
+  implies:
+    incidents.write: [incidents.read]
+    services.write: [services.read]
+    schedules.write: [schedules.read]
+    users.write: [users.read]
+    oncalls.read: [schedules.read]
+
+tools:
+
+  list_incidents:
+    title: List incidents
+    description: >-
+      List incidents, filtered by status, service, urgency or date range.
+      Defaults to everything, so narrow it for anything but a quick look.
+    category: incidents
+    scopes: [incidents.read]
+    read_only: true
+    request:
+      method: GET
+      path: /incidents
+      query:
+        statuses[]: "${statuses}"
+        service_ids[]: "${service_ids}"
+        urgencies[]: "${urgencies}"
+        since: "${since}"
+        until: "${until}"
+        limit: "${limit}"
+        offset: "${offset}"
+        sort_by: "${sort_by}"
+    input:
+      statuses:
+        type: array
+        description: Only incidents in these states, e.g. ["triggered","acknowledged"].
+        optional: true
+        items: {type: string, enum: [triggered, acknowledged, resolved]}
+      service_ids:
+        type: array
+        description: Only incidents on these services.
+        optional: true
+        items: {type: string}
+      urgencies:
+        type: array
+        description: Only incidents at these urgencies.
+        optional: true
+        items: {type: string, enum: [high, low]}
+      since:
+        type: string
+        description: Only incidents created at or after this ISO 8601 instant.
+        optional: true
+      until:
+        type: string
+        description: Only incidents created at or before this ISO 8601 instant.
+        optional: true
+      limit:
+        type: integer
+        description: How many incidents per page (1-100).
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 100
+      offset:
+        type: integer
+        description: Zero-based index to start from.
+        optional: true
+        minimum: 0
+      sort_by:
+        type: string
+        description: Sort order, e.g. "created_at:desc".
+        optional: true
+    output:
+      description: A page of incidents.
+      type: object
+      properties:
+        incidents: {type: array, description: "Each with id, title, status and service."}
+        more: {type: boolean}
+
+  get_incident:
+    title: Get an incident
+    description: >-
+      Read one incident's status, urgency, assignees and the service it fired
+      on.
+    category: incidents
+    scopes: [incidents.read]
+    read_only: true
+    request:
+      method: GET
+      path: /incidents/${incident_id}
+    input:
+      incident_id:
+        type: string
+        description: The incident id, e.g. PABCDEF.
+    output:
+      description: The incident.
+      type: object
+      response_path: incident
+      properties:
+        id: {type: string}
+        title: "{type: string}"
+        status: {type: string}
+        urgency: {type: string}
+        assignments: {type: array}
+
+  create_incident:
+    title: Create an incident
+    description: >-
+      Raise an incident on a service through the REST API, which pages whoever
+      is on call. Use trigger_incident instead when you have an integration
+      routing key.
+    category: incidents
+    scopes: [incidents.write]
+    destructive: true
+    request:
+      method: POST
+      path: /incidents
+      headers:
+        From: "${from_email}"
+      body:
+        incident:
+          type: incident
+          title: "${title}"
+          service:
+            id: "${service_id}"
+            type: service_reference
+          urgency: "${urgency}"
+          body:
+            $when: "${details}"
+            type: incident_body
+            details: "${details}"
+          incident_key: "${incident_key}"
+          escalation_policy:
+            $when: "${escalation_policy_id}"
+            id: "${escalation_policy_id}"
+            type: escalation_policy_reference
+    input:
+      title:
+        type: string
+        description: What is wrong, shown as the incident's headline.
+      service_id:
+        type: string
+        description: Service the incident belongs to.
+      from_email:
+        type: string
+        description: Email of a PagerDuty user the action is attributed to.
+        format: email
+      urgency:
+        type: string
+        description: How urgently to page.
+        optional: true
+        enum: [high, low]
+      details:
+        type: string
+        description: Longer description of the problem.
+        optional: true
+      incident_key:
+        type: string
+        description: Your own key, so repeat calls deduplicate into one incident.
+        optional: true
+      escalation_policy_id:
+        type: string
+        description: Escalation policy to use instead of the service's default.
+        optional: true
+    output:
+      description: The created incident.
+      type: object
+      response_path: incident
+      properties:
+        id: {type: string}
+        incident_number: {type: integer}
+        html_url: {type: string}
+
+  update_incident_status:
+    title: Acknowledge or resolve an incident
+    description: >-
+      Move an incident to acknowledged or resolved, and optionally reassign it
+      or change its urgency.
+    category: incidents
+    scopes: [incidents.write]
+    request:
+      method: PUT
+      path: /incidents/${incident_id}
+      headers:
+        From: "${from_email}"
+      body:
+        incident:
+          type: incident_reference
+          status: "${status}"
+          urgency: "${urgency}"
+          resolution: "${resolution}"
+          escalation_level: "${escalation_level}"
+    input:
+      incident_id:
+        type: string
+        description: The incident id.
+      from_email:
+        type: string
+        description: Email of a PagerDuty user the action is attributed to.
+        format: email
+      status:
+        type: string
+        description: New status.
+        optional: true
+        enum: [acknowledged, resolved]
+      urgency:
+        type: string
+        description: New urgency.
+        optional: true
+        enum: [high, low]
+      resolution:
+        type: string
+        description: Note recorded when resolving.
+        optional: true
+      escalation_level:
+        type: integer
+        description: Escalate to this level of the policy.
+        optional: true
+        minimum: 1
+    output:
+      description: The updated incident.
+      type: object
+      response_path: incident
+      properties:
+        id: {type: string}
+        status: {type: string}
+
+  add_incident_note:
+    title: Add a note to an incident
+    description: Record a note on an incident's timeline, for responders to read.
+    category: incidents
+    scopes: [incidents.write]
+    request:
+      method: POST
+      path: /incidents/${incident_id}/notes
+      headers:
+        From: "${from_email}"
+      body:
+        note:
+          content: "${content}"
+    input:
+      incident_id:
+        type: string
+        description: The incident id.
+      content:
+        type: string
+        description: The note text.
+      from_email:
+        type: string
+        description: Email of a PagerDuty user the note is attributed to.
+        format: email
+    output:
+      description: The created note.
+      type: object
+      response_path: note
+      properties:
+        id: {type: string}
+        content: {type: string}
+        created_at: {type: string}
+
+  trigger_incident:
+    title: Trigger an alert through the Events API
+    description: >-
+      Fire an alert using an integration routing key rather than the REST API.
+      This is how monitoring systems page PagerDuty, and it needs no OAuth
+      scope — the routing key is the credential.
+    category: events
+    destructive: true
+    notes: Uses events.pagerduty.com with a routing key, not the connection's OAuth token.
+    request:
+      method: POST
+      base_url_override: https://events.pagerduty.com
+      path: /v2/enqueue
+      body:
+        routing_key: "${routing_key}"
+        event_action: "${event_action}"
+        dedup_key: "${dedup_key}"
+        payload:
+          summary: "${summary}"
+          source: "${source}"
+          severity: "${severity}"
+          component: "${component}"
+          group: "${group}"
+          class: "${event_class}"
+          custom_details: "${custom_details}"
+    input:
+      routing_key: 
+        type: string
+        description: Integration routing key from the service's Events API v2 integration.
+        secret: true
+      summary:
+        type: string
+        description: One-line description of what is wrong.
+      source:
+        type: string
+        description: Where the problem is, e.g. a hostname or service name.
+      severity:
+        type: string
+        description: How bad it is.
+        optional: true
+        default: error
+        enum: [critical, error, warning, info]
+      event_action:
+        type: string
+        description: Whether this opens, acknowledges or closes the alert.
+        optional: true
+        default: trigger
+        enum: [trigger, acknowledge, resolve]
+      dedup_key:
+        type: string
+        description: Key that groups repeat events into one alert. Required to resolve.
+        optional: true
+      component:
+        type: string
+        description: Which part of the source is affected.
+        optional: true
+      group:
+        type: string
+        description: Logical grouping for the alert.
+        optional: true
+      event_class:
+        type: string
+        description: The class of problem, e.g. "high cpu".
+        optional: true
+      custom_details:
+        type: object
+        description: Any extra data to show on the alert.
+        optional: true
+    output:
+      description: The accepted event.
+      type: object
+      properties:
+        status: {type: string}
+        dedup_key: {type: string, description: "Use this to acknowledge or resolve later."}
+        message: {type: string}
+
+  list_services:
+    title: List services
+    description: >-
+      List the account's services with their ids and escalation policies, which
+      create_incident needs.
+    category: services
+    scopes: [services.read]
+    read_only: true
+    request:
+      method: GET
+      path: /services
+      query:
+        query: "${query}"
+        limit: "${limit}"
+        offset: "${offset}"
+        include[]: "${include}"
+    input:
+      query:
+        type: string
+        description: Match against service names.
+        optional: true
+      limit:
+        type: integer
+        description: How many services per page (1-100).
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 100
+      offset:
+        type: integer
+        description: Zero-based index to start from.
+        optional: true
+        minimum: 0
+      include:
+        type: array
+        description: Related records to inline, e.g. ["escalation_policies"].
+        optional: true
+        items: {type: string}
+    output:
+      description: A page of services.
+      type: object
+      properties:
+        services: {type: array}
+        more: {type: boolean}
+
+  list_oncalls:
+    title: See who is on call
+    description: >-
+      List the current on-call assignments, optionally for particular schedules
+      or escalation policies. The fastest answer to "who do I page".
+    category: oncall
+    scopes: [oncalls.read]
+    read_only: true
+    request:
+      method: GET
+      path: /oncalls
+      query:
+        schedule_ids[]: "${schedule_ids}"
+        escalation_policy_ids[]: "${escalation_policy_ids}"
+        user_ids[]: "${user_ids}"
+        since: "${since}"
+        until: "${until}"
+        limit: "${limit}"
+        earliest: "${earliest}"
+    input:
+      schedule_ids:
+        type: array
+        description: Only these schedules.
+        optional: true
+        items: {type: string}
+      escalation_policy_ids:
+        type: array
+        description: Only these escalation policies.
+        optional: true
+        items: {type: string}
+      user_ids:
+        type: array
+        description: Only these users.
+        optional: true
+        items: {type: string}
+      since:
+        type: string
+        description: Start of the window, ISO 8601. Defaults to now.
+        optional: true
+      until:
+        type: string
+        description: End of the window, ISO 8601.
+        optional: true
+      limit:
+        type: integer
+        description: How many entries per page (1-100).
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 100
+      earliest:
+        type: boolean
+        description: Return only the earliest on-call entry per policy and level.
+        optional: true
+    output:
+      description: The on-call assignments.
+      type: object
+      properties:
+        oncalls: {type: array, description: "Each with user, schedule and escalation_level."}
+
+  list_schedules:
+    title: List on-call schedules
+    description: List the account's schedules with the ids the on-call tools take.
+    category: oncall
+    scopes: [schedules.read]
+    read_only: true
+    request:
+      method: GET
+      path: /schedules
+      query:
+        query: "${query}"
+        limit: "${limit}"
+        offset: "${offset}"
+    input:
+      query:
+        type: string
+        description: Match against schedule names.
+        optional: true
+      limit:
+        type: integer
+        description: How many schedules per page (1-100).
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 100
+      offset:
+        type: integer
+        description: Zero-based index to start from.
+        optional: true
+        minimum: 0
+    output:
+      description: A page of schedules.
+      type: object
+      properties:
+        schedules: {type: array}
+        more: {type: boolean}
+
+  create_schedule_override:
+    title: Cover someone's on-call shift
+    description: >-
+      Put a different user on call for a window, overriding the schedule. The
+      way to hand off a shift.
+    category: oncall
+    scopes: [schedules.write]
+    request:
+      method: POST
+      path: /schedules/${schedule_id}/overrides
+      headers:
+        From: "${from_email}"
+      body:
+        override:
+          start: "${start}"
+          end: "${end}"
+          user:
+            id: "${user_id}"
+            type: user_reference
+    input:
+      schedule_id:
+        type: string
+        description: The schedule to override.
+      user_id:
+        type: string
+        description: User who will take the shift.
+      start:
+        type: string
+        description: When the override starts, ISO 8601.
+      end:
+        type: string
+        description: When it ends, ISO 8601.
+      from_email:
+        type: string
+        description: Email of a PagerDuty user the action is attributed to.
+        optional: true
+        format: email
+    output:
+      description: The created override.
+      type: object
+      response_path: override
+      properties:
+        id: {type: string}
+        start: {type: string}
+        end: {type: string}
+
+  list_users:
+    title: List users
+    description: >-
+      List the account's users with their ids and email addresses, which the
+      assignment and From arguments take.
+    category: users
+    scopes: [users.read]
+    read_only: true
+    request:
+      method: GET
+      path: /users
+      query:
+        query: "${query}"
+        limit: "${limit}"
+        offset: "${offset}"
+        team_ids[]: "${team_ids}"
+    input:
+      query:
+        type: string
+        description: Match against names and email addresses.
+        optional: true
+      limit:
+        type: integer
+        description: How many users per page (1-100).
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 100
+      offset:
+        type: integer
+        description: Zero-based index to start from.
+        optional: true
+        minimum: 0
+      team_ids:
+        type: array
+        description: Only users on these teams.
+        optional: true
+        items: {type: string}
+    output:
+      description: A page of users.
+      type: object
+      properties:
+        users: {type: array}
+        more: {type: boolean}
+
+  get_current_user:
+    title: Get the authenticated user
+    description: >-
+      Read the PagerDuty user the token belongs to. The cheapest health check
+      for the connection, and it supplies the email the From header wants.
+    category: users
+    scopes: [users.read]
+    read_only: true
+    request:
+      method: GET
+      path: /users/me
+    input: {}
+    output:
+      description: The authenticated user.
+      type: object
+      response_path: user
+      properties:
+        id: {type: string}
+        name: {type: string}
+        email: {type: string}
+        role: {type: string}

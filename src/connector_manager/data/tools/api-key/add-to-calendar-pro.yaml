@@ -1,0 +1,2360 @@
+# Add to Calendar PRO tools.
+#
+# The whole documented REST API is here: event groups, events, styles, RSVP
+# templates, CTA templates, landing page templates, email templates, webhooks,
+# and the miscellaneous reads (ics bodies, custom domains, RSVP replies).
+#
+# The provider's own vocabulary, which the field names follow rather than
+# renaming:
+#
+#   * a **proKey** is the uuid of a group, an event or an RSVP reply, while
+#     styles, templates and webhooks are addressed by a numeric **id**;
+#   * a **style** is referenced everywhere else as `layout`;
+#   * events are created inside a group -- pass `event_group` for an existing
+#     one or `new_event_group_name` to have one made.
+#
+# Two provider limits worth knowing: a list read returns at most 800 items
+# (2,000 for RSVP replies), so `page` is how you get the rest, and every fifth
+# update to an event or a group costs one event credit.
+#
+# Docs: https://docs.add-to-calendar-pro.com/api/introduction
+
+connector_id: add-to-calendar-pro
+display_name: Add to Calendar PRO
+docs_url: https://docs.add-to-calendar-pro.com/api/introduction
+
+tools:
+
+  # -- event groups ----------------------------------------------------------
+
+  list_groups:
+    title: List event groups
+    description: >-
+      The ids of every event group in the workspace. Reads are capped at 800
+      items, so page through with `page` when there are more.
+    category: groups
+    read_only: true
+    request:
+      method: GET
+      path: /group/all
+      query:
+        page: "${page}"
+    input:
+      page:
+        type: integer
+        description: Which page of results to return, 800 groups per page. The first page is 1.
+        optional: true
+        minimum: 1
+    output:
+      description: The ids of the available event groups.
+      type: array
+      items: {type: object, description: "A group, identified by its prokey."}
+
+  get_latest_group:
+    title: Get the latest event group
+    description: >-
+      The most recently created event group. Useful straight after creating
+      one, or to check what a script last wrote.
+    category: groups
+    read_only: true
+    request:
+      method: GET
+      path: /group/latest
+    input: {}
+    output:
+      description: The newest event group.
+      type: object
+      properties:
+        prokey: {type: string}
+        name: {type: string}
+        status: {type: string}
+
+  get_group:
+    title: Get an event group
+    description: >-
+      One event group by proKey, with its name, publication status,
+      subscription settings, the style and CTA template attached to it, and the
+      proKeys of the events it holds.
+    category: groups
+    read_only: true
+    request:
+      method: GET
+      path: /group/${prokey}
+    input:
+      prokey:
+        type: string
+        description: The group's proKey (a uuid).
+        example: 99ec3e7f-ef04-bbbb-a3d7-e30736faaaaa
+    output:
+      description: The event group.
+      type: object
+      properties:
+        prokey: {type: string}
+        name: {type: string}
+        status: {type: string}
+        subscription: {type: string}
+        subscription_cal_url: {type: string}
+        layout: {type: string, description: "Id of the style attached to the group."}
+        landingpage: {type: string}
+        cta: {type: boolean}
+        cta_block: {type: string}
+        events: {type: array, description: "ProKeys of the events in this group."}
+
+  create_group:
+    title: Create an event group
+    description: >-
+      Create a group to hold events. Only the name is required, and it is
+      usually internal -- unless the group is published as a calendar
+      subscription, in which case it is public. Events cannot be added here;
+      link them when creating each event. Returns the new group's proKey.
+    category: groups
+    request:
+      method: POST
+      path: /group
+      body:
+        name: "${name}"
+        internal_note: "${internal_note}"
+        subscription: "${subscription}"
+        subscription_cal_url: "${subscription_cal_url}"
+        layout: "${layout}"
+        landingpage: "${landingpage}"
+        cta: "${cta}"
+        cta_block: "${cta_block}"
+    input:
+      name:
+        type: string
+        description: Name of the event group.
+        example: Autumn webinars
+      internal_note:
+        type: string
+        description: A private note on the group.
+        optional: true
+      subscription:
+        type: string
+        description: >-
+          Whether the group is offered as a calendar subscription. "external"
+          needs `subscription_cal_url`.
+        optional: true
+        enum: ["no", external]
+      subscription_cal_url:
+        type: string
+        description: URL of the external calendar to subscribe to. Must start with http and usually ends in .ics.
+        optional: true
+      layout:
+        type: string
+        description: Id of the style (layout) to render the group's buttons with.
+        optional: true
+      landingpage:
+        type: string
+        description: Id of the landing page template to use for the group.
+        optional: true
+      cta:
+        type: boolean
+        description: Whether a call to action is shown.
+        optional: true
+      cta_block:
+        type: string
+        description: Id of the CTA template to show. Set `cta` as well.
+        optional: true
+    output:
+      description: The created group's proKey.
+      type: object
+      properties:
+        status: {type: string}
+        message: {type: string}
+        prokey: {type: string, description: "Use this when creating events in the group."}
+
+  update_group:
+    title: Update an event group
+    description: >-
+      Change a group. Fields you send are updated, fields you omit stay as they
+      are, and a field sent as null is cleared. The subscription setting can
+      only change while the group has no events, and a group set to draft in
+      the web app cannot be published from here. Every fifth update costs one
+      event credit.
+    category: groups
+    request:
+      method: PATCH
+      path: /group/${prokey}
+      body:
+        name: "${name}"
+        internal_note: "${internal_note}"
+        subscription: "${subscription}"
+        subscription_cal_url: "${subscription_cal_url}"
+        layout: "${layout}"
+        landingpage: "${landingpage}"
+        cta: "${cta}"
+        cta_block: "${cta_block}"
+        status: "${status}"
+    input:
+      prokey:
+        type: string
+        description: The group's proKey.
+      name:
+        type: string
+        description: New name for the group.
+        optional: true
+      internal_note:
+        type: string
+        description: New private note.
+        optional: true
+      subscription:
+        type: string
+        description: New subscription setting. Only changeable while the group has no events.
+        optional: true
+        enum: ["no", external]
+      subscription_cal_url:
+        type: string
+        description: URL of the external calendar, for subscription "external".
+        optional: true
+      layout:
+        type: string
+        description: Id of the style (layout) to use.
+        optional: true
+      landingpage:
+        type: string
+        description: Id of the landing page template to use.
+        optional: true
+      cta:
+        type: boolean
+        description: Whether a call to action is shown.
+        optional: true
+      cta_block:
+        type: string
+        description: Id of the CTA template to show.
+        optional: true
+      status:
+        type: string
+        description: Publication status. A group drafted in the web app cannot be published here.
+        optional: true
+        enum: [published, draft]
+    output:
+      description: Confirmation of the update.
+      type: object
+      properties:
+        status: {type: string}
+        message: {type: string}
+
+  delete_group:
+    title: Delete an event group
+    description: >-
+      Delete a group and every event linked to it. There is no undo, so read
+      the group first if you are unsure how many events hang off it.
+    category: groups
+    destructive: true
+    request:
+      method: DELETE
+      path: /group/${prokey}
+    input:
+      prokey:
+        type: string
+        description: The group's proKey.
+    output:
+      description: Confirmation that the group was deleted.
+      type: object
+      properties:
+        status: {type: string}
+        message: {type: string}
+
+  # -- events ----------------------------------------------------------------
+
+  list_events:
+    title: List events
+    description: >-
+      The ids, proKeys and generated labels of the workspace's events, with
+      optional filtering by group and by time window. For a recurring or
+      multi-date event the filter uses the earliest start and the latest end
+      across its dates. Ask for `dates=true` to get each event's dates object
+      alongside.
+    category: events
+    read_only: true
+    request:
+      method: GET
+      path: /event/all
+      query:
+        from: "${from_datetime}"
+        to: "${to_datetime}"
+        group: "${group}"
+        dates: "${dates}"
+        page: "${page}"
+    input:
+      from_datetime:
+        type: string
+        description: >-
+          Keep events ending at or after this point. Either "now" or a UTC ISO
+          datetime without milliseconds.
+        optional: true
+        example: "2026-09-01T00:00:00Z"
+      to_datetime:
+        type: string
+        description: Keep events starting at or before this point. "now" or a UTC ISO datetime.
+        optional: true
+        example: "2026-12-31T23:59:59Z"
+      group:
+        type: string
+        description: Only events in this group, by group proKey.
+        optional: true
+      dates:
+        type: boolean
+        description: Include each event's dates object in the response.
+        optional: true
+      page:
+        type: integer
+        description: Which page of results to return, 800 events per page. The first page is 1.
+        optional: true
+        minimum: 1
+    output:
+      description: The available events.
+      type: array
+      items: {type: object, description: "An event's id, prokey, label and optionally its dates."}
+
+  get_latest_event:
+    title: Get the latest event
+    description: >-
+      The most recently created event -- its id, proKey and label, plus the
+      dates object when `dates` is set. Handy for confirming what a create call
+      just produced.
+    category: events
+    read_only: true
+    request:
+      method: GET
+      path: /event/latest
+      query:
+        dates: "${dates}"
+    input:
+      dates:
+        type: boolean
+        description: Include the event's dates object.
+        optional: true
+    output:
+      description: The newest event.
+      type: object
+      properties:
+        id: {type: string}
+        prokey: {type: string}
+        label: {type: string}
+        dates: {type: array}
+
+  get_event:
+    title: Get an event
+    description: >-
+      One event by proKey, with every date it holds, its recurrence settings,
+      the style, landing page, RSVP and CTA templates attached, and the group
+      it belongs to.
+    category: events
+    read_only: true
+    request:
+      method: GET
+      path: /event/${prokey}
+    input:
+      prokey:
+        type: string
+        description: The event's proKey (a uuid).
+    output:
+      description: The event.
+      type: object
+      properties:
+        prokey: {type: string}
+        status: {type: string}
+        dates: {type: array, description: "Each date with name, startDate, endDate, timeZone, location, organizer and description."}
+        title_event_series: {type: string}
+        recurrence: {type: string}
+        layout: {type: string}
+        landingpage: {type: string}
+        rsvp: {type: boolean}
+        rsvp_block: {type: string}
+        cta: {type: boolean}
+        cta_block: {type: string}
+        event_group: {type: string}
+
+  create_event:
+    title: Create an event
+    description: >-
+      Create an event inside a group. Each entry in `dates` is one occurrence,
+      so more than one entry makes a multi-date event -- which recurrence does
+      not allow. Events are always created published; the status cannot be set
+      here. The response's proKey addresses the auto-created landing page at
+      caldn.net and the generated ics file.
+    category: events
+    request:
+      method: POST
+      path: /event
+      body:
+        dates: "${dates}"
+        event_group: "${event_group}"
+        new_event_group_name: "${new_event_group_name}"
+        title_event_series: "${title_event_series}"
+        simplified_recurrence: "${simplified_recurrence}"
+        recurrence: "${recurrence}"
+        recurrence_simple_type: "${recurrence_simple_type}"
+        recurrence_interval: "${recurrence_interval}"
+        recurrence_byDay: "${recurrence_by_day}"
+        recurrence_byMonth: "${recurrence_by_month}"
+        recurrence_byMonthDay: "${recurrence_by_month_day}"
+        recurrence_count: "${recurrence_count}"
+        recurrence_weekstart: "${recurrence_weekstart}"
+        layout: "${layout}"
+        landingpage: "${landingpage}"
+        iCalFileName: "${ical_file_name}"
+        rsvp: "${rsvp}"
+        rsvp_block: "${rsvp_block}"
+        cta: "${cta}"
+        cta_block: "${cta_block}"
+        hideButton: "${hide_button}"
+        distribution: "${distribution}"
+    input:
+      dates:
+        type: array
+        description: >-
+          The event's occurrences. Each needs at least `name` and `startDate`
+          (YYYY-MM-DD), and should carry `timeZone`. `startTime`/`endTime` are
+          HH:MM, `status` is CONFIRMED, TENTATIVE or CANCELLED, `availability`
+          is free or busy, and `description` accepts simple HTML.
+        items:
+          type: object
+          properties:
+            name: {type: string}
+            startDate: {type: string}
+            startTime: {type: string}
+            endDate: {type: string}
+            endTime: {type: string}
+            timeZone: {type: string}
+            description: {type: string}
+            location: {type: string}
+            status: {type: string}
+            availability: {type: string}
+            organizer_name: {type: string}
+            organizer_email: {type: string}
+            attendee_name: {type: string}
+            attendee_email: {type: string}
+      event_group:
+        type: string
+        description: >-
+          ProKey of the group to put the event in. Send this or
+          `new_event_group_name`.
+        optional: true
+      new_event_group_name:
+        type: string
+        description: Name for a group to create and put the event in, instead of `event_group`.
+        optional: true
+      title_event_series:
+        type: string
+        description: Title for the series, used when the event has more than one date.
+        optional: true
+      simplified_recurrence:
+        type: boolean
+        description: >-
+          True to use the recurrence_* fields, false to use a raw RRULE in
+          `recurrence`.
+        optional: true
+      recurrence:
+        type: string
+        description: Recurrence as an RRULE, with `simplified_recurrence` false.
+        optional: true
+        example: RRULE:FREQ=WEEKLY;BYDAY=TU
+      recurrence_simple_type:
+        type: string
+        description: Repeat frequency, with `simplified_recurrence` true.
+        optional: true
+        enum: [daily, weekly, monthly, yearly]
+      recurrence_interval:
+        type: integer
+        description: Repeat every N periods of `recurrence_simple_type`.
+        optional: true
+        minimum: 1
+      recurrence_by_day:
+        type: string
+        description: Which weekdays to repeat on, e.g. "2MO,TU" for the second Monday and every Tuesday.
+        optional: true
+      recurrence_by_month:
+        type: string
+        description: Which months to repeat in, as numbers, e.g. "1,2,12".
+        optional: true
+      recurrence_by_month_day:
+        type: string
+        description: Which days of the month to repeat on, e.g. "3,23".
+        optional: true
+      recurrence_count:
+        type: integer
+        description: How many times the event repeats in total.
+        optional: true
+        minimum: 1
+      recurrence_weekstart:
+        type: string
+        description: Which day the week starts on, e.g. "MO".
+        optional: true
+      layout:
+        type: string
+        description: Id of the style (layout) to render the button with.
+        optional: true
+      landingpage:
+        type: string
+        description: Id of the landing page template to use.
+        optional: true
+      ical_file_name:
+        type: string
+        description: Override the generated ics file's name.
+        optional: true
+      rsvp:
+        type: boolean
+        description: Whether the event collects RSVP replies.
+        optional: true
+      rsvp_block:
+        type: string
+        description: Id of the RSVP template to use. Set `rsvp` as well.
+        optional: true
+      cta:
+        type: boolean
+        description: Whether a call to action is shown.
+        optional: true
+      cta_block:
+        type: string
+        description: Id of the CTA template to show. Set `cta` as well.
+        optional: true
+      hide_button:
+        type: boolean
+        description: Hide the Add to Calendar button itself.
+        optional: true
+      distribution:
+        type: boolean
+        description: Whether the event is distributed to Add to Calendar PRO's channels.
+        optional: true
+    output:
+      description: The created event's proKey.
+      type: object
+      properties:
+        status: {type: string}
+        message: {type: string}
+        prokey: {type: string, description: "Addresses the landing page at caldn.net/:prokey and the ics file."}
+
+  update_event:
+    title: Update an event
+    description: >-
+      Change an event. Fields you send are updated, omitted fields stay, and a
+      null clears a field. `event_group` cannot be changed. The `dates` array is
+      positional -- to edit the second date you must send at least one field for
+      the first -- and clearing every value of a date removes it. Every fifth
+      update costs one event credit.
+    category: events
+    request:
+      method: PATCH
+      path: /event/${prokey}
+      body:
+        dates: "${dates}"
+        title_event_series: "${title_event_series}"
+        simplified_recurrence: "${simplified_recurrence}"
+        recurrence: "${recurrence}"
+        recurrence_simple_type: "${recurrence_simple_type}"
+        recurrence_interval: "${recurrence_interval}"
+        recurrence_byDay: "${recurrence_by_day}"
+        recurrence_byMonth: "${recurrence_by_month}"
+        recurrence_byMonthDay: "${recurrence_by_month_day}"
+        recurrence_count: "${recurrence_count}"
+        recurrence_weekstart: "${recurrence_weekstart}"
+        layout: "${layout}"
+        landingpage: "${landingpage}"
+        iCalFileName: "${ical_file_name}"
+        rsvp: "${rsvp}"
+        rsvp_block: "${rsvp_block}"
+        cta: "${cta}"
+        cta_block: "${cta_block}"
+        hideButton: "${hide_button}"
+        distribution: "${distribution}"
+    input:
+      prokey:
+        type: string
+        description: The event's proKey.
+      dates:
+        type: array
+        description: >-
+          Replacement occurrences, in the same order as the event's existing
+          dates. Same shape as on create.
+        optional: true
+        items:
+          type: object
+          properties:
+            name: {type: string}
+            startDate: {type: string}
+            startTime: {type: string}
+            endDate: {type: string}
+            endTime: {type: string}
+            timeZone: {type: string}
+            description: {type: string}
+            location: {type: string}
+            status: {type: string}
+            availability: {type: string}
+            organizer_name: {type: string}
+            organizer_email: {type: string}
+      title_event_series:
+        type: string
+        description: New series title.
+        optional: true
+      simplified_recurrence:
+        type: boolean
+        description: Whether to read the recurrence_* fields rather than `recurrence`.
+        optional: true
+      recurrence:
+        type: string
+        description: New recurrence as an RRULE.
+        optional: true
+      recurrence_simple_type:
+        type: string
+        description: New repeat frequency.
+        optional: true
+        enum: [daily, weekly, monthly, yearly]
+      recurrence_interval:
+        type: integer
+        description: Repeat every N periods.
+        optional: true
+        minimum: 1
+      recurrence_by_day:
+        type: string
+        description: Which weekdays to repeat on.
+        optional: true
+      recurrence_by_month:
+        type: string
+        description: Which months to repeat in.
+        optional: true
+      recurrence_by_month_day:
+        type: string
+        description: Which days of the month to repeat on.
+        optional: true
+      recurrence_count:
+        type: integer
+        description: How many times the event repeats.
+        optional: true
+        minimum: 1
+      recurrence_weekstart:
+        type: string
+        description: Which day the week starts on.
+        optional: true
+      layout:
+        type: string
+        description: Id of the style (layout) to use.
+        optional: true
+      landingpage:
+        type: string
+        description: Id of the landing page template to use.
+        optional: true
+      ical_file_name:
+        type: string
+        description: New name for the generated ics file.
+        optional: true
+      rsvp:
+        type: boolean
+        description: Whether the event collects RSVP replies.
+        optional: true
+      rsvp_block:
+        type: string
+        description: Id of the RSVP template to use.
+        optional: true
+      cta:
+        type: boolean
+        description: Whether a call to action is shown.
+        optional: true
+      cta_block:
+        type: string
+        description: Id of the CTA template to show.
+        optional: true
+      hide_button:
+        type: boolean
+        description: Hide the Add to Calendar button itself.
+        optional: true
+      distribution:
+        type: boolean
+        description: Whether the event is distributed to Add to Calendar PRO's channels.
+        optional: true
+    output:
+      description: Confirmation of the update.
+      type: object
+      properties:
+        status: {type: string}
+        message: {type: string}
+
+  delete_event:
+    title: Delete an event
+    description: >-
+      Delete an event by proKey. There is no undo, and its landing page and ics
+      file stop working immediately.
+    category: events
+    destructive: true
+    request:
+      method: DELETE
+      path: /event/${prokey}
+    input:
+      prokey:
+        type: string
+        description: The event's proKey.
+    output:
+      description: Confirmation that the event was deleted.
+      type: object
+      properties:
+        status: {type: string}
+        message: {type: string}
+
+  # -- styles ----------------------------------------------------------------
+
+  list_styles:
+    title: List styles
+    description: >-
+      Every style (referenced elsewhere as `layout`) in the workspace. A style
+      holds the button appearance, the calendar options offered, and the
+      light/dark CSS overrides.
+    category: styles
+    read_only: true
+    request:
+      method: GET
+      path: /style/all
+      query:
+        page: "${page}"
+    input:
+      page:
+        type: integer
+        description: Which page of results to return, 800 styles per page. The first page is 1.
+        optional: true
+        minimum: 1
+    output:
+      description: The available styles.
+      type: array
+      items: {type: object, description: "A style, identified by its id."}
+
+  get_latest_style:
+    title: Get the latest style
+    description: The most recently created style, with all of its rendering settings.
+    category: styles
+    read_only: true
+    request:
+      method: GET
+      path: /style/latest
+    input: {}
+    output:
+      description: The newest style.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        options: {type: array}
+
+  get_style:
+    title: Get a style
+    description: >-
+      One style by id, with the calendar options it offers, its button style,
+      list behaviour, language, labels and colour overrides.
+    category: styles
+    read_only: true
+    request:
+      method: GET
+      path: /style/${id}
+    input:
+      id:
+        type: string
+        description: The style's id.
+    output:
+      description: The style.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        options: {type: array}
+        buttonStyle: {type: string}
+        listStyle: {type: string}
+        lightMode: {type: string}
+        language: {type: string}
+
+  create_style:
+    title: Create a style
+    description: >-
+      Create a style (a layout) for buttons and option lists. Name and
+      `options` are required -- `options` being which calendars are offered.
+      The id that comes back is what an event's or group's `layout` field takes.
+    category: styles
+    request:
+      method: POST
+      path: /style
+      body:
+        name: "${name}"
+        options: "${options}"
+        buttonStyle: "${button_style}"
+        customCss: "${custom_css}"
+        inline: "${inline}"
+        buttonsList: "${buttons_list}"
+        trigger: "${trigger}"
+        listStyle: "${list_style}"
+        hideBackground: "${hide_background}"
+        hideIconButton: "${hide_icon_button}"
+        hideIconList: "${hide_icon_list}"
+        hideTextLabelButton: "${hide_text_label_button}"
+        hideCheckmark: "${hide_checkmark}"
+        lightMode: "${light_mode}"
+        language: "${language}"
+        customLabels: "${custom_labels}"
+        hideRichData: "${hide_rich_data}"
+        identifier: "${identifier}"
+        hideBranding: "${hide_branding}"
+        inlineRsvp: "${inline_rsvp}"
+        pastDateHandling: "${past_date_handling}"
+        size: "${size}"
+        proxy: "${proxy}"
+        styleLight: "${style_light}"
+        styleDark: "${style_dark}"
+        optionsMobile: "${options_mobile}"
+        optionsIOS: "${options_ios}"
+    input:
+      name:
+        type: string
+        description: Internal name for the style.
+        example: Website buttons
+      options:
+        type: array
+        description: >-
+          Which calendars the button offers, in order. Values: apple, google,
+          ical, ms365, msteams, outlookcom, yahoo.
+        items: {type: string, enum: [apple, google, ical, ms365, msteams, outlookcom, yahoo]}
+      button_style:
+        type: string
+        description: Visual style of the button. "custom" requires `custom_css`.
+        optional: true
+        enum: [default, 3d, flat, round, neumorphism, text, date, custom]
+      custom_css:
+        type: string
+        description: URL of your own CSS file, used with button style "custom".
+        optional: true
+      inline:
+        type: boolean
+        description: Render the button inline instead of as a block.
+        optional: true
+      buttons_list:
+        type: boolean
+        description: Render each option as its own button rather than one button with a list.
+        optional: true
+      trigger:
+        type: string
+        description: How the options list opens.
+        optional: true
+        enum: [hover, click]
+      list_style:
+        type: string
+        description: How the options list is presented.
+        optional: true
+        enum: [dropdown, dropdown-static, dropup-static, overlay, modal]
+      hide_background:
+        type: boolean
+        description: Do not darken the page behind an opened list.
+        optional: true
+      hide_icon_button:
+        type: boolean
+        description: Hide the icon on the button.
+        optional: true
+      hide_icon_list:
+        type: boolean
+        description: Hide the icons in the options list.
+        optional: true
+      hide_text_label_button:
+        type: boolean
+        description: Hide the button's text label.
+        optional: true
+      hide_checkmark:
+        type: boolean
+        description: Hide the checkmark shown after an event is saved.
+        optional: true
+      light_mode:
+        type: string
+        description: Which theme the button follows.
+        optional: true
+        enum: [light, dark, system, bodyScheme]
+      language:
+        type: string
+        description: Two-letter language code for the button's labels, e.g. "en" or "de".
+        optional: true
+      custom_labels:
+        type: object
+        description: 'Label overrides, keyed by label name, e.g. {"modal.button.default": "hit this!"}.'
+        optional: true
+      hide_rich_data:
+        type: boolean
+        description: Do not emit structured data about the event.
+        optional: true
+      identifier:
+        type: string
+        description: Custom identifier used for click tracking.
+        optional: true
+      hide_branding:
+        type: boolean
+        description: Hide Add to Calendar PRO branding. Needs a plan above Hobby.
+        optional: true
+      inline_rsvp:
+        type: boolean
+        description: Render the RSVP form inline instead of in a modal.
+        optional: true
+      past_date_handling:
+        type: string
+        description: What to do with the button once the event is in the past.
+        optional: true
+        enum: [none, disable, hide]
+      size:
+        type: string
+        description: Button size, a number from 0 to 10 as a string.
+        optional: true
+      proxy:
+        type: boolean
+        description: >-
+          Route clicks through Add to Calendar PRO's proxy, which is what makes
+          click tracking and calendar pre-checks work.
+        optional: true
+      style_light:
+        type: object
+        description: 'CSS variable overrides for light mode, e.g. {"--base-font-size-l": "14px"}.'
+        optional: true
+      style_dark:
+        type: object
+        description: CSS variable overrides that apply only in dark mode.
+        optional: true
+      options_mobile:
+        type: array
+        description: Alternative calendar options for mobile devices.
+        optional: true
+        items: {type: string}
+      options_ios:
+        type: array
+        description: Alternative calendar options for iOS. When set, `options_mobile` covers Android only.
+        optional: true
+        items: {type: string}
+    output:
+      description: The created style's id.
+      type: object
+      properties:
+        status: {type: string}
+        message: {type: string}
+        id: {type: string}
+
+  update_style:
+    title: Update a style
+    description: >-
+      Change a style. Fields you send are updated, omitted fields stay as they
+      are, and a null clears one. Takes the same fields as creating a style.
+    category: styles
+    request:
+      method: PATCH
+      path: /style/${id}
+      body:
+        name: "${name}"
+        options: "${options}"
+        buttonStyle: "${button_style}"
+        customCss: "${custom_css}"
+        inline: "${inline}"
+        buttonsList: "${buttons_list}"
+        trigger: "${trigger}"
+        listStyle: "${list_style}"
+        hideBackground: "${hide_background}"
+        hideIconButton: "${hide_icon_button}"
+        hideTextLabelButton: "${hide_text_label_button}"
+        hideCheckmark: "${hide_checkmark}"
+        lightMode: "${light_mode}"
+        language: "${language}"
+        customLabels: "${custom_labels}"
+        hideRichData: "${hide_rich_data}"
+        identifier: "${identifier}"
+        hideBranding: "${hide_branding}"
+        inlineRsvp: "${inline_rsvp}"
+        pastDateHandling: "${past_date_handling}"
+        size: "${size}"
+        proxy: "${proxy}"
+        styleLight: "${style_light}"
+        styleDark: "${style_dark}"
+    input:
+      id:
+        type: string
+        description: The style's id.
+      name:
+        type: string
+        description: New internal name.
+        optional: true
+      options:
+        type: array
+        description: Which calendars the button offers.
+        optional: true
+        items: {type: string, enum: [apple, google, ical, ms365, msteams, outlookcom, yahoo]}
+      button_style:
+        type: string
+        description: Visual style of the button.
+        optional: true
+        enum: [default, 3d, flat, round, neumorphism, text, date, custom]
+      custom_css:
+        type: string
+        description: URL of your own CSS file.
+        optional: true
+      inline:
+        type: boolean
+        description: Render the button inline.
+        optional: true
+      buttons_list:
+        type: boolean
+        description: Render each option as its own button.
+        optional: true
+      trigger:
+        type: string
+        description: How the options list opens.
+        optional: true
+        enum: [hover, click]
+      list_style:
+        type: string
+        description: How the options list is presented.
+        optional: true
+        enum: [dropdown, dropdown-static, dropup-static, overlay, modal]
+      hide_background:
+        type: boolean
+        description: Do not darken the page behind an opened list.
+        optional: true
+      hide_icon_button:
+        type: boolean
+        description: Hide the icon on the button.
+        optional: true
+      hide_text_label_button:
+        type: boolean
+        description: Hide the button's text label.
+        optional: true
+      hide_checkmark:
+        type: boolean
+        description: Hide the post-save checkmark.
+        optional: true
+      light_mode:
+        type: string
+        description: Which theme the button follows.
+        optional: true
+        enum: [light, dark, system, bodyScheme]
+      language:
+        type: string
+        description: Two-letter language code for the labels.
+        optional: true
+      custom_labels:
+        type: object
+        description: Label overrides, keyed by label name.
+        optional: true
+      hide_rich_data:
+        type: boolean
+        description: Do not emit structured data.
+        optional: true
+      identifier:
+        type: string
+        description: Custom tracking identifier.
+        optional: true
+      hide_branding:
+        type: boolean
+        description: Hide Add to Calendar PRO branding.
+        optional: true
+      inline_rsvp:
+        type: boolean
+        description: Render the RSVP form inline.
+        optional: true
+      past_date_handling:
+        type: string
+        description: What to do with the button for past events.
+        optional: true
+        enum: [none, disable, hide]
+      size:
+        type: string
+        description: Button size, 0 to 10 as a string.
+        optional: true
+      proxy:
+        type: boolean
+        description: Route clicks through the tracking proxy.
+        optional: true
+      style_light:
+        type: object
+        description: CSS variable overrides for light mode.
+        optional: true
+      style_dark:
+        type: object
+        description: CSS variable overrides for dark mode.
+        optional: true
+    output:
+      description: Confirmation of the update.
+      type: object
+      properties:
+        status: {type: string}
+        message: {type: string}
+
+  delete_style:
+    title: Delete a style
+    description: >-
+      Delete a style. Events and groups referencing it fall back to the default
+      appearance, so check what uses it first.
+    category: styles
+    destructive: true
+    request:
+      method: DELETE
+      path: /style/${id}
+    input:
+      id:
+        type: string
+        description: The style's id.
+    output:
+      description: Confirmation that the style was deleted.
+      type: object
+      properties:
+        status: {type: string}
+        message: {type: string}
+
+  # -- RSVP templates --------------------------------------------------------
+
+  list_rsvp_templates:
+    title: List RSVP templates
+    description: >-
+      Every RSVP template (an "rsvp-block") in the workspace. A template holds
+      the seat limits, the form fields and the email templates used through the
+      RSVP journey.
+    category: rsvp-templates
+    read_only: true
+    request:
+      method: GET
+      path: /rsvp-block/all
+      query:
+        page: "${page}"
+    input:
+      page:
+        type: integer
+        description: Which page of results to return. The first page is 1.
+        optional: true
+        minimum: 1
+    output:
+      description: The available RSVP templates.
+      type: array
+      items: {type: object, description: "An RSVP template, identified by its id."}
+
+  get_latest_rsvp_template:
+    title: Get the latest RSVP template
+    description: The most recently created RSVP template, with its limits, fields and email settings.
+    category: rsvp-templates
+    read_only: true
+    request:
+      method: GET
+      path: /rsvp-block/latest
+    input: {}
+    output:
+      description: The newest RSVP template.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+
+  get_rsvp_template:
+    title: Get an RSVP template
+    description: >-
+      One RSVP template by id, with its seat limits, expiry, form fields and
+      the ids of the email templates it uses.
+    category: rsvp-templates
+    read_only: true
+    request:
+      method: GET
+      path: /rsvp-block/${id}
+    input:
+      id:
+        type: string
+        description: The RSVP template's id.
+    output:
+      description: The RSVP template.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        max: {type: integer}
+        maxpp: {type: integer}
+        expires: {type: string}
+        fields: {type: array}
+
+  create_rsvp_template:
+    title: Create an RSVP template
+    description: >-
+      Create an RSVP template to attach to events. Only the name is required.
+      `max` caps total seats and `maxpp` seats per sign-up; `doi` makes each
+      attendee confirm their email. The id that comes back is what an event's
+      `rsvp_block` takes.
+    category: rsvp-templates
+    request:
+      method: POST
+      path: /rsvp-block
+      body:
+        name: "${name}"
+        max: "${max}"
+        maxpp: "${maxpp}"
+        expires: "${expires}"
+        maybe_option: "${maybe_option}"
+        initial_confirmation: "${initial_confirmation}"
+        doi: "${doi}"
+        headline: "${headline}"
+        text: "${text}"
+        fields: "${fields}"
+        email_rsvp_doi: "${email_rsvp_doi}"
+        email_rsvp_thank_you: "${email_rsvp_thank_you}"
+        email_rsvp_signup_confirmation: "${email_rsvp_signup_confirmation}"
+        email_rsvp_change_confirmation: "${email_rsvp_change_confirmation}"
+        email_rsvp_event_update: "${email_rsvp_event_update}"
+        email_rsvp_magic_link: "${email_rsvp_magic_link}"
+        email_rsvp_second_signup: "${email_rsvp_second_signup}"
+    input:
+      name:
+        type: string
+        description: Internal name for the RSVP template.
+        example: Community meetup form
+      max:
+        type: integer
+        description: Total seats available. Unlimited when omitted.
+        optional: true
+        minimum: 1
+      maxpp:
+        type: integer
+        description: Seats one person may claim per sign-up. Defaults to 1.
+        optional: true
+        minimum: 1
+      expires:
+        type: string
+        description: When sign-ups close, as an ISO 8601 UTC datetime.
+        optional: true
+        example: "2026-12-31T14:29:01.000Z"
+      maybe_option:
+        type: boolean
+        description: Offer "maybe" alongside yes and no.
+        optional: true
+      initial_confirmation:
+        type: boolean
+        description: Treat every sign-up as confirmed straight away.
+        optional: true
+      doi:
+        type: boolean
+        description: Require double opt-in -- each attendee must confirm their email address.
+        optional: true
+      headline:
+        type: string
+        description: Headline shown above the form.
+        optional: true
+      text:
+        type: string
+        description: Intro text above the form. Accepts simple HTML.
+        optional: true
+      fields:
+        type: array
+        description: >-
+          Extra form fields. Each has a `type` (text, number, checkbox, radio,
+          label, hidden), a `name`, a `label`, and optionally `required`,
+          `placeholder` and `default`.
+        optional: true
+        items:
+          type: object
+          properties:
+            type: {type: string}
+            name: {type: string}
+            label: {type: string}
+            required: {type: boolean}
+            placeholder: {type: string}
+            default: {type: string}
+      email_rsvp_doi:
+        type: integer
+        description: Id of the email template used for the double opt-in email.
+        optional: true
+      email_rsvp_thank_you:
+        type: integer
+        description: Id of the thank-you email template.
+        optional: true
+      email_rsvp_signup_confirmation:
+        type: integer
+        description: Id of the sign-up confirmation email template.
+        optional: true
+      email_rsvp_change_confirmation:
+        type: integer
+        description: Id of the change confirmation email template.
+        optional: true
+      email_rsvp_event_update:
+        type: integer
+        description: Id of the event update email template.
+        optional: true
+      email_rsvp_magic_link:
+        type: integer
+        description: Id of the magic link email template.
+        optional: true
+      email_rsvp_second_signup:
+        type: integer
+        description: Id of the second sign-up email template.
+        optional: true
+    output:
+      description: The created RSVP template's id.
+      type: object
+      properties:
+        status: {type: string}
+        message: {type: string}
+        id: {type: string}
+
+  update_rsvp_template:
+    title: Update an RSVP template
+    description: >-
+      Change an RSVP template. Fields you send are updated, omitted fields stay
+      as they are, and a null clears one.
+    category: rsvp-templates
+    request:
+      method: PATCH
+      path: /rsvp-block/${id}
+      body:
+        name: "${name}"
+        max: "${max}"
+        maxpp: "${maxpp}"
+        expires: "${expires}"
+        maybe_option: "${maybe_option}"
+        initial_confirmation: "${initial_confirmation}"
+        doi: "${doi}"
+        headline: "${headline}"
+        text: "${text}"
+        fields: "${fields}"
+        email_rsvp_doi: "${email_rsvp_doi}"
+        email_rsvp_thank_you: "${email_rsvp_thank_you}"
+        email_rsvp_signup_confirmation: "${email_rsvp_signup_confirmation}"
+        email_rsvp_change_confirmation: "${email_rsvp_change_confirmation}"
+        email_rsvp_event_update: "${email_rsvp_event_update}"
+        email_rsvp_magic_link: "${email_rsvp_magic_link}"
+        email_rsvp_second_signup: "${email_rsvp_second_signup}"
+    input:
+      id:
+        type: string
+        description: The RSVP template's id.
+      name:
+        type: string
+        description: New internal name.
+        optional: true
+      max:
+        type: integer
+        description: Total seats available.
+        optional: true
+        minimum: 1
+      maxpp:
+        type: integer
+        description: Seats per sign-up.
+        optional: true
+        minimum: 1
+      expires:
+        type: string
+        description: When sign-ups close, as an ISO 8601 UTC datetime.
+        optional: true
+      maybe_option:
+        type: boolean
+        description: Offer "maybe" alongside yes and no.
+        optional: true
+      initial_confirmation:
+        type: boolean
+        description: Treat every sign-up as confirmed straight away.
+        optional: true
+      doi:
+        type: boolean
+        description: Require double opt-in on the email address.
+        optional: true
+      headline:
+        type: string
+        description: New headline above the form.
+        optional: true
+      text:
+        type: string
+        description: New intro text. Accepts simple HTML.
+        optional: true
+      fields:
+        type: array
+        description: Replacement form fields, same shape as on create.
+        optional: true
+        items:
+          type: object
+          properties:
+            type: {type: string}
+            name: {type: string}
+            label: {type: string}
+            required: {type: boolean}
+            placeholder: {type: string}
+            default: {type: string}
+      email_rsvp_doi:
+        type: integer
+        description: Id of the double opt-in email template.
+        optional: true
+      email_rsvp_thank_you:
+        type: integer
+        description: Id of the thank-you email template.
+        optional: true
+      email_rsvp_signup_confirmation:
+        type: integer
+        description: Id of the sign-up confirmation email template.
+        optional: true
+      email_rsvp_change_confirmation:
+        type: integer
+        description: Id of the change confirmation email template.
+        optional: true
+      email_rsvp_event_update:
+        type: integer
+        description: Id of the event update email template.
+        optional: true
+      email_rsvp_magic_link:
+        type: integer
+        description: Id of the magic link email template.
+        optional: true
+      email_rsvp_second_signup:
+        type: integer
+        description: Id of the second sign-up email template.
+        optional: true
+    output:
+      description: Confirmation of the update.
+      type: object
+      properties:
+        status: {type: string}
+        message: {type: string}
+
+  delete_rsvp_template:
+    title: Delete an RSVP template
+    description: >-
+      Delete an RSVP template. Events using it lose their form, so repoint them
+      first if they are still collecting replies.
+    category: rsvp-templates
+    destructive: true
+    request:
+      method: DELETE
+      path: /rsvp-block/${id}
+    input:
+      id:
+        type: string
+        description: The RSVP template's id.
+    output:
+      description: Confirmation that the template was deleted.
+      type: object
+      properties:
+        status: {type: string}
+        message: {type: string}
+
+  # -- CTA templates ---------------------------------------------------------
+
+  list_cta_templates:
+    title: List CTA templates
+    description: >-
+      Every call-to-action template (a "cta-block") in the workspace. A CTA is
+      what the modal offers after someone adds an event -- text, a link, a
+      share prompt or a form.
+    category: cta-templates
+    read_only: true
+    request:
+      method: GET
+      path: /cta-block/all
+      query:
+        page: "${page}"
+    input:
+      page:
+        type: integer
+        description: Which page of results to return. The first page is 1.
+        optional: true
+        minimum: 1
+    output:
+      description: The available CTA templates.
+      type: array
+      items: {type: object, description: "A CTA template, identified by its id."}
+
+  get_latest_cta_template:
+    title: Get the latest CTA template
+    description: The most recently created call-to-action template, with its type and content.
+    category: cta-templates
+    read_only: true
+    request:
+      method: GET
+      path: /cta-block/latest
+    input: {}
+    output:
+      description: The newest CTA template.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        type: {type: string}
+
+  get_cta_template:
+    title: Get a CTA template
+    description: >-
+      One CTA template by id, with its type, headline, text, form fields, target
+      URL and button label.
+    category: cta-templates
+    read_only: true
+    request:
+      method: GET
+      path: /cta-block/${id}
+    input:
+      id:
+        type: string
+        description: The CTA template's id.
+    output:
+      description: The CTA template.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        type: {type: string}
+        headline: {type: string}
+        url: {type: string}
+        fields: {type: array}
+
+  create_cta_template:
+    title: Create a CTA template
+    description: >-
+      Create a call-to-action template. Name and type are required: "link"
+      sends people to `url`, "form" posts the collected `fields` to `url`,
+      "share" offers sharing, "text" just shows a message. The id that comes
+      back is what an event's or group's `cta_block` takes.
+    category: cta-templates
+    request:
+      method: POST
+      path: /cta-block
+      body:
+        name: "${name}"
+        type: "${type}"
+        headline: "${headline}"
+        text: "${text}"
+        fields: "${fields}"
+        url: "${url}"
+        button_label: "${button_label}"
+    input:
+      name:
+        type: string
+        description: Internal name for the CTA template.
+        example: Newsletter prompt
+      type:
+        type: string
+        description: What the call to action does.
+        enum: [none, text, link, share, form]
+      headline:
+        type: string
+        description: Headline shown in the modal.
+        optional: true
+      text:
+        type: string
+        description: Intro text under the headline.
+        optional: true
+      fields:
+        type: array
+        description: >-
+          Form fields, for type "form". Each has a `type` (text, number,
+          checkbox, radio, label, hidden), a `name`, a `label`, and optionally
+          `required`, `placeholder` and `default`.
+        optional: true
+        items:
+          type: object
+          properties:
+            type: {type: string}
+            name: {type: string}
+            label: {type: string}
+            required: {type: boolean}
+            placeholder: {type: string}
+            default: {type: string}
+      url:
+        type: string
+        description: The link target, or the endpoint form data is sent to, depending on `type`.
+        optional: true
+      button_label:
+        type: string
+        description: Label on the call-to-action button.
+        optional: true
+    output:
+      description: The created CTA template's id.
+      type: object
+      properties:
+        status: {type: string}
+        message: {type: string}
+        id: {type: string}
+
+  update_cta_template:
+    title: Update a CTA template
+    description: >-
+      Change a call-to-action template. Fields you send are updated, omitted
+      fields stay as they are, and a null clears one.
+    category: cta-templates
+    request:
+      method: PATCH
+      path: /cta-block/${id}
+      body:
+        name: "${name}"
+        type: "${type}"
+        headline: "${headline}"
+        text: "${text}"
+        fields: "${fields}"
+        url: "${url}"
+        button_label: "${button_label}"
+    input:
+      id:
+        type: string
+        description: The CTA template's id.
+      name:
+        type: string
+        description: New internal name.
+        optional: true
+      type:
+        type: string
+        description: What the call to action does.
+        optional: true
+        enum: [none, text, link, share, form]
+      headline:
+        type: string
+        description: New headline.
+        optional: true
+      text:
+        type: string
+        description: New intro text.
+        optional: true
+      fields:
+        type: array
+        description: Replacement form fields, same shape as on create.
+        optional: true
+        items:
+          type: object
+          properties:
+            type: {type: string}
+            name: {type: string}
+            label: {type: string}
+            required: {type: boolean}
+            placeholder: {type: string}
+            default: {type: string}
+      url:
+        type: string
+        description: New link target or form endpoint.
+        optional: true
+      button_label:
+        type: string
+        description: New button label.
+        optional: true
+    output:
+      description: Confirmation of the update.
+      type: object
+      properties:
+        status: {type: string}
+        message: {type: string}
+
+  delete_cta_template:
+    title: Delete a CTA template
+    description: >-
+      Delete a call-to-action template. Events and groups pointing at it stop
+      showing a CTA.
+    category: cta-templates
+    destructive: true
+    request:
+      method: DELETE
+      path: /cta-block/${id}
+    input:
+      id:
+        type: string
+        description: The CTA template's id.
+    output:
+      description: Confirmation that the template was deleted.
+      type: object
+      properties:
+        status: {type: string}
+        message: {type: string}
+
+  # -- landing page templates ------------------------------------------------
+
+  list_landing_page_templates:
+    title: List landing page templates
+    description: >-
+      Every landing page template in the workspace. These style the hosted
+      event page at caldn.net, including its background, colours and meta tags.
+    category: landing-pages
+    read_only: true
+    request:
+      method: GET
+      path: /landingpage/all
+      query:
+        page: "${page}"
+    input:
+      page:
+        type: integer
+        description: Which page of results to return. The first page is 1.
+        optional: true
+        minimum: 1
+    output:
+      description: The available landing page templates.
+      type: array
+      items: {type: object, description: "A landing page template, identified by its id."}
+
+  get_latest_landing_page_template:
+    title: Get the latest landing page template
+    description: The most recently created landing page template, with its styling and meta settings.
+    category: landing-pages
+    read_only: true
+    request:
+      method: GET
+      path: /landingpage/latest
+    input: {}
+    output:
+      description: The newest landing page template.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+
+  get_landing_page_template:
+    title: Get a landing page template
+    description: >-
+      One landing page template by id, with its title, intro and legal text,
+      colours, background settings, meta overrides and custom domain.
+    category: landing-pages
+    read_only: true
+    request:
+      method: GET
+      path: /landingpage/${id}
+    input:
+      id:
+        type: string
+        description: The landing page template's id.
+    output:
+      description: The landing page template.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        title: {type: string}
+        highlight_color: {type: string}
+        background: {type: string}
+        custom_domain: {type: string}
+
+  create_landing_page_template:
+    title: Create a landing page template
+    description: >-
+      Create a landing page template for hosted event pages. Only the name is
+      required. Header and background images cannot be set through the API --
+      that is web-app only -- so `background` "image" or "preset" expects one
+      chosen there.
+    category: landing-pages
+    request:
+      method: POST
+      path: /landingpage
+      body:
+        name: "${name}"
+        title: "${title}"
+        intro: "${intro}"
+        legal: "${legal}"
+        highlight_color: "${highlight_color}"
+        background: "${background}"
+        gradient_direction: "${gradient_direction}"
+        background_color_1: "${background_color_1}"
+        background_color_2: "${background_color_2}"
+        image_repeat: "${image_repeat}"
+        meta_title_override: "${meta_title_override}"
+        meta_robots_override: "${meta_robots_override}"
+        meta_description_override: "${meta_description_override}"
+        custom_domain: "${custom_domain}"
+    input:
+      name:
+        type: string
+        description: Internal name for the template.
+        example: Dark event page
+      title:
+        type: string
+        description: Title shown on the page.
+        optional: true
+      intro:
+        type: string
+        description: Intro text above the event. Accepts HTML.
+        optional: true
+      legal:
+        type: string
+        description: Legal footer text. Accepts HTML.
+        optional: true
+      highlight_color:
+        type: string
+        description: Hex colour used for buttons and decorative elements.
+        optional: true
+        example: "#fcba03"
+      background:
+        type: string
+        description: How the page background is drawn.
+        optional: true
+        enum: [solid, gradient, image, preset]
+      gradient_direction:
+        type: string
+        description: Gradient direction, only with background "gradient".
+        optional: true
+        enum: [linear-t, linear-tr, linear-r, linear-br, radial]
+      background_color_1:
+        type: string
+        description: First background colour, as a hex code.
+        optional: true
+      background_color_2:
+        type: string
+        description: Second background colour, as a hex code. Only with background "gradient".
+        optional: true
+      image_repeat:
+        type: boolean
+        description: Repeat the background image rather than showing it fullscreen.
+        optional: true
+      meta_title_override:
+        type: string
+        description: Replaces the auto-generated meta title.
+        optional: true
+      meta_robots_override:
+        type: boolean
+        description: True to emit "norobots, noindex" for the page.
+        optional: true
+      meta_description_override:
+        type: string
+        description: Replaces the auto-generated meta description.
+        optional: true
+      custom_domain:
+        type: string
+        description: Id of a configured custom domain to serve the page from. `list_custom_domains` lists them.
+        optional: true
+    output:
+      description: The created landing page template's id.
+      type: object
+      properties:
+        status: {type: string}
+        message: {type: string}
+        id: {type: string}
+
+  update_landing_page_template:
+    title: Update a landing page template
+    description: >-
+      Change a landing page template. Fields you send are updated, omitted
+      fields stay as they are, and a null clears one. Images still cannot be
+      set through the API.
+    category: landing-pages
+    request:
+      method: PATCH
+      path: /landingpage/${id}
+      body:
+        name: "${name}"
+        title: "${title}"
+        intro: "${intro}"
+        legal: "${legal}"
+        highlight_color: "${highlight_color}"
+        background: "${background}"
+        gradient_direction: "${gradient_direction}"
+        background_color_1: "${background_color_1}"
+        background_color_2: "${background_color_2}"
+        image_repeat: "${image_repeat}"
+        meta_title_override: "${meta_title_override}"
+        meta_robots_override: "${meta_robots_override}"
+        meta_description_override: "${meta_description_override}"
+        custom_domain: "${custom_domain}"
+    input:
+      id:
+        type: string
+        description: The landing page template's id.
+      name:
+        type: string
+        description: New internal name.
+        optional: true
+      title:
+        type: string
+        description: New page title.
+        optional: true
+      intro:
+        type: string
+        description: New intro text. Accepts HTML.
+        optional: true
+      legal:
+        type: string
+        description: New legal footer text. Accepts HTML.
+        optional: true
+      highlight_color:
+        type: string
+        description: New highlight colour, as a hex code.
+        optional: true
+      background:
+        type: string
+        description: How the page background is drawn.
+        optional: true
+        enum: [solid, gradient, image, preset]
+      gradient_direction:
+        type: string
+        description: Gradient direction, only with background "gradient".
+        optional: true
+        enum: [linear-t, linear-tr, linear-r, linear-br, radial]
+      background_color_1:
+        type: string
+        description: First background colour, as a hex code.
+        optional: true
+      background_color_2:
+        type: string
+        description: Second background colour, as a hex code.
+        optional: true
+      image_repeat:
+        type: boolean
+        description: Repeat the background image rather than showing it fullscreen.
+        optional: true
+      meta_title_override:
+        type: string
+        description: Replaces the auto-generated meta title.
+        optional: true
+      meta_robots_override:
+        type: boolean
+        description: True to emit "norobots, noindex".
+        optional: true
+      meta_description_override:
+        type: string
+        description: Replaces the auto-generated meta description.
+        optional: true
+      custom_domain:
+        type: string
+        description: Id of a configured custom domain.
+        optional: true
+    output:
+      description: Confirmation of the update.
+      type: object
+      properties:
+        status: {type: string}
+        message: {type: string}
+
+  delete_landing_page_template:
+    title: Delete a landing page template
+    description: >-
+      Delete a landing page template. Events and groups using it fall back to
+      the standard page.
+    category: landing-pages
+    destructive: true
+    request:
+      method: DELETE
+      path: /landingpage/${id}
+    input:
+      id:
+        type: string
+        description: The landing page template's id.
+    output:
+      description: Confirmation that the template was deleted.
+      type: object
+      properties:
+        status: {type: string}
+        message: {type: string}
+
+  # -- email templates -------------------------------------------------------
+
+  list_email_templates:
+    title: List email templates
+    description: >-
+      The ids, names and types of every email template in the workspace. These
+      ids are what an RSVP template's email_rsvp_* fields take. Email templates
+      are read-only over the API -- they are authored in the web app.
+    category: email-templates
+    read_only: true
+    request:
+      method: GET
+      path: /email-template/all
+      query:
+        page: "${page}"
+    input:
+      page:
+        type: integer
+        description: Which page of results to return. The first page is 1.
+        optional: true
+        minimum: 1
+    output:
+      description: The available email templates.
+      type: array
+      items: {type: object, description: "An email template's id, name and type."}
+
+  list_email_templates_by_type:
+    title: List email templates of one type
+    description: >-
+      The email templates for one stage of the RSVP journey -- the double
+      opt-in mail, the thank-you, the sign-up or change confirmation, an event
+      update, the magic link, or a second sign-up.
+    category: email-templates
+    read_only: true
+    request:
+      method: GET
+      path: /email-template/${type}
+    input:
+      type:
+        type: string
+        description: Which stage of the RSVP journey to list templates for.
+        enum:
+          - rsvp_doi
+          - rsvp_thank_you
+          - rsvp_signup_confirmation
+          - rsvp_change_confirmation
+          - rsvp_event_update
+          - rsvp_magic_link
+          - rsvp_second_signup
+    output:
+      description: The email templates of that type.
+      type: array
+      items: {type: object, description: "An email template's id and name."}
+
+  get_latest_email_template:
+    title: Get the latest email template
+    description: The most recently created email template, with its id, name and type.
+    category: email-templates
+    read_only: true
+    request:
+      method: GET
+      path: /email-template/latest
+    input: {}
+    output:
+      description: The newest email template.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        type: {type: string}
+
+  # -- webhooks --------------------------------------------------------------
+
+  list_webhooks:
+    title: List webhooks
+    description: >-
+      Every webhook in the workspace, with what it fires on and where it posts.
+    category: webhooks
+    read_only: true
+    request:
+      method: GET
+      path: /webhook/all
+      query:
+        page: "${page}"
+    input:
+      page:
+        type: integer
+        description: Which page of results to return. The first page is 1.
+        optional: true
+        minimum: 1
+    output:
+      description: The configured webhooks.
+      type: array
+      items: {type: object, description: "A webhook, identified by its id."}
+
+  get_latest_webhook:
+    title: Get the latest webhook
+    description: The most recently created webhook, with its trigger, target URL and headers.
+    category: webhooks
+    read_only: true
+    request:
+      method: GET
+      path: /webhook/latest
+    input: {}
+    output:
+      description: The newest webhook.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        payload_url: {type: string}
+
+  get_webhook:
+    title: Get a webhook
+    description: >-
+      One webhook by id, with whether it is active, the method and URL it
+      posts to, what it triggers on, and any extra headers and body fields.
+    category: webhooks
+    read_only: true
+    request:
+      method: GET
+      path: /webhook/${id}
+    input:
+      id:
+        type: string
+        description: The webhook's id.
+    output:
+      description: The webhook.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        active: {type: boolean}
+        method: {type: string}
+        payload_url: {type: string}
+        trigger: {type: string}
+        trigger_element: {type: string}
+        prokey_filter: {type: string}
+
+  create_webhook:
+    title: Create a webhook
+    description: >-
+      Register a webhook. Everything except `prokey_filter`, `header` and
+      `body` is required. By default the whole trigger element is sent as JSON
+      under `element_data`; supplying `body` replaces that with your own
+      fields, where {{field}} interpolates values from the element.
+    category: webhooks
+    request:
+      method: POST
+      path: /webhook
+      body:
+        name: "${name}"
+        active: "${active}"
+        method: "${method}"
+        payload_url: "${payload_url}"
+        trigger: "${trigger}"
+        trigger_element: "${trigger_element}"
+        prokey_filter: "${prokey_filter}"
+        header: "${header}"
+        body: "${body}"
+    input:
+      name:
+        type: string
+        description: Internal name for the webhook.
+        example: RSVP to CRM
+      active:
+        type: boolean
+        description: Whether the webhook fires. A false webhook is configured but dormant.
+      method:
+        type: string
+        description: HTTP method used when calling your endpoint.
+        enum: [GET, POST, PUT, PATCH, DELETE]
+      payload_url:
+        type: string
+        description: The endpoint Add to Calendar PRO sends the data to.
+        example: https://hooks.example.com/atc
+      trigger:
+        type: string
+        description: Which change fires the webhook.
+        enum: [create, update, delete]
+      trigger_element:
+        type: string
+        description: Which kind of object the trigger watches.
+        enum: [rsvp_answer, event, event_group, style, rsvp_template, cta_template, landingpage_template]
+      prokey_filter:
+        type: string
+        description: For RSVP answers, only fire for this event's proKey.
+        optional: true
+      header:
+        type: array
+        description: 'Extra request headers, each as {"key": ..., "value": ...} -- usually an auth token.'
+        optional: true
+        items:
+          type: object
+          properties:
+            key: {type: string}
+            value: {type: string}
+      body:
+        type: array
+        description: >-
+          Extra body fields, each as {"key": ..., "value": ...}. Values may
+          interpolate element fields with double curly brackets.
+        optional: true
+        items:
+          type: object
+          properties:
+            key: {type: string}
+            value: {type: string}
+    output:
+      description: The created webhook's id.
+      type: object
+      properties:
+        status: {type: string}
+        message: {type: string}
+        id: {type: string}
+
+  update_webhook:
+    title: Update a webhook
+    description: >-
+      Change a webhook. Fields you send are updated, omitted fields stay as
+      they are, and a null clears one -- so setting `active` false is how you
+      pause one without deleting it.
+    category: webhooks
+    request:
+      method: PATCH
+      path: /webhook/${id}
+      body:
+        name: "${name}"
+        active: "${active}"
+        method: "${method}"
+        payload_url: "${payload_url}"
+        trigger: "${trigger}"
+        trigger_element: "${trigger_element}"
+        prokey_filter: "${prokey_filter}"
+        header: "${header}"
+        body: "${body}"
+    input:
+      id:
+        type: string
+        description: The webhook's id.
+      name:
+        type: string
+        description: New internal name.
+        optional: true
+      active:
+        type: boolean
+        description: Whether the webhook fires.
+        optional: true
+      method:
+        type: string
+        description: HTTP method used when calling your endpoint.
+        optional: true
+        enum: [GET, POST, PUT, PATCH, DELETE]
+      payload_url:
+        type: string
+        description: New endpoint to send the data to.
+        optional: true
+      trigger:
+        type: string
+        description: Which change fires the webhook.
+        optional: true
+        enum: [create, update, delete]
+      trigger_element:
+        type: string
+        description: Which kind of object the trigger watches.
+        optional: true
+        enum: [rsvp_answer, event, event_group, style, rsvp_template, cta_template, landingpage_template]
+      prokey_filter:
+        type: string
+        description: For RSVP answers, only fire for this event's proKey.
+        optional: true
+      header:
+        type: array
+        description: 'Replacement extra headers, each as {"key": ..., "value": ...}.'
+        optional: true
+        items:
+          type: object
+          properties:
+            key: {type: string}
+            value: {type: string}
+      body:
+        type: array
+        description: 'Replacement extra body fields, each as {"key": ..., "value": ...}.'
+        optional: true
+        items:
+          type: object
+          properties:
+            key: {type: string}
+            value: {type: string}
+    output:
+      description: Confirmation of the update.
+      type: object
+      properties:
+        status: {type: string}
+        message: {type: string}
+
+  delete_webhook:
+    title: Delete a webhook
+    description: >-
+      Delete a webhook. It stops firing immediately, so anything downstream
+      that depends on it goes quiet -- set `active` false instead if you only
+      want to pause it.
+    category: webhooks
+    destructive: true
+    request:
+      method: DELETE
+      path: /webhook/${id}
+    input:
+      id:
+        type: string
+        description: The webhook's id.
+    output:
+      description: Confirmation that the webhook was deleted.
+      type: object
+      properties:
+        status: {type: string}
+        message: {type: string}
+
+  # -- RSVP replies and other reads ------------------------------------------
+
+  list_rsvp_replies:
+    title: List RSVP replies for an event
+    description: >-
+      Every RSVP reply for one event: the respondent's email, their status,
+      how many seats they claimed and the answers they gave to the form's
+      fields. Reads are capped at 2,000 replies, so page through with `page`.
+    category: rsvp-replies
+    read_only: true
+    request:
+      method: GET
+      path: /rsvp-answers/${prokey}
+      query:
+        page: "${page}"
+    input:
+      prokey:
+        type: string
+        description: The event's proKey.
+      page:
+        type: integer
+        description: Which page of replies to return, 2,000 per page. The first page is 1.
+        optional: true
+        minimum: 1
+    output:
+      description: The RSVP replies for the event.
+      type: array
+      items:
+        type: object
+        description: A reply with id, status, email, amount, payload and timestamps.
+
+  get_latest_rsvp_reply_for_event:
+    title: Get the latest RSVP reply for an event
+    description: >-
+      The most recent RSVP reply for one event -- the cheapest way to poll a
+      single event for new sign-ups.
+    category: rsvp-replies
+    read_only: true
+    request:
+      method: GET
+      path: /rsvp-answers/${prokey}/latest
+    input:
+      prokey:
+        type: string
+        description: The event's proKey.
+    output:
+      description: The newest reply for that event.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string}
+        email: {type: string}
+        amount: {type: integer}
+        payload: {type: object}
+
+  get_latest_rsvp_reply:
+    title: Get the latest RSVP reply overall
+    description: >-
+      The most recent RSVP reply across every event in the workspace, for
+      polling the whole account rather than one event.
+    category: rsvp-replies
+    read_only: true
+    request:
+      method: GET
+      path: /rsvp-answers/latest
+    input: {}
+    output:
+      description: The newest reply in the workspace.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string}
+        email: {type: string}
+        prokey: {type: string}
+        payload: {type: object}
+
+  get_ics_body:
+    title: Get an event's ics file body
+    description: >-
+      The raw iCalendar body for an event, so you can serve the file yourself
+      rather than linking to the hosted copy. Set `response_type` to "object"
+      to get the event name and the hosted ics URLs alongside the body -- and
+      note that a multi-date event with an organizer yields several entries.
+    category: ics
+    read_only: true
+    request:
+      method: GET
+      path: /ics/${prokey}
+      query:
+        responseType: "${response_type}"
+    input:
+      prokey:
+        type: string
+        description: The event's proKey.
+      response_type:
+        type: string
+        description: Set to "object" to get names and hosted file URLs alongside each ics body.
+        optional: true
+        enum: [object]
+    output:
+      description: The ics body, or an object per file when `response_type` is "object".
+      type: array
+      items: {type: object, description: "Either a raw ics string, or {name, icsFile, icsBody}."}
+
+  list_custom_domains:
+    title: List custom domains
+    description: >-
+      The custom domains configured for hosted landing pages, plus the global
+      default. Their ids are what a landing page template's `custom_domain`
+      takes.
+    category: settings
+    read_only: true
+    request:
+      method: GET
+      path: /custom-domains
+    input: {}
+    output:
+      description: The configured custom domains and the default one.
+      type: object
+      properties:
+        domains: {type: array, description: "Each with an id and a hostname."}

@@ -1,0 +1,1341 @@
+# Acuity Scheduling tools.
+#
+# Every endpoint Acuity's v1 API documents is here -- 33 of them -- so this is
+# the whole surface rather than a slice.
+#
+# Acuity's OAuth grant is a single blanket scope (`api-v1`), which the
+# catalogue already requests, so no tool declares scopes of its own.
+#
+# Three habits of this API shape the tools below:
+#
+#   * dates and datetimes are parsed by PHP's strtotime in the business (or
+#     calendar) timezone, so "2026-09-15", "2026-09-15T14:00:00-0800" and
+#     "next monday" are all accepted, and a bare date carries no offset;
+#   * writes act "as a client" by default -- availability rules, cancellation
+#     windows and attribute validation all apply. `admin` true is what turns
+#     that off, and it is also what unlocks the `notes`, `certificate` and
+#     `no_show` fields;
+#   * `no_email` true suppresses the confirmation, update and cancellation
+#     emails Acuity would otherwise send the client.
+#
+# Clients are keyed by name plus phone rather than by an id, which is why
+# update_client and delete_client take those in the query string.
+#
+# Docs: https://developers.acuityscheduling.com/reference/quick-start
+
+connector_id: acuity-scheduling
+display_name: Acuity Scheduling
+docs_url: https://developers.acuityscheduling.com/reference/quick-start
+
+tools:
+
+  # -- account ---------------------------------------------------------------
+
+  get_account:
+    title: Get account information
+    description: >-
+      Basic information about the authenticated Acuity account -- its id,
+      business name, email, timezone and currency. The timezone matters: it is
+      the one every unqualified datetime in this API is read in.
+    category: account
+    read_only: true
+    request:
+      method: GET
+      path: /me
+    input: {}
+    output:
+      description: The account.
+      type: object
+      properties:
+        id: {type: integer}
+        firstName: {type: string}
+        lastName: {type: string}
+        email: {type: string}
+        businessName: {type: string}
+        timezone: {type: string}
+        currency: {type: string}
+        plan: {type: string}
+
+  get_meta:
+    title: Get service metadata
+    description: >-
+      Metadata for Acuity's own services, such as the timezones and locales the
+      API accepts. Read this rather than hard-coding lists.
+    category: account
+    read_only: true
+    request:
+      method: GET
+      path: /meta
+    input: {}
+    output:
+      description: Service metadata.
+      type: object
+      properties:
+        timezones: {type: array}
+
+  # -- appointments ----------------------------------------------------------
+
+  list_appointments:
+    title: List appointments
+    description: >-
+      The account's scheduled appointments, newest first. Filter by date range,
+      calendar, appointment type or the client's name, email or phone. Canceled
+      appointments are excluded unless `canceled` is true, and `exclude_forms`
+      makes the response markedly smaller by dropping intake form answers.
+    category: appointments
+    read_only: true
+    request:
+      method: GET
+      path: /appointments
+      query:
+        max: "${max}"
+        minDate: "${min_date}"
+        maxDate: "${max_date}"
+        calendarID: "${calendar_id}"
+        appointmentTypeID: "${appointment_type_id}"
+        canceled: "${canceled}"
+        firstName: "${first_name}"
+        lastName: "${last_name}"
+        email: "${email}"
+        phone: "${phone}"
+        excludeForms: "${exclude_forms}"
+        direction: "${direction}"
+    input:
+      max:
+        type: integer
+        description: How many appointments to return.
+        optional: true
+        default: 100
+        minimum: 1
+      min_date:
+        type: string
+        description: Only appointments on or after this date.
+        optional: true
+        example: "2026-09-01"
+      max_date:
+        type: string
+        description: Only appointments on or before this date.
+        optional: true
+        example: "2026-09-30"
+      calendar_id:
+        type: integer
+        description: Only appointments on this calendar.
+        optional: true
+      appointment_type_id:
+        type: integer
+        description: Only appointments of this type.
+        optional: true
+      canceled:
+        type: boolean
+        description: Return canceled appointments instead of active ones.
+        optional: true
+      first_name:
+        type: string
+        description: Only appointments whose client has this first name.
+        optional: true
+      last_name:
+        type: string
+        description: Only appointments whose client has this last name.
+        optional: true
+      email:
+        type: string
+        description: Only appointments whose client has this email address.
+        optional: true
+      phone:
+        type: string
+        description: >-
+          Only appointments whose client has this phone number. A leading "+"
+          must be percent-encoded for the match to work.
+        optional: true
+      exclude_forms:
+        type: boolean
+        description: Leave intake form answers out of the response, which speeds it up.
+        optional: true
+      direction:
+        type: string
+        description: Sort order by appointment time.
+        optional: true
+        default: DESC
+        enum: [ASC, DESC]
+    output:
+      description: The matching appointments.
+      type: array
+      items:
+        type: object
+        description: An appointment with id, datetime, duration, client details, calendar, type, price and forms.
+
+  get_appointment:
+    title: Get an appointment
+    description: >-
+      One appointment by id, with its time, duration, client, calendar,
+      appointment type, price, labels and intake form answers. Ask for
+      `past_form_answers` to see what the client answered on earlier visits.
+    category: appointments
+    read_only: true
+    request:
+      method: GET
+      path: /appointments/${id}
+      query:
+        pastFormAnswers: "${past_form_answers}"
+    input:
+      id:
+        type: integer
+        description: The appointment's id.
+      past_form_answers:
+        type: boolean
+        description: Include the client's previous answers to this appointment's intake forms.
+        optional: true
+    output:
+      description: The appointment.
+      type: object
+      properties:
+        id: {type: integer}
+        datetime: {type: string}
+        endTime: {type: string}
+        duration: {type: string}
+        firstName: {type: string}
+        lastName: {type: string}
+        email: {type: string}
+        phone: {type: string}
+        calendarID: {type: integer}
+        appointmentTypeID: {type: integer}
+        price: {type: string}
+        canceled: {type: boolean}
+        forms: {type: array}
+
+  create_appointment:
+    title: Book an appointment
+    description: >-
+      Book an appointment. Acuity validates the slot against real availability
+      unless `admin` is true -- which also requires `calendar_id` and is what
+      lets you set `notes`. Leave `calendar_id` out as a client booking and
+      Acuity picks an available calendar. Use `check_times` first if you want
+      to confirm the slot before writing.
+    category: appointments
+    request:
+      method: POST
+      path: /appointments
+      query:
+        admin: "${admin}"
+        noEmail: "${no_email}"
+      body:
+        datetime: "${datetime}"
+        appointmentTypeID: "${appointment_type_id}"
+        calendarID: "${calendar_id}"
+        firstName: "${first_name}"
+        lastName: "${last_name}"
+        email: "${email}"
+        phone: "${phone}"
+        timezone: "${timezone}"
+        certificate: "${certificate}"
+        fields: "${fields}"
+        notes: "${notes}"
+        addonIDs: "${addon_ids}"
+        labels: "${labels}"
+        smsOptIn: "${sms_opt_in}"
+    input:
+      datetime:
+        type: string
+        description: >-
+          When the appointment starts. Parsed by strtotime in the business or
+          calendar timezone, so an offset makes it unambiguous.
+        example: 2026-09-15T14:00:00-0800
+      appointment_type_id:
+        type: integer
+        description: Which appointment type is being booked. `list_appointment_types` lists them.
+      first_name:
+        type: string
+        description: The client's first name.
+      last_name:
+        type: string
+        description: The client's last name.
+      email:
+        type: string
+        description: The client's email address. Optional only when booking as an admin.
+        format: email
+      calendar_id:
+        type: integer
+        description: >-
+          Which calendar to book on. Required when `admin` is true; otherwise
+          Acuity finds an available one.
+        optional: true
+      phone:
+        type: string
+        description: The client's phone number. Account settings may make this mandatory.
+        optional: true
+      timezone:
+        type: string
+        description: The client's timezone, as a long id such as America/New_York.
+        optional: true
+      certificate:
+        type: string
+        description: Package or coupon certificate code to apply to the booking.
+        optional: true
+      fields:
+        type: array
+        description: >-
+          Intake form answers, each {"id": <field id>, "value": "..."}.
+          `list_forms` gives the field ids.
+        optional: true
+        items:
+          type: object
+          properties:
+            id: {type: integer}
+            value: {type: string}
+      notes:
+        type: string
+        description: Internal notes on the appointment. Only settable with `admin` true.
+        optional: true
+      addon_ids:
+        type: array
+        description: >-
+          Ids of add-ons to include. They must be associated with the
+          appointment type.
+        optional: true
+        items: {type: integer}
+      labels:
+        type: array
+        description: >-
+          A label to attach, as [{"id": <label id>}]. Acuity accepts an array
+          of length 1 only.
+        optional: true
+        items:
+          type: object
+          properties:
+            id: {type: integer}
+      sms_opt_in:
+        type: boolean
+        description: >-
+          Whether the client explicitly agreed to receive SMS. Only meaningful
+          for appointment types with SMS reminders.
+        optional: true
+      admin:
+        type: boolean
+        description: >-
+          Book as an admin: skips availability and attribute validation, and
+          allows `notes`. Requires `calendar_id`.
+        optional: true
+      no_email:
+        type: boolean
+        description: Do not send the client the confirmation email.
+        optional: true
+    output:
+      description: The appointment that was booked.
+      type: object
+      properties:
+        id: {type: integer}
+        datetime: {type: string}
+        calendarID: {type: integer}
+        appointmentTypeID: {type: integer}
+        confirmationPage: {type: string}
+
+  update_appointment:
+    title: Update an appointment
+    description: >-
+      Change an appointment's client details, intake form answers or labels --
+      the white-list of updatable attributes. Names cannot be removed, and
+      `notes` and `certificate` need `admin` true. Moving an appointment in
+      time is `reschedule_appointment`, not this.
+    category: appointments
+    request:
+      method: PUT
+      path: /appointments/${id}
+      query:
+        admin: "${admin}"
+        noEmail: "${no_email}"
+      body:
+        firstName: "${first_name}"
+        lastName: "${last_name}"
+        email: "${email}"
+        phone: "${phone}"
+        certificate: "${certificate}"
+        fields: "${fields}"
+        notes: "${notes}"
+        labels: "${labels}"
+        smsOptIn: "${sms_opt_in}"
+    input:
+      id:
+        type: integer
+        description: The appointment's id.
+      first_name:
+        type: string
+        description: New first name for the client. Cannot be cleared.
+        optional: true
+      last_name:
+        type: string
+        description: New last name for the client. Cannot be cleared.
+        optional: true
+      email:
+        type: string
+        description: New email address. Cannot be cleared except as an admin.
+        optional: true
+        format: email
+      phone:
+        type: string
+        description: New phone number. Whether it can be cleared depends on account settings.
+        optional: true
+      certificate:
+        type: string
+        description: Package or coupon certificate code. Only settable with `admin` true.
+        optional: true
+      fields:
+        type: array
+        description: 'Intake form answers to set, each {"id": <field id>, "value": "..."}.'
+        optional: true
+        items:
+          type: object
+          properties:
+            id: {type: integer}
+            value: {type: string}
+      notes:
+        type: string
+        description: Internal notes. Only settable with `admin` true.
+        optional: true
+      labels:
+        type: array
+        description: 'A label to attach, as [{"id": <label id>}]. Array of length 1 only.'
+        optional: true
+        items:
+          type: object
+          properties:
+            id: {type: integer}
+      sms_opt_in:
+        type: boolean
+        description: Whether the client agreed to receive SMS.
+        optional: true
+      admin:
+        type: boolean
+        description: Update as an admin, which skips attribute validation and allows notes and certificate.
+        optional: true
+      no_email:
+        type: boolean
+        description: Do not send the client the update email.
+        optional: true
+    output:
+      description: The updated appointment.
+      type: object
+      properties:
+        id: {type: integer}
+        datetime: {type: string}
+        firstName: {type: string}
+        lastName: {type: string}
+
+  reschedule_appointment:
+    title: Reschedule an appointment
+    description: >-
+      Move an appointment to a new time, and optionally to another calendar.
+      Availability is validated unless `admin` is true. Keeping the appointment
+      on its calendar means omitting `calendar_id`.
+    category: appointments
+    request:
+      method: PUT
+      path: /appointments/${id}/reschedule
+      query:
+        admin: "${admin}"
+        noEmail: "${no_email}"
+      body:
+        datetime: "${datetime}"
+        calendarID: "${calendar_id}"
+        timezone: "${timezone}"
+    input:
+      id:
+        type: integer
+        description: The appointment's id.
+      datetime:
+        type: string
+        description: The new start time, parsed by strtotime in the business timezone.
+        example: 2026-09-16T11:00:00-0800
+      calendar_id:
+        type: integer
+        description: Calendar to move the appointment to. Omit to keep it where it is.
+        optional: true
+      timezone:
+        type: string
+        description: The client's timezone, as a long id such as Europe/Berlin.
+        optional: true
+      admin:
+        type: boolean
+        description: Reschedule as an admin, which disables availability validation.
+        optional: true
+      no_email:
+        type: boolean
+        description: Do not send the client the reschedule email.
+        optional: true
+    output:
+      description: The rescheduled appointment.
+      type: object
+      properties:
+        id: {type: integer}
+        datetime: {type: string}
+        calendarID: {type: integer}
+
+  cancel_appointment:
+    title: Cancel an appointment
+    description: >-
+      Cancel an appointment. Client cancellation rules apply unless `admin` is
+      true, which is also what allows marking it a no-show. The appointment is
+      not deleted -- it comes back from `list_appointments` with `canceled`
+      true -- but the slot is released and the client is emailed unless
+      `no_email` is set.
+    category: appointments
+    destructive: true
+    request:
+      method: PUT
+      path: /appointments/${id}/cancel
+      query:
+        admin: "${admin}"
+        noEmail: "${no_email}"
+      body:
+        cancelNote: "${cancel_note}"
+        noShow: "${no_show}"
+    input:
+      id:
+        type: integer
+        description: The appointment's id.
+      cancel_note:
+        type: string
+        description: A message included in the cancellation notification.
+        optional: true
+      no_show:
+        type: boolean
+        description: Record the appointment as a no-show. Only settable with `admin` true.
+        optional: true
+      admin:
+        type: boolean
+        description: Cancel as an admin, which ignores cancellation rules and allows `no_show`.
+        optional: true
+      no_email:
+        type: boolean
+        description: Do not send the client the cancellation email.
+        optional: true
+    output:
+      description: The canceled appointment.
+      type: object
+      properties:
+        id: {type: integer}
+        canceled: {type: boolean}
+        noShow: {type: boolean}
+
+  list_appointment_payments:
+    title: List an appointment's payments
+    description: >-
+      The payment transactions recorded against one appointment, with their
+      amount, processor and status -- how to tell a deposit from a full payment.
+    category: payments
+    read_only: true
+    request:
+      method: GET
+      path: /appointments/${id}/payments
+    input:
+      id:
+        type: integer
+        description: The appointment's id.
+    output:
+      description: The appointment's payment transactions.
+      type: array
+      items:
+        type: object
+        description: A transaction with id, amount, processor, transactionID and created timestamp.
+
+  # -- catalogue -------------------------------------------------------------
+
+  list_appointment_types:
+    title: List appointment types
+    description: >-
+      The services on offer -- their ids, names, durations, prices, category,
+      whether they are classes, and which calendars they are offered on. The
+      ids here are what booking and availability calls take.
+    category: catalogue
+    read_only: true
+    request:
+      method: GET
+      path: /appointment-types
+      query:
+        includeDeleted: "${include_deleted}"
+    input:
+      include_deleted:
+        type: boolean
+        description: Also return appointment types that have been deleted.
+        optional: true
+    output:
+      description: The account's appointment types.
+      type: array
+      items:
+        type: object
+        description: An appointment type with id, name, duration, price, category, class flag and calendarIDs.
+
+  list_appointment_addons:
+    title: List appointment add-ons
+    description: >-
+      The add-ons configured on the account, with their ids, names, prices and
+      extra durations. An add-on can only be booked on the appointment types it
+      is associated with.
+    category: catalogue
+    read_only: true
+    request:
+      method: GET
+      path: /appointment-addons
+    input: {}
+    output:
+      description: The account's appointment add-ons.
+      type: array
+      items:
+        type: object
+        description: An add-on with id, name, price, duration and the appointment types it applies to.
+
+  list_calendars:
+    title: List calendars
+    description: >-
+      The calendars (staff members, rooms or resources) appointments can be
+      booked on, with their ids, names, emails, timezones and locations.
+    category: catalogue
+    read_only: true
+    request:
+      method: GET
+      path: /calendars
+    input: {}
+    output:
+      description: The account's calendars.
+      type: array
+      items:
+        type: object
+        description: A calendar with id, name, email, replyTo, description, location and timezone.
+
+  list_forms:
+    title: List intake forms
+    description: >-
+      The intake forms and their fields, with each field's id, type, options
+      and whether it is required. Those field ids are what the `fields`
+      argument of a booking or update takes.
+    category: catalogue
+    read_only: true
+    request:
+      method: GET
+      path: /forms
+    input: {}
+    output:
+      description: The account's intake forms.
+      type: array
+      items:
+        type: object
+        description: A form with id, name, appointmentTypeIDs and its fields.
+
+  list_labels:
+    title: List labels
+    description: >-
+      The labels available for tagging appointments, with their ids and
+      colours. A label is attached by id when booking or updating.
+    category: catalogue
+    read_only: true
+    request:
+      method: GET
+      path: /labels
+    input: {}
+    output:
+      description: The account's labels.
+      type: array
+      items:
+        type: object
+        description: A label with id, name and color.
+
+  list_products:
+    title: List products and packages
+    description: >-
+      The store's products and packages -- ids, names, prices and descriptions.
+      Package ids are what `create_certificate` turns into a redeemable code.
+    category: catalogue
+    read_only: true
+    request:
+      method: GET
+      path: /products
+      query:
+        deleted: "${deleted}"
+    input:
+      deleted:
+        type: boolean
+        description: Return deleted products instead of live ones.
+        optional: true
+    output:
+      description: The account's products and packages.
+      type: array
+      items:
+        type: object
+        description: A product with id, name, description, price and type.
+
+  # -- availability ----------------------------------------------------------
+
+  get_availability_dates:
+    title: Get available dates in a month
+    description: >-
+      Which dates in a month have any availability for an appointment type.
+      This is the first of Acuity's two-step availability lookup: get the
+      dates, then get the times for one of them.
+    category: availability
+    read_only: true
+    request:
+      method: GET
+      path: /availability/dates
+      query:
+        month: "${month}"
+        appointmentTypeID: "${appointment_type_id}"
+        calendarID: "${calendar_id}"
+        timezone: "${timezone}"
+    input:
+      month:
+        type: string
+        description: The month to check, e.g. "2026-09". Parsed by strtotime.
+        example: "2026-09"
+      appointment_type_id:
+        type: integer
+        description: Which appointment type to check availability for.
+      calendar_id:
+        type: integer
+        description: >-
+          Only this calendar. By default every calendar the appointment type is
+          offered on is considered.
+        optional: true
+      timezone:
+        type: string
+        description: Timezone to express the dates in, as a long id such as America/New_York.
+        optional: true
+    output:
+      description: The dates with availability.
+      type: array
+      items:
+        type: object
+        description: 'A date with availability, as {"date": "2026-09-15"}.'
+
+  get_availability_times:
+    title: Get available times on a date
+    description: >-
+      The bookable start times on one date for an appointment type. Add-ons
+      change the duration and therefore the slots, so pass `addon_ids` if the
+      booking will include them, and pass the appointment's own id in
+      `ignore_appointment_ids` when checking times for a reschedule so its
+      current slot is not treated as busy.
+    category: availability
+    read_only: true
+    request:
+      method: GET
+      path: /availability/times
+      query:
+        date: "${date}"
+        appointmentTypeID: "${appointment_type_id}"
+        calendarID: "${calendar_id}"
+        addonIDs[]: "${addon_ids}"
+        timezone: "${timezone}"
+        ignoreAppointmentIDs[]: "${ignore_appointment_ids}"
+    input:
+      date:
+        type: string
+        description: The date to check, e.g. "2026-09-15". Parsed by strtotime.
+        example: "2026-09-15"
+      appointment_type_id:
+        type: integer
+        description: Which appointment type to check availability for.
+      calendar_id:
+        type: integer
+        description: Only this calendar. By default every eligible calendar is considered.
+        optional: true
+      addon_ids:
+        type: array
+        description: Add-ons that will be booked, since they change the slot length.
+        optional: true
+        items: {type: integer}
+      timezone:
+        type: string
+        description: Timezone to express the times in, as a long id.
+        optional: true
+      ignore_appointment_ids:
+        type: array
+        description: >-
+          Appointments to treat as free, which is what makes overlapping slots
+          appear when rescheduling.
+        optional: true
+        items: {type: integer}
+    output:
+      description: The bookable start times.
+      type: array
+      items:
+        type: object
+        description: 'A slot, as {"time": "2026-09-15T14:00:00-0800", "slotsAvailable": 1}.'
+
+  get_availability_classes:
+    title: Get available classes
+    description: >-
+      Group classes with availability, for a month or a date range. `month`
+      overrides `min_date` and `max_date` when both are given. Classes that are
+      full or private are hidden unless you ask for them.
+    category: availability
+    read_only: true
+    request:
+      method: GET
+      path: /availability/classes
+      query:
+        month: "${month}"
+        appointmentTypeID: "${appointment_type_id}"
+        calendarID: "${calendar_id}"
+        timezone: "${timezone}"
+        minDate: "${min_date}"
+        maxDate: "${max_date}"
+        includeUnavailable: "${include_unavailable}"
+        includePrivate: "${include_private}"
+    input:
+      month:
+        type: string
+        description: Month to check, e.g. "2026-09". Overrides `min_date` and `max_date`.
+        optional: true
+      appointment_type_id:
+        type: integer
+        description: Only this class appointment type. By default all class types are returned.
+        optional: true
+      calendar_id:
+        type: integer
+        description: Only classes on this calendar.
+        optional: true
+      timezone:
+        type: string
+        description: Timezone to express the class times in, as a long id.
+        optional: true
+      min_date:
+        type: string
+        description: Earliest date to return classes for.
+        optional: true
+      max_date:
+        type: string
+        description: Latest date to return classes for.
+        optional: true
+      include_unavailable:
+        type: boolean
+        description: Also return classes that are no longer available, e.g. full ones.
+        optional: true
+      include_private:
+        type: boolean
+        description: Also return classes marked private.
+        optional: true
+    output:
+      description: The classes and their availability.
+      type: array
+      items:
+        type: object
+        description: A class occurrence with time, calendar, appointment type and slots available.
+
+  check_times:
+    title: Validate an appointment time
+    description: >-
+      Ask Acuity whether a specific time is bookable for an appointment type
+      before you try to book it -- the cheap way to avoid a failed create for a
+      slot that has just gone. Omit `calendar_id` to let Acuity check every
+      eligible calendar.
+    category: availability
+    read_only: true
+    request:
+      method: POST
+      path: /availability/check-times
+      body:
+        datetime: "${datetime}"
+        appointmentTypeID: "${appointment_type_id}"
+        calendarID: "${calendar_id}"
+    input:
+      datetime:
+        type: string
+        description: The time to validate, parsed by strtotime in the business timezone.
+        example: 2026-09-15T14:00:00-0800
+      appointment_type_id:
+        type: integer
+        description: Which appointment type the time is being checked for.
+      calendar_id:
+        type: integer
+        description: Only check this calendar. By default any available calendar counts.
+        optional: true
+    output:
+      description: Whether the time is valid, and why not when it is not.
+      type: object
+      properties:
+        valid: {type: boolean}
+        error: {type: string}
+        message: {type: string}
+
+  # -- blocked time ----------------------------------------------------------
+
+  list_blocks:
+    title: List blocked-off time
+    description: >-
+      The blocks of time marked unavailable on the account's calendars, newest
+      first. Filter by date range or calendar.
+    category: blocks
+    read_only: true
+    request:
+      method: GET
+      path: /blocks
+      query:
+        max: "${max}"
+        minDate: "${min_date}"
+        maxDate: "${max_date}"
+        calendarID: "${calendar_id}"
+    input:
+      max:
+        type: integer
+        description: How many blocks to return.
+        optional: true
+        default: 100
+        minimum: 1
+      min_date:
+        type: string
+        description: Only blocks on or after this date, as YYYY-MM-DD.
+        optional: true
+      max_date:
+        type: string
+        description: Only blocks on or before this date, as YYYY-MM-DD.
+        optional: true
+      calendar_id:
+        type: integer
+        description: Only blocks on this calendar.
+        optional: true
+    output:
+      description: The blocked-off periods.
+      type: array
+      items:
+        type: object
+        description: A block with id, start, end, calendarID and notes.
+
+  get_block:
+    title: Get a blocked-off period
+    description: >-
+      One block of unavailable time by id, with its start, end, calendar and
+      notes.
+    category: blocks
+    read_only: true
+    request:
+      method: GET
+      path: /blocks/${id}
+    input:
+      id:
+        type: integer
+        description: The block's id.
+    output:
+      description: The block.
+      type: object
+      properties:
+        id: {type: integer}
+        start: {type: string}
+        end: {type: string}
+        calendarID: {type: integer}
+        notes: {type: string}
+
+  create_block:
+    title: Block off time
+    description: >-
+      Mark a period unavailable on one calendar, so nothing can be booked into
+      it. Start and end are parsed by strtotime, and the calendar is required
+      -- a block always belongs to exactly one.
+    category: blocks
+    request:
+      method: POST
+      path: /blocks
+      body:
+        start: "${start}"
+        end: "${end}"
+        calendarID: "${calendar_id}"
+        notes: "${notes}"
+    input:
+      start:
+        type: string
+        description: When the blocked period begins, parsed by strtotime.
+        example: 2026-09-15T09:00:00-0800
+      end:
+        type: string
+        description: When the blocked period ends, parsed by strtotime.
+        example: 2026-09-15T12:00:00-0800
+      calendar_id:
+        type: integer
+        description: Which calendar to block time on.
+      notes:
+        type: string
+        description: A note explaining the block, shown internally.
+        optional: true
+    output:
+      description: The block that was created.
+      type: object
+      properties:
+        id: {type: integer}
+        start: {type: string}
+        end: {type: string}
+        calendarID: {type: integer}
+
+  delete_block:
+    title: Delete a blocked-off period
+    description: >-
+      Remove a block, making that time bookable again. Existing appointments
+      are untouched -- this only lifts the hold.
+    category: blocks
+    destructive: true
+    request:
+      method: DELETE
+      path: /blocks/${id}
+    input:
+      id:
+        type: integer
+        description: The block's id.
+    output:
+      description: Confirmation that the block was deleted.
+      type: object
+      properties:
+        status: {type: string}
+
+  # -- clients ---------------------------------------------------------------
+
+  list_clients:
+    title: List clients
+    description: >-
+      The account's client list. `search` matches first name, last name or
+      phone number. Acuity keys clients by name plus phone rather than by an
+      id, which is why updating or deleting one takes those fields.
+    category: clients
+    read_only: true
+    request:
+      method: GET
+      path: /clients
+      query:
+        search: "${search}"
+    input:
+      search:
+        type: string
+        description: Filter clients by first name, last name or phone number.
+        optional: true
+    output:
+      description: The matching clients.
+      type: array
+      items:
+        type: object
+        description: A client with firstName, lastName, phone, email and notes.
+
+  create_client:
+    title: Create a client
+    description: >-
+      Add a client to the account's list without booking anything. First and
+      last name are required; the pair plus the phone number is what identifies
+      the client later.
+    category: clients
+    request:
+      method: POST
+      path: /clients
+      body:
+        firstName: "${first_name}"
+        lastName: "${last_name}"
+        phone: "${phone}"
+        email: "${email}"
+        notes: "${notes}"
+    input:
+      first_name:
+        type: string
+        description: The client's first name.
+      last_name:
+        type: string
+        description: The client's last name.
+      phone:
+        type: string
+        description: The client's phone number.
+        optional: true
+      email:
+        type: string
+        description: The client's email address.
+        optional: true
+        format: email
+      notes:
+        type: string
+        description: Internal notes about the client.
+        optional: true
+    output:
+      description: The client that was created.
+      type: object
+      properties:
+        firstName: {type: string}
+        lastName: {type: string}
+        phone: {type: string}
+        email: {type: string}
+
+  update_client:
+    title: Update a client
+    description: >-
+      Change a client's details. The client is identified by the name (and
+      phone, where names collide) in the query string, while the body carries
+      the new values -- so renaming means sending the old name in the query and
+      the new one in the body.
+    category: clients
+    request:
+      method: PUT
+      path: /clients
+      query:
+        firstName: "${find_first_name}"
+        lastName: "${find_last_name}"
+        phone: "${find_phone}"
+      body:
+        firstName: "${first_name}"
+        lastName: "${last_name}"
+        phone: "${phone}"
+        email: "${email}"
+        notes: "${notes}"
+    input:
+      find_first_name:
+        type: string
+        description: First name of the client to update.
+      find_last_name:
+        type: string
+        description: Last name of the client to update.
+      first_name:
+        type: string
+        description: The client's first name after the update.
+      last_name:
+        type: string
+        description: The client's last name after the update.
+      find_phone:
+        type: string
+        description: Phone number of the client to update, when the name alone is ambiguous.
+        optional: true
+      phone:
+        type: string
+        description: New phone number.
+        optional: true
+      email:
+        type: string
+        description: New email address.
+        optional: true
+        format: email
+      notes:
+        type: string
+        description: New internal notes.
+        optional: true
+    output:
+      description: The updated client.
+      type: object
+      properties:
+        firstName: {type: string}
+        lastName: {type: string}
+        phone: {type: string}
+        email: {type: string}
+
+  delete_client:
+    title: Delete a client
+    description: >-
+      Remove a client from the account's list. Their past appointments remain;
+      only the client record goes. Pass `phone` as well when two clients share
+      a name.
+    category: clients
+    destructive: true
+    request:
+      method: DELETE
+      path: /clients
+      query:
+        firstName: "${first_name}"
+        lastName: "${last_name}"
+        phone: "${phone}"
+    input:
+      first_name:
+        type: string
+        description: First name of the client to delete.
+      last_name:
+        type: string
+        description: Last name of the client to delete.
+      phone:
+        type: string
+        description: Phone number of the client, to disambiguate a shared name.
+        optional: true
+    output:
+      description: Confirmation that the client was deleted.
+      type: object
+      properties:
+        status: {type: string}
+
+  # -- store: orders and certificates ---------------------------------------
+
+  list_orders:
+    title: List store orders
+    description: >-
+      Orders from the online store, most recent first. Each carries its status
+      (delivered, paid or unpaid) and a semicolon-separated title listing the
+      products bought.
+    category: orders
+    read_only: true
+    request:
+      method: GET
+      path: /orders
+      query:
+        max: "${max}"
+    input:
+      max:
+        type: integer
+        description: How many orders to return.
+        optional: true
+        default: 100
+        minimum: 1
+    output:
+      description: The store's orders.
+      type: array
+      items:
+        type: object
+        description: An order with id, time, status, total, title and client details.
+
+  get_order:
+    title: Get a store order
+    description: >-
+      One order by id, with its line items, totals, status, the client who
+      placed it and any certificates it produced.
+    category: orders
+    read_only: true
+    request:
+      method: GET
+      path: /orders/${id}
+    input:
+      id:
+        type: integer
+        description: The order's id.
+    output:
+      description: The order.
+      type: object
+      properties:
+        id: {type: integer}
+        status: {type: string}
+        total: {type: string}
+        time: {type: string}
+        certificates: {type: array}
+        orderItems: {type: array}
+
+  list_certificates:
+    title: List package certificates
+    description: >-
+      Package and coupon certificate codes, filtered by product, order,
+      appointment type or email address. Combining `email` with
+      `appointment_type_id` is how you find the codes a given client could use
+      for a given service.
+    category: certificates
+    read_only: true
+    request:
+      method: GET
+      path: /certificates
+      query:
+        productID: "${product_id}"
+        orderID: "${order_id}"
+        appointmentTypeID: "${appointment_type_id}"
+        email: "${email}"
+    input:
+      product_id:
+        type: string
+        description: Only certificates for this product.
+        optional: true
+      order_id:
+        type: string
+        description: Only certificates created by this order.
+        optional: true
+      appointment_type_id:
+        type: string
+        description: Only certificates valid for this appointment type.
+        optional: true
+      email:
+        type: string
+        description: Only certificates valid for this email address.
+        optional: true
+    output:
+      description: The matching certificates.
+      type: array
+      items:
+        type: object
+        description: A certificate with its code, productID, remainingCounts and expiration.
+
+  check_certificate:
+    title: Check a certificate code
+    description: >-
+      Validate a package or coupon code against an appointment type before
+      booking with it, optionally for a particular email address. Returns the
+      discount or remaining uses when the code is good.
+    category: certificates
+    read_only: true
+    request:
+      method: GET
+      path: /certificates/check
+      query:
+        certificate: "${certificate}"
+        appointmentTypeID: "${appointment_type_id}"
+        email: "${email}"
+    input:
+      certificate:
+        type: string
+        description: The certificate code to check.
+      appointment_type_id:
+        type: integer
+        description: The appointment type the code would be used for.
+      email:
+        type: string
+        description: Email address to check the code against, for codes tied to a client.
+        optional: true
+    output:
+      description: The certificate's validity and terms.
+      type: object
+      properties:
+        certificate: {type: string}
+        productID: {type: integer}
+        remainingCounts: {type: object}
+        discountAmount: {type: string}
+        expiration: {type: string}
+
+  create_certificate:
+    title: Create a certificate code
+    description: >-
+      Issue a certificate for a package or a coupon -- how you grant someone
+      prepaid sessions or a discount without an order going through the store.
+      Leave `certificate` blank and Acuity generates the code.
+    category: certificates
+    request:
+      method: POST
+      path: /certificates
+      body:
+        productID: "${product_id}"
+        couponID: "${coupon_id}"
+        certificate: "${certificate}"
+        email: "${email}"
+    input:
+      product_id:
+        type: integer
+        description: The package to issue a certificate for.
+        optional: true
+      coupon_id:
+        type: integer
+        description: The coupon to issue a certificate for, instead of a package.
+        optional: true
+      certificate:
+        type: string
+        description: The code to use. Acuity picks one when this is omitted.
+        optional: true
+      email:
+        type: string
+        description: Email address to assign the package code to.
+        optional: true
+        format: email
+    output:
+      description: The certificate that was issued.
+      type: object
+      properties:
+        id: {type: integer}
+        certificate: {type: string}
+        productID: {type: integer}
+        email: {type: string}
+
+  delete_certificate:
+    title: Delete a certificate code
+    description: >-
+      Void a certificate code so it can no longer be redeemed. Appointments
+      already booked with it are unaffected.
+    category: certificates
+    destructive: true
+    request:
+      method: DELETE
+      path: /certificates/${id}
+    input:
+      id:
+        type: integer
+        description: The certificate's id.
+    output:
+      description: Confirmation that the certificate was deleted.
+      type: object
+      properties:
+        status: {type: string}

@@ -1,0 +1,392 @@
+# Constant Contact tools.
+#
+# Contacts are upserted by email through the sign-up endpoint, which also
+# records consent -- that is the intended path for adding people, rather than a
+# bare create.
+#
+# Docs: https://developer.constantcontact.com/api_reference/index.html
+
+connector_id: constant-contact
+display_name: Constant Contact
+docs_url: https://developer.constantcontact.com/api_reference/index.html
+
+scope_rules:
+  implies:
+    contact_data: []
+    campaign_data: []
+
+tools:
+
+  list_contacts:
+    title: List contacts
+    description: >-
+      Page through the account's contacts. Narrow by list membership, status or
+      when they last changed.
+    category: contacts
+    scopes: [contact_data]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/contacts
+      query:
+        limit: "${limit}"
+        cursor: "${cursor}"
+        status: "${status}"
+        lists: "${list_ids}"
+        email: "${email}"
+        updated_after: "${updated_after}"
+        include: "${include}"
+    input:
+      limit:
+        type: integer
+        description: How many contacts per page (1-500).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 500
+      cursor:
+        type: string
+        description: Cursor from the previous response's _links.next.
+        optional: true
+      status:
+        type: string
+        description: Only contacts in this state.
+        optional: true
+        enum: [all, active, deleted]
+      list_ids:
+        type: array
+        description: Only contacts on these lists.
+        optional: true
+        items: {type: string}
+      email:
+        type: string
+        description: Only the contact with this email address.
+        optional: true
+        format: email
+      updated_after:
+        type: string
+        description: Only contacts changed after this ISO 8601 instant.
+        optional: true
+      include:
+        type: array
+        description: Extra blocks to inline, e.g. ["custom_fields","list_memberships"].
+        optional: true
+        items: {type: string}
+    output:
+      description: A page of contacts.
+      type: object
+      properties:
+        contacts: {type: array}
+        _links: {type: object}
+
+  get_contact:
+    title: Get a contact
+    description: Read one contact's details, list memberships and custom fields.
+    category: contacts
+    scopes: [contact_data]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/contacts/${contact_id}
+      query:
+        include: "${include}"
+    input:
+      contact_id:
+        type: string
+        description: The contact's id.
+      include:
+        type: array
+        description: Extra blocks to inline.
+        optional: true
+        items: {type: string}
+    output:
+      description: The contact.
+      type: object
+      properties:
+        contact_id: {type: string}
+        email_address: {type: object}
+        first_name: {type: string}
+        list_memberships: {type: array}
+
+  add_contact:
+    title: Add or update a contact
+    description: >-
+      Upsert a contact by email address and put them on lists, recording explicit
+      consent. This is Constant Contact's intended path for adding people, so
+      only use it where consent was genuinely given.
+    category: contacts
+    scopes: [contact_data]
+    destructive: true
+    request:
+      method: POST
+      path: /v3/contacts/sign_up_form
+      body:
+        email_address: "${email}"
+        first_name: "${first_name}"
+        last_name: "${last_name}"
+        job_title: "${job_title}"
+        company_name: "${company_name}"
+        phone_number: "${phone_number}"
+        list_memberships: "${list_ids}"
+        custom_fields: "${custom_fields}"
+    input:
+      email:
+        type: string
+        description: The contact's email address, which is the deduplication key.
+        format: email
+      list_ids:
+        type: array
+        description: List ids to subscribe them to.
+        items: {type: string}
+      first_name:
+        type: string
+        description: First name.
+        optional: true
+      last_name:
+        type: string
+        description: Last name.
+        optional: true
+      job_title:
+        type: string
+        description: Job title.
+        optional: true
+      company_name:
+        type: string
+        description: Company name.
+        optional: true
+      phone_number:
+        type: string
+        description: Phone number.
+        optional: true
+      custom_fields:
+        type: array
+        description: "Custom field values, each {\"custom_field_id\": \"...\", \"value\": \"...\"}."
+        optional: true
+        items: {type: object}
+    output:
+      description: The added or updated contact.
+      type: object
+      properties:
+        contact_id: {type: string}
+        action: {type: string, description: "created or updated."}
+
+  delete_contact:
+    title: Delete a contact
+    description: >-
+      Remove a contact from the account. Constant Contact keeps a suppression
+      record so they are not re-added by accident.
+    category: contacts
+    scopes: [contact_data]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v3/contacts/${contact_id}
+    input:
+      contact_id:
+        type: string
+        description: The contact to delete.
+    output:
+      description: Empty on success -- Constant Contact answers 204 No Content.
+      type: object
+
+  list_contact_lists:
+    title: List contact lists
+    description: >-
+      List the account's contact lists with the ids add_contact subscribes to.
+    category: lists
+    scopes: [contact_data]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/contact_lists
+      query:
+        limit: "${limit}"
+        cursor: "${cursor}"
+        include_count: "${include_count}"
+    input:
+      limit:
+        type: integer
+        description: How many lists per page (1-500).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 500
+      cursor:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+      include_count:
+        type: boolean
+        description: Include each list's membership count.
+        optional: true
+    output:
+      description: A page of contact lists.
+      type: object
+      properties:
+        lists: {type: array}
+        _links: {type: object}
+
+  create_contact_list:
+    title: Create a contact list
+    description: Create a list that contacts can then be subscribed to.
+    category: lists
+    scopes: [contact_data]
+    request:
+      method: POST
+      path: /v3/contact_lists
+      body:
+        name: "${name}"
+        description: "${description}"
+        favorite: "${favorite}"
+    input:
+      name:
+        type: string
+        description: The list's name.
+      description:
+        type: string
+        description: What the list is for.
+        optional: true
+      favorite:
+        type: boolean
+        description: Pin it to the top of the lists page.
+        optional: true
+    output:
+      description: The created list.
+      type: object
+      properties:
+        list_id: {type: string}
+        name: {type: string}
+
+  list_email_campaigns:
+    title: List email campaigns
+    description: >-
+      List the account's email campaigns with their status and last-sent time.
+    category: campaigns
+    scopes: [campaign_data]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/emails
+      query:
+        limit: "${limit}"
+        after_date: "${after_date}"
+        before_date: "${before_date}"
+        campaign_status: "${status}"
+    input:
+      limit:
+        type: integer
+        description: How many campaigns per page (1-500).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 500
+      after_date:
+        type: string
+        description: Only campaigns updated after this ISO 8601 instant.
+        optional: true
+      before_date:
+        type: string
+        description: Only campaigns updated before this ISO 8601 instant.
+        optional: true
+      status:
+        type: string
+        description: Only campaigns in this state.
+        optional: true
+        enum: [Draft, Scheduled, Executing, Done, Error, Removed]
+    output:
+      description: A page of campaigns.
+      type: object
+      properties:
+        campaigns: {type: array}
+        _links: {type: object}
+
+  get_campaign_report:
+    title: Get a campaign's stats
+    description: >-
+      Read how an email campaign performed — sends, opens, clicks, bounces and
+      unsubscribes.
+    category: reporting
+    scopes: [campaign_data]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/reports/summary_reports/email_campaign_summaries
+      query:
+        limit: "${limit}"
+        cursor: "${cursor}"
+    input:
+      limit:
+        type: integer
+        description: How many campaign summaries per page (1-500).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 500
+      cursor:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+    output:
+      description: Per-campaign performance summaries.
+      type: object
+      properties:
+        bulk_email_campaign_summaries: {type: array}
+        _links: {type: object}
+
+  list_custom_fields:
+    title: List custom contact fields
+    description: >-
+      List the account's custom contact fields with the ids add_contact's
+      custom_fields takes.
+    category: contacts
+    scopes: [contact_data]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/contact_custom_fields
+      query:
+        limit: "${limit}"
+        cursor: "${cursor}"
+    input:
+      limit:
+        type: integer
+        description: How many fields per page (1-100).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 100
+      cursor:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+    output:
+      description: The account's custom fields.
+      type: object
+      properties:
+        custom_fields: {type: array}
+
+  get_account_summary:
+    title: Get the connected account
+    description: >-
+      Read the Constant Contact account the token belongs to — its name,
+      organisation and contact email. The cheapest health check.
+    category: account
+    scopes: [account_read]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/account/summary
+      query:
+        extra_fields: "${extra_fields}"
+    input:
+      extra_fields:
+        type: string
+        description: Extra blocks to include, e.g. "physical_address".
+        optional: true
+    output:
+      description: The account summary.
+      type: object
+      properties:
+        organization_name: {type: string}
+        contact_email: {type: string}
+        contact_phone: {type: string}

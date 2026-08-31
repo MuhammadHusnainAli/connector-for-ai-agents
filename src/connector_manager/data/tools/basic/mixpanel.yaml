@@ -1,0 +1,362 @@
+# Mixpanel tools.
+#
+# Two different surfaces live behind one host: /api/query for reading and
+# /api/2.0 (plus api.mixpanel.com) for writing. Query tools need the project id
+# and a service-account credential.
+#
+# Event timestamps and date ranges are project-timezone dates as YYYY-MM-DD.
+#
+# Docs: https://developer.mixpanel.com/reference/overview
+
+connector_id: mixpanel
+display_name: Mixpanel
+docs_url: https://developer.mixpanel.com/reference/overview
+
+tools:
+
+  run_segmentation_query:
+    title: Segment an event over time
+    description: >-
+      Count an event across a date range, optionally split by a property — the
+      workhorse for "how many signups per day last month, by plan".
+    category: query
+    read_only: true
+    request:
+      method: GET
+      path: /api/query/segmentation
+      query:
+        project_id: "${project_id}"
+        event: "${event}"
+        from_date: "${from_date}"
+        to_date: "${to_date}"
+        "on": "${breakdown}"
+        unit: "${unit}"
+        where: "${where}"
+        type: "${type}"
+        limit: "${limit}"
+    input:
+      project_id:
+        type: string
+        description: The Mixpanel project id.
+      event:
+        type: string
+        description: Event name to count, e.g. "Signed Up".
+      from_date:
+        type: string
+        description: First day of the range, YYYY-MM-DD.
+        example: "2026-08-01"
+      to_date:
+        type: string
+        description: Last day of the range, YYYY-MM-DD.
+      breakdown:
+        type: string
+        description: Expression to split the count by, e.g. properties["plan"].
+        optional: true
+      unit:
+        type: string
+        description: Bucket size for the series.
+        optional: true
+        default: day
+        enum: [minute, hour, day, week, month]
+      where:
+        type: string
+        description: Filter expression, e.g. properties["country"] == "US".
+        optional: true
+      type:
+        type: string
+        description: What to count.
+        optional: true
+        enum: [general, unique, average]
+      limit:
+        type: integer
+        description: How many distinct values of the breakdown to return.
+        optional: true
+        minimum: 1
+    output:
+      description: Counts per bucket, split by the `on` expression.
+      type: object
+      properties:
+        data: {type: object, description: "Holds series and values."}
+        legend_size: {type: integer}
+
+  run_funnel_query:
+    title: Run a funnel
+    description: >-
+      Measure conversion through an ordered set of steps over a date range. The
+      funnel must already be saved in Mixpanel; list_saved_funnels returns the
+      ids.
+    category: query
+    read_only: true
+    request:
+      method: GET
+      path: /api/query/funnels
+      query:
+        project_id: "${project_id}"
+        funnel_id: "${funnel_id}"
+        from_date: "${from_date}"
+        to_date: "${to_date}"
+        unit: "${unit}"
+        "on": "${breakdown}"
+        where: "${where}"
+    input:
+      project_id:
+        type: string
+        description: The Mixpanel project id.
+      funnel_id:
+        type: string
+        description: Saved funnel id, from list_saved_funnels.
+      from_date:
+        type: string
+        description: First day of the range, YYYY-MM-DD.
+      to_date:
+        type: string
+        description: Last day of the range, YYYY-MM-DD.
+      unit:
+        type: string
+        description: Bucket size for the series.
+        optional: true
+        enum: [day, week, month]
+      breakdown:
+        type: string
+        description: Property expression to break the funnel down by.
+        optional: true
+      where:
+        type: string
+        description: Filter expression applied to the funnel.
+        optional: true
+    output:
+      description: Conversion at each step, per bucket.
+      type: object
+      properties:
+        data: {type: object}
+        meta: {type: object}
+
+  list_saved_funnels:
+    title: List saved funnels
+    description: >-
+      List the project's saved funnels with the ids run_funnel_query takes.
+    category: query
+    read_only: true
+    request:
+      method: GET
+      path: /api/query/funnels/list
+      query:
+        project_id: "${project_id}"
+    input:
+      project_id:
+        type: string
+        description: The Mixpanel project id.
+    output:
+      description: The project's saved funnels.
+      type: array
+      items:
+        type: object
+        properties:
+          funnel_id: {type: integer}
+          name: {type: string}
+
+  run_retention_query:
+    title: Measure retention
+    description: >-
+      Measure how many users who did one event came back and did another, over
+      a date range — Mixpanel's cohort retention report.
+    category: query
+    read_only: true
+    request:
+      method: GET
+      path: /api/query/retention
+      query:
+        project_id: "${project_id}"
+        from_date: "${from_date}"
+        to_date: "${to_date}"
+        born_event: "${born_event}"
+        event: "${return_event}"
+        retention_type: "${retention_type}"
+        unit: "${unit}"
+        interval_count: "${interval_count}"
+        where: "${where}"
+    input:
+      project_id:
+        type: string
+        description: The Mixpanel project id.
+      from_date:
+        type: string
+        description: First day of the range, YYYY-MM-DD.
+      to_date:
+        type: string
+        description: Last day of the range, YYYY-MM-DD.
+      born_event:
+        type: string
+        description: Event that puts a user into the cohort, e.g. "Signed Up".
+        optional: true
+      return_event:
+        type: string
+        description: Event that counts as coming back.
+        optional: true
+      retention_type:
+        type: string
+        description: Whether a user counts on the exact interval or any time after.
+        optional: true
+        enum: [birth, compounded]
+      unit:
+        type: string
+        description: Interval size.
+        optional: true
+        enum: [day, week, month]
+      interval_count:
+        type: integer
+        description: How many intervals to follow the cohort for.
+        optional: true
+        minimum: 1
+      where:
+        type: string
+        description: Filter expression.
+        optional: true
+    output:
+      description: Retention counts per cohort and interval.
+      type: object
+
+  export_events:
+    title: Export raw events
+    description: >-
+      Stream every raw event in a date range as newline-delimited JSON. Heavy —
+      prefer a segmentation query when a count will do.
+    category: export
+    read_only: true
+    request:
+      method: GET
+      base_url_override: https://data.mixpanel.com
+      path: /api/2.0/export
+      query:
+        project_id: "${project_id}"
+        from_date: "${from_date}"
+        to_date: "${to_date}"
+        event: "${events}"
+        where: "${where}"
+    input:
+      project_id:
+        type: string
+        description: The Mixpanel project id.
+      from_date:
+        type: string
+        description: First day of the range, YYYY-MM-DD.
+      to_date:
+        type: string
+        description: Last day of the range, YYYY-MM-DD.
+      events:
+        type: array
+        description: Only these event names. Omit for every event.
+        optional: true
+        items: {type: string}
+      where:
+        type: string
+        description: Filter expression.
+        optional: true
+    output:
+      description: Newline-delimited JSON, one raw event per line.
+      type: string
+
+  list_events:
+    title: List event names
+    description: >-
+      List the event names the project has seen recently, so a query can name a
+      real one.
+    category: query
+    read_only: true
+    request:
+      method: GET
+      path: /api/query/events/names
+      query:
+        project_id: "${project_id}"
+        type: "${type}"
+        limit: "${limit}"
+    input:
+      project_id:
+        type: string
+        description: The Mixpanel project id.
+      type:
+        type: string
+        description: Count total events or unique users.
+        optional: true
+        enum: [general, unique, average]
+      limit:
+        type: integer
+        description: How many event names to return.
+        optional: true
+        minimum: 1
+    output:
+      description: The project's event names.
+      type: array
+      items: {type: string}
+
+  list_event_properties:
+    title: List an event's properties
+    description: >-
+      List the property names recorded on an event, so filters and breakdowns
+      can reference real ones.
+    category: query
+    read_only: true
+    request:
+      method: GET
+      path: /api/query/events/properties/top
+      query:
+        project_id: "${project_id}"
+        event: "${event}"
+        limit: "${limit}"
+    input:
+      project_id:
+        type: string
+        description: The Mixpanel project id.
+      event:
+        type: string
+        description: The event name.
+      limit:
+        type: integer
+        description: How many properties to return.
+        optional: true
+        minimum: 1
+    output:
+      description: The event's properties and how often each appears.
+      type: object
+
+  query_user_profiles:
+    title: Query user profiles
+    description: >-
+      Find user profiles matching a selector expression, e.g.
+      properties["$email"] == "ada@example.com".
+    category: profiles
+    read_only: true
+    request:
+      method: POST
+      path: /api/query/engage
+      encoding: form
+      body:
+        project_id: "${project_id}"
+        where: "${where}"
+        page: "${page}"
+        session_id: "${session_id}"
+    input:
+      project_id:
+        type: string
+        description: The Mixpanel project id.
+      where:
+        type: string
+        description: Selector expression over the profile properties.
+        optional: true
+      page:
+        type: integer
+        description: Zero-based page number, used with session_id.
+        optional: true
+        minimum: 0
+      session_id:
+        type: string
+        description: Session id from the first page, to keep paging consistent.
+        optional: true
+    output:
+      description: A page of user profiles.
+      type: object
+      properties:
+        results: {type: array}
+        session_id: {type: string}
+        page: {type: integer}
+        total: {type: integer}

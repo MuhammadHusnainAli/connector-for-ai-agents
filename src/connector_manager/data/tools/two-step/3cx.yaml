@@ -1,0 +1,758 @@
+# 3CX Configuration API (XAPI) tools.
+#
+# 3CX v20 exposes an OData REST interface at /xapi/v1. The connection's `domain`
+# supplies the PBX host and the base url already ends in /xapi, so paths start
+# at /v1.
+#
+# Two things follow from OData rather than from 3CX:
+#   * collections take $filter, $select, $orderby, $top, $skip, $expand and
+#     $count, which is how every list tool here is narrowed;
+#   * a single entity is addressed with the key in parentheses — /v1/Users(123)
+#     rather than /v1/Users/123.
+#
+# String comparisons in $filter are case-sensitive, so 3CX's own examples use
+# tolower(), e.g. tolower(EmailAddress) eq 'ada@example.com'.
+#
+# Docs: https://www.3cx.com/docs/configuration-rest-api/
+
+connector_id: 3cx
+display_name: 3CX
+docs_url: https://www.3cx.com/docs/configuration-rest-api/
+
+tools:
+
+  list_users:
+    title: List users
+    description: >-
+      Page through the PBX's users — extensions, their numbers and email
+      addresses. Narrow with an OData $filter such as
+      tolower(EmailAddress) eq 'ada@example.com', and use $expand to pull in
+      related entities like Groups.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /v1/Users
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $orderby: "${order_by}"
+        $top: "${top}"
+        $skip: "${skip}"
+        $expand: "${expand}"
+        $count: "${count}"
+    input:
+      filter:
+        type: string
+        description: OData filter expression. String comparisons are case-sensitive, so wrap in tolower().
+        optional: true
+        example: tolower(EmailAddress) eq 'ada@example.com'
+      select:
+        type: array
+        description: Only return these fields, e.g. ["Id","FirstName","LastName","Number","EmailAddress"].
+        optional: true
+        items: {type: string}
+      order_by:
+        type: string
+        description: OData ordering, e.g. "Number asc".
+        optional: true
+      top:
+        type: integer
+        description: How many users to return.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: How many users to skip, for paging.
+        optional: true
+        minimum: 0
+      expand:
+        type: array
+        description: Related entities to inline, e.g. ["Groups"].
+        optional: true
+        items: {type: string}
+      count:
+        type: boolean
+        description: Include the total match count alongside the page.
+        optional: true
+    output:
+      description: A page of users, under OData's value array.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          Id: {type: integer}
+          Number: {type: string}
+          FirstName: {type: string}
+          LastName: {type: string}
+          EmailAddress: {type: string}
+
+  get_user:
+    title: Get a user
+    description: >-
+      Read one user by their numeric id, addressed with OData's key syntax.
+      $expand pulls in related entities such as Groups and their Rights.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /v1/Users(${user_id})
+      query:
+        $select: "${select}"
+        $expand: "${expand}"
+    input:
+      user_id:
+        type: integer
+        description: The user's numeric Id, from list_users.
+      select:
+        type: array
+        description: Only return these fields.
+        optional: true
+        items: {type: string}
+      expand:
+        type: array
+        description: Related entities to inline, e.g. ["Groups"].
+        optional: true
+        items: {type: string}
+    output:
+      description: The user.
+      type: object
+      properties:
+        Id: {type: integer}
+        Number: {type: string}
+        FirstName: {type: string}
+        EmailAddress: {type: string}
+        Groups: {type: array}
+
+  create_user:
+    title: Create a user
+    description: >-
+      Add an extension to the PBX. `fields` is the OData user entity — Number,
+      FirstName, LastName and EmailAddress at minimum; read one existing user
+      first to see what else the PBX expects.
+    category: users
+    request:
+      method: POST
+      path: /v1/Users
+      body: "${fields}"
+    input:
+      fields:
+        type: object
+        description: >-
+          The user entity, e.g. {"Number": "101", "FirstName": "Ada",
+          "LastName": "Lovelace", "EmailAddress": "ada@example.com"}.
+    output:
+      description: The created user.
+      type: object
+      properties:
+        Id: {type: integer}
+        Number: {type: string}
+
+  update_user:
+    title: Update a user
+    description: >-
+      Change fields on an existing extension. This is an OData PATCH, so only
+      what is supplied is written and everything else is left alone.
+    category: users
+    request:
+      method: PATCH
+      path: /v1/Users(${user_id})
+      body: "${fields}"
+    input:
+      user_id:
+        type: integer
+        description: The user's numeric Id.
+      fields:
+        type: object
+        description: "Fields to change, e.g. {\"EmailAddress\": \"new@example.com\"}."
+    output:
+      description: Empty on success -- 3CX answers 204 No Content.
+      type: object
+
+  delete_user:
+    title: Delete a user
+    description: >-
+      Remove an extension from the PBX. Their voicemail and call history go with
+      it, and this cannot be undone from the API.
+    category: users
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/Users(${user_id})
+    input:
+      user_id:
+        type: integer
+        description: The user's numeric Id.
+    output:
+      description: Empty on success -- 3CX answers 204 No Content.
+      type: object
+
+  get_my_user:
+    title: Get the authenticated user
+    description: >-
+      Read the profile the API credentials act as. The cheapest health check for
+      a 3CX connection.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /v1/MyUser
+      query:
+        $select: "${select}"
+    input:
+      select:
+        type: array
+        description: Only return these fields.
+        optional: true
+        items: {type: string}
+    output:
+      description: The authenticated user's profile.
+      type: object
+      properties:
+        Id: {type: integer}
+        Number: {type: string}
+        EmailAddress: {type: string}
+
+  list_groups:
+    title: List groups
+    description: >-
+      List the PBX's groups — 3CX's departments or tenants — with their members
+      and rights.
+    category: groups
+    read_only: true
+    request:
+      method: GET
+      path: /v1/Groups
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $top: "${top}"
+        $skip: "${skip}"
+        $expand: "${expand}"
+    input:
+      filter:
+        type: string
+        description: OData filter expression.
+        optional: true
+      select:
+        type: array
+        description: Only return these fields.
+        optional: true
+        items: {type: string}
+      top:
+        type: integer
+        description: How many groups to return.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: How many groups to skip.
+        optional: true
+        minimum: 0
+      expand:
+        type: array
+        description: Related entities to inline, e.g. ["Members","Rights"].
+        optional: true
+        items: {type: string}
+    output:
+      description: A page of groups.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          Id: {type: integer}
+          Name: {type: string}
+          Members: {type: array}
+
+  list_active_calls:
+    title: List calls in progress
+    description: >-
+      Read the calls happening on the PBX right now, with their parties and
+      status. The live view behind a wallboard.
+    category: calls
+    read_only: true
+    request:
+      method: GET
+      path: /v1/ActiveCalls
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $top: "${top}"
+        $orderby: "${order_by}"
+    input:
+      filter:
+        type: string
+        description: OData filter expression, e.g. Status eq 'Talking'.
+        optional: true
+      select:
+        type: array
+        description: Only return these fields.
+        optional: true
+        items: {type: string}
+      top:
+        type: integer
+        description: How many calls to return.
+        optional: true
+        minimum: 1
+      order_by:
+        type: string
+        description: OData ordering, e.g. "EstablishedAt desc".
+        optional: true
+    output:
+      description: The calls currently in progress.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          Id: {type: integer}
+          Caller: {type: string}
+          Callee: {type: string}
+          Status: {type: string}
+          EstablishedAt: {type: string}
+
+  drop_active_call:
+    title: Drop a call in progress
+    description: >-
+      Hang up a call that is currently connected. The parties are disconnected
+      immediately; there is no undo.
+    category: calls
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/ActiveCalls(${call_id})
+    input:
+      call_id:
+        type: integer
+        description: The call's Id, from list_active_calls.
+    output:
+      description: Empty on success -- 3CX answers 204 No Content.
+      type: object
+
+  list_queues:
+    title: List call queues
+    description: >-
+      List the PBX's call queues with their numbers, strategies and agents.
+    category: telephony
+    read_only: true
+    request:
+      method: GET
+      path: /v1/Queues
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $top: "${top}"
+        $skip: "${skip}"
+        $expand: "${expand}"
+    input:
+      filter:
+        type: string
+        description: OData filter expression.
+        optional: true
+      select:
+        type: array
+        description: Only return these fields.
+        optional: true
+        items: {type: string}
+      top:
+        type: integer
+        description: How many queues to return.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: How many queues to skip.
+        optional: true
+        minimum: 0
+      expand:
+        type: array
+        description: Related entities to inline, e.g. ["Agents"].
+        optional: true
+        items: {type: string}
+    output:
+      description: A page of call queues.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          Id: {type: integer}
+          Number: {type: string}
+          Name: {type: string}
+          PollingStrategy: {type: string}
+
+  list_ring_groups:
+    title: List ring groups
+    description: >-
+      List the PBX's ring groups — the extensions that ring together — with
+      their members and ring strategy.
+    category: telephony
+    read_only: true
+    request:
+      method: GET
+      path: /v1/RingGroups
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $top: "${top}"
+        $expand: "${expand}"
+    input:
+      filter:
+        type: string
+        description: OData filter expression.
+        optional: true
+      select:
+        type: array
+        description: Only return these fields.
+        optional: true
+        items: {type: string}
+      top:
+        type: integer
+        description: How many ring groups to return.
+        optional: true
+        minimum: 1
+      expand:
+        type: array
+        description: Related entities to inline, e.g. ["Members"].
+        optional: true
+        items: {type: string}
+    output:
+      description: A page of ring groups.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          Id: {type: integer}
+          Number: {type: string}
+          Name: {type: string}
+
+  list_trunks:
+    title: List trunks
+    description: >-
+      List the PBX's SIP trunks — its links to the outside world — with their
+      providers and registration state.
+    category: telephony
+    read_only: true
+    request:
+      method: GET
+      path: /v1/Trunks
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      filter:
+        type: string
+        description: OData filter expression.
+        optional: true
+      select:
+        type: array
+        description: Only return these fields.
+        optional: true
+        items: {type: string}
+      top:
+        type: integer
+        description: How many trunks to return.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: How many trunks to skip.
+        optional: true
+        minimum: 0
+    output:
+      description: A page of trunks.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          Id: {type: integer}
+          Name: {type: string}
+          Number: {type: string}
+          IsOnline: {type: boolean}
+
+  list_inbound_rules:
+    title: List inbound rules
+    description: >-
+      List the rules that decide where incoming calls land, by DID and by time
+      of day.
+    category: routing
+    read_only: true
+    request:
+      method: GET
+      path: /v1/InboundRules
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      filter:
+        type: string
+        description: OData filter expression.
+        optional: true
+      select:
+        type: array
+        description: Only return these fields.
+        optional: true
+        items: {type: string}
+      top:
+        type: integer
+        description: How many rules to return.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: How many rules to skip.
+        optional: true
+        minimum: 0
+    output:
+      description: A page of inbound rules.
+      type: array
+      response_path: value
+      items: {type: object}
+
+  list_outbound_rules:
+    title: List outbound rules
+    description: >-
+      List the dial plan — the rules that decide which trunk an outgoing call
+      leaves by, and how the number is transformed.
+    category: routing
+    read_only: true
+    request:
+      method: GET
+      path: /v1/OutboundRules
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      filter:
+        type: string
+        description: OData filter expression.
+        optional: true
+      select:
+        type: array
+        description: Only return these fields.
+        optional: true
+        items: {type: string}
+      top:
+        type: integer
+        description: How many rules to return.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: How many rules to skip.
+        optional: true
+        minimum: 0
+    output:
+      description: A page of outbound rules.
+      type: array
+      response_path: value
+      items: {type: object}
+
+  list_did_numbers:
+    title: List DID numbers
+    description: >-
+      List the direct-dial numbers the PBX answers on, and what each is routed
+      to.
+    category: routing
+    read_only: true
+    request:
+      method: GET
+      path: /v1/DidNumbers
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      filter:
+        type: string
+        description: OData filter expression.
+        optional: true
+      select:
+        type: array
+        description: Only return these fields.
+        optional: true
+        items: {type: string}
+      top:
+        type: integer
+        description: How many numbers to return.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: How many numbers to skip.
+        optional: true
+        minimum: 0
+    output:
+      description: A page of DID numbers.
+      type: array
+      response_path: value
+      items: {type: object}
+
+  list_sip_devices:
+    title: List SIP devices
+    description: >-
+      List the provisioned handsets and softphones, with the extension each is
+      registered to and its firmware.
+    category: telephony
+    read_only: true
+    request:
+      method: GET
+      path: /v1/SipDevices
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      filter:
+        type: string
+        description: OData filter expression.
+        optional: true
+      select:
+        type: array
+        description: Only return these fields.
+        optional: true
+        items: {type: string}
+      top:
+        type: integer
+        description: How many devices to return.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: How many devices to skip.
+        optional: true
+        minimum: 0
+    output:
+      description: A page of SIP devices.
+      type: array
+      response_path: value
+      items: {type: object}
+
+  list_contacts:
+    title: List contacts
+    description: >-
+      Read the PBX's shared phonebook. Narrow with an OData $filter to look
+      someone up by name or number.
+    category: contacts
+    read_only: true
+    request:
+      method: GET
+      path: /v1/Contacts
+      query:
+        $filter: "${filter}"
+        $select: "${select}"
+        $orderby: "${order_by}"
+        $top: "${top}"
+        $skip: "${skip}"
+    input:
+      filter:
+        type: string
+        description: OData filter expression, e.g. contains(FirstName,'Ada').
+        optional: true
+      select:
+        type: array
+        description: Only return these fields.
+        optional: true
+        items: {type: string}
+      order_by:
+        type: string
+        description: OData ordering, e.g. "LastName asc".
+        optional: true
+      top:
+        type: integer
+        description: How many contacts to return.
+        optional: true
+        minimum: 1
+      skip:
+        type: integer
+        description: How many contacts to skip.
+        optional: true
+        minimum: 0
+    output:
+      description: A page of contacts.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          Id: {type: integer}
+          FirstName: {type: string}
+          LastName: {type: string}
+          Phone: {type: string}
+
+  create_contact:
+    title: Create a contact
+    description: >-
+      Add an entry to the PBX's shared phonebook. `fields` is the OData contact
+      entity — FirstName, LastName and a phone number at minimum.
+    category: contacts
+    request:
+      method: POST
+      path: /v1/Contacts
+      body: "${fields}"
+    input:
+      fields:
+        type: object
+        description: >-
+          The contact entity, e.g. {"FirstName": "Ada", "LastName": "Lovelace",
+          "MobilePhone": "+15550100"}.
+    output:
+      description: The created contact.
+      type: object
+      properties:
+        Id: {type: integer}
+        FirstName: {type: string}
+
+  get_system_status:
+    title: Get the PBX's system status
+    description: >-
+      Read the PBX's health — extensions registered, trunks up, calls in
+      progress, disk and licence state. The broadest single check of whether the
+      system is well.
+    category: system
+    read_only: true
+    request:
+      method: GET
+      path: /v1/SystemStatus
+    input: {}
+    output:
+      description: The PBX's current status.
+      type: object
+      properties:
+        ExtensionsRegistered: {type: integer}
+        ExtensionsTotal: {type: integer}
+        TrunksRegistered: {type: integer}
+        CallsActive: {type: integer}
+        FreeDiskSpace: {type: integer}
+
+  get_license_status:
+    title: Get the licence status
+    description: >-
+      Read the PBX's licence — its edition, simultaneous-call limit and expiry —
+      which is what caps how much of the system can be used.
+    category: system
+    read_only: true
+    request:
+      method: GET
+      path: /v1/LicenseStatus
+    input: {}
+    output:
+      description: The PBX's licence.
+      type: object
+      properties:
+        ProductCode: {type: string}
+        SimultaneousCalls: {type: integer}
+        ExpirationDate: {type: string}
+        MaxNumberOfExtensions: {type: integer}

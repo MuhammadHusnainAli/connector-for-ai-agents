@@ -1,0 +1,5642 @@
+# Adobe Commerce (Magento Open Source) REST tools.
+#
+# Every path here is a route Adobe Commerce declares in its own
+# `etc/webapi.xml` files, so they exist on any stock instance; a module the
+# store has not installed is the only reason one would 404.
+#
+# The connection's base url already carries `/rest/{storeCode}`, so paths start
+# at `/V1`. The store code matters: `all` addresses the default (admin) scope,
+# a store view code scopes the call to that view -- which is how per-view
+# product names, prices and CMS content are read and written.
+#
+# Four conventions run through the whole API:
+#
+#   * **collection reads use `searchCriteria`**, a bracketed query structure
+#     rather than plain parameters:
+#     `searchCriteria[filterGroups][0][filters][0][field]=status`,
+#     `...[value]=1`, `...[conditionType]=eq`, plus
+#     `searchCriteria[pageSize]`, `searchCriteria[currentPage]` and
+#     `searchCriteria[sortOrders][0][field]`. Filters inside one filterGroup are
+#     ORed together; separate groups are ANDed. That is why the list tools take
+#     one `search_criteria` object of flat bracketed keys instead of a fixed set
+#     of arguments;
+#   * **writes wrap the entity** -- `{"product": {...}}`, `{"category": {...}}`,
+#     `{"entity": {...}}` for sales documents -- which each tool does for you;
+#   * **products are addressed by SKU**, not by id, everywhere except a few
+#     legacy routes; orders, invoices and shipments are addressed by entity id;
+#   * **custom and EAV attributes** travel in `custom_attributes` as
+#     `[{"attribute_code": ..., "value": ...}]`, and `extension_attributes`
+#     carries what modules bolt on -- including stock data on a product.
+#
+# Not covered here: the token endpoints (`/V1/integration/admin/token` and the
+# customer ones), since this connector authenticates with an access token
+# already, and the customer-session routes (`/V1/carts/mine`,
+# `/V1/customers/me`) which need a customer token rather than an integration
+# one. The admin-scope equivalents -- `/V1/carts/{cartId}` and
+# `/V1/customers/{id}` -- are here instead.
+#
+# Docs: https://developer.adobe.com/commerce/webapi/rest/
+
+connector_id: adobe-commerce
+display_name: Adobe Commerce
+docs_url: https://developer.adobe.com/commerce/webapi/rest/
+
+tools:
+
+  # -- products ---------------------------------------------------------------
+
+  search_products:
+    title: Search products
+    description: >-
+      Find products with a `searchCriteria` query. The usual shape is one filter
+      group per condition -- for example field `status`, value 1, conditionType
+      `eq` -- plus `pageSize` and `currentPage`. Products are wide records, so
+      `fields` is worth using to trim the response.
+    category: products
+    read_only: true
+    request:
+      method: GET
+      path: /V1/products
+      query: "${search_criteria}"
+    input:
+      search_criteria:
+        type: object
+        description: >-
+          Flat bracketed query keys, e.g.
+          {"searchCriteria[filterGroups][0][filters][0][field]": "type_id",
+          "searchCriteria[filterGroups][0][filters][0][value]": "simple",
+          "searchCriteria[pageSize]": 50, "searchCriteria[currentPage]": 1}.
+          Pass {"searchCriteria": ""} to fetch everything, which the API
+          requires rather than an empty query.
+    output:
+      description: The matching products.
+      type: object
+      properties:
+        items: {type: array, description: "Each product with sku, name, price, status and custom_attributes."}
+        total_count: {type: integer}
+        search_criteria: {type: object}
+
+  get_product:
+    title: Get a product
+    description: >-
+      One product by SKU, with its attributes, media gallery entries, tier
+      prices and extension attributes -- stock data among them. A SKU with a
+      slash or space must be URL-encoded, which this tool handles.
+    category: products
+    read_only: true
+    request:
+      method: GET
+      path: /V1/products/${sku}
+      query:
+        editMode: "${edit_mode}"
+        storeId: "${store_id}"
+        forceReload: "${force_reload}"
+    input:
+      sku:
+        type: string
+        description: The product's SKU.
+        example: 24-MB01
+      edit_mode:
+        type: boolean
+        description: Load the product as the admin edit form would, rather than as the storefront.
+        optional: true
+      store_id:
+        type: integer
+        description: Read the product's values as they are in this store view.
+        optional: true
+      force_reload:
+        type: boolean
+        description: Bypass Adobe Commerce's internal product cache.
+        optional: true
+    output:
+      description: The product.
+      type: object
+      properties:
+        id: {type: integer}
+        sku: {type: string}
+        name: {type: string}
+        price: {type: number}
+        status: {type: integer}
+        type_id: {type: string}
+        custom_attributes: {type: array}
+        extension_attributes: {type: object}
+
+  create_product:
+    title: Create a product
+    description: >-
+      Create a product. SKU, name, attribute set and type are the essentials;
+      price is required for a simple product, and `extension_attributes.stock_item`
+      is how it gets stock. A `configurable` product needs its options and child
+      links afterwards.
+    category: products
+    request:
+      method: POST
+      path: /V1/products
+      body:
+        product: "${product}"
+        saveOptions: "${save_options}"
+    input:
+      product:
+        type: object
+        description: >-
+          The product, e.g.
+          {"sku": "24-MB01", "name": "Joust Duffle Bag", "attribute_set_id": 4,
+          "price": 34, "type_id": "simple", "status": 1, "visibility": 4,
+          "extension_attributes": {"stock_item": {"qty": 100, "is_in_stock": true}}}.
+      save_options:
+        type: boolean
+        description: Persist the product's custom options along with it.
+        optional: true
+    output:
+      description: The product that was created.
+      type: object
+      properties:
+        id: {type: integer}
+        sku: {type: string}
+
+  update_product:
+    title: Update a product
+    description: >-
+      Update a product by SKU. Send only what changes -- but note that
+      collections such as `media_gallery_entries` and `custom_attributes`
+      replace rather than merge, so read the product first when editing one
+      entry of many.
+    category: products
+    request:
+      method: PUT
+      path: /V1/products/${sku}
+      body:
+        product: "${product}"
+        saveOptions: "${save_options}"
+    input:
+      sku:
+        type: string
+        description: The product's SKU.
+      product:
+        type: object
+        description: 'The fields to change, e.g. {"price": 39.99, "status": 2}.'
+      save_options:
+        type: boolean
+        description: Persist the product's custom options along with it.
+        optional: true
+    output:
+      description: The updated product.
+      type: object
+      properties:
+        id: {type: integer}
+        sku: {type: string}
+
+  delete_product:
+    title: Delete a product
+    description: >-
+      Delete a product by SKU. Orders that already contain it keep their line
+      items, but it disappears from the catalogue and from any category. Setting
+      `status` to 2 (disabled) is the reversible alternative.
+    category: products
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1/products/${sku}
+    input:
+      sku:
+        type: string
+        description: The product's SKU.
+    output:
+      description: True when the product was deleted.
+      type: string
+
+  get_products_render_info:
+    title: Get storefront render information for products
+    description: >-
+      Prices, availability and add-to-cart URLs as the storefront would render
+      them for a given store and currency -- catalogue data with the customer
+      group's pricing rules applied, rather than raw attribute values.
+    category: products
+    read_only: true
+    request:
+      method: GET
+      path: /V1/products-render-info
+      query: "${search_criteria}"
+    input:
+      search_criteria:
+        type: object
+        description: >-
+          Bracketed query keys including the required `store_id` and
+          `currency_code`, e.g.
+          {"storeId": 1, "currencyCode": "USD",
+          "searchCriteria[filterGroups][0][filters][0][field]": "entity_id"}.
+    output:
+      description: The rendered product information.
+      type: object
+      properties:
+        items: {type: array}
+
+  list_product_types:
+    title: List product types
+    description: >-
+      The product types this installation supports -- simple, configurable,
+      bundle, virtual, downloadable, grouped -- with their labels. The values a
+      product's `type_id` may take.
+    category: products
+    read_only: true
+    request:
+      method: GET
+      path: /V1/products/types
+    input: {}
+    output:
+      description: The available product types.
+      type: array
+      items: {type: object, description: "A type with name and label."}
+
+  list_product_attributes:
+    title: Search product attributes
+    description: >-
+      Find product attributes, with their codes, types, scope and whether they
+      are required. This is how you learn what `custom_attributes` may contain
+      on this store.
+    category: attributes
+    read_only: true
+    request:
+      method: GET
+      path: /V1/products/attributes
+      query: "${search_criteria}"
+    input:
+      search_criteria:
+        type: object
+        description: >-
+          Bracketed searchCriteria keys, e.g.
+          {"searchCriteria[pageSize]": 100}.
+    output:
+      description: The matching attributes.
+      type: object
+      properties:
+        items: {type: array}
+        total_count: {type: integer}
+
+  get_product_attribute:
+    title: Get a product attribute
+    description: >-
+      One product attribute by code, with its frontend input type, scope,
+      validation rules and options.
+    category: attributes
+    read_only: true
+    request:
+      method: GET
+      path: /V1/products/attributes/${attribute_code}
+    input:
+      attribute_code:
+        type: string
+        description: The attribute's code, e.g. color.
+        example: color
+    output:
+      description: The attribute.
+      type: object
+      properties:
+        attribute_id: {type: integer}
+        attribute_code: {type: string}
+        frontend_input: {type: string}
+        options: {type: array}
+
+  create_product_attribute:
+    title: Create a product attribute
+    description: >-
+      Define a new product attribute. `frontend_input` decides what kind it is
+      (text, select, boolean, price and so on) and `scope` whether its values are
+      global, per-website or per-store-view -- the choice that decides whether
+      each store view can differ.
+    category: attributes
+    request:
+      method: POST
+      path: /V1/products/attributes
+      body:
+        attribute: "${attribute}"
+    input:
+      attribute:
+        type: object
+        description: >-
+          The attribute, e.g.
+          {"attribute_code": "material", "frontend_input": "select",
+          "default_frontend_label": "Material", "scope": "global",
+          "is_required": false}.
+    output:
+      description: The attribute that was created.
+      type: object
+      properties:
+        attribute_id: {type: integer}
+        attribute_code: {type: string}
+
+  update_product_attribute:
+    title: Update a product attribute
+    description: >-
+      Change an attribute's labels, validation or storefront behaviour.
+      Changing `frontend_input` on an attribute that already holds data is
+      disruptive -- the existing values are reinterpreted.
+    category: attributes
+    request:
+      method: PUT
+      path: /V1/products/attributes/${attribute_code}
+      body:
+        attribute: "${attribute}"
+    input:
+      attribute_code:
+        type: string
+        description: The attribute's code.
+      attribute:
+        type: object
+        description: The fields to change.
+    output:
+      description: The updated attribute.
+      type: object
+      properties:
+        attribute_id: {type: integer}
+        attribute_code: {type: string}
+
+  delete_product_attribute:
+    title: Delete a product attribute
+    description: >-
+      Delete a product attribute and every product's value for it. Attribute
+      sets, layered navigation and any configurable product built on it are all
+      affected.
+    category: attributes
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1/products/attributes/${attribute_code}
+    input:
+      attribute_code:
+        type: string
+        description: The attribute's code.
+    output:
+      description: True when the attribute was deleted.
+      type: string
+
+  list_attribute_options:
+    title: List a product attribute's options
+    description: >-
+      The selectable options of a select or multiselect attribute, each with its
+      label and value. Those values are what a product's `custom_attributes`
+      entry must contain -- the option id, not the label.
+    category: attributes
+    read_only: true
+    request:
+      method: GET
+      path: /V1/products/attributes/${attribute_code}/options
+    input:
+      attribute_code:
+        type: string
+        description: The attribute's code.
+    output:
+      description: The attribute's options.
+      type: array
+      items: {type: object, description: "An option with label and value."}
+
+  create_attribute_option:
+    title: Add an option to a product attribute
+    description: >-
+      Add a selectable option to a select or multiselect attribute, optionally
+      with per-store labels. Adobe Commerce assigns the option's value id.
+    category: attributes
+    request:
+      method: POST
+      path: /V1/products/attributes/${attribute_code}/options
+      body:
+        option: "${option}"
+    input:
+      attribute_code:
+        type: string
+        description: The attribute's code.
+      option:
+        type: object
+        description: >-
+          The option, e.g.
+          {"label": "Merino wool", "sort_order": 10,
+          "store_labels": [{"store_id": 1, "label": "Merino"}]}.
+    output:
+      description: The option that was created.
+      type: string
+
+  update_attribute_option:
+    title: Update a product attribute option
+    description: >-
+      Change an option's label or sort order. Products already using the option
+      keep it -- only its presentation changes.
+    category: attributes
+    request:
+      method: PUT
+      path: /V1/products/attributes/${attribute_code}/options/${option_id}
+      body:
+        option: "${option}"
+    input:
+      attribute_code:
+        type: string
+        description: The attribute's code.
+      option_id:
+        type: string
+        description: The option's value id.
+      option:
+        type: object
+        description: The option's new label and settings.
+    output:
+      description: True when the option was updated.
+      type: string
+
+  delete_attribute_option:
+    title: Delete a product attribute option
+    description: >-
+      Remove an option from an attribute. Products that held the option lose
+      that value, and a configurable product built on it loses the
+      corresponding variation.
+    category: attributes
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1/products/attributes/${attribute_code}/options/${option_id}
+    input:
+      attribute_code:
+        type: string
+        description: The attribute's code.
+      option_id:
+        type: string
+        description: The option's value id.
+    output:
+      description: True when the option was deleted.
+      type: string
+
+  list_attribute_types:
+    title: List attribute input types
+    description: >-
+      The frontend input types an attribute may use, as this installation
+      offers them -- the vocabulary for `frontend_input`.
+    category: attributes
+    read_only: true
+    request:
+      method: GET
+      path: /V1/products/attributes/types
+    input: {}
+    output:
+      description: The available input types.
+      type: array
+      items: {type: object}
+
+  get_attribute_is_filterable:
+    title: Check whether an attribute is filterable
+    description: >-
+      Whether an attribute appears in layered navigation. The answer decides
+      whether shoppers can filter by it, which is a merchandising decision as
+      much as a technical one.
+    category: attributes
+    read_only: true
+    request:
+      method: GET
+      path: /V1/products/attributes/${attribute_code}/is-filterable
+    input:
+      attribute_code:
+        type: string
+        description: The attribute's code.
+    output:
+      description: Whether the attribute is filterable.
+      type: string
+
+  set_attribute_is_filterable:
+    title: Set whether an attribute is filterable
+    description: >-
+      Turn layered-navigation filtering on or off for an attribute. Takes effect
+      on the storefront once the relevant indexes and caches refresh.
+    category: attributes
+    request:
+      method: PUT
+      path: /V1/products/attributes/${attribute_code}/is-filterable/${is_filterable}
+    input:
+      attribute_code:
+        type: string
+        description: The attribute's code.
+      is_filterable:
+        type: string
+        description: '"1" to make it filterable, "0" to stop.'
+        enum: ["0", "1"]
+    output:
+      description: True when the setting was applied.
+      type: string
+
+  list_attribute_sets:
+    title: Search attribute sets
+    description: >-
+      Find product attribute sets. Every product belongs to one, and it decides
+      which attributes the product has -- so this is the list a create call's
+      `attribute_set_id` comes from.
+    category: attributes
+    read_only: true
+    request:
+      method: GET
+      path: /V1/products/attribute-sets/sets/list
+      query: "${search_criteria}"
+    input:
+      search_criteria:
+        type: object
+        description: 'Bracketed searchCriteria keys, e.g. {"searchCriteria[pageSize]": 50}.'
+    output:
+      description: The matching attribute sets.
+      type: object
+      properties:
+        items: {type: array}
+        total_count: {type: integer}
+
+  get_attribute_set:
+    title: Get an attribute set
+    description: One attribute set by id, with its name and entity type.
+    category: attributes
+    read_only: true
+    request:
+      method: GET
+      path: /V1/products/attribute-sets/${attribute_set_id}
+    input:
+      attribute_set_id:
+        type: integer
+        description: The attribute set's id.
+    output:
+      description: The attribute set.
+      type: object
+      properties:
+        attribute_set_id: {type: integer}
+        attribute_set_name: {type: string}
+
+  create_attribute_set:
+    title: Create an attribute set
+    description: >-
+      Create a product attribute set, based on an existing one via
+      `skeletonId` -- which is how it inherits the standard attribute groups
+      rather than starting empty.
+    category: attributes
+    request:
+      method: POST
+      path: /V1/products/attribute-sets
+      body:
+        attributeSet: "${attribute_set}"
+        skeletonId: "${skeleton_id}"
+    input:
+      attribute_set:
+        type: object
+        description: >-
+          The set, e.g.
+          {"attribute_set_name": "Apparel", "entity_type_id": 4, "sort_order": 10}.
+      skeleton_id:
+        type: integer
+        description: Id of the attribute set to copy the group structure from.
+    output:
+      description: The attribute set that was created.
+      type: object
+      properties:
+        attribute_set_id: {type: integer}
+
+  update_attribute_set:
+    title: Update an attribute set
+    description: Change an attribute set's name or sort order.
+    category: attributes
+    request:
+      method: PUT
+      path: /V1/products/attribute-sets/${attribute_set_id}
+      body:
+        attributeSet: "${attribute_set}"
+    input:
+      attribute_set_id:
+        type: integer
+        description: The attribute set's id.
+      attribute_set:
+        type: object
+        description: The fields to change.
+    output:
+      description: True when the set was updated.
+      type: string
+
+  delete_attribute_set:
+    title: Delete an attribute set
+    description: >-
+      Delete an attribute set. Products belonging to it must be moved first --
+      Adobe Commerce refuses while any remain.
+    category: attributes
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1/products/attribute-sets/${attribute_set_id}
+    input:
+      attribute_set_id:
+        type: integer
+        description: The attribute set's id.
+    output:
+      description: True when the set was deleted.
+      type: string
+
+  list_attribute_set_attributes:
+    title: List an attribute set's attributes
+    description: >-
+      Which attributes belong to one set, in their groups -- the fields a
+      product in that set actually has.
+    category: attributes
+    read_only: true
+    request:
+      method: GET
+      path: /V1/products/attribute-sets/${attribute_set_id}/attributes
+    input:
+      attribute_set_id:
+        type: integer
+        description: The attribute set's id.
+    output:
+      description: The set's attributes.
+      type: array
+      items: {type: object}
+
+  add_attribute_to_set:
+    title: Add an attribute to an attribute set
+    description: >-
+      Put an attribute into a set's group, which gives every product in that set
+      the field. The group id decides where it appears in the admin form.
+    category: attributes
+    request:
+      method: POST
+      path: /V1/products/attribute-sets/attributes
+      body:
+        attributeSetId: "${attribute_set_id}"
+        attributeGroupId: "${attribute_group_id}"
+        attributeCode: "${attribute_code}"
+        sortOrder: "${sort_order}"
+    input:
+      attribute_set_id:
+        type: integer
+        description: The attribute set's id.
+      attribute_group_id:
+        type: integer
+        description: Id of the group within the set.
+      attribute_code:
+        type: string
+        description: Code of the attribute to add.
+      sort_order:
+        type: integer
+        description: Where the attribute sits within its group.
+        optional: true
+    output:
+      description: The id of the resulting association.
+      type: string
+
+  remove_attribute_from_set:
+    title: Remove an attribute from an attribute set
+    description: >-
+      Take an attribute out of a set. Products in the set stop carrying the
+      field; the attribute itself and its stored values survive.
+    category: attributes
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1/products/attribute-sets/${attribute_set_id}/attributes/${attribute_code}
+    input:
+      attribute_set_id:
+        type: integer
+        description: The attribute set's id.
+      attribute_code:
+        type: string
+        description: Code of the attribute to remove.
+    output:
+      description: True when the attribute was removed.
+      type: string
+
+  list_attribute_groups:
+    title: Search attribute groups
+    description: >-
+      The attribute groups across sets -- the sections an admin sees on the
+      product form, such as Content, Search Engine Optimization and Design.
+    category: attributes
+    read_only: true
+    request:
+      method: GET
+      path: /V1/products/attribute-sets/groups/list
+      query: "${search_criteria}"
+    input:
+      search_criteria:
+        type: object
+        description: 'Bracketed searchCriteria keys, e.g. {"searchCriteria[pageSize]": 50}.'
+    output:
+      description: The matching attribute groups.
+      type: object
+      properties:
+        items: {type: array}
+        total_count: {type: integer}
+
+  create_attribute_group:
+    title: Create an attribute group
+    description: Add a group to an attribute set, to organise its attributes on the form.
+    category: attributes
+    request:
+      method: POST
+      path: /V1/products/attribute-sets/groups
+      body:
+        group: "${group}"
+    input:
+      group:
+        type: object
+        description: >-
+          The group, e.g.
+          {"attribute_group_name": "Care instructions", "attribute_set_id": 4}.
+    output:
+      description: The group that was created.
+      type: object
+      properties:
+        attribute_group_id: {type: string}
+
+  update_attribute_group:
+    title: Update an attribute group
+    description: Rename an attribute group or move it within its set.
+    category: attributes
+    request:
+      method: PUT
+      path: /V1/products/attribute-sets/${attribute_set_id}/groups
+      body:
+        group: "${group}"
+    input:
+      attribute_set_id:
+        type: integer
+        description: The attribute set's id.
+      group:
+        type: object
+        description: The group's new name and settings, including its id.
+    output:
+      description: The updated group.
+      type: object
+      properties:
+        attribute_group_id: {type: string}
+
+  delete_attribute_group:
+    title: Delete an attribute group
+    description: >-
+      Delete an attribute group. Its attributes fall back to the set's default
+      group rather than being deleted.
+    category: attributes
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1/products/attribute-sets/groups/${group_id}
+    input:
+      group_id:
+        type: integer
+        description: The attribute group's id.
+    output:
+      description: True when the group was deleted.
+      type: string
+
+  list_product_media:
+    title: List a product's media
+    description: >-
+      The images and videos on a product, each with its file path, label, roles
+      (image, small_image, thumbnail, swatch) and position.
+    category: products
+    read_only: true
+    request:
+      method: GET
+      path: /V1/products/${sku}/media
+    input:
+      sku:
+        type: string
+        description: The product's SKU.
+    output:
+      description: The product's media gallery entries.
+      type: array
+      items: {type: object}
+
+  get_product_media:
+    title: Get one media entry
+    description: One media gallery entry of a product, by its entry id.
+    category: products
+    read_only: true
+    request:
+      method: GET
+      path: /V1/products/${sku}/media/${entry_id}
+    input:
+      sku:
+        type: string
+        description: The product's SKU.
+      entry_id:
+        type: integer
+        description: The gallery entry's id.
+    output:
+      description: The media entry.
+      type: object
+      properties:
+        id: {type: integer}
+        file: {type: string}
+        label: {type: string}
+        types: {type: array}
+
+  create_product_media:
+    title: Add media to a product
+    description: >-
+      Attach an image to a product. The file goes in as base64 inside
+      `content`, and `types` assigns its roles -- an image with no roles is
+      stored but never shown as the main product image.
+    category: products
+    request:
+      method: POST
+      path: /V1/products/${sku}/media
+      body:
+        entry: "${entry}"
+    input:
+      sku:
+        type: string
+        description: The product's SKU.
+      entry:
+        type: object
+        description: >-
+          The gallery entry, e.g.
+          {"media_type": "image", "label": "Front", "position": 1,
+          "disabled": false, "types": ["image", "small_image", "thumbnail"],
+          "content": {"base64_encoded_data": "...", "type": "image/jpeg",
+          "name": "front.jpg"}}.
+    output:
+      description: The id of the new gallery entry.
+      type: string
+
+  update_product_media:
+    title: Update a product's media entry
+    description: >-
+      Change a gallery entry's label, position, roles or disabled state.
+      Omitting `content` leaves the file itself untouched.
+    category: products
+    request:
+      method: PUT
+      path: /V1/products/${sku}/media/${entry_id}
+      body:
+        entry: "${entry}"
+    input:
+      sku:
+        type: string
+        description: The product's SKU.
+      entry_id:
+        type: integer
+        description: The gallery entry's id.
+      entry:
+        type: object
+        description: The entry's new label, position, types or disabled flag.
+    output:
+      description: True when the entry was updated.
+      type: string
+
+  delete_product_media:
+    title: Delete a product's media entry
+    description: >-
+      Remove an image or video from a product. If it held the main image role,
+      the product is left without one until another is assigned.
+    category: products
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1/products/${sku}/media/${entry_id}
+    input:
+      sku:
+        type: string
+        description: The product's SKU.
+      entry_id:
+        type: integer
+        description: The gallery entry's id.
+    output:
+      description: True when the entry was deleted.
+      type: string
+
+  list_media_types:
+    title: List media roles for an attribute set
+    description: >-
+      Which image roles exist for products in an attribute set -- image,
+      small_image, thumbnail, swatch_image and any the theme adds. The values a
+      gallery entry's `types` may take.
+    category: products
+    read_only: true
+    request:
+      method: GET
+      path: /V1/products/media/types/${attribute_set_name}
+    input:
+      attribute_set_name:
+        type: string
+        description: Name of the attribute set.
+        example: Default
+    output:
+      description: The available media roles.
+      type: array
+      items: {type: object}
+
+  list_product_links:
+    title: List a product's links
+    description: >-
+      The products linked to this one of a given kind -- `related`, `upsell`,
+      `crosssell` or `associated` -- with their positions.
+    category: products
+    read_only: true
+    request:
+      method: GET
+      path: /V1/products/${sku}/links/${link_type}
+    input:
+      sku:
+        type: string
+        description: The product's SKU.
+      link_type:
+        type: string
+        description: The link type, e.g. related, upsell, crosssell.
+        example: related
+    output:
+      description: The linked products.
+      type: array
+      items: {type: object}
+
+  create_product_links:
+    title: Add links to a product
+    description: >-
+      Link other products to this one -- related items, upsells or
+      cross-sells. Each entry names the link type, the linked SKU and a
+      position.
+    category: products
+    request:
+      method: POST
+      path: /V1/products/${sku}/links
+      body:
+        items: "${items}"
+    input:
+      sku:
+        type: string
+        description: The product's SKU.
+      items:
+        type: array
+        description: >-
+          The links to add, each e.g.
+          {"sku": "24-MB01", "link_type": "related",
+          "linked_product_sku": "24-MB04", "linked_product_type": "simple",
+          "position": 1}.
+        items: {type: object}
+    output:
+      description: True when the links were added.
+      type: string
+
+  update_product_links:
+    title: Update a product's links
+    description: >-
+      Replace the link entries on a product. Sending a shorter list removes the
+      ones you leave out, so read them first when editing.
+    category: products
+    request:
+      method: PUT
+      path: /V1/products/${sku}/links
+      body:
+        items: "${items}"
+    input:
+      sku:
+        type: string
+        description: The product's SKU.
+      items:
+        type: array
+        description: The link entries to set.
+        items: {type: object}
+    output:
+      description: True when the links were updated.
+      type: string
+
+  delete_product_link:
+    title: Remove a product link
+    description: >-
+      Remove one linked product of one link type. Neither product is otherwise
+      affected.
+    category: products
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1/products/${sku}/links/${link_type}/${linked_product_sku}
+    input:
+      sku:
+        type: string
+        description: The product's SKU.
+      link_type:
+        type: string
+        description: The link type, e.g. related.
+      linked_product_sku:
+        type: string
+        description: SKU of the linked product to remove.
+    output:
+      description: True when the link was removed.
+      type: string
+
+  list_link_types:
+    title: List product link types
+    description: >-
+      The link types this installation supports, with their codes -- what
+      `link_type` may be.
+    category: products
+    read_only: true
+    request:
+      method: GET
+      path: /V1/products/links/types
+    input: {}
+    output:
+      description: The available link types.
+      type: array
+      items: {type: object}
+
+  list_link_type_attributes:
+    title: List a link type's attributes
+    description: >-
+      The attributes a link of this type carries, such as position or default
+      quantity for a grouped product's children.
+    category: products
+    read_only: true
+    request:
+      method: GET
+      path: /V1/products/links/${link_type}/attributes
+    input:
+      link_type:
+        type: string
+        description: The link type, e.g. associated.
+    output:
+      description: The link type's attributes.
+      type: array
+      items: {type: object}
+
+  list_product_options:
+    title: List a product's custom options
+    description: >-
+      The custom options on a product -- text fields, dropdowns, file uploads --
+      each with its type, price and values. These are per-product options, not
+      attribute-based variations.
+    category: products
+    read_only: true
+    request:
+      method: GET
+      path: /V1/products/${sku}/options
+    input:
+      sku:
+        type: string
+        description: The product's SKU.
+    output:
+      description: The product's custom options.
+      type: array
+      items: {type: object}
+
+  get_product_option:
+    title: Get a product custom option
+    description: One custom option of a product, with its values and pricing.
+    category: products
+    read_only: true
+    request:
+      method: GET
+      path: /V1/products/${sku}/options/${option_id}
+    input:
+      sku:
+        type: string
+        description: The product's SKU.
+      option_id:
+        type: integer
+        description: The option's id.
+    output:
+      description: The custom option.
+      type: object
+      properties:
+        option_id: {type: integer}
+        title: {type: string}
+        type: {type: string}
+        values: {type: array}
+
+  create_product_option:
+    title: Add a custom option to a product
+    description: >-
+      Add a per-product option such as engraving text or a gift-wrap choice.
+      `type` decides the input, and `price`/`price_type` whether choosing it
+      costs more.
+    category: products
+    request:
+      method: POST
+      path: /V1/products/options
+      body:
+        option: "${option}"
+    input:
+      option:
+        type: object
+        description: >-
+          The option, e.g.
+          {"product_sku": "24-MB01", "title": "Engraving", "type": "field",
+          "is_require": false, "price": 5, "price_type": "fixed",
+          "sort_order": 1}.
+    output:
+      description: The option that was created.
+      type: object
+      properties:
+        option_id: {type: integer}
+
+  update_product_option:
+    title: Update a product custom option
+    description: >-
+      Change a custom option's title, price or values. Values sent replace the
+      existing ones for that option.
+    category: products
+    request:
+      method: PUT
+      path: /V1/products/options/${option_id}
+      body:
+        option: "${option}"
+    input:
+      option_id:
+        type: integer
+        description: The option's id.
+      option:
+        type: object
+        description: The option's new definition, including its product_sku.
+    output:
+      description: The updated option.
+      type: object
+      properties:
+        option_id: {type: integer}
+
+  delete_product_option:
+    title: Delete a product custom option
+    description: >-
+      Remove a custom option from a product. Carts holding it keep their
+      selection until they are recalculated.
+    category: products
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1/products/${sku}/options/${option_id}
+    input:
+      sku:
+        type: string
+        description: The product's SKU.
+      option_id:
+        type: integer
+        description: The option's id.
+    output:
+      description: True when the option was deleted.
+      type: string
+
+  list_option_types:
+    title: List custom option types
+    description: >-
+      The input types a custom option may use -- field, area, drop_down, radio,
+      checkbox, date, file and so on.
+    category: products
+    read_only: true
+    request:
+      method: GET
+      path: /V1/products/options/types
+    input: {}
+    output:
+      description: The available custom option types.
+      type: array
+      items: {type: object}
+
+  assign_product_to_website:
+    title: Assign a product to a website
+    description: >-
+      Make a product available on another website. In a multi-site store this is
+      what decides where it can be bought at all.
+    category: products
+    request:
+      method: POST
+      path: /V1/products/${sku}/websites
+      body:
+        productWebsiteLink: "${product_website_link}"
+    input:
+      sku:
+        type: string
+        description: The product's SKU.
+      product_website_link:
+        type: object
+        description: 'The assignment, e.g. {"sku": "24-MB01", "website_id": 2}.'
+    output:
+      description: True when the assignment was made.
+      type: string
+
+  remove_product_from_website:
+    title: Remove a product from a website
+    description: >-
+      Withdraw a product from one website. It stops being purchasable there
+      while remaining on any other site it is assigned to.
+    category: products
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1/products/${sku}/websites/${website_id}
+    input:
+      sku:
+        type: string
+        description: The product's SKU.
+      website_id:
+        type: integer
+        description: The website's id.
+    output:
+      description: True when the product was removed from the website.
+      type: string
+
+  get_product_tier_prices:
+    title: Get tier prices for products
+    description: >-
+      The quantity- and customer-group-based tier prices for the given SKUs --
+      the volume pricing a B2B store runs on.
+    category: pricing
+    read_only: true
+    request:
+      method: POST
+      path: /V1/products/tier-prices-information
+      body:
+        skus: "${skus}"
+    input:
+      skus:
+        type: array
+        description: SKUs to read tier prices for.
+        items: {type: string}
+    output:
+      description: The tier prices, and any items that failed.
+      type: array
+      items: {type: object}
+
+  set_product_tier_prices:
+    title: Set tier prices
+    description: >-
+      Add or replace tier prices in bulk. Each entry names the SKU, the
+      customer group, the quantity threshold and the price -- and whether the
+      price is a fixed amount or a percentage discount.
+    category: pricing
+    request:
+      method: POST
+      path: /V1/products/tier-prices
+      body:
+        prices: "${prices}"
+    input:
+      prices:
+        type: array
+        description: >-
+          The tier prices, each e.g.
+          {"price": 20, "price_type": "fixed", "website_id": 0, "sku": "24-MB01",
+          "customer_group": "ALL GROUPS", "quantity": 10}.
+        items: {type: object}
+    output:
+      description: Any entries that could not be applied.
+      type: array
+      items: {type: object}
+
+  replace_product_tier_prices:
+    title: Replace tier prices
+    description: >-
+      Replace the tier prices for the SKUs named, removing any not in the
+      payload. The bulk equivalent of clearing and reloading a volume price
+      list.
+    category: pricing
+    request:
+      method: PUT
+      path: /V1/products/tier-prices
+      body:
+        prices: "${prices}"
+    input:
+      prices:
+        type: array
+        description: The full set of tier prices to leave in place.
+        items: {type: object}
+    output:
+      description: Any entries that could not be applied.
+      type: array
+      items: {type: object}
+
+  delete_product_tier_prices:
+    title: Delete tier prices
+    description: Remove specific tier prices in bulk, by SKU, group and quantity.
+    category: pricing
+    destructive: true
+    request:
+      method: POST
+      path: /V1/products/tier-prices-delete
+      body:
+        prices: "${prices}"
+    input:
+      prices:
+        type: array
+        description: The tier prices to remove.
+        items: {type: object}
+    output:
+      description: Any entries that could not be removed.
+      type: array
+      items: {type: object}
+
+  get_product_base_prices:
+    title: Get base prices
+    description: >-
+      The base price of each named SKU per store view -- the starting point
+      before special prices and catalogue rules.
+    category: pricing
+    read_only: true
+    request:
+      method: POST
+      path: /V1/products/base-prices-information
+      body:
+        skus: "${skus}"
+    input:
+      skus:
+        type: array
+        description: SKUs to read prices for.
+        items: {type: string}
+    output:
+      description: The base prices.
+      type: array
+      items: {type: object}
+
+  set_product_base_prices:
+    title: Set base prices
+    description: >-
+      Update base prices in bulk, per SKU and store view. The efficient way to
+      push a price list without updating each product record.
+    category: pricing
+    request:
+      method: POST
+      path: /V1/products/base-prices
+      body:
+        prices: "${prices}"
+    input:
+      prices:
+        type: array
+        description: >-
+          The prices, each e.g.
+          {"price": 34, "store_id": 0, "sku": "24-MB01"}.
+        items: {type: object}
+    output:
+      description: Any entries that could not be applied.
+      type: array
+      items: {type: object}
+
+  get_product_special_prices:
+    title: Get special prices
+    description: >-
+      The special (sale) prices on the named SKUs, with the date windows they
+      apply in.
+    category: pricing
+    read_only: true
+    request:
+      method: POST
+      path: /V1/products/special-price-information
+      body:
+        skus: "${skus}"
+    input:
+      skus:
+        type: array
+        description: SKUs to read special prices for.
+        items: {type: string}
+    output:
+      description: The special prices.
+      type: array
+      items: {type: object}
+
+  set_product_special_prices:
+    title: Set special prices
+    description: >-
+      Schedule sale prices in bulk, each with its store view and its from/to
+      dates. This is how a promotion goes live and ends without a further call.
+    category: pricing
+    request:
+      method: POST
+      path: /V1/products/special-price
+      body:
+        prices: "${prices}"
+    input:
+      prices:
+        type: array
+        description: >-
+          The special prices, each e.g.
+          {"price": 24, "store_id": 0, "sku": "24-MB01",
+          "price_from": "2026-11-27 00:00:00", "price_to": "2026-12-01 23:59:59"}.
+        items: {type: object}
+    output:
+      description: Any entries that could not be applied.
+      type: array
+      items: {type: object}
+
+  delete_product_special_prices:
+    title: Delete special prices
+    description: >-
+      Remove sale prices in bulk, ending a promotion early. The base price takes
+      over immediately.
+    category: pricing
+    destructive: true
+    request:
+      method: POST
+      path: /V1/products/special-price-delete
+      body:
+        prices: "${prices}"
+    input:
+      prices:
+        type: array
+        description: The special prices to remove.
+        items: {type: object}
+    output:
+      description: Any entries that could not be removed.
+      type: array
+      items: {type: object}
+
+  get_product_costs:
+    title: Get product costs
+    description: >-
+      The cost value stored against each named SKU -- what margin reporting is
+      calculated from. Not shown to shoppers.
+    category: pricing
+    read_only: true
+    request:
+      method: POST
+      path: /V1/products/cost-information
+      body:
+        skus: "${skus}"
+    input:
+      skus:
+        type: array
+        description: SKUs to read costs for.
+        items: {type: string}
+    output:
+      description: The costs.
+      type: array
+      items: {type: object}
+
+  set_product_costs:
+    title: Set product costs
+    description: Update cost values in bulk, per SKU and store view.
+    category: pricing
+    request:
+      method: POST
+      path: /V1/products/cost
+      body:
+        prices: "${prices}"
+    input:
+      prices:
+        type: array
+        description: 'The costs, each e.g. {"cost": 12.5, "store_id": 0, "sku": "24-MB01"}.'
+        items: {type: object}
+    output:
+      description: Any entries that could not be applied.
+      type: array
+      items: {type: object}
+
+  delete_product_costs:
+    title: Delete product costs
+    description: Remove stored cost values in bulk, leaving margin unknown for those SKUs.
+    category: pricing
+    destructive: true
+    request:
+      method: POST
+      path: /V1/products/cost-delete
+      body:
+        skus: "${skus}"
+    input:
+      skus:
+        type: array
+        description: SKUs whose costs to remove.
+        items: {type: string}
+    output:
+      description: Any entries that could not be removed.
+      type: array
+      items: {type: object}
+
+  update_product_stock_item:
+    title: Update a product's stock item
+    description: >-
+      Set a product's quantity and stock status directly -- the narrow write
+      for inventory, rather than saving the whole product. Both `qty` and
+      `is_in_stock` matter: a positive quantity with `is_in_stock` false is
+      still unsellable.
+    category: inventory
+    request:
+      method: PUT
+      path: /V1/products/${sku}/stockItems/${item_id}
+      body:
+        stockItem: "${stock_item}"
+    input:
+      sku:
+        type: string
+        description: The product's SKU.
+      item_id:
+        type: string
+        description: The stock item's id, from `get_stock_item`.
+      stock_item:
+        type: object
+        description: >-
+          The stock values, e.g.
+          {"qty": 100, "is_in_stock": true, "manage_stock": true,
+          "min_qty": 0, "backorders": 0}.
+    output:
+      description: The stock item's id.
+      type: string
+
+  get_stock_item:
+    title: Get a product's stock item
+    description: >-
+      The stock record for one SKU -- quantity, in-stock flag, backorder and
+      threshold settings, and the item id an update needs.
+    category: inventory
+    read_only: true
+    request:
+      method: GET
+      path: /V1/stockItems/${product_sku}
+    input:
+      product_sku:
+        type: string
+        description: The product's SKU.
+    output:
+      description: The stock item.
+      type: object
+      properties:
+        item_id: {type: integer}
+        qty: {type: number}
+        is_in_stock: {type: boolean}
+        manage_stock: {type: boolean}
+
+  get_stock_status:
+    title: Get a product's stock status
+    description: >-
+      The computed stock status for one SKU -- what the storefront uses to
+      decide whether it can be added to a cart.
+    category: inventory
+    read_only: true
+    request:
+      method: GET
+      path: /V1/stockStatuses/${product_sku}
+    input:
+      product_sku:
+        type: string
+        description: The product's SKU.
+    output:
+      description: The stock status.
+      type: object
+      properties:
+        product_id: {type: integer}
+        stock_status: {type: integer}
+        qty: {type: number}
+
+  list_low_stock_items:
+    title: List low stock items
+    description: >-
+      Products at or below a quantity threshold -- the replenishment list.
+      `scopeId` selects the stock scope and `currentPage`/`pageSize` page the
+      result.
+    category: inventory
+    read_only: true
+    request:
+      method: GET
+      path: /V1/stockItems/lowStock/
+      query: "${query}"
+    input:
+      query:
+        type: object
+        description: >-
+          The query, e.g.
+          {"scopeId": 0, "qty": 10, "currentPage": 1, "pageSize": 50}.
+    output:
+      description: The low stock items.
+      type: object
+      properties:
+        items: {type: array}
+        total_count: {type: integer}
+
+  # -- categories -------------------------------------------------------------
+
+  get_category_tree:
+    title: Get the category tree
+    description: >-
+      The category tree from a root, with children nested. `depth` limits how
+      far down it walks -- worth setting on a deep catalogue.
+    category: categories
+    read_only: true
+    request:
+      method: GET
+      path: /V1/categories
+      query:
+        rootCategoryId: "${root_category_id}"
+        depth: "${depth}"
+    input:
+      root_category_id:
+        type: integer
+        description: Category to start from. Defaults to the store's root.
+        optional: true
+      depth:
+        type: integer
+        description: How many levels to return.
+        optional: true
+        minimum: 1
+    output:
+      description: The category tree.
+      type: object
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        children_data: {type: array}
+
+  search_categories:
+    title: Search categories
+    description: >-
+      Find categories with a `searchCriteria` query rather than walking the
+      tree -- how you locate a category by name or URL key.
+    category: categories
+    read_only: true
+    request:
+      method: GET
+      path: /V1/categories/list
+      query: "${search_criteria}"
+    input:
+      search_criteria:
+        type: object
+        description: >-
+          Bracketed searchCriteria keys, e.g.
+          {"searchCriteria[filterGroups][0][filters][0][field]": "name",
+          "searchCriteria[filterGroups][0][filters][0][value]": "%Bags%",
+          "searchCriteria[filterGroups][0][filters][0][conditionType]": "like"}.
+    output:
+      description: The matching categories.
+      type: object
+      properties:
+        items: {type: array}
+        total_count: {type: integer}
+
+  get_category:
+    title: Get a category
+    description: >-
+      One category by id, with its name, path, level, activity and custom
+      attributes. Pass `store_id` to read it as one store view sees it.
+    category: categories
+    read_only: true
+    request:
+      method: GET
+      path: /V1/categories/${category_id}
+      query:
+        storeId: "${store_id}"
+    input:
+      category_id:
+        type: integer
+        description: The category's id.
+      store_id:
+        type: integer
+        description: Read the category's values for this store view.
+        optional: true
+    output:
+      description: The category.
+      type: object
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        parent_id: {type: integer}
+        is_active: {type: boolean}
+        custom_attributes: {type: array}
+
+  create_category:
+    title: Create a category
+    description: >-
+      Create a category under a parent. `parent_id` decides where it sits, and
+      `include_in_menu` whether shoppers see it in navigation -- a category can
+      exist and be active without being in the menu.
+    category: categories
+    request:
+      method: POST
+      path: /V1/categories
+      body:
+        category: "${category}"
+    input:
+      category:
+        type: object
+        description: >-
+          The category, e.g.
+          {"parent_id": 2, "name": "Outerwear", "is_active": true,
+          "include_in_menu": true,
+          "custom_attributes": [{"attribute_code": "url_key", "value": "outerwear"}]}.
+    output:
+      description: The category that was created.
+      type: object
+      properties:
+        id: {type: integer}
+        name: {type: string}
+
+  update_category:
+    title: Update a category
+    description: >-
+      Change a category's name, activity, menu inclusion or attributes. Use
+      `move_category` to change where it sits rather than editing `parent_id`
+      here.
+    category: categories
+    request:
+      method: PUT
+      path: /V1/categories/${category_id}
+      body:
+        category: "${category}"
+    input:
+      category_id:
+        type: integer
+        description: The category's id.
+      category:
+        type: object
+        description: The fields to change.
+    output:
+      description: The updated category.
+      type: object
+      properties:
+        id: {type: integer}
+        name: {type: string}
+
+  delete_category:
+    title: Delete a category
+    description: >-
+      Delete a category and its subtree. Products are not deleted but lose
+      their placement, so URLs pointing at the category break.
+    category: categories
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1/categories/${category_id}
+    input:
+      category_id:
+        type: integer
+        description: The category's id.
+    output:
+      description: True when the category was deleted.
+      type: string
+
+  move_category:
+    title: Move a category
+    description: >-
+      Reparent a category, optionally after a given sibling. Its whole subtree
+      moves with it, and URL rewrites are regenerated.
+    category: categories
+    request:
+      method: PUT
+      path: /V1/categories/${category_id}/move
+      body:
+        parentId: "${parent_id}"
+        afterId: "${after_id}"
+    input:
+      category_id:
+        type: integer
+        description: The category being moved.
+      parent_id:
+        type: integer
+        description: Id of the category it moves under.
+      after_id:
+        type: integer
+        description: Id of the sibling it should follow.
+        optional: true
+    output:
+      description: True when the category was moved.
+      type: string
+
+  list_category_products:
+    title: List a category's products
+    description: >-
+      Which products sit in one category, with their positions -- the order
+      shoppers see them in.
+    category: categories
+    read_only: true
+    request:
+      method: GET
+      path: /V1/categories/${category_id}/products
+    input:
+      category_id:
+        type: integer
+        description: The category's id.
+    output:
+      description: The category's products.
+      type: array
+      items: {type: object, description: "A product link with sku and position."}
+
+  assign_product_to_category:
+    title: Assign a product to a category
+    description: >-
+      Put a product into a category at a given position. A product can sit in
+      many categories, and this adds one placement rather than replacing them.
+    category: categories
+    request:
+      method: POST
+      path: /V1/categories/${category_id}/products
+      body:
+        productLink: "${product_link}"
+    input:
+      category_id:
+        type: integer
+        description: The category's id.
+      product_link:
+        type: object
+        description: >-
+          The placement, e.g.
+          {"sku": "24-MB01", "position": 1, "category_id": "3"}.
+    output:
+      description: True when the product was assigned.
+      type: string
+
+  update_category_product:
+    title: Update a product's position in a category
+    description: >-
+      Change where a product appears in a category's listing. Merchandising by
+      position, without touching the product itself.
+    category: categories
+    request:
+      method: PUT
+      path: /V1/categories/${category_id}/products
+      body:
+        productLink: "${product_link}"
+    input:
+      category_id:
+        type: integer
+        description: The category's id.
+      product_link:
+        type: object
+        description: 'The placement to update, e.g. {"sku": "24-MB01", "position": 5}.'
+    output:
+      description: True when the placement was updated.
+      type: string
+
+  remove_product_from_category:
+    title: Remove a product from a category
+    description: >-
+      Take a product out of one category. The product and its other placements
+      are untouched.
+    category: categories
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1/categories/${category_id}/products/${sku}
+    input:
+      category_id:
+        type: integer
+        description: The category's id.
+      sku:
+        type: string
+        description: The product's SKU.
+    output:
+      description: True when the product was removed.
+      type: string
+
+  list_category_attributes:
+    title: Search category attributes
+    description: >-
+      The attributes categories carry on this store, including any a
+      customisation added -- what a category's `custom_attributes` may contain.
+    category: categories
+    read_only: true
+    request:
+      method: GET
+      path: /V1/categories/attributes
+      query: "${search_criteria}"
+    input:
+      search_criteria:
+        type: object
+        description: 'Bracketed searchCriteria keys, e.g. {"searchCriteria[pageSize]": 100}.'
+    output:
+      description: The matching category attributes.
+      type: object
+      properties:
+        items: {type: array}
+        total_count: {type: integer}
+
+  get_category_attribute:
+    title: Get a category attribute
+    description: One category attribute by code, with its input type and scope.
+    category: categories
+    read_only: true
+    request:
+      method: GET
+      path: /V1/categories/attributes/${attribute_code}
+    input:
+      attribute_code:
+        type: string
+        description: The attribute's code, e.g. url_key.
+    output:
+      description: The attribute.
+      type: object
+      properties:
+        attribute_code: {type: string}
+        frontend_input: {type: string}
+
+  list_category_attribute_options:
+    title: List a category attribute's options
+    description: The selectable options of a category attribute, with their labels and values.
+    category: categories
+    read_only: true
+    request:
+      method: GET
+      path: /V1/categories/attributes/${attribute_code}/options
+    input:
+      attribute_code:
+        type: string
+        description: The attribute's code.
+    output:
+      description: The attribute's options.
+      type: array
+      items: {type: object}
+
+  # -- orders -----------------------------------------------------------------
+
+  search_orders:
+    title: Search orders
+    description: >-
+      Find orders with a `searchCriteria` query -- by status, store, customer
+      email, grand total or creation date. This is the workhorse read for order
+      management, and `sortOrders` on `created_at` is how you page newest-first.
+    category: orders
+    read_only: true
+    request:
+      method: GET
+      path: /V1/orders
+      query: "${search_criteria}"
+    input:
+      search_criteria:
+        type: object
+        description: >-
+          Bracketed searchCriteria keys, e.g.
+          {"searchCriteria[filterGroups][0][filters][0][field]": "status",
+          "searchCriteria[filterGroups][0][filters][0][value]": "processing",
+          "searchCriteria[sortOrders][0][field]": "created_at",
+          "searchCriteria[sortOrders][0][direction]": "DESC",
+          "searchCriteria[pageSize]": 50}.
+    output:
+      description: The matching orders.
+      type: object
+      properties:
+        items: {type: array, description: "Each order with entity_id, increment_id, status, totals and items."}
+        total_count: {type: integer}
+
+  get_order:
+    title: Get an order
+    description: >-
+      One order by entity id, with its line items, addresses, payment,
+      shipments and status history. Note that the id here is `entity_id`, not
+      the `increment_id` a customer sees on their confirmation.
+    category: orders
+    read_only: true
+    request:
+      method: GET
+      path: /V1/orders/${order_id}
+    input:
+      order_id:
+        type: integer
+        description: The order's entity id.
+    output:
+      description: The order.
+      type: object
+      properties:
+        entity_id: {type: integer}
+        increment_id: {type: string}
+        status: {type: string}
+        state: {type: string}
+        grand_total: {type: number}
+        items: {type: array}
+        billing_address: {type: object}
+        payment: {type: object}
+
+  create_order:
+    title: Create or update an order
+    description: >-
+      Write an order entity directly. This bypasses the quote and pricing
+      engine, so totals are taken as given -- it is for migrating history or
+      integrating an external checkout, not for normal order placement, which
+      goes through a cart.
+    category: orders
+    request:
+      method: PUT
+      path: /V1/orders/create
+      body:
+        entity: "${entity}"
+    input:
+      entity:
+        type: object
+        description: >-
+          The order entity -- customer, addresses, items, payment and totals, as
+          the order schema declares them.
+    output:
+      description: The order that was written.
+      type: object
+      properties:
+        entity_id: {type: integer}
+        increment_id: {type: string}
+
+  update_order:
+    title: Update an order
+    description: >-
+      Update an existing order entity by id. Most order changes belong to a
+      specific action -- hold, cancel, invoice, ship -- so reach for this only
+      for fields those do not cover.
+    category: orders
+    request:
+      method: PUT
+      path: /V1/orders/${order_id}
+      body:
+        entity: "${entity}"
+    input:
+      order_id:
+        type: integer
+        description: The order's entity id.
+      entity:
+        type: object
+        description: The order fields to change.
+    output:
+      description: The updated order.
+      type: object
+      properties:
+        entity_id: {type: integer}
+
+  list_order_items:
+    title: Search order items
+    description: >-
+      Order line items across orders, filtered with `searchCriteria` -- how you
+      answer "which orders contain this SKU" without walking every order.
+    category: orders
+    read_only: true
+    request:
+      method: GET
+      path: /V1/orders/items
+      query: "${search_criteria}"
+    input:
+      search_criteria:
+        type: object
+        description: >-
+          Bracketed searchCriteria keys, e.g.
+          {"searchCriteria[filterGroups][0][filters][0][field]": "sku",
+          "searchCriteria[filterGroups][0][filters][0][value]": "24-MB01"}.
+    output:
+      description: The matching order items.
+      type: object
+      properties:
+        items: {type: array}
+        total_count: {type: integer}
+
+  get_order_item:
+    title: Get an order item
+    description: One order line item by id, with its product, quantities and prices.
+    category: orders
+    read_only: true
+    request:
+      method: GET
+      path: /V1/orders/items/${item_id}
+    input:
+      item_id:
+        type: integer
+        description: The order item's id.
+    output:
+      description: The order item.
+      type: object
+      properties:
+        item_id: {type: integer}
+        sku: {type: string}
+        qty_ordered: {type: number}
+        price: {type: number}
+
+  list_order_statuses:
+    title: Get an order's status history
+    description: >-
+      The status history and comments on one order -- who changed what, when,
+      and whether the customer was notified.
+    category: orders
+    read_only: true
+    request:
+      method: GET
+      path: /V1/orders/${order_id}/statuses
+    input:
+      order_id:
+        type: integer
+        description: The order's entity id.
+    output:
+      description: The order's status history.
+      type: string
+
+  list_order_comments:
+    title: List an order's comments
+    description: >-
+      The comments recorded against an order, with their status at the time and
+      whether each was sent to the customer.
+    category: orders
+    read_only: true
+    request:
+      method: GET
+      path: /V1/orders/${order_id}/comments
+    input:
+      order_id:
+        type: integer
+        description: The order's entity id.
+    output:
+      description: The order's comments.
+      type: object
+      properties:
+        items: {type: array}
+        total_count: {type: integer}
+
+  add_order_comment:
+    title: Add a comment to an order
+    description: >-
+      Add a status-history comment. `is_customer_notified` set to 1 emails it to
+      the customer, so it is the difference between an internal note and a
+      message they receive.
+    category: orders
+    request:
+      method: POST
+      path: /V1/orders/${order_id}/comments
+      body:
+        statusHistory: "${status_history}"
+    input:
+      order_id:
+        type: integer
+        description: The order's entity id.
+      status_history:
+        type: object
+        description: >-
+          The comment, e.g.
+          {"comment": "Stock allocated", "is_customer_notified": 0,
+          "is_visible_on_front": 0, "status": "processing"}.
+    output:
+      description: True when the comment was added.
+      type: string
+
+  send_order_email:
+    title: Email an order confirmation
+    description: >-
+      Send the order confirmation email to the customer. This sends real mail --
+      use it to resend a confirmation that failed, not as a routine step after
+      every write.
+    category: orders
+    request:
+      method: POST
+      path: /V1/orders/${order_id}/emails
+    input:
+      order_id:
+        type: integer
+        description: The order's entity id.
+    output:
+      description: True when the email was sent.
+      type: string
+
+  hold_order:
+    title: Hold an order
+    description: >-
+      Put an order on hold, which stops it progressing to invoice or shipment
+      until released. The reversible way to pause fulfilment while a query is
+      resolved.
+    category: orders
+    request:
+      method: POST
+      path: /V1/orders/${order_id}/hold
+    input:
+      order_id:
+        type: integer
+        description: The order's entity id.
+    output:
+      description: True when the order was held.
+      type: string
+
+  unhold_order:
+    title: Release an order from hold
+    description: Take an order off hold so it can be invoiced and shipped again.
+    category: orders
+    request:
+      method: POST
+      path: /V1/orders/${order_id}/unhold
+    input:
+      order_id:
+        type: integer
+        description: The order's entity id.
+    output:
+      description: True when the order was released.
+      type: string
+
+  cancel_order:
+    title: Cancel an order
+    description: >-
+      Cancel an order. Stock is returned and the order stops being fulfillable;
+      an order that is already invoiced or shipped cannot be cancelled -- refund
+      it instead. Not reversible.
+    category: orders
+    destructive: true
+    request:
+      method: POST
+      path: /V1/orders/${order_id}/cancel
+    input:
+      order_id:
+        type: integer
+        description: The order's entity id.
+    output:
+      description: True when the order was cancelled.
+      type: string
+
+  invoice_order:
+    title: Invoice an order
+    description: >-
+      Create an invoice for an order, optionally capturing payment and
+      emailing the customer. `capture` true takes the money where the payment
+      method supports it, so it is a financial action rather than a document
+      one.
+    category: invoices
+    request:
+      method: POST
+      path: /V1/order/${order_id}/invoice
+      body:
+        capture: "${capture}"
+        items: "${items}"
+        notify: "${notify}"
+        appendComment: "${append_comment}"
+        comment: "${comment}"
+    input:
+      order_id:
+        type: integer
+        description: The order's entity id.
+      capture:
+        type: boolean
+        description: Capture payment as part of invoicing.
+        optional: true
+      items:
+        type: array
+        description: >-
+          Which lines to invoice, each {"order_item_id": ..., "qty": ...}.
+          Omit to invoice everything outstanding.
+        optional: true
+        items: {type: object}
+      notify:
+        type: boolean
+        description: Email the invoice to the customer.
+        optional: true
+      append_comment:
+        type: boolean
+        description: Include `comment` on the invoice.
+        optional: true
+      comment:
+        type: object
+        description: 'A comment for the invoice, e.g. {"comment": "Partial shipment"}.'
+        optional: true
+    output:
+      description: The new invoice's id.
+      type: string
+
+  ship_order:
+    title: Ship an order
+    description: >-
+      Create a shipment for an order, with optional tracking numbers and
+      customer notification. Shipping decrements stock and, for many payment
+      methods, is what triggers settlement downstream.
+    category: shipments
+    request:
+      method: POST
+      path: /V1/order/${order_id}/ship
+      body:
+        items: "${items}"
+        notify: "${notify}"
+        appendComment: "${append_comment}"
+        comment: "${comment}"
+        tracks: "${tracks}"
+    input:
+      order_id:
+        type: integer
+        description: The order's entity id.
+      items:
+        type: array
+        description: >-
+          Which lines to ship, each {"order_item_id": ..., "qty": ...}. Omit to
+          ship everything outstanding.
+        optional: true
+        items: {type: object}
+      notify:
+        type: boolean
+        description: Email the shipment notification to the customer.
+        optional: true
+      append_comment:
+        type: boolean
+        description: Include `comment` on the shipment.
+        optional: true
+      comment:
+        type: object
+        description: A comment for the shipment.
+        optional: true
+      tracks:
+        type: array
+        description: >-
+          Tracking numbers, each e.g.
+          {"track_number": "1Z999", "title": "UPS", "carrier_code": "ups"}.
+        optional: true
+        items: {type: object}
+    output:
+      description: The new shipment's id.
+      type: string
+
+  refund_order:
+    title: Refund an order
+    description: >-
+      Refund an order, creating a credit memo. `isOnline` true refunds through
+      the payment gateway -- real money back to the customer -- while false
+      records an offline refund only. Not reversible either way.
+    category: creditmemos
+    destructive: true
+    request:
+      method: POST
+      path: /V1/order/${order_id}/refund
+      body:
+        items: "${items}"
+        isOnline: "${is_online}"
+        notify: "${notify}"
+        appendComment: "${append_comment}"
+        comment: "${comment}"
+        arguments: "${arguments}"
+    input:
+      order_id:
+        type: integer
+        description: The order's entity id.
+      items:
+        type: array
+        description: >-
+          Which lines to refund, each {"order_item_id": ..., "qty": ...}. Omit
+          to refund everything.
+        optional: true
+        items: {type: object}
+      is_online:
+        type: boolean
+        description: Refund through the payment gateway rather than recording an offline refund.
+        optional: true
+      notify:
+        type: boolean
+        description: Email the credit memo to the customer.
+        optional: true
+      append_comment:
+        type: boolean
+        description: Include `comment` on the credit memo.
+        optional: true
+      comment:
+        type: object
+        description: A comment for the credit memo.
+        optional: true
+      arguments:
+        type: object
+        description: >-
+          Adjustments, e.g.
+          {"shipping_amount": 0, "adjustment_positive": 0,
+          "adjustment_negative": 5}.
+        optional: true
+    output:
+      description: The new credit memo's id.
+      type: string
+
+  # -- invoices ---------------------------------------------------------------
+
+  search_invoices:
+    title: Search invoices
+    description: >-
+      Find invoices with a `searchCriteria` query -- by order, state, date or
+      grand total. The financial counterpart to searching orders.
+    category: invoices
+    read_only: true
+    request:
+      method: GET
+      path: /V1/invoices
+      query: "${search_criteria}"
+    input:
+      search_criteria:
+        type: object
+        description: 'Bracketed searchCriteria keys, e.g. {"searchCriteria[pageSize]": 50}.'
+    output:
+      description: The matching invoices.
+      type: object
+      properties:
+        items: {type: array}
+        total_count: {type: integer}
+
+  get_invoice:
+    title: Get an invoice
+    description: One invoice by id, with its lines, totals and the order it belongs to.
+    category: invoices
+    read_only: true
+    request:
+      method: GET
+      path: /V1/invoices/${invoice_id}
+    input:
+      invoice_id:
+        type: integer
+        description: The invoice's entity id.
+    output:
+      description: The invoice.
+      type: object
+      properties:
+        entity_id: {type: integer}
+        increment_id: {type: string}
+        order_id: {type: integer}
+        grand_total: {type: number}
+        items: {type: array}
+
+  create_invoice:
+    title: Create an invoice
+    description: >-
+      Write an invoice entity directly. For the normal case -- invoicing an
+      order's outstanding lines -- `invoice_order` is the tool, since it lets
+      Adobe Commerce work out the totals.
+    category: invoices
+    request:
+      method: POST
+      path: /V1/invoices/
+      body:
+        entity: "${entity}"
+    input:
+      entity:
+        type: object
+        description: The invoice entity, with its order id, items and totals.
+    output:
+      description: The invoice that was created.
+      type: object
+      properties:
+        entity_id: {type: integer}
+
+  capture_invoice:
+    title: Capture an invoice
+    description: >-
+      Capture payment for an invoice through the gateway. This moves money, so
+      it is not a bookkeeping step -- check the invoice's state first, since a
+      captured invoice cannot be captured twice.
+    category: invoices
+    request:
+      method: POST
+      path: /V1/invoices/${invoice_id}/capture
+    input:
+      invoice_id:
+        type: integer
+        description: The invoice's entity id.
+    output:
+      description: True when the capture succeeded.
+      type: string
+
+  void_invoice:
+    title: Void an invoice
+    description: >-
+      Void an invoice at the gateway, releasing an authorisation that was never
+      captured. Not the same as a refund: nothing is returned because nothing
+      was taken.
+    category: invoices
+    destructive: true
+    request:
+      method: POST
+      path: /V1/invoices/${invoice_id}/void
+    input:
+      invoice_id:
+        type: integer
+        description: The invoice's entity id.
+    output:
+      description: True when the invoice was voided.
+      type: string
+
+  refund_invoice:
+    title: Refund an invoice
+    description: >-
+      Refund a specific invoice, creating a credit memo against it. `isOnline`
+      decides whether the money goes back through the gateway.
+    category: invoices
+    destructive: true
+    request:
+      method: POST
+      path: /V1/invoice/${invoice_id}/refund
+      body:
+        items: "${items}"
+        isOnline: "${is_online}"
+        notify: "${notify}"
+        appendComment: "${append_comment}"
+        comment: "${comment}"
+        arguments: "${arguments}"
+    input:
+      invoice_id:
+        type: integer
+        description: The invoice's entity id.
+      items:
+        type: array
+        description: Which lines to refund. Omit to refund the whole invoice.
+        optional: true
+        items: {type: object}
+      is_online:
+        type: boolean
+        description: Refund through the payment gateway.
+        optional: true
+      notify:
+        type: boolean
+        description: Email the credit memo to the customer.
+        optional: true
+      append_comment:
+        type: boolean
+        description: Include `comment` on the credit memo.
+        optional: true
+      comment:
+        type: object
+        description: A comment for the credit memo.
+        optional: true
+      arguments:
+        type: object
+        description: Adjustments such as shipping refunded or manual adjustments.
+        optional: true
+    output:
+      description: The new credit memo's id.
+      type: string
+
+  list_invoice_comments:
+    title: List an invoice's comments
+    description: The comments recorded on one invoice, with their notification flags.
+    category: invoices
+    read_only: true
+    request:
+      method: GET
+      path: /V1/invoices/${invoice_id}/comments
+    input:
+      invoice_id:
+        type: integer
+        description: The invoice's entity id.
+    output:
+      description: The invoice's comments.
+      type: object
+      properties:
+        items: {type: array}
+        total_count: {type: integer}
+
+  add_invoice_comment:
+    title: Add a comment to an invoice
+    description: >-
+      Add a comment to an invoice, optionally notifying the customer. The
+      payload names the invoice it belongs to via `parent_id`.
+    category: invoices
+    request:
+      method: POST
+      path: /V1/invoices/comments
+      body:
+        entity: "${entity}"
+    input:
+      entity:
+        type: object
+        description: >-
+          The comment, e.g.
+          {"parent_id": 12, "comment": "Payment captured",
+          "is_customer_notified": 0, "is_visible_on_front": 0}.
+    output:
+      description: The comment that was added.
+      type: object
+      properties:
+        entity_id: {type: integer}
+
+  send_invoice_email:
+    title: Email an invoice
+    description: >-
+      Send the invoice email to the customer. Real mail, so treat it as a
+      customer-facing action.
+    category: invoices
+    request:
+      method: POST
+      path: /V1/invoices/${invoice_id}/emails
+    input:
+      invoice_id:
+        type: integer
+        description: The invoice's entity id.
+    output:
+      description: True when the email was sent.
+      type: string
+
+  # -- shipments --------------------------------------------------------------
+
+  search_shipments:
+    title: Search shipments
+    description: >-
+      Find shipments with a `searchCriteria` query -- by order, date or
+      tracking. How fulfilment progress is reported without walking orders.
+    category: shipments
+    read_only: true
+    request:
+      method: GET
+      path: /V1/shipments
+      query: "${search_criteria}"
+    input:
+      search_criteria:
+        type: object
+        description: 'Bracketed searchCriteria keys, e.g. {"searchCriteria[pageSize]": 50}.'
+    output:
+      description: The matching shipments.
+      type: object
+      properties:
+        items: {type: array}
+        total_count: {type: integer}
+
+  get_shipment:
+    title: Get a shipment
+    description: >-
+      One shipment by id, with its items, tracking numbers and the order it
+      belongs to.
+    category: shipments
+    read_only: true
+    request:
+      method: GET
+      path: /V1/shipment/${shipment_id}
+    input:
+      shipment_id:
+        type: integer
+        description: The shipment's entity id.
+    output:
+      description: The shipment.
+      type: object
+      properties:
+        entity_id: {type: integer}
+        order_id: {type: integer}
+        items: {type: array}
+        tracks: {type: array}
+
+  create_shipment:
+    title: Create a shipment
+    description: >-
+      Write a shipment entity directly. For shipping an order's outstanding
+      lines, `ship_order` is the tool -- it works out quantities and updates the
+      order's state.
+    category: shipments
+    request:
+      method: POST
+      path: /V1/shipment/
+      body:
+        entity: "${entity}"
+    input:
+      entity:
+        type: object
+        description: The shipment entity, with its order id, items and tracks.
+    output:
+      description: The shipment that was created.
+      type: object
+      properties:
+        entity_id: {type: integer}
+
+  get_shipment_label:
+    title: Get a shipment's label
+    description: >-
+      The shipping label for one shipment, as generated by the carrier
+      integration. Returns the label data, not a URL.
+    category: shipments
+    read_only: true
+    request:
+      method: GET
+      path: /V1/shipment/${shipment_id}/label
+    input:
+      shipment_id:
+        type: integer
+        description: The shipment's entity id.
+    output:
+      description: The label data.
+      type: string
+
+  add_shipment_track:
+    title: Add tracking to a shipment
+    description: >-
+      Attach a tracking number to a shipment. The carrier code has to be one the
+      store has configured, and the customer sees the number in their account.
+    category: shipments
+    request:
+      method: POST
+      path: /V1/shipment/track
+      body:
+        entity: "${entity}"
+    input:
+      entity:
+        type: object
+        description: >-
+          The tracking record, e.g.
+          {"order_id": 5, "parent_id": 3, "track_number": "1Z999",
+          "title": "UPS", "carrier_code": "ups"}.
+    output:
+      description: The tracking record that was created.
+      type: object
+      properties:
+        entity_id: {type: integer}
+
+  delete_shipment_track:
+    title: Remove tracking from a shipment
+    description: >-
+      Delete a tracking number. The customer stops seeing it, which matters if
+      it was wrong -- add the correct one afterwards.
+    category: shipments
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1/shipment/track/${track_id}
+    input:
+      track_id:
+        type: integer
+        description: The tracking record's id.
+    output:
+      description: True when the tracking was removed.
+      type: string
+
+  list_shipment_comments:
+    title: List a shipment's comments
+    description: >-
+      The comments recorded on one shipment, with whether each was sent to the
+      customer -- the record of what a buyer was told about their delivery.
+    category: shipments
+    read_only: true
+    request:
+      method: GET
+      path: /V1/shipment/${shipment_id}/comments
+    input:
+      shipment_id:
+        type: integer
+        description: The shipment's entity id.
+    output:
+      description: The shipment's comments.
+      type: object
+      properties:
+        items: {type: array}
+        total_count: {type: integer}
+
+  add_shipment_comment:
+    title: Add a comment to a shipment
+    description: >-
+      Add a comment to a shipment, optionally notifying the customer -- how a
+      delay or a split delivery is explained.
+    category: shipments
+    request:
+      method: POST
+      path: /V1/shipment/${shipment_id}/comments
+      body:
+        entity: "${entity}"
+    input:
+      shipment_id:
+        type: integer
+        description: The shipment's entity id.
+      entity:
+        type: object
+        description: >-
+          The comment, e.g.
+          {"comment": "Left with neighbour", "is_customer_notified": 1,
+          "parent_id": 3}.
+    output:
+      description: The comment that was added.
+      type: object
+      properties:
+        entity_id: {type: integer}
+
+  send_shipment_email:
+    title: Email a shipment notification
+    description: >-
+      Send the shipment email to the customer, tracking numbers included. Real
+      mail to a real person.
+    category: shipments
+    request:
+      method: POST
+      path: /V1/shipment/${shipment_id}/emails
+    input:
+      shipment_id:
+        type: integer
+        description: The shipment's entity id.
+    output:
+      description: True when the email was sent.
+      type: string
+
+  # -- credit memos -----------------------------------------------------------
+
+  search_credit_memos:
+    title: Search credit memos
+    description: >-
+      Find credit memos with a `searchCriteria` query -- the record of what has
+      been refunded, by order, date or amount.
+    category: creditmemos
+    read_only: true
+    request:
+      method: GET
+      path: /V1/creditmemos
+      query: "${search_criteria}"
+    input:
+      search_criteria:
+        type: object
+        description: 'Bracketed searchCriteria keys, e.g. {"searchCriteria[pageSize]": 50}.'
+    output:
+      description: The matching credit memos.
+      type: object
+      properties:
+        items: {type: array}
+        total_count: {type: integer}
+
+  get_credit_memo:
+    title: Get a credit memo
+    description: >-
+      One credit memo by id, with its lines, adjustments and the order it
+      refunds.
+    category: creditmemos
+    read_only: true
+    request:
+      method: GET
+      path: /V1/creditmemo/${credit_memo_id}
+    input:
+      credit_memo_id:
+        type: integer
+        description: The credit memo's entity id.
+    output:
+      description: The credit memo.
+      type: object
+      properties:
+        entity_id: {type: integer}
+        order_id: {type: integer}
+        grand_total: {type: number}
+        items: {type: array}
+
+  create_credit_memo:
+    title: Create a credit memo
+    description: >-
+      Write a credit memo entity directly. For refunding an order or invoice,
+      `refund_order` and `refund_invoice` are the tools -- they handle totals
+      and the gateway.
+    category: creditmemos
+    request:
+      method: POST
+      path: /V1/creditmemo
+      body:
+        entity: "${entity}"
+    input:
+      entity:
+        type: object
+        description: The credit memo entity, with its order id, items and adjustments.
+    output:
+      description: The credit memo that was created.
+      type: object
+      properties:
+        entity_id: {type: integer}
+
+  update_credit_memo:
+    title: Update a credit memo
+    description: >-
+      Update a credit memo entity. Refunded amounts are settled records, so this
+      is for metadata rather than for changing what was refunded.
+    category: creditmemos
+    request:
+      method: PUT
+      path: /V1/creditmemo/${credit_memo_id}
+      body:
+        entity: "${entity}"
+    input:
+      credit_memo_id:
+        type: integer
+        description: The credit memo's entity id.
+      entity:
+        type: object
+        description: The fields to change.
+    output:
+      description: The updated credit memo.
+      type: object
+      properties:
+        entity_id: {type: integer}
+
+  refund_credit_memo:
+    title: Process a credit memo refund
+    description: >-
+      Execute the refund for a prepared credit memo, optionally offline. Money
+      moves when `offlineRequested` is false, so read the memo first.
+    category: creditmemos
+    destructive: true
+    request:
+      method: POST
+      path: /V1/creditmemo/refund
+      body:
+        creditmemo: "${creditmemo}"
+        offlineRequested: "${offline_requested}"
+    input:
+      creditmemo:
+        type: object
+        description: The credit memo to process.
+      offline_requested:
+        type: boolean
+        description: Record the refund offline instead of sending it to the gateway.
+        optional: true
+    output:
+      description: The processed credit memo.
+      type: object
+      properties:
+        entity_id: {type: integer}
+
+  list_credit_memo_comments:
+    title: List a credit memo's comments
+    description: The comments recorded on one credit memo.
+    category: creditmemos
+    read_only: true
+    request:
+      method: GET
+      path: /V1/creditmemo/${credit_memo_id}/comments
+    input:
+      credit_memo_id:
+        type: integer
+        description: The credit memo's entity id.
+    output:
+      description: The credit memo's comments.
+      type: object
+      properties:
+        items: {type: array}
+        total_count: {type: integer}
+
+  add_credit_memo_comment:
+    title: Add a comment to a credit memo
+    description: >-
+      Add a comment to a credit memo, optionally notifying the customer -- the
+      place to record why a refund was given.
+    category: creditmemos
+    request:
+      method: POST
+      path: /V1/creditmemo/${credit_memo_id}/comments
+      body:
+        entity: "${entity}"
+    input:
+      credit_memo_id:
+        type: integer
+        description: The credit memo's entity id.
+      entity:
+        type: object
+        description: 'The comment, e.g. {"comment": "Goodwill refund", "is_customer_notified": 1}.'
+    output:
+      description: The comment that was added.
+      type: object
+      properties:
+        entity_id: {type: integer}
+
+  send_credit_memo_email:
+    title: Email a credit memo
+    description: Send the credit memo email to the customer. Real mail.
+    category: creditmemos
+    request:
+      method: POST
+      path: /V1/creditmemo/${credit_memo_id}/emails
+    input:
+      credit_memo_id:
+        type: integer
+        description: The credit memo's entity id.
+    output:
+      description: True when the email was sent.
+      type: string
+
+  list_transactions:
+    title: Search payment transactions
+    description: >-
+      Payment transactions recorded against orders -- authorisations, captures,
+      refunds and voids, with the gateway's own transaction ids. The audit trail
+      when a payment is disputed.
+    category: payments
+    read_only: true
+    request:
+      method: GET
+      path: /V1/transactions
+      query: "${search_criteria}"
+    input:
+      search_criteria:
+        type: object
+        description: 'Bracketed searchCriteria keys, e.g. {"searchCriteria[pageSize]": 50}.'
+    output:
+      description: The matching transactions.
+      type: object
+      properties:
+        items: {type: array}
+        total_count: {type: integer}
+
+  get_transaction:
+    title: Get a payment transaction
+    description: >-
+      One transaction by id, with its type, gateway reference and the raw
+      details the payment method returned.
+    category: payments
+    read_only: true
+    request:
+      method: GET
+      path: /V1/transactions/${transaction_id}
+    input:
+      transaction_id:
+        type: integer
+        description: The transaction's id.
+    output:
+      description: The transaction.
+      type: object
+      properties:
+        transaction_id: {type: integer}
+        txn_type: {type: string}
+        txn_id: {type: string}
+        order_id: {type: integer}
+
+  # -- customers --------------------------------------------------------------
+
+  search_customers:
+    title: Search customers
+    description: >-
+      Find customers with a `searchCriteria` query -- by email, group, website
+      or creation date. Customer records carry personal data, so keep what comes
+      back to what you need.
+    category: customers
+    read_only: true
+    request:
+      method: GET
+      path: /V1/customers/search
+      query: "${search_criteria}"
+    input:
+      search_criteria:
+        type: object
+        description: >-
+          Bracketed searchCriteria keys, e.g.
+          {"searchCriteria[filterGroups][0][filters][0][field]": "email",
+          "searchCriteria[filterGroups][0][filters][0][value]": "%@example.com",
+          "searchCriteria[filterGroups][0][filters][0][conditionType]": "like"}.
+    output:
+      description: The matching customers.
+      type: object
+      properties:
+        items: {type: array}
+        total_count: {type: integer}
+
+  get_customer:
+    title: Get a customer
+    description: >-
+      One customer by id, with their addresses, group and custom attributes.
+      Personal data -- handle accordingly.
+    category: customers
+    read_only: true
+    request:
+      method: GET
+      path: /V1/customers/${customer_id}
+    input:
+      customer_id:
+        type: integer
+        description: The customer's id.
+    output:
+      description: The customer.
+      type: object
+      properties:
+        id: {type: integer}
+        email: {type: string}
+        firstname: {type: string}
+        lastname: {type: string}
+        group_id: {type: integer}
+        addresses: {type: array}
+
+  create_customer:
+    title: Create a customer
+    description: >-
+      Create a customer account. Omitting `password` creates the account
+      without one, which means the customer must reset it before signing in --
+      often what you want when importing.
+    category: customers
+    request:
+      method: POST
+      path: /V1/customers
+      body:
+        customer: "${customer}"
+        password: "${password}"
+        redirectUrl: "${redirect_url}"
+    input:
+      customer:
+        type: object
+        description: >-
+          The customer, e.g.
+          {"email": "ada@example.com", "firstname": "Ada", "lastname": "Lovelace",
+          "website_id": 1, "group_id": 1}.
+      password:
+        type: string
+        description: Initial password. Omit to create the account without one.
+        optional: true
+        secret: true
+      redirect_url:
+        type: string
+        description: Where to send the customer after they confirm their email.
+        optional: true
+    output:
+      description: The customer that was created.
+      type: object
+      properties:
+        id: {type: integer}
+        email: {type: string}
+
+  update_customer:
+    title: Update a customer
+    description: >-
+      Update a customer by id. The `addresses` collection replaces rather than
+      merges, so read the customer first when adding one address to several.
+    category: customers
+    request:
+      method: PUT
+      path: /V1/customers/${customer_id}
+      body:
+        customer: "${customer}"
+        passwordHash: "${password_hash}"
+    input:
+      customer_id:
+        type: integer
+        description: The customer's id.
+      customer:
+        type: object
+        description: 'The fields to change, e.g. {"group_id": 2}.'
+      password_hash:
+        type: string
+        description: A pre-hashed password, for migrating accounts between systems.
+        optional: true
+        secret: true
+    output:
+      description: The updated customer.
+      type: object
+      properties:
+        id: {type: integer}
+        email: {type: string}
+
+  delete_customer:
+    title: Delete a customer
+    description: >-
+      Delete a customer account. Their orders remain as records but are no
+      longer linked to a live account, and this is not reversible -- which is
+      also what makes it the tool for a data-erasure request.
+    category: customers
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1/customers/${customer_id}
+    input:
+      customer_id:
+        type: integer
+        description: The customer's id.
+    output:
+      description: True when the customer was deleted.
+      type: string
+
+  get_customer_address:
+    title: Get a customer address
+    description: One saved customer address by id, with its street, city, region and country.
+    category: customers
+    read_only: true
+    request:
+      method: GET
+      path: /V1/customers/addresses/${address_id}
+    input:
+      address_id:
+        type: integer
+        description: The address's id.
+    output:
+      description: The address.
+      type: object
+      properties:
+        id: {type: integer}
+        street: {type: array}
+        city: {type: string}
+        postcode: {type: string}
+        country_id: {type: string}
+
+  delete_customer_address:
+    title: Delete a customer address
+    description: >-
+      Delete a saved address. Orders that used it keep their own copy, since an
+      order snapshots the address at checkout.
+    category: customers
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1/addresses/${address_id}
+    input:
+      address_id:
+        type: integer
+        description: The address's id.
+    output:
+      description: True when the address was deleted.
+      type: string
+
+  get_customer_billing_address:
+    title: Get a customer's default billing address
+    description: The address a customer's orders bill to by default.
+    category: customers
+    read_only: true
+    request:
+      method: GET
+      path: /V1/customers/${customer_id}/billingAddress
+    input:
+      customer_id:
+        type: integer
+        description: The customer's id.
+    output:
+      description: The default billing address.
+      type: object
+      properties:
+        id: {type: integer}
+        street: {type: array}
+        city: {type: string}
+
+  get_customer_shipping_address:
+    title: Get a customer's default shipping address
+    description: The address a customer's orders ship to by default.
+    category: customers
+    read_only: true
+    request:
+      method: GET
+      path: /V1/customers/${customer_id}/shippingAddress
+    input:
+      customer_id:
+        type: integer
+        description: The customer's id.
+    output:
+      description: The default shipping address.
+      type: object
+      properties:
+        id: {type: integer}
+        street: {type: array}
+        city: {type: string}
+
+  check_customer_email_available:
+    title: Check whether an email is available
+    description: >-
+      Whether an email address can still be registered on a website -- the
+      check to run before creating an account, since a duplicate is rejected.
+    category: customers
+    read_only: true
+    request:
+      method: POST
+      path: /V1/customers/isEmailAvailable
+      body:
+        customerEmail: "${customer_email}"
+        websiteId: "${website_id}"
+    input:
+      customer_email:
+        type: string
+        description: The email address to check.
+        format: email
+      website_id:
+        type: integer
+        description: Website to check against. Defaults to the current one.
+        optional: true
+    output:
+      description: True when the address is available.
+      type: string
+
+  validate_customer:
+    title: Validate a customer record
+    description: >-
+      Ask Adobe Commerce whether a customer record would pass validation,
+      without saving it. Useful before a bulk import, since it reports the
+      specific messages rather than failing on the first row. It is a PUT
+      because Adobe Commerce routes it that way, but it writes nothing.
+    category: customers
+    request:
+      method: PUT
+      path: /V1/customers/validate
+      body:
+        customer: "${customer}"
+    input:
+      customer:
+        type: object
+        description: The customer record to validate.
+    output:
+      description: Whether it is valid, with messages when it is not.
+      type: object
+      properties:
+        valid: {type: boolean}
+        messages: {type: array}
+
+  activate_customer:
+    title: Activate a customer account
+    description: >-
+      Confirm a customer's account with the confirmation key they were emailed
+      -- the API equivalent of them clicking the link.
+    category: customers
+    request:
+      method: PUT
+      path: /V1/customers/${email}/activate
+      body:
+        confirmationKey: "${confirmation_key}"
+    input:
+      email:
+        type: string
+        description: The customer's email address.
+      confirmation_key:
+        type: string
+        description: The confirmation key from their activation email.
+    output:
+      description: The activated customer.
+      type: object
+      properties:
+        id: {type: integer}
+        email: {type: string}
+
+  initiate_customer_password_reset:
+    title: Send a customer password reset
+    description: >-
+      Start a password reset, which emails the customer a reset link. This
+      sends mail to a real address, so it is not something to call
+      speculatively.
+    category: customers
+    request:
+      method: PUT
+      path: /V1/customers/password
+      body:
+        email: "${email}"
+        template: "${template}"
+        websiteId: "${website_id}"
+    input:
+      email:
+        type: string
+        description: The customer's email address.
+        format: email
+      template:
+        type: string
+        description: Which email template to use -- email_reset or email_reminder.
+        optional: true
+        default: email_reset
+        enum: [email_reset, email_reminder]
+      website_id:
+        type: integer
+        description: Website the account belongs to.
+        optional: true
+    output:
+      description: True when the email was sent.
+      type: string
+
+  reset_customer_password:
+    title: Reset a customer's password
+    description: >-
+      Complete a password reset using the token from the reset email. Sets the
+      new password directly, so the token is a credential -- do not log it.
+    category: customers
+    request:
+      method: POST
+      path: /V1/customers/resetPassword
+      body:
+        email: "${email}"
+        resetToken: "${reset_token}"
+        newPassword: "${new_password}"
+    input:
+      email:
+        type: string
+        description: The customer's email address.
+        format: email
+      reset_token:
+        type: string
+        description: The reset token from the email.
+        secret: true
+      new_password:
+        type: string
+        description: The new password.
+        secret: true
+    output:
+      description: True when the password was reset.
+      type: string
+
+  get_customer_reset_token_status:
+    title: Check a customer's password reset token
+    description: >-
+      Whether a reset token is still valid for a customer -- the check before
+      showing them a reset form that would fail.
+    category: customers
+    read_only: true
+    request:
+      method: GET
+      path: /V1/customers/${customer_id}/password/resetLinkToken/${reset_password_link_token}
+    input:
+      customer_id:
+        type: integer
+        description: The customer's id.
+      reset_password_link_token:
+        type: string
+        description: The token to check.
+        secret: true
+    output:
+      description: True when the token is still valid.
+      type: string
+
+  confirm_customer:
+    title: Confirm a customer's email
+    description: >-
+      Confirm a customer account from an email confirmation, by customer id and
+      key. The pair with `activate_customer`, which works by email address.
+    category: customers
+    read_only: true
+    request:
+      method: GET
+      path: /V1/customers/${customer_id}/confirm
+    input:
+      customer_id:
+        type: integer
+        description: The customer's id.
+    output:
+      description: The confirmation status.
+      type: string
+
+  check_customer_readonly_permissions:
+    title: Check whether a customer is read-only
+    description: >-
+      Whether this integration may only read the customer, which reflects how
+      the store's access control is configured for customer data.
+    category: customers
+    read_only: true
+    request:
+      method: GET
+      path: /V1/customers/${customer_id}/permissions/readonly
+    input:
+      customer_id:
+        type: integer
+        description: The customer's id.
+    output:
+      description: True when the customer is read-only for this integration.
+      type: string
+
+  list_customer_attribute_metadata:
+    title: List customer attribute metadata
+    description: >-
+      The attributes a customer record carries on this store, with their input
+      types and options -- including any a customisation added.
+    category: customers
+    read_only: true
+    request:
+      method: GET
+      path: /V1/attributeMetadata/customer
+    input: {}
+    output:
+      description: The customer attributes.
+      type: array
+      items: {type: object}
+
+  get_customer_attribute_metadata:
+    title: Get one customer attribute's metadata
+    description: One customer attribute by code, with its type, validation and options.
+    category: customers
+    read_only: true
+    request:
+      method: GET
+      path: /V1/attributeMetadata/customer/attribute/${attribute_code}
+    input:
+      attribute_code:
+        type: string
+        description: The attribute's code, e.g. taxvat.
+    output:
+      description: The attribute's metadata.
+      type: object
+      properties:
+        attribute_code: {type: string}
+        frontend_input: {type: string}
+
+  list_customer_custom_attributes:
+    title: List customer custom attributes
+    description: >-
+      Only the custom attributes on the customer entity -- the fields this store
+      added, without the standard ones.
+    category: customers
+    read_only: true
+    request:
+      method: GET
+      path: /V1/attributeMetadata/customer/custom
+    input: {}
+    output:
+      description: The custom customer attributes.
+      type: array
+      items: {type: object}
+
+  list_customer_form_attributes:
+    title: List a customer form's attributes
+    description: >-
+      Which customer attributes appear on one form -- registration, account
+      edit, address edit -- as the store has configured it.
+    category: customers
+    read_only: true
+    request:
+      method: GET
+      path: /V1/attributeMetadata/customer/form/${form_code}
+    input:
+      form_code:
+        type: string
+        description: The form's code, e.g. customer_account_create.
+        example: customer_account_create
+    output:
+      description: The form's attributes.
+      type: array
+      items: {type: object}
+
+  list_customer_address_attribute_metadata:
+    title: List customer address attribute metadata
+    description: >-
+      The attributes a customer address carries, with their types and options --
+      which is how you learn whether this store requires a region, a company or
+      a VAT number.
+    category: customers
+    read_only: true
+    request:
+      method: GET
+      path: /V1/attributeMetadata/customerAddress
+    input: {}
+    output:
+      description: The customer address attributes.
+      type: array
+      items: {type: object}
+
+  get_customer_address_attribute_metadata:
+    title: Get one address attribute's metadata
+    description: One customer address attribute by code, with its type and validation.
+    category: customers
+    read_only: true
+    request:
+      method: GET
+      path: /V1/attributeMetadata/customerAddress/attribute/${attribute_code}
+    input:
+      attribute_code:
+        type: string
+        description: The attribute's code, e.g. region.
+    output:
+      description: The attribute's metadata.
+      type: object
+      properties:
+        attribute_code: {type: string}
+        frontend_input: {type: string}
+
+  # -- customer groups --------------------------------------------------------
+
+  search_customer_groups:
+    title: Search customer groups
+    description: >-
+      Find customer groups. Groups drive tax class and tier pricing, so a
+      customer's group is what decides what they pay.
+    category: customers
+    read_only: true
+    request:
+      method: GET
+      path: /V1/customerGroups/search
+      query: "${search_criteria}"
+    input:
+      search_criteria:
+        type: object
+        description: 'Bracketed searchCriteria keys, e.g. {"searchCriteria[pageSize]": 50}.'
+    output:
+      description: The matching customer groups.
+      type: object
+      properties:
+        items: {type: array}
+        total_count: {type: integer}
+
+  get_customer_group:
+    title: Get a customer group
+    description: One customer group by id, with its name and tax class.
+    category: customers
+    read_only: true
+    request:
+      method: GET
+      path: /V1/customerGroups/${group_id}
+    input:
+      group_id:
+        type: integer
+        description: The group's id.
+    output:
+      description: The customer group.
+      type: object
+      properties:
+        id: {type: integer}
+        code: {type: string}
+        tax_class_id: {type: integer}
+
+  create_customer_group:
+    title: Create a customer group
+    description: >-
+      Create a customer group with its tax class. New groups are what B2B
+      pricing tiers are usually built on.
+    category: customers
+    request:
+      method: POST
+      path: /V1/customerGroups
+      body:
+        group: "${group}"
+    input:
+      group:
+        type: object
+        description: 'The group, e.g. {"code": "Wholesale", "tax_class_id": 3}.'
+    output:
+      description: The group that was created.
+      type: object
+      properties:
+        id: {type: integer}
+        code: {type: string}
+
+  update_customer_group:
+    title: Update a customer group
+    description: >-
+      Change a group's name or tax class. Changing the tax class changes what
+      every customer in the group is charged.
+    category: customers
+    request:
+      method: PUT
+      path: /V1/customerGroups/${group_id}
+      body:
+        group: "${group}"
+    input:
+      group_id:
+        type: integer
+        description: The group's id.
+      group:
+        type: object
+        description: The fields to change.
+    output:
+      description: The updated group.
+      type: object
+      properties:
+        id: {type: integer}
+
+  delete_customer_group:
+    title: Delete a customer group
+    description: >-
+      Delete a customer group. Customers in it fall back to the default group,
+      which may change their pricing and tax.
+    category: customers
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1/customerGroups/${group_id}
+    input:
+      group_id:
+        type: integer
+        description: The group's id.
+    output:
+      description: True when the group was deleted.
+      type: string
+
+  get_default_customer_group:
+    title: Get the default customer group
+    description: >-
+      Which group new customers land in. Optionally for a specific store, since
+      the default is per-store configuration.
+    category: customers
+    read_only: true
+    request:
+      method: GET
+      path: /V1/customerGroups/default
+    input: {}
+    output:
+      description: The default customer group.
+      type: object
+      properties:
+        id: {type: integer}
+        code: {type: string}
+
+  get_store_default_customer_group:
+    title: Get a store's default customer group
+    description: Which group new customers land in for one store view.
+    category: customers
+    read_only: true
+    request:
+      method: GET
+      path: /V1/customerGroups/default/${store_id}
+    input:
+      store_id:
+        type: integer
+        description: The store view's id.
+    output:
+      description: That store's default customer group.
+      type: object
+      properties:
+        id: {type: integer}
+        code: {type: string}
+
+  set_default_customer_group:
+    title: Set the default customer group
+    description: >-
+      Make a group the default for new customers. Every subsequent registration
+      lands in it, with its tax class and pricing.
+    category: customers
+    request:
+      method: PUT
+      path: /V1/customerGroups/default/${group_id}
+    input:
+      group_id:
+        type: integer
+        description: Id of the group to make default.
+    output:
+      description: The group that is now default.
+      type: object
+      properties:
+        id: {type: integer}
+
+  check_customer_group_permissions:
+    title: Check a customer group's permissions
+    description: >-
+      Whether this group can be deleted or changed -- Adobe Commerce protects
+      the built-in groups, and this reports that before an attempt fails.
+    category: customers
+    read_only: true
+    request:
+      method: GET
+      path: /V1/customerGroups/${group_id}/permissions
+    input:
+      group_id:
+        type: integer
+        description: The group's id.
+    output:
+      description: What may be done with the group.
+      type: object
+      properties:
+        can_delete: {type: boolean}
+
+  # -- carts ------------------------------------------------------------------
+
+  search_carts:
+    title: Search carts
+    description: >-
+      Find quotes (carts) with a `searchCriteria` query -- by customer, store or
+      whether they are still active. This is where abandoned-cart work starts:
+      an active cart with items and no order is an abandoned one.
+    category: carts
+    read_only: true
+    request:
+      method: GET
+      path: /V1/carts/search
+      query: "${search_criteria}"
+    input:
+      search_criteria:
+        type: object
+        description: >-
+          Bracketed searchCriteria keys, e.g.
+          {"searchCriteria[filterGroups][0][filters][0][field]": "is_active",
+          "searchCriteria[filterGroups][0][filters][0][value]": 1,
+          "searchCriteria[pageSize]": 50}.
+    output:
+      description: The matching carts.
+      type: object
+      properties:
+        items: {type: array}
+        total_count: {type: integer}
+
+  get_cart:
+    title: Get a cart
+    description: >-
+      One cart by id, with its items, totals, addresses and the customer it
+      belongs to.
+    category: carts
+    read_only: true
+    request:
+      method: GET
+      path: /V1/carts/${cart_id}
+    input:
+      cart_id:
+        type: integer
+        description: The cart's (quote's) id.
+    output:
+      description: The cart.
+      type: object
+      properties:
+        id: {type: integer}
+        items: {type: array}
+        customer: {type: object}
+        is_active: {type: boolean}
+
+  create_cart_for_customer:
+    title: Create a cart for a customer
+    description: >-
+      Start a new cart on a customer's behalf -- how an agent builds an order
+      for someone over the phone. Returns the cart id the other cart tools take.
+    category: carts
+    request:
+      method: POST
+      path: /V1/customers/${customer_id}/carts
+    input:
+      customer_id:
+        type: integer
+        description: The customer to create the cart for.
+    output:
+      description: The new cart's id.
+      type: string
+
+  create_cart:
+    title: Create an empty cart
+    description: >-
+      Create a cart with no customer attached yet. Useful for assembling an
+      order before deciding whose it is.
+    category: carts
+    request:
+      method: POST
+      path: /V1/carts/
+    input: {}
+    output:
+      description: The new cart's id.
+      type: string
+
+  assign_customer_to_cart:
+    title: Assign a customer to a cart
+    description: >-
+      Attach a customer to an existing cart, which is how a guest cart becomes
+      theirs. Their addresses and group pricing apply from that point.
+    category: carts
+    request:
+      method: PUT
+      path: /V1/carts/${cart_id}
+      body:
+        customerId: "${customer_id}"
+        storeId: "${store_id}"
+    input:
+      cart_id:
+        type: integer
+        description: The cart's id.
+      customer_id:
+        type: integer
+        description: The customer to attach.
+      store_id:
+        type: integer
+        description: Store the cart belongs to.
+        optional: true
+    output:
+      description: True when the customer was assigned.
+      type: string
+
+  list_cart_items:
+    title: List a cart's items
+    description: The line items in one cart, with their SKUs, quantities and prices.
+    category: carts
+    read_only: true
+    request:
+      method: GET
+      path: /V1/carts/${cart_id}/items
+    input:
+      cart_id:
+        type: integer
+        description: The cart's id.
+    output:
+      description: The cart's items.
+      type: array
+      items: {type: object}
+
+  add_cart_item:
+    title: Add an item to a cart
+    description: >-
+      Put a product in a cart. Configurable and bundle products need their
+      option selections in `product_option`, or Adobe Commerce rejects the line
+      as incomplete.
+    category: carts
+    request:
+      method: POST
+      path: /V1/carts/${cart_id}/items
+      body:
+        cartItem: "${cart_item}"
+    input:
+      cart_id:
+        type: integer
+        description: The cart's id.
+      cart_item:
+        type: object
+        description: >-
+          The line to add, e.g.
+          {"sku": "24-MB01", "qty": 1, "quote_id": "3"} -- plus `product_option`
+          for a configurable or bundle product.
+    output:
+      description: The line that was added.
+      type: object
+      properties:
+        item_id: {type: integer}
+        sku: {type: string}
+        qty: {type: number}
+
+  update_cart_item:
+    title: Update a cart item
+    description: >-
+      Change a line's quantity or options. Setting the quantity to zero does not
+      remove it -- use `delete_cart_item` for that.
+    category: carts
+    request:
+      method: PUT
+      path: /V1/carts/${cart_id}/items/${item_id}
+      body:
+        cartItem: "${cart_item}"
+    input:
+      cart_id:
+        type: integer
+        description: The cart's id.
+      item_id:
+        type: integer
+        description: The line's item id.
+      cart_item:
+        type: object
+        description: 'The line''s new values, e.g. {"qty": 3, "quote_id": "3"}.'
+    output:
+      description: The updated line.
+      type: object
+      properties:
+        item_id: {type: integer}
+        qty: {type: number}
+
+  delete_cart_item:
+    title: Remove an item from a cart
+    description: Take a line out of a cart. Totals are recalculated on the next read.
+    category: carts
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1/carts/${cart_id}/items/${item_id}
+    input:
+      cart_id:
+        type: integer
+        description: The cart's id.
+      item_id:
+        type: integer
+        description: The line's item id.
+    output:
+      description: True when the line was removed.
+      type: string
+
+  get_cart_totals:
+    title: Get a cart's totals
+    description: >-
+      The cart's calculated totals -- subtotal, tax, shipping, discounts and
+      grand total, with the per-line breakdown. What the customer would be
+      charged as it stands.
+    category: carts
+    read_only: true
+    request:
+      method: GET
+      path: /V1/carts/${cart_id}/totals
+    input:
+      cart_id:
+        type: integer
+        description: The cart's id.
+    output:
+      description: The cart's totals.
+      type: object
+      properties:
+        grand_total: {type: number}
+        subtotal: {type: number}
+        tax_amount: {type: number}
+        shipping_amount: {type: number}
+        items: {type: array}
+
+  estimate_cart_totals:
+    title: Estimate a cart's totals for an address
+    description: >-
+      What the cart would total for a given address and shipping method,
+      without committing to either -- the calculation behind a checkout's
+      shipping estimator.
+    category: carts
+    read_only: true
+    request:
+      method: POST
+      path: /V1/carts/${cart_id}/totals-information
+      body:
+        addressInformation: "${address_information}"
+    input:
+      cart_id:
+        type: integer
+        description: The cart's id.
+      address_information:
+        type: object
+        description: >-
+          The address and method, e.g.
+          {"address": {"country_id": "US", "postcode": "78758", "region_id": 57},
+          "shipping_method_code": "flatrate", "shipping_carrier_code": "flatrate"}.
+    output:
+      description: The estimated totals.
+      type: object
+      properties:
+        grand_total: {type: number}
+        tax_amount: {type: number}
+        shipping_amount: {type: number}
+
+  get_cart_billing_address:
+    title: Get a cart's billing address
+    description: The billing address currently set on a cart.
+    category: carts
+    read_only: true
+    request:
+      method: GET
+      path: /V1/carts/${cart_id}/billing-address
+    input:
+      cart_id:
+        type: integer
+        description: The cart's id.
+    output:
+      description: The billing address.
+      type: object
+      properties:
+        id: {type: integer}
+        street: {type: array}
+        city: {type: string}
+        postcode: {type: string}
+
+  set_cart_billing_address:
+    title: Set a cart's billing address
+    description: >-
+      Set the billing address on a cart. It affects tax calculation, so totals
+      can change as a result.
+    category: carts
+    request:
+      method: POST
+      path: /V1/carts/${cart_id}/billing-address
+      body:
+        address: "${address}"
+        useForShipping: "${use_for_shipping}"
+    input:
+      cart_id:
+        type: integer
+        description: The cart's id.
+      address:
+        type: object
+        description: >-
+          The address, e.g.
+          {"firstname": "Ada", "lastname": "Lovelace",
+          "street": ["1 Main St"], "city": "Austin", "region_id": 57,
+          "postcode": "78758", "country_id": "US", "telephone": "5125551234"}.
+      use_for_shipping:
+        type: boolean
+        description: Also use this address for shipping.
+        optional: true
+    output:
+      description: The billing address's id.
+      type: string
+
+  get_cart_shipping_methods:
+    title: Get a cart's shipping methods
+    description: >-
+      The shipping methods available for the cart's current address, with their
+      prices -- what the customer would be offered at checkout.
+    category: carts
+    read_only: true
+    request:
+      method: GET
+      path: /V1/carts/${cart_id}/shipping-methods
+    input:
+      cart_id:
+        type: integer
+        description: The cart's id.
+    output:
+      description: The available shipping methods.
+      type: array
+      items: {type: object, description: "A method with carrier_code, method_code, amount and title."}
+
+  estimate_shipping_methods:
+    title: Estimate shipping methods for an address
+    description: >-
+      Which shipping methods and prices would apply to an address, before it is
+      saved to the cart. The estimator that runs as a shopper types their
+      postcode.
+    category: carts
+    read_only: true
+    request:
+      method: POST
+      path: /V1/carts/${cart_id}/estimate-shipping-methods
+      body:
+        address: "${address}"
+    input:
+      cart_id:
+        type: integer
+        description: The cart's id.
+      address:
+        type: object
+        description: >-
+          The address to estimate for -- country_id, region_id and postcode are
+          usually enough.
+    output:
+      description: The available shipping methods and their prices.
+      type: array
+      items: {type: object}
+
+  estimate_shipping_methods_by_address_id:
+    title: Estimate shipping methods for a saved address
+    description: >-
+      The same estimate using one of the customer's saved addresses, by id --
+      the shortcut when they are signed in.
+    category: carts
+    read_only: true
+    request:
+      method: POST
+      path: /V1/carts/${cart_id}/estimate-shipping-methods-by-address-id
+      body:
+        addressId: "${address_id}"
+    input:
+      cart_id:
+        type: integer
+        description: The cart's id.
+      address_id:
+        type: integer
+        description: Id of the customer's saved address.
+    output:
+      description: The available shipping methods and their prices.
+      type: array
+      items: {type: object}
+
+  set_cart_shipping_information:
+    title: Set a cart's shipping information
+    description: >-
+      Set the shipping address and method together, which is the step that
+      finalises delivery before payment. The response carries the recalculated
+      totals and the payment methods now available.
+    category: carts
+    request:
+      method: POST
+      path: /V1/carts/${cart_id}/shipping-information
+      body:
+        addressInformation: "${address_information}"
+    input:
+      cart_id:
+        type: integer
+        description: The cart's id.
+      address_information:
+        type: object
+        description: >-
+          The shipping and billing addresses plus the chosen method, e.g.
+          {"shipping_address": {...}, "billing_address": {...},
+          "shipping_method_code": "flatrate",
+          "shipping_carrier_code": "flatrate"}.
+    output:
+      description: The payment methods now available, and the cart's totals.
+      type: object
+      properties:
+        payment_methods: {type: array}
+        totals: {type: object}
+
+  get_cart_payment_methods:
+    title: Get a cart's payment methods
+    description: >-
+      Which payment methods this cart may use, given its totals, address and
+      the store's configuration.
+    category: carts
+    read_only: true
+    request:
+      method: GET
+      path: /V1/carts/${cart_id}/payment-methods
+    input:
+      cart_id:
+        type: integer
+        description: The cart's id.
+    output:
+      description: The available payment methods.
+      type: array
+      items: {type: object, description: "A method with code and title."}
+
+  get_cart_selected_payment_method:
+    title: Get a cart's selected payment method
+    description: Which payment method the cart currently has set, if any.
+    category: carts
+    read_only: true
+    request:
+      method: GET
+      path: /V1/carts/${cart_id}/selected-payment-method
+    input:
+      cart_id:
+        type: integer
+        description: The cart's id.
+    output:
+      description: The selected payment method.
+      type: object
+      properties:
+        method: {type: string}
+
+  set_cart_payment_method:
+    title: Set a cart's payment method
+    description: >-
+      Choose how the cart will be paid for. Some methods need extra data in
+      `additional_data`, which the method's own configuration defines.
+    category: carts
+    request:
+      method: PUT
+      path: /V1/carts/${cart_id}/selected-payment-method
+      body:
+        method: "${method}"
+    input:
+      cart_id:
+        type: integer
+        description: The cart's id.
+      method:
+        type: object
+        description: >-
+          The payment method, e.g.
+          {"method": "checkmo"} or a gateway method with additional_data.
+    output:
+      description: True when the method was set.
+      type: string
+
+  place_order:
+    title: Place a cart's order
+    description: >-
+      Convert a cart into an order. This is checkout: stock is reserved,
+      payment is taken by the chosen method, and the customer is emailed. It
+      cannot be undone -- cancel or refund the resulting order instead.
+    category: carts
+    request:
+      method: PUT
+      path: /V1/carts/${cart_id}/order
+      body:
+        paymentMethod: "${payment_method}"
+    input:
+      cart_id:
+        type: integer
+        description: The cart's id.
+      payment_method:
+        type: object
+        description: >-
+          The payment method to place the order with, e.g. {"method": "checkmo"}.
+        optional: true
+    output:
+      description: The new order's id.
+      type: string
+
+  get_cart_coupons:
+    title: Get a cart's coupon
+    description: The coupon code currently applied to a cart, if any.
+    category: carts
+    read_only: true
+    request:
+      method: GET
+      path: /V1/carts/${cart_id}/coupons
+    input:
+      cart_id:
+        type: integer
+        description: The cart's id.
+    output:
+      description: The applied coupon code.
+      type: string
+
+  apply_cart_coupon:
+    title: Apply a coupon to a cart
+    description: >-
+      Apply a coupon code, which recalculates the totals. A cart holds one
+      coupon at a time, so applying a second replaces the first.
+    category: carts
+    request:
+      method: PUT
+      path: /V1/carts/${cart_id}/coupons/${coupon_code}
+    input:
+      cart_id:
+        type: integer
+        description: The cart's id.
+      coupon_code:
+        type: string
+        description: The coupon code to apply.
+    output:
+      description: True when the coupon was applied.
+      type: string
+
+  delete_cart_coupon:
+    title: Remove a cart's coupon
+    description: >-
+      Remove the applied coupon, which recalculates the totals at full price.
+    category: carts
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1/carts/${cart_id}/coupons
+    input:
+      cart_id:
+        type: integer
+        description: The cart's id.
+    output:
+      description: True when the coupon was removed.
+      type: string
+
+  get_cart_gift_message:
+    title: Get a cart's gift message
+    description: The gift message set on a cart, if the store has gift messaging enabled.
+    category: carts
+    read_only: true
+    request:
+      method: GET
+      path: /V1/carts/${cart_id}/gift-message
+    input:
+      cart_id:
+        type: integer
+        description: The cart's id.
+    output:
+      description: The gift message.
+      type: object
+      properties:
+        gift_message_id: {type: integer}
+        sender: {type: string}
+        recipient: {type: string}
+        message: {type: string}
+
+  set_cart_gift_message:
+    title: Set a cart's gift message
+    description: >-
+      Attach a gift message to the whole cart. It is printed with the order, so
+      the text is customer-visible.
+    category: carts
+    request:
+      method: POST
+      path: /V1/carts/${cart_id}/gift-message
+      body:
+        giftMessage: "${gift_message}"
+    input:
+      cart_id:
+        type: integer
+        description: The cart's id.
+      gift_message:
+        type: object
+        description: >-
+          The message, e.g.
+          {"sender": "Ada", "recipient": "Grace", "message": "Happy birthday"}.
+    output:
+      description: True when the message was set.
+      type: string
+
+  get_cart_item_gift_message:
+    title: Get a cart item's gift message
+    description: The gift message on one line of a cart, for per-item gifting.
+    category: carts
+    read_only: true
+    request:
+      method: GET
+      path: /V1/carts/${cart_id}/gift-message/${item_id}
+    input:
+      cart_id:
+        type: integer
+        description: The cart's id.
+      item_id:
+        type: integer
+        description: The line's item id.
+    output:
+      description: The item's gift message.
+      type: object
+      properties:
+        gift_message_id: {type: integer}
+        message: {type: string}
+
+  set_cart_item_gift_message:
+    title: Set a cart item's gift message
+    description: Attach a gift message to one line rather than to the whole cart.
+    category: carts
+    request:
+      method: POST
+      path: /V1/carts/${cart_id}/gift-message/${item_id}
+      body:
+        giftMessage: "${gift_message}"
+    input:
+      cart_id:
+        type: integer
+        description: The cart's id.
+      item_id:
+        type: integer
+        description: The line's item id.
+      gift_message:
+        type: object
+        description: The sender, recipient and message text.
+    output:
+      description: True when the message was set.
+      type: string
+
+  # -- guest carts ------------------------------------------------------------
+
+  create_guest_cart:
+    title: Create a guest cart
+    description: >-
+      Start a cart for a shopper who is not signed in. Returns a masked cart id
+      -- an opaque token rather than a number -- which the other guest cart
+      tools take.
+    category: carts
+    request:
+      method: POST
+      path: /V1/guest-carts
+    input: {}
+    output:
+      description: The masked cart id.
+      type: string
+
+  get_guest_cart:
+    title: Get a guest cart
+    description: One guest cart by its masked id, with its items and totals.
+    category: carts
+    read_only: true
+    request:
+      method: GET
+      path: /V1/guest-carts/${cart_id}
+    input:
+      cart_id:
+        type: string
+        description: The guest cart's masked id.
+    output:
+      description: The guest cart.
+      type: object
+      properties:
+        id: {type: integer}
+        items: {type: array}
+
+  add_guest_cart_item:
+    title: Add an item to a guest cart
+    description: >-
+      Put a product in a guest cart. The `quote_id` inside the payload is the
+      masked id, not a number.
+    category: carts
+    request:
+      method: POST
+      path: /V1/guest-carts/${cart_id}/items
+      body:
+        cartItem: "${cart_item}"
+    input:
+      cart_id:
+        type: string
+        description: The guest cart's masked id.
+      cart_item:
+        type: object
+        description: 'The line to add, e.g. {"sku": "24-MB01", "qty": 1, "quote_id": "abc123"}.'
+    output:
+      description: The line that was added.
+      type: object
+      properties:
+        item_id: {type: integer}
+        sku: {type: string}
+
+  update_guest_cart_item:
+    title: Update a guest cart item
+    description: Change a line's quantity or options in a guest cart.
+    category: carts
+    request:
+      method: PUT
+      path: /V1/guest-carts/${cart_id}/items/${item_id}
+      body:
+        cartItem: "${cart_item}"
+    input:
+      cart_id:
+        type: string
+        description: The guest cart's masked id.
+      item_id:
+        type: integer
+        description: The line's item id.
+      cart_item:
+        type: object
+        description: The line's new values.
+    output:
+      description: The updated line.
+      type: object
+      properties:
+        item_id: {type: integer}
+
+  delete_guest_cart_item:
+    title: Remove an item from a guest cart
+    description: >-
+      Take a line out of a guest cart. Totals are recalculated on the next
+      read, and an emptied guest cart stays valid rather than being discarded.
+    category: carts
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1/guest-carts/${cart_id}/items/${item_id}
+    input:
+      cart_id:
+        type: string
+        description: The guest cart's masked id.
+      item_id:
+        type: integer
+        description: The line's item id.
+    output:
+      description: True when the line was removed.
+      type: string
+
+  get_guest_cart_totals:
+    title: Get a guest cart's totals
+    description: The calculated totals for a guest cart, with the per-line breakdown.
+    category: carts
+    read_only: true
+    request:
+      method: GET
+      path: /V1/guest-carts/${cart_id}/totals
+    input:
+      cart_id:
+        type: string
+        description: The guest cart's masked id.
+    output:
+      description: The guest cart's totals.
+      type: object
+      properties:
+        grand_total: {type: number}
+        subtotal: {type: number}
+        tax_amount: {type: number}
+
+  set_guest_cart_shipping_information:
+    title: Set a guest cart's shipping information
+    description: >-
+      Set a guest cart's addresses and shipping method, returning the payment
+      methods and totals that follow.
+    category: carts
+    request:
+      method: POST
+      path: /V1/guest-carts/${cart_id}/shipping-information
+      body:
+        addressInformation: "${address_information}"
+    input:
+      cart_id:
+        type: string
+        description: The guest cart's masked id.
+      address_information:
+        type: object
+        description: The shipping and billing addresses plus the chosen method.
+    output:
+      description: The payment methods now available, and the totals.
+      type: object
+      properties:
+        payment_methods: {type: array}
+        totals: {type: object}
+
+  place_guest_order:
+    title: Place a guest cart's order
+    description: >-
+      Turn a guest cart into an order. As with a customer checkout this takes
+      payment and emails the buyer, and cannot be undone.
+    category: carts
+    request:
+      method: PUT
+      path: /V1/guest-carts/${cart_id}/order
+      body:
+        paymentMethod: "${payment_method}"
+    input:
+      cart_id:
+        type: string
+        description: The guest cart's masked id.
+      payment_method:
+        type: object
+        description: The payment method to place the order with.
+        optional: true
+    output:
+      description: The new order's id.
+      type: string
+
+  # -- CMS --------------------------------------------------------------------
+
+  search_cms_pages:
+    title: Search CMS pages
+    description: >-
+      Find CMS pages with a `searchCriteria` query -- by identifier, title or
+      active state. The store's own content, not products.
+    category: cms
+    read_only: true
+    request:
+      method: GET
+      path: /V1/cmsPage/search
+      query: "${search_criteria}"
+    input:
+      search_criteria:
+        type: object
+        description: 'Bracketed searchCriteria keys, e.g. {"searchCriteria[pageSize]": 50}.'
+    output:
+      description: The matching CMS pages.
+      type: object
+      properties:
+        items: {type: array}
+        total_count: {type: integer}
+
+  get_cms_page:
+    title: Get a CMS page
+    description: One CMS page by id, with its content, layout and URL identifier.
+    category: cms
+    read_only: true
+    request:
+      method: GET
+      path: /V1/cmsPage/${page_id}
+    input:
+      page_id:
+        type: integer
+        description: The page's id.
+    output:
+      description: The CMS page.
+      type: object
+      properties:
+        id: {type: integer}
+        identifier: {type: string}
+        title: {type: string}
+        content: {type: string}
+        active: {type: boolean}
+
+  create_cms_page:
+    title: Create a CMS page
+    description: >-
+      Create a content page. `identifier` becomes its URL key, so it must be
+      unique per store, and `active` decides whether it is live immediately.
+    category: cms
+    request:
+      method: POST
+      path: /V1/cmsPage
+      body:
+        page: "${page}"
+    input:
+      page:
+        type: object
+        description: >-
+          The page, e.g.
+          {"identifier": "shipping-policy", "title": "Shipping policy",
+          "content": "<p>...</p>", "active": true, "page_layout": "1column"}.
+    output:
+      description: The page that was created.
+      type: object
+      properties:
+        id: {type: integer}
+        identifier: {type: string}
+
+  update_cms_page:
+    title: Update a CMS page
+    description: >-
+      Change a page's content, title or layout. Live pages update immediately
+      once the store's cache refreshes, so this is a publishing action.
+    category: cms
+    request:
+      method: PUT
+      path: /V1/cmsPage/${page_id}
+      body:
+        page: "${page}"
+    input:
+      page_id:
+        type: integer
+        description: The page's id.
+      page:
+        type: object
+        description: The fields to change.
+    output:
+      description: The updated page.
+      type: object
+      properties:
+        id: {type: integer}
+
+  delete_cms_page:
+    title: Delete a CMS page
+    description: >-
+      Delete a content page. Its URL starts returning 404, so setting `active`
+      false is the reversible way to take a page down.
+    category: cms
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1/cmsPage/${page_id}
+    input:
+      page_id:
+        type: integer
+        description: The page's id.
+    output:
+      description: True when the page was deleted.
+      type: string
+
+  search_cms_blocks:
+    title: Search CMS blocks
+    description: >-
+      Find CMS blocks -- the reusable content fragments pages and layouts embed,
+      such as promotional banners and footer copy.
+    category: cms
+    read_only: true
+    request:
+      method: GET
+      path: /V1/cmsBlock/search
+      query: "${search_criteria}"
+    input:
+      search_criteria:
+        type: object
+        description: 'Bracketed searchCriteria keys, e.g. {"searchCriteria[pageSize]": 50}.'
+    output:
+      description: The matching CMS blocks.
+      type: object
+      properties:
+        items: {type: array}
+        total_count: {type: integer}
+
+  get_cms_block:
+    title: Get a CMS block
+    description: One CMS block by id, with its identifier and content.
+    category: cms
+    read_only: true
+    request:
+      method: GET
+      path: /V1/cmsBlock/${block_id}
+    input:
+      block_id:
+        type: integer
+        description: The block's id.
+    output:
+      description: The CMS block.
+      type: object
+      properties:
+        id: {type: integer}
+        identifier: {type: string}
+        title: {type: string}
+        content: {type: string}
+
+  create_cms_block:
+    title: Create a CMS block
+    description: >-
+      Create a reusable content block. Its `identifier` is how layouts and
+      pages reference it, so it should be stable once other content points at
+      it.
+    category: cms
+    request:
+      method: POST
+      path: /V1/cmsBlock
+      body:
+        block: "${block}"
+    input:
+      block:
+        type: object
+        description: >-
+          The block, e.g.
+          {"identifier": "home-banner", "title": "Home banner",
+          "content": "<div>...</div>", "active": true}.
+    output:
+      description: The block that was created.
+      type: object
+      properties:
+        id: {type: integer}
+        identifier: {type: string}
+
+  update_cms_block:
+    title: Update a CMS block
+    description: >-
+      Change a block's content or title. Every page embedding it changes at
+      once, which is the point of a block -- and the risk.
+    category: cms
+    request:
+      method: PUT
+      path: /V1/cmsBlock/${block_id}
+      body:
+        block: "${block}"
+    input:
+      block_id:
+        type: integer
+        description: The block's id.
+      block:
+        type: object
+        description: The fields to change.
+    output:
+      description: The updated block.
+      type: object
+      properties:
+        id: {type: integer}
+
+  delete_cms_block:
+    title: Delete a CMS block
+    description: >-
+      Delete a content block. Pages that embed it render nothing in its place,
+      so check what references the identifier first.
+    category: cms
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1/cmsBlock/${block_id}
+    input:
+      block_id:
+        type: integer
+        description: The block's id.
+    output:
+      description: True when the block was deleted.
+      type: string
+
+  # -- promotions -------------------------------------------------------------
+
+  search_sales_rules:
+    title: Search cart price rules
+    description: >-
+      Find cart price rules -- the promotions that discount a basket. Their ids
+      are what coupon generation and coupon records refer to.
+    category: promotions
+    read_only: true
+    request:
+      method: GET
+      path: /V1/salesRules/search
+      query: "${search_criteria}"
+    input:
+      search_criteria:
+        type: object
+        description: 'Bracketed searchCriteria keys, e.g. {"searchCriteria[pageSize]": 50}.'
+    output:
+      description: The matching rules.
+      type: object
+      properties:
+        items: {type: array}
+        total_count: {type: integer}
+
+  get_sales_rule:
+    title: Get a cart price rule
+    description: >-
+      One rule by id, with its conditions, discount and the websites and
+      customer groups it applies to.
+    category: promotions
+    read_only: true
+    request:
+      method: GET
+      path: /V1/salesRules/${rule_id}
+    input:
+      rule_id:
+        type: integer
+        description: The rule's id.
+    output:
+      description: The rule.
+      type: object
+      properties:
+        rule_id: {type: integer}
+        name: {type: string}
+        discount_amount: {type: number}
+        simple_action: {type: string}
+        is_active: {type: boolean}
+
+  create_sales_rule:
+    title: Create a cart price rule
+    description: >-
+      Create a promotion. `simple_action` and `discount_amount` decide what it
+      takes off, and `website_ids` plus `customer_group_ids` who gets it -- a
+      rule missing either applies to nobody.
+    category: promotions
+    request:
+      method: POST
+      path: /V1/salesRules
+      body:
+        rule: "${rule}"
+    input:
+      rule:
+        type: object
+        description: >-
+          The rule, e.g.
+          {"name": "10% off", "website_ids": [1], "customer_group_ids": [0,1],
+          "is_active": true, "simple_action": "by_percent",
+          "discount_amount": 10, "coupon_type": "SPECIFIC_COUPON"}.
+    output:
+      description: The rule that was created.
+      type: object
+      properties:
+        rule_id: {type: integer}
+        name: {type: string}
+
+  update_sales_rule:
+    title: Update a cart price rule
+    description: >-
+      Change a promotion's conditions, discount or dates. Changes take effect
+      on the next cart calculation, so an active rule changes live pricing.
+    category: promotions
+    request:
+      method: PUT
+      path: /V1/salesRules/${rule_id}
+      body:
+        rule: "${rule}"
+    input:
+      rule_id:
+        type: integer
+        description: The rule's id.
+      rule:
+        type: object
+        description: The fields to change.
+    output:
+      description: The updated rule.
+      type: object
+      properties:
+        rule_id: {type: integer}
+
+  delete_sales_rule:
+    title: Delete a cart price rule
+    description: >-
+      Delete a promotion and the coupons generated from it. Setting `is_active`
+      false is the reversible way to end a promotion.
+    category: promotions
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1/salesRules/${rule_id}
+    input:
+      rule_id:
+        type: integer
+        description: The rule's id.
+    output:
+      description: True when the rule was deleted.
+      type: string
+
+  search_coupons:
+    title: Search coupons
+    description: >-
+      Find coupons with a `searchCriteria` query -- by code, rule or usage.
+      Usage counts are how you tell a spent code from an unused one.
+    category: promotions
+    read_only: true
+    request:
+      method: GET
+      path: /V1/coupons/search
+      query: "${search_criteria}"
+    input:
+      search_criteria:
+        type: object
+        description: 'Bracketed searchCriteria keys, e.g. {"searchCriteria[pageSize]": 100}.'
+    output:
+      description: The matching coupons.
+      type: object
+      properties:
+        items: {type: array}
+        total_count: {type: integer}
+
+  get_coupon:
+    title: Get a coupon
+    description: One coupon by id, with its code, rule, usage limits and expiry.
+    category: promotions
+    read_only: true
+    request:
+      method: GET
+      path: /V1/coupons/${coupon_id}
+    input:
+      coupon_id:
+        type: integer
+        description: The coupon's id.
+    output:
+      description: The coupon.
+      type: object
+      properties:
+        coupon_id: {type: integer}
+        code: {type: string}
+        rule_id: {type: integer}
+        times_used: {type: integer}
+
+  create_coupon:
+    title: Create a coupon
+    description: >-
+      Create a coupon code against an existing cart price rule. The rule
+      supplies the discount; the coupon is just the code that unlocks it.
+    category: promotions
+    request:
+      method: POST
+      path: /V1/coupons
+      body:
+        coupon: "${coupon}"
+    input:
+      coupon:
+        type: object
+        description: >-
+          The coupon, e.g.
+          {"rule_id": 4, "code": "WELCOME10", "usage_limit": 100,
+          "usage_per_customer": 1}.
+    output:
+      description: The coupon that was created.
+      type: object
+      properties:
+        coupon_id: {type: integer}
+        code: {type: string}
+
+  update_coupon:
+    title: Update a coupon
+    description: >-
+      Change a coupon's code, usage limits or expiry. Shortening the expiry
+      ends the offer for anyone who has not redeemed it.
+    category: promotions
+    request:
+      method: PUT
+      path: /V1/coupons/${coupon_id}
+      body:
+        coupon: "${coupon}"
+    input:
+      coupon_id:
+        type: integer
+        description: The coupon's id.
+      coupon:
+        type: object
+        description: The fields to change.
+    output:
+      description: The updated coupon.
+      type: object
+      properties:
+        coupon_id: {type: integer}
+
+  delete_coupon:
+    title: Delete a coupon
+    description: >-
+      Delete a coupon code. Anyone holding the code finds it invalid at
+      checkout, so retiring one mid-campaign is customer-visible.
+    category: promotions
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1/coupons/${coupon_id}
+    input:
+      coupon_id:
+        type: integer
+        description: The coupon's id.
+    output:
+      description: True when the coupon was deleted.
+      type: string
+
+  generate_coupons:
+    title: Generate coupon codes
+    description: >-
+      Bulk-generate codes for a rule -- how a campaign gets thousands of unique
+      single-use codes rather than one shared one. The format arguments control
+      length, prefix and character set.
+    category: promotions
+    request:
+      method: POST
+      path: /V1/coupons/generate
+      body:
+        couponSpec: "${coupon_spec}"
+    input:
+      coupon_spec:
+        type: object
+        description: >-
+          The generation spec, e.g.
+          {"rule_id": 4, "quantity": 500, "length": 12, "format": "alphanum",
+          "prefix": "SUM-"}.
+    output:
+      description: The generated codes.
+      type: array
+      items: {type: string}
+
+  delete_coupons_by_ids:
+    title: Delete coupons by id
+    description: >-
+      Delete many coupons at once by their ids. `ignoreInvalidCoupons` decides
+      whether one bad id fails the whole batch.
+    category: promotions
+    destructive: true
+    request:
+      method: POST
+      path: /V1/coupons/deleteByIds
+      body:
+        ids: "${ids}"
+        ignoreInvalidCoupons: "${ignore_invalid_coupons}"
+    input:
+      ids:
+        type: array
+        description: Ids of the coupons to delete.
+        items: {type: integer}
+      ignore_invalid_coupons:
+        type: boolean
+        description: Skip ids that do not exist rather than failing the batch.
+        optional: true
+    output:
+      description: What was deleted and what failed.
+      type: object
+      properties:
+        failed_items: {type: array}
+        missing_items: {type: array}
+
+  delete_coupons_by_codes:
+    title: Delete coupons by code
+    description: >-
+      Delete many coupons at once by their codes -- the shape to use when a
+      campaign's codes are known but their ids are not.
+    category: promotions
+    destructive: true
+    request:
+      method: POST
+      path: /V1/coupons/deleteByCodes
+      body:
+        codes: "${codes}"
+        ignoreInvalidCoupons: "${ignore_invalid_coupons}"
+    input:
+      codes:
+        type: array
+        description: The coupon codes to delete.
+        items: {type: string}
+      ignore_invalid_coupons:
+        type: boolean
+        description: Skip codes that do not exist rather than failing the batch.
+        optional: true
+    output:
+      description: What was deleted and what failed.
+      type: object
+      properties:
+        failed_items: {type: array}
+        missing_items: {type: array}
+
+  # -- tax --------------------------------------------------------------------
+
+  search_tax_rates:
+    title: Search tax rates
+    description: >-
+      Find tax rates by region, postcode or code -- the percentages that combine
+      into what a customer is charged.
+    category: tax
+    read_only: true
+    request:
+      method: GET
+      path: /V1/taxRates/search
+      query: "${search_criteria}"
+    input:
+      search_criteria:
+        type: object
+        description: 'Bracketed searchCriteria keys, e.g. {"searchCriteria[pageSize]": 50}.'
+    output:
+      description: The matching tax rates.
+      type: object
+      properties:
+        items: {type: array}
+        total_count: {type: integer}
+
+  get_tax_rate:
+    title: Get a tax rate
+    description: One tax rate by id, with its percentage and the region it covers.
+    category: tax
+    read_only: true
+    request:
+      method: GET
+      path: /V1/taxRates/${rate_id}
+    input:
+      rate_id:
+        type: integer
+        description: The tax rate's id.
+    output:
+      description: The tax rate.
+      type: object
+      properties:
+        id: {type: integer}
+        code: {type: string}
+        rate: {type: number}
+        tax_country_id: {type: string}
+
+  create_tax_rate:
+    title: Create a tax rate
+    description: >-
+      Create a tax rate for a country, region and postcode range. Rates take
+      effect through tax rules, so a rate alone changes nothing until a rule
+      references it.
+    category: tax
+    request:
+      method: POST
+      path: /V1/taxRates
+      body:
+        tax_rate: "${tax_rate}"
+    input:
+      tax_rate:
+        type: object
+        description: >-
+          The rate, e.g.
+          {"tax_country_id": "US", "tax_region_id": 57, "rate": 8.25,
+          "code": "US-TX-*-Rate 1", "tax_postcode": "*"}.
+    output:
+      description: The rate that was created.
+      type: object
+      properties:
+        id: {type: integer}
+        code: {type: string}
+
+  update_tax_rate:
+    title: Update a tax rate
+    description: >-
+      Change a tax rate's percentage or coverage. It affects what customers are
+      charged from the next calculation, so it is a financial change.
+    category: tax
+    request:
+      method: PUT
+      path: /V1/taxRates
+      body:
+        tax_rate: "${tax_rate}"
+    input:
+      tax_rate:
+        type: object
+        description: The rate to update, including its id.
+    output:
+      description: The updated rate.
+      type: object
+      properties:
+        id: {type: integer}
+
+  delete_tax_rate:
+    title: Delete a tax rate
+    description: >-
+      Delete a tax rate. Rules referencing it lose that component, which
+      generally means customers in that region stop being charged tax --
+      check the rules first.
+    category: tax
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1/taxRates/${rate_id}
+    input:
+      rate_id:
+        type: integer
+        description: The tax rate's id.
+    output:
+      description: True when the rate was deleted.
+      type: string
+
+  search_tax_rules:
+    title: Search tax rules
+    description: >-
+      Find tax rules -- the bindings that say which customer and product tax
+      classes get which rates. This is where tax configuration actually lives.
+    category: tax
+    read_only: true
+    request:
+      method: GET
+      path: /V1/taxRules/search
+      query: "${search_criteria}"
+    input:
+      search_criteria:
+        type: object
+        description: 'Bracketed searchCriteria keys, e.g. {"searchCriteria[pageSize]": 50}.'
+    output:
+      description: The matching tax rules.
+      type: object
+      properties:
+        items: {type: array}
+        total_count: {type: integer}
+
+  get_tax_rule:
+    title: Get a tax rule
+    description: One tax rule by id, with the classes and rates it binds together.
+    category: tax
+    read_only: true
+    request:
+      method: GET
+      path: /V1/taxRules/${rule_id}
+    input:
+      rule_id:
+        type: integer
+        description: The tax rule's id.
+    output:
+      description: The tax rule.
+      type: object
+      properties:
+        id: {type: integer}
+        code: {type: string}
+        tax_rate_ids: {type: array}
+
+  create_tax_rule:
+    title: Create a tax rule
+    description: >-
+      Bind customer tax classes, product tax classes and rates into a rule --
+      the step that makes rates apply to real orders.
+    category: tax
+    request:
+      method: POST
+      path: /V1/taxRules
+      body:
+        rule: "${rule}"
+    input:
+      rule:
+        type: object
+        description: >-
+          The rule, e.g.
+          {"code": "Retail-Taxable", "customer_tax_class_ids": [3],
+          "product_tax_class_ids": [2], "tax_rate_ids": [1], "priority": 0}.
+    output:
+      description: The rule that was created.
+      type: object
+      properties:
+        id: {type: integer}
+        code: {type: string}
+
+  update_tax_rule:
+    title: Update a tax rule
+    description: >-
+      Change which classes and rates a rule binds. Live tax calculation changes
+      with it.
+    category: tax
+    request:
+      method: PUT
+      path: /V1/taxRules
+      body:
+        rule: "${rule}"
+    input:
+      rule:
+        type: object
+        description: The rule to update, including its id.
+    output:
+      description: The updated rule.
+      type: object
+      properties:
+        id: {type: integer}
+
+  delete_tax_rule:
+    title: Delete a tax rule
+    description: >-
+      Delete a tax rule. Orders in the classes it covered stop being taxed by
+      it, which is a live pricing change.
+    category: tax
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1/taxRules/${rule_id}
+    input:
+      rule_id:
+        type: integer
+        description: The tax rule's id.
+    output:
+      description: True when the rule was deleted.
+      type: string
+
+  search_tax_classes:
+    title: Search tax classes
+    description: >-
+      Find tax classes -- the customer and product categories tax rules key on,
+      such as "Retail Customer" and "Taxable Goods".
+    category: tax
+    read_only: true
+    request:
+      method: GET
+      path: /V1/taxClasses/search
+      query: "${search_criteria}"
+    input:
+      search_criteria:
+        type: object
+        description: 'Bracketed searchCriteria keys, e.g. {"searchCriteria[pageSize]": 50}.'
+    output:
+      description: The matching tax classes.
+      type: object
+      properties:
+        items: {type: array}
+        total_count: {type: integer}
+
+  get_tax_class:
+    title: Get a tax class
+    description: One tax class by id, with its name and type.
+    category: tax
+    read_only: true
+    request:
+      method: GET
+      path: /V1/taxClasses/${tax_class_id}
+    input:
+      tax_class_id:
+        type: integer
+        description: The tax class's id.
+    output:
+      description: The tax class.
+      type: object
+      properties:
+        class_id: {type: integer}
+        class_name: {type: string}
+        class_type: {type: string}
+
+  create_tax_class:
+    title: Create a tax class
+    description: >-
+      Create a customer or product tax class. `class_type` decides which --
+      CUSTOMER or PRODUCT -- and rules then bind the two together.
+    category: tax
+    request:
+      method: POST
+      path: /V1/taxClasses
+      body:
+        taxClass: "${tax_class}"
+    input:
+      tax_class:
+        type: object
+        description: >-
+          The class, e.g.
+          {"class_name": "Reduced rate goods", "class_type": "PRODUCT"}.
+    output:
+      description: The new class's id.
+      type: string
+
+  update_tax_class:
+    title: Update a tax class
+    description: Rename a tax class. Rules and products referencing it are unaffected.
+    category: tax
+    request:
+      method: PUT
+      path: /V1/taxClasses/${class_id}
+      body:
+        taxClass: "${tax_class}"
+    input:
+      class_id:
+        type: integer
+        description: The tax class's id.
+      tax_class:
+        type: object
+        description: The fields to change.
+    output:
+      description: True when the class was updated.
+      type: string
+
+  delete_tax_class:
+    title: Delete a tax class
+    description: >-
+      Delete a tax class. Products or customers in it fall back to the default,
+      which changes what they are charged.
+    category: tax
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1/taxClasses/${tax_class_id}
+    input:
+      tax_class_id:
+        type: integer
+        description: The tax class's id.
+    output:
+      description: True when the class was deleted.
+      type: string
+
+  # -- store configuration ----------------------------------------------------
+
+  list_store_views:
+    title: List store views
+    description: >-
+      The store views configured on this installation, with their codes and
+      ids. Those codes are what the connection's store code and every
+      `storeId` argument refer to.
+    category: stores
+    read_only: true
+    request:
+      method: GET
+      path: /V1/store/storeViews
+    input: {}
+    output:
+      description: The store views.
+      type: array
+      items: {type: object, description: "A store view with id, code, name and website_id."}
+
+  list_store_groups:
+    title: List store groups
+    description: >-
+      The store groups -- the layer between a website and its store views, each
+      with its root category.
+    category: stores
+    read_only: true
+    request:
+      method: GET
+      path: /V1/store/storeGroups
+    input: {}
+    output:
+      description: The store groups.
+      type: array
+      items: {type: object}
+
+  list_websites:
+    title: List websites
+    description: >-
+      The websites on this installation. Product assignment, customer accounts
+      and pricing are all scoped by website, so these ids matter for anything
+      multi-site.
+    category: stores
+    read_only: true
+    request:
+      method: GET
+      path: /V1/store/websites
+    input: {}
+    output:
+      description: The websites.
+      type: array
+      items: {type: object, description: "A website with id, code and name."}
+
+  list_store_configs:
+    title: List store configuration
+    description: >-
+      The active configuration per store view -- base URLs, currency, locale,
+      weight unit. What a storefront client needs to render prices and links
+      correctly.
+    category: stores
+    read_only: true
+    request:
+      method: GET
+      path: /V1/store/storeConfigs
+      query:
+        storeCodes: "${store_codes}"
+    input:
+      store_codes:
+        type: array
+        description: Only these store views, by code. Omit for all of them.
+        optional: true
+        items: {type: string}
+    output:
+      description: The store configurations.
+      type: array
+      items: {type: object}
+
+  list_countries:
+    title: List countries
+    description: >-
+      The countries this store accepts, with their regions and postcode
+      formats -- what an address form's country and region fields are built
+      from.
+    category: stores
+    read_only: true
+    request:
+      method: GET
+      path: /V1/directory/countries
+    input: {}
+    output:
+      description: The available countries.
+      type: array
+      items: {type: object}
+
+  get_country:
+    title: Get a country
+    description: >-
+      One country by its two-letter id, with its regions -- the list a region
+      dropdown needs, and the ids an address's `region_id` takes.
+    category: stores
+    read_only: true
+    request:
+      method: GET
+      path: /V1/directory/countries/${country_id}
+    input:
+      country_id:
+        type: string
+        description: The country's two-letter code.
+        example: US
+    output:
+      description: The country and its regions.
+      type: object
+      properties:
+        id: {type: string}
+        full_name_locale: {type: string}
+        available_regions: {type: array}
+
+  get_currency_info:
+    title: Get currency information
+    description: >-
+      The store's base and display currencies with their exchange rates -- what
+      converts a base price into what a shopper sees.
+    category: stores
+    read_only: true
+    request:
+      method: GET
+      path: /V1/directory/currency
+    input: {}
+    output:
+      description: The currency configuration.
+      type: object
+      properties:
+        base_currency_code: {type: string}
+        default_display_currency_code: {type: string}
+        exchange_rates: {type: array}
+
+  list_modules:
+    title: List installed modules
+    description: >-
+      Every module enabled on this installation. The practical way to find out
+      whether an endpoint from a third-party module will exist before calling
+      it.
+    category: stores
+    read_only: true
+    request:
+      method: GET
+      path: /V1/modules
+    input: {}
+    output:
+      description: The enabled module names.
+      type: array
+      items: {type: string}
+
+  search_documents:
+    title: Search the storefront catalogue
+    description: >-
+      Run a storefront catalogue search, as the search box does -- returning
+      matching product ids with relevance scores rather than full records.
+      Fetch the products themselves with `get_product`.
+    category: search
+    read_only: true
+    request:
+      method: GET
+      path: /V1/search
+      query: "${search_criteria}"
+    input:
+      search_criteria:
+        type: object
+        description: >-
+          Bracketed searchCriteria keys including the query, e.g.
+          {"searchCriteria[requestName]": "quick_search_container",
+          "searchCriteria[filterGroups][0][filters][0][field]": "search_term",
+          "searchCriteria[filterGroups][0][filters][0][value]": "bag"}.
+    output:
+      description: The matching documents.
+      type: object
+      properties:
+        items: {type: array}
+        total_count: {type: integer}
+
+  # -- bulk operations --------------------------------------------------------
+
+  list_bulk_operations:
+    title: List bulk operations
+    description: >-
+      The asynchronous bulk operations this installation has run, with their
+      status. Async bulk endpoints answer with a `bulk_uuid`, and this is how
+      you find it again.
+    category: bulk
+    read_only: true
+    request:
+      method: GET
+      path: /V1/bulk
+      query: "${search_criteria}"
+    input:
+      search_criteria:
+        type: object
+        description: 'Bracketed searchCriteria keys, e.g. {"searchCriteria[pageSize]": 20}.'
+    output:
+      description: The bulk operations.
+      type: object
+      properties:
+        items: {type: array}
+        total_count: {type: integer}
+
+  get_bulk_status:
+    title: Get a bulk operation's status
+    description: >-
+      Whether an asynchronous bulk operation has finished, and how many of its
+      operations succeeded. Poll this after submitting one.
+    category: bulk
+    read_only: true
+    request:
+      method: GET
+      path: /V1/bulk/${bulk_uuid}/status
+    input:
+      bulk_uuid:
+        type: string
+        description: The bulk operation's uuid.
+    output:
+      description: The operation's status counts.
+      type: object
+      properties:
+        operations_list: {type: array}
+        operation_count: {type: integer}
+
+  get_bulk_detailed_status:
+    title: Get a bulk operation's detailed status
+    description: >-
+      The per-operation outcome of a bulk run, including the error message on
+      each failure -- what you need to work out which rows to resubmit.
+    category: bulk
+    read_only: true
+    request:
+      method: GET
+      path: /V1/bulk/${bulk_uuid}/detailed-status
+    input:
+      bulk_uuid:
+        type: string
+        description: The bulk operation's uuid.
+    output:
+      description: The detailed per-operation status.
+      type: object
+      properties:
+        operations_list: {type: array}
+
+  get_bulk_operation_status_count:
+    title: Count a bulk operation's items by status
+    description: >-
+      How many operations in one bulk run are in a given state -- open,
+      complete, retriable or failed. The quick progress check.
+    category: bulk
+    read_only: true
+    request:
+      method: GET
+      path: /V1/bulk/${bulk_uuid}/operation-status/${status}
+    input:
+      bulk_uuid:
+        type: string
+        description: The bulk operation's uuid.
+      status:
+        type: integer
+        description: >-
+          The status to count -- 1 complete, 2 retriable failure, 3 not
+          retriable failure, 4 open, 5 rejected.
+    output:
+      description: The count of operations in that state.
+      type: string

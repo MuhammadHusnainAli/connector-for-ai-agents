@@ -1,0 +1,365 @@
+# VirtualSMS tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://virtualsms.io/openapi.json
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: virtualsms
+display_name: VirtualSMS
+docs_url: https://virtualsms.io/openapi.json
+generated: true
+generated_from: https://virtualsms.io/openapi.json
+tools:
+  compat_get_balance:
+    title: getBalance - Check account balance
+    description: 'getBalance - Check account balance Returns your current account balance. Response format:
+      ACCESSBALANCE:{amount} (e.g., ACCESSBALANCE:50.30) Error: BADKEY (invalid API key) Calls GET /stubs/handler_api.php#getBalance
+      on VirtualSMS''s API.'
+    category: stubs
+    request:
+      method: GET
+      path: /stubs/handler_api.php#getBalance
+      query:
+        action: ${action}
+        api_key: ${key}
+    input:
+      action:
+        type: string
+        description: The action parameter.
+        enum:
+        - getBalance
+      key:
+        type: string
+        description: Your VirtualSMS API key
+    output:
+      description: Always HTTP 200. Check body for success or error.
+      type: object
+    read_only: true
+  compat_get_number:
+    title: getNumber - Rent a phone number
+    description: 'getNumber - Rent a phone number Rents a phone number for the specified service. Immediately
+      deducts cost from balance. Response format: ACCESSNUMBER:{rentalid}:{phone} (e.g., ACCESSNUMBER:12345:13476711222)
+      Response header: X-Price: 0.75 - actual price charged Service codes: wa (WhatsApp), tg (Telegram),
+      go (Google), ds (Discord), Calls GET /stubs/handler_api.php#getNumber on VirtualSMS''s API.'
+    category: stubs
+    request:
+      method: GET
+      path: /stubs/handler_api.php#getNumber
+      query:
+        action: ${action}
+        api_key: ${key}
+        service: ${service}
+        country: ${country}
+        max_price: ${max_price}
+        maxPrice: ${max_price_}
+    input:
+      action:
+        type: string
+        description: The action parameter.
+        enum:
+        - getNumber
+      key:
+        type: string
+        description: The api_key parameter.
+      service:
+        type: string
+        description: sms-activate service code
+      country:
+        type: integer
+        description: Numeric country code (default 187 = USA)
+        optional: true
+      max_price:
+        type: number
+        description: Maximum price to pay. Returns MAXPRICEEXCEEDED if actual price is higher.
+        optional: true
+      max_price_:
+        type: number
+        description: Alias for maxprice
+        optional: true
+    output:
+      description: Always HTTP 200. Check body for success or error.
+      type: object
+    read_only: true
+  compat_get_numbers_status:
+    title: getNumbersStatus - Stock by service for a country
+    description: 'getNumbersStatus - Stock by service for a country Returns available number counts per
+      service for a given country. Response: JSON object mapping service code to available count. Counts
+      capped at 100. Calls GET /stubs/handler_api.php#getNumbersStatus on VirtualSMS''s API.'
+    category: stubs
+    request:
+      method: GET
+      path: /stubs/handler_api.php#getNumbersStatus
+      query:
+        action: ${action}
+        api_key: ${key}
+        country: ${country}
+    input:
+      action:
+        type: string
+        description: The action parameter.
+        enum:
+        - getNumbersStatus
+      key:
+        type: string
+        description: The api_key parameter.
+      country:
+        type: integer
+        description: Numeric country code
+    output:
+      description: JSON map of service - available count
+      type: object
+    read_only: true
+  compat_get_prices:
+    title: getPrices - Get all prices (country - service)
+    description: 'getPrices - Get all prices (country - service) Returns pricing and stock availability
+      for all countries and services. Note: This is the one compat endpoint that returns JSON (not plain
+      text). This matches sms-activate behavior. Response structure: { "countrycode": { "servicecode":
+      { "cost": "0.50", "count": 87 } } } Stock counts are capped at 10 Calls GET /stubs/handler_api.php#getPrices
+      on VirtualSMS''s API.'
+    category: stubs
+    request:
+      method: GET
+      path: /stubs/handler_api.php#getPrices
+      query:
+        action: ${action}
+        api_key: ${key}
+        service: ${service}
+        country: ${country}
+    input:
+      action:
+        type: string
+        description: The action parameter.
+        enum:
+        - getPrices
+      key:
+        type: string
+        description: The api_key parameter.
+      service:
+        type: string
+        description: Filter to specific service code
+        optional: true
+      country:
+        type: integer
+        description: Filter to specific numeric country code
+        optional: true
+    output:
+      description: JSON price matrix
+      type: object
+    read_only: true
+  compat_get_prices_verification:
+    title: getPricesVerification - Get prices (service - country)
+    description: 'getPricesVerification - Get prices (service - country) Same data as getPrices but with
+      the nesting order transposed: service - country - pricing data. Response structure: { "servicecode":
+      { "countrycode": { "cost": "0.50", "count": 87 } } } Calls GET /stubs/handler_api.php#getPricesVerification
+      on VirtualSMS''s API.'
+    category: stubs
+    request:
+      method: GET
+      path: /stubs/handler_api.php#getPricesVerification
+      query:
+        action: ${action}
+        api_key: ${key}
+    input:
+      action:
+        type: string
+        description: The action parameter.
+        enum:
+        - getPricesVerification
+      key:
+        type: string
+        description: The api_key parameter.
+    output:
+      description: JSON price matrix (transposed)
+      type: object
+    read_only: true
+  compat_get_status:
+    title: getStatus - Poll for SMS code
+    description: 'getStatus - Poll for SMS code Polls the status of a rental. Call every 3-5 seconds until
+      you get STATUSOK or STATUSCANCEL. Tip: Use WebSocket (wss://virtualsms.io/ws/orders) for instant
+      delivery instead of polling. Responses: - STATUSWAITCODE - Waiting, no SMS yet - STATUSOK:{code}
+      - SMS received, code extracted (e.g., STATUSOK: Calls GET /stubs/handler_api.php#getStatus on VirtualSMS''s
+      API.'
+    category: stubs
+    request:
+      method: GET
+      path: /stubs/handler_api.php#getStatus
+      query:
+        action: ${action}
+        api_key: ${key}
+        id: ${id}
+        text: ${text}
+    input:
+      action:
+        type: string
+        description: The action parameter.
+        enum:
+        - getStatus
+      key:
+        type: string
+        description: The api_key parameter.
+      id:
+        type: integer
+        description: Rental ID from getNumber response
+      text:
+        type: integer
+        description: Set to 1 to get full SMS body in X-Text response header
+        optional: true
+        enum:
+        - 0
+        - 1
+    output:
+      description: Always HTTP 200. Check body for status.
+      type: object
+    read_only: true
+  compat_set_status_cancel:
+    title: setStatus (status=8) - Cancel rental & refund
+    description: 'setStatus (status=8) - Cancel rental & refund Cancels a rental before SMS is received.
+      Full balance refund. Cannot cancel after SMS arrives - returns ACCESSREADY instead. Responses: -
+      ACCESSCANCEL - Cancelled, balance refunded - ACCESSREADY - Too late, SMS already received (cannot
+      cancel) - NOACTIVATION - Invalid rental ID Calls GET /stubs/handler_api.php#setStatusCancel on VirtualSMS''s
+      API.'
+    category: stubs
+    request:
+      method: GET
+      path: /stubs/handler_api.php#setStatusCancel
+      query:
+        action: ${action}
+        api_key: ${key}
+        id: ${id}
+        status: ${status}
+    input:
+      action:
+        type: string
+        description: The action parameter.
+        enum:
+        - setStatus
+      key:
+        type: string
+        description: The api_key parameter.
+      id:
+        type: integer
+        description: Rental ID to cancel
+      status:
+        type: integer
+        description: Use status=8 to cancel
+        enum:
+        - 8
+    output:
+      description: Always HTTP 200.
+      type: object
+    read_only: true
+  compat_set_status_done:
+    title: setStatus (status=6) - Mark rental as done
+    description: 'setStatus (status=6) - Mark rental as done Signal that you''ve successfully used the
+      SMS code. Frees your active rental slot. Always call this after you''re done - otherwise you''ll
+      hit the 20-concurrent-rental limit. Response: ACCESSACTIVATION (success) or NOACTIVATION (invalid
+      ID) Calls GET /stubs/handler_api.php#setStatusDone on VirtualSMS''s API.'
+    category: stubs
+    request:
+      method: GET
+      path: /stubs/handler_api.php#setStatusDone
+      query:
+        action: ${action}
+        api_key: ${key}
+        id: ${id}
+        status: ${status}
+    input:
+      action:
+        type: string
+        description: The action parameter.
+        enum:
+        - setStatus
+      key:
+        type: string
+        description: The api_key parameter.
+      id:
+        type: integer
+        description: Rental ID to mark as done
+      status:
+        type: integer
+        description: Use status=6 to mark as done
+        enum:
+        - 6
+    output:
+      description: Always HTTP 200.
+      type: object
+    read_only: true
+  ws_orders:
+    title: WebSocket - Real-time SMS delivery
+    description: 'WebSocket - Real-time SMS delivery WebSocket Connection Connect via WebSocket for instant
+      SMS delivery - zero polling delay. Endpoint: wss://virtualsms.io/ws/orders Query parameters: - apikey
+      - Your VirtualSMS API key (required) - orderid - Specific rental ID to subscribe to (required) Example
+      connection: javascript const ws = new We Calls GET /ws/orders on VirtualSMS''s API.'
+    category: ws
+    request:
+      method: GET
+      path: /ws/orders
+      query:
+        api_key: ${key}
+        order_id: ${order_id}
+    input:
+      key:
+        type: string
+        description: Your VirtualSMS API key
+      order_id:
+        type: integer
+        description: Rental ID to subscribe to
+    output:
+      description: Whatever GET /ws/orders returns, as described by the provider's specification.
+      type: object
+    read_only: true
+  balance_get:
+    title: Get account balance
+    description: Get account balance Returns your current USD balance. Calls GET /api/v1/balance on VirtualSMS's
+      API.
+    category: api
+    request:
+      method: GET
+      path: /api/v1/balance
+    input: {}
+    output:
+      description: Balance returned
+      type: object
+    read_only: true
+  price_get:
+    title: Get price for service/country combination
+    description: Get price for service/country combination Public endpoint - no authentication required.
+      Returns the current price for a specific service and country combination. Calls GET /api/v1/price
+      on VirtualSMS's API.
+    category: api
+    request:
+      method: GET
+      path: /api/v1/price
+      query:
+        service: ${service}
+        country: ${country}
+    input:
+      service:
+        type: string
+        description: Service code (e.g. tg, wa, ig)
+      country:
+        type: string
+        description: ISO country code (e.g. ID, PH, US)
+    output:
+      description: Price returned
+      type: object
+    read_only: true
+  proxies_list:
+    title: List your purchased proxies
+    description: List your purchased proxies Calls GET /api/v1/proxies on VirtualSMS's API.
+    category: api
+    request:
+      method: GET
+      path: /api/v1/proxies
+    input: {}
+    output:
+      description: Your proxies
+      type: object
+    read_only: true

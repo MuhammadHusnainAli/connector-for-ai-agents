@@ -1,0 +1,510 @@
+# Exa tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://api.exa.ai/openapi.json
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: exa
+display_name: Exa
+docs_url: https://api.exa.ai/openapi.json
+generated: true
+generated_from: https://api.exa.ai/openapi.json
+tools:
+  answer:
+    title: Answer
+    description: Answer Performs a search based on the query and generates either a direct answer or a
+      detailed summary with citations, depending on the query type. Calls POST /answer on the provider's
+      API.
+    category: answer
+    request:
+      method: POST
+      path: /answer
+      body:
+        query: ${query}
+        stream: ${stream}
+        text: ${text}
+        outputSchema: ${output_schema}
+    input:
+      query:
+        type: string
+        description: Natural-language question or instructions for the request.
+      stream:
+        type: boolean
+        description: If true, the response is returned as a server-sent events (SSE) stream.
+        optional: true
+      text:
+        type: boolean
+        description: If true, returns full page text with default settings. If false, disables text return.
+        optional: true
+      output_schema:
+        type: object
+        description: A JSON Schema Draft 7 specification for the desired answer structure. When provided,
+          the answer is returned as a structured object matching the schema instead of a plain string.
+        optional: true
+    output:
+      description: OK
+      type: object
+  list_batches:
+    title: List batches
+    description: List batches List batches for your team, ordered from newest to oldest. Calls GET /batches
+      on the provider's API.
+    category: batches
+    request:
+      method: GET
+      path: /batches
+      query:
+        cursor: ${cursor}
+        limit: ${limit}
+        status: ${status}
+    input:
+      cursor:
+        type: string
+        description: The cursor parameter.
+        optional: true
+      limit:
+        type: integer
+        description: The limit parameter.
+        optional: true
+        default: 100
+      status:
+        type: string
+        description: The status parameter.
+        optional: true
+    output:
+      description: OK
+      type: object
+    read_only: true
+  create_batch:
+    title: Create a batch
+    description: Create a batch Create a batch of requests to run asynchronously. Each request is dispatched
+      to its target route and results are made available for download when the batch completes. Calls
+      POST /batches on the provider's API.
+    category: batches
+    request:
+      method: POST
+      path: /batches
+      body:
+        requests: ${requests}
+        metadata: ${metadata}
+    input:
+      requests:
+        type: array
+        description: The requests to enqueue. Each customId must be unique within the batch.
+        items:
+          type: object
+      metadata:
+        type: object
+        description: Caller-provided metadata stored with the batch.
+        optional: true
+    output:
+      description: OK
+      type: object
+  list_monitors:
+    title: List Monitors
+    description: List Monitors Lists all monitors for the authenticated team. Supports filtering by status
+      and cursor-based pagination. Calls GET /monitors on the provider's API.
+    category: monitors
+    request:
+      method: GET
+      path: /monitors
+      query:
+        status: ${status}
+        cursor: ${cursor}
+        limit: ${limit}
+        name: ${name}
+        metadata: ${metadata}
+    input:
+      status:
+        type: string
+        description: The status parameter.
+        optional: true
+        enum:
+        - active
+        - paused
+        - disabled
+      cursor:
+        type: string
+        description: The cursor parameter.
+        optional: true
+      limit:
+        type: integer
+        description: The limit parameter.
+        optional: true
+        default: 50
+      name:
+        type: string
+        description: The name parameter.
+        optional: true
+      metadata:
+        type: object
+        description: 'Filter monitors by metadata key-value pairs (exact match, AND semantics). Use bracket
+          notation: metadata[key]=value.'
+        optional: true
+    output:
+      description: A paginated list of monitors
+      type: object
+    read_only: true
+  create_monitor:
+    title: Create a Monitor
+    description: 'Create a Monitor Creates a new Monitor to run recurring Exa searches on a schedule.
+      Monitors automatically execute your search query on a recurring schedule and deliver results to
+      your webhook endpoint with automatic deduplication: - Date-based filtering only fetches content
+      since the last run - Semantic deduplicati Calls POST /monitors on the provider''s API.'
+    category: monitors
+    request:
+      method: POST
+      path: /monitors
+      body:
+        name: ${name}
+        search: ${search}
+        trigger: ${trigger}
+        outputSchema: ${output_schema}
+        metadata: ${metadata}
+        webhook: ${webhook}
+    input:
+      name:
+        type: string
+        description: An optional name for the monitor
+        optional: true
+      search:
+        type: object
+        description: The search field of the request body.
+      trigger:
+        type: object
+        description: The trigger field of the request body.
+        optional: true
+      output_schema:
+        type: string
+        description: 'Controls the format of the run output. Defaults to { "type": "text" } if not specified.
+          When type is "text", the output is a plain text summary. When type is "object", the output is
+          structured JSON. If no properties are specified with "object" type, a schema is inferred automatically;
+          otherwise the output adheres to the provided schema.'
+        optional: true
+      metadata:
+        type: object
+        description: Optional key-value metadata. Echoed back in webhook deliveries so you can route updates
+          to systems like Slack.
+        optional: true
+      webhook:
+        type: object
+        description: The webhook field of the request body.
+    output:
+      description: The created monitor with webhook secret
+      type: object
+  search:
+    title: Search
+    description: Search Perform a search with an Exa prompt-engineered query and retrieve a list of relevant
+      results. Optionally get contents. Calls POST /search on the provider's API.
+    category: search
+    request:
+      method: POST
+      path: /search
+      body:
+        includeDomains: ${include_domains}
+        excludeDomains: ${exclude_domains}
+        startCrawlDate: ${start_crawl_date}
+        endCrawlDate: ${end_crawl_date}
+        startPublishedDate: ${start_published_date}
+        endPublishedDate: ${end_published_date}
+        numResults: ${num_results}
+        context: ${context}
+        moderation: ${moderation}
+        contents: ${contents}
+        query: ${query}
+        additionalQueries: ${additional_queries}
+    input:
+      include_domains:
+        type: string
+        description: The includeDomains field of the request body.
+        optional: true
+      exclude_domains:
+        type: string
+        description: The excludeDomains field of the request body.
+        optional: true
+      start_crawl_date:
+        type: string
+        description: The startCrawlDate field of the request body.
+        optional: true
+      end_crawl_date:
+        type: string
+        description: The endCrawlDate field of the request body.
+        optional: true
+      start_published_date:
+        type: string
+        description: The startPublishedDate field of the request body.
+        optional: true
+      end_published_date:
+        type: string
+        description: The endPublishedDate field of the request body.
+        optional: true
+      num_results:
+        type: string
+        description: The numResults field of the request body.
+        optional: true
+      context:
+        type: string
+        description: The context field of the request body.
+        optional: true
+      moderation:
+        type: string
+        description: The moderation field of the request body.
+        optional: true
+      contents:
+        type: string
+        description: The contents field of the request body.
+        optional: true
+      query:
+        type: string
+        description: The query string for the search.
+      additional_queries:
+        type: string
+        description: The additionalQueries field of the request body.
+        optional: true
+    output:
+      description: OK
+      type: object
+  list_agent_runs:
+    title: List runs
+    description: List runs List Agent runs for your team, ordered from newest to oldest. Calls GET /agent/runs
+      on the provider's API.
+    category: agent
+    request:
+      method: GET
+      path: /agent/runs
+      query:
+        limit: ${limit}
+        cursor: ${cursor}
+    input:
+      limit:
+        type: integer
+        description: The limit parameter.
+        optional: true
+        default: 20
+      cursor:
+        type: string
+        description: The cursor parameter.
+        optional: true
+    output:
+      description: Paginated Agent runs
+      type: object
+    read_only: true
+  create_agent_run:
+    title: Create a run
+    description: 'Create a run Create an asynchronous Agent run. By default, the API returns the run object
+      immediately. Set Accept: text/event-stream to stream run lifecycle events until the run reaches
+      a terminal status. Calls POST /agent/runs on the provider''s API.'
+    category: agent
+    request:
+      method: POST
+      path: /agent/runs
+      body:
+        query: ${query}
+        systemPrompt: ${system_prompt}
+        input: ${input}
+        outputSchema: ${output_schema}
+        effort: ${effort}
+        previousRunId: ${previous_run_id}
+        metadata: ${metadata}
+        dataSources: ${data_sources}
+        budget: ${budget}
+    input:
+      query:
+        type: string
+        description: Natural-language question or instructions for the request.
+      system_prompt:
+        type: string
+        description: Additional instructions that guide generated output or agent behavior. Use this for
+          source preferences, novelty constraints, duplication constraints, or other behavior guidance.
+        optional: true
+      input:
+        type: object
+        description: Records to process and records or entities to exclude from the answer.
+        optional: true
+      output_schema:
+        type: string
+        description: The outputSchema field of the request body.
+        optional: true
+      effort:
+        type: string
+        description: Cost and reasoning effort preference for the run. auto lets Exa choose the appropriate
+          effort. max is the highest-effort public beta tier for work where completeness and thoroughness
+          matter more than latency or cost, including large list building, deep multi-source research,
+          and criteria that are hard to verify.
+        optional: true
+        enum:
+        - minimal
+        - low
+        - medium
+        - high
+        - xhigh
+        - auto
+        - max
+      previous_run_id:
+        type: string
+        description: Agent run ID. New run IDs are returned with the agentrun prefix.
+        optional: true
+      metadata:
+        type: object
+        description: Caller-provided metadata stored with the run.
+        optional: true
+      data_sources:
+        type: array
+        description: Exa Connect data providers to enable for the run. Each entry enables all of that
+          provider's tools.
+        optional: true
+        items:
+          type: object
+      budget:
+        type: object
+        description: Optional per-run spending limit for the metered auto and max efforts. Runs that finish
+          early may cost less than the limit.
+        optional: true
+    output:
+      description: Agent run created
+      type: object
+  batch_monitors:
+    title: Batch Action on Monitors
+    description: 'Batch Action on Monitors Perform a batch action on monitors matching the provided filters.
+      Supported actions: - delete: Permanently remove matching monitors - pause: Pause matching monitors
+      - unpause: Unpause matching monitors Use dryrun: true (the default) to preview which monitors would
+      be affected before performing the a Calls POST /monitors/batch on the provider''s API.'
+    category: monitors
+    request:
+      method: POST
+      path: /monitors/batch
+      body:
+        action: ${action}
+        filter: ${filter}
+        dry_run: ${dry_run}
+        limit: ${limit}
+    input:
+      action:
+        type: string
+        description: The action to perform on matching monitors. delete permanently removes them, pause
+          sets their status to paused, and unpause sets their status to active.
+        enum:
+        - delete
+        - pause
+        - unpause
+      filter:
+        type: object
+        description: At least one filter field must be provided to prevent accidental bulk operations.
+      dry_run:
+        type: boolean
+        description: When true, returns the monitors that would be affected without performing the action.
+          Defaults to true.
+        optional: true
+      limit:
+        type: integer
+        description: Maximum number of monitors to process in a single request. Defaults to 50, maximum
+          500.
+        optional: true
+    output:
+      description: Batch action result
+      type: object
+  events_list:
+    title: List all Events
+    description: List all Events List all events that have occurred in the system. You can paginate through
+      the results using the cursor parameter. Calls GET /v0/events on the provider's API.
+    category: events
+    request:
+      method: GET
+      path: /v0/events
+      query:
+        cursor: ${cursor}
+        limit: ${limit}
+        types: ${types}
+        createdBefore: ${created_before}
+        createdAfter: ${created_after}
+    input:
+      cursor:
+        type: string
+        description: The cursor to paginate through the results
+        optional: true
+      limit:
+        type: integer
+        description: The number of results to return
+        optional: true
+        default: 25
+      types:
+        type: array
+        description: The types of events to filter by
+        optional: true
+        items:
+          type: string
+      created_before:
+        type: string
+        description: Filter events created before or at this timestamp (inclusive). Must be a valid ISO
+          8601 datetime string. All times are in UTC.
+        optional: true
+      created_after:
+        type: string
+        description: Filter events created after or at this timestamp (inclusive). Must be a valid ISO
+          8601 datetime string. All times are in UTC.
+        optional: true
+    output:
+      description: List of events
+      type: object
+    read_only: true
+  imports_list:
+    title: List Imports
+    description: List Imports Lists all imports for the Webset. Calls GET /v0/imports on the provider's
+      API.
+    category: imports
+    request:
+      method: GET
+      path: /v0/imports
+      query:
+        cursor: ${cursor}
+        limit: ${limit}
+    input:
+      cursor:
+        type: string
+        description: The cursor to paginate through the results
+        optional: true
+      limit:
+        type: integer
+        description: The number of results to return
+        optional: true
+        default: 25
+    output:
+      description: List of imports
+      type: object
+    read_only: true
+  monitors_list:
+    title: List Monitors
+    description: List Monitors Lists all monitors for the Webset. Calls GET /v0/monitors on the provider's
+      API.
+    category: monitors
+    request:
+      method: GET
+      path: /v0/monitors
+      query:
+        cursor: ${cursor}
+        limit: ${limit}
+        websetId: ${webset_id}
+    input:
+      cursor:
+        type: string
+        description: The cursor to paginate through the results
+        optional: true
+      limit:
+        type: integer
+        description: The number of results to return
+        optional: true
+        default: 25
+      webset_id:
+        type: string
+        description: The id of the Webset to list monitors for
+        optional: true
+    output:
+      description: List of monitors
+      type: object
+    read_only: true

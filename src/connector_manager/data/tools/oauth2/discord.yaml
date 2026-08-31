@@ -1,0 +1,215 @@
+# Discord tools.
+#
+# Scoped to what a *user* OAuth2 token can do: read the identity it belongs to,
+# the guilds it is in, and its membership of one guild. Discord's channel and
+# message endpoints need a bot token sent as `Bot <token>`, which this
+# connector's Bearer authorization cannot produce, so they are deliberately not
+# here -- reach them through a bot-token connector instead.
+#
+# Docs: https://discord.com/developers/docs/reference
+
+connector_id: discord
+display_name: Discord
+docs_url: https://discord.com/developers/docs/reference
+
+scope_rules:
+  implies:
+    "guilds.members.read": [guilds]
+
+tools:
+
+  get_current_user:
+    title: Get the authenticated user
+    description: >-
+      Read the Discord account the token belongs to -- id, username, avatar and,
+      with the email scope, their address. The cheapest health check for a
+      Discord connection.
+    category: users
+    scopes: [identify]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v10/users/@me
+    input: {}
+    output:
+      description: The authenticated user.
+      type: object
+      properties:
+        id: {type: string}
+        username: {type: string}
+        global_name: {type: string}
+        email: {type: string, description: "Only present when the email scope was granted."}
+        avatar: {type: string}
+
+  list_my_guilds:
+    title: List the user's servers
+    description: >-
+      List the guilds (servers) the user belongs to, with their ids, names and
+      the user's permission bitfield in each.
+    category: guilds
+    scopes: [guilds]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v10/users/@me/guilds
+      query:
+        limit: "${limit}"
+        before: "${before}"
+        after: "${after}"
+        with_counts: "${with_counts}"
+    input:
+      limit:
+        type: integer
+        description: How many guilds to return (1-200).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 200
+      before:
+        type: string
+        description: Only guilds with an id before this one.
+        optional: true
+      after:
+        type: string
+        description: Only guilds with an id after this one.
+        optional: true
+      with_counts:
+        type: boolean
+        description: Include approximate member and presence counts.
+        optional: true
+    output:
+      description: The user's guilds.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          name: {type: string}
+          owner: {type: boolean}
+          permissions: {type: string}
+
+  get_my_guild_member:
+    title: Get the user's membership of a server
+    description: >-
+      Read the user's own membership of one guild -- their nickname, roles and
+      when they joined.
+    category: guilds
+    scopes: ["guilds.members.read"]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v10/users/@me/guilds/${guild_id}/member
+    input:
+      guild_id:
+        type: string
+        description: The guild (server) id.
+    output:
+      description: The user's guild membership.
+      type: object
+      properties:
+        nick: {type: string}
+        roles: {type: array}
+        joined_at: {type: string}
+        user: {type: object}
+
+  list_my_connections:
+    title: List the user's linked accounts
+    description: >-
+      List the third-party accounts the user has connected to Discord -- Steam,
+      Twitch, Spotify, GitHub and so on.
+    category: users
+    scopes: [connections]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v10/users/@me/connections
+    input: {}
+    output:
+      description: The user's linked accounts.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          name: {type: string}
+          type: {type: string}
+          verified: {type: boolean}
+
+  execute_webhook:
+    title: Post a message through a webhook
+    description: >-
+      Send a message to a channel using an incoming webhook URL, which needs no
+      bot token and no scope -- the URL itself is the credential. This is the
+      practical way to post into Discord from an agent.
+    category: messages
+    destructive: true
+    notes: >-
+      The webhook URL carries its own authorization, so this tool works even
+      when the connection's OAuth scopes cover nothing else.
+    request:
+      method: POST
+      base_url_override: https://discord.com
+      path: /api/webhooks/${webhook_id}/${webhook_token}
+      query:
+        wait: "${wait}"
+        thread_id: "${thread_id}"
+      body:
+        content: "${content}"
+        username: "${username}"
+        avatar_url: "${avatar_url}"
+        embeds: "${embeds}"
+        tts: "${tts}"
+        allowed_mentions: "${allowed_mentions}"
+    input:
+      webhook_id:
+        type: string
+        description: The webhook's id, the second-to-last segment of its URL.
+      webhook_token:
+        type: string
+        description: The webhook's token, the last segment of its URL.
+        secret: true
+      content:
+        type: string
+        description: Message text, up to 2000 characters. Optional when embeds are given.
+        optional: true
+        max_length: 2000
+      username:
+        type: string
+        description: Override the webhook's display name for this message.
+        optional: true
+      avatar_url:
+        type: string
+        description: Override the webhook's avatar for this message.
+        optional: true
+        format: uri
+      embeds:
+        type: array
+        description: Up to 10 rich embeds, each with title, description, color and fields.
+        optional: true
+        max_length: 10
+        items: {type: object}
+      tts:
+        type: boolean
+        description: Send as a text-to-speech message.
+        optional: true
+      thread_id:
+        type: string
+        description: Post into this thread rather than the channel itself.
+        optional: true
+      wait:
+        type: boolean
+        description: Wait for the message to be created and return it, rather than answering 204.
+        optional: true
+        default: true
+      allowed_mentions:
+        type: object
+        description: "Restrict which mentions ping, e.g. {\"parse\": []} to ping nobody."
+        optional: true
+    output:
+      description: The posted message, when wait is true.
+      type: object
+      properties:
+        id: {type: string}
+        channel_id: {type: string}
+        content: {type: string}
+        timestamp: {type: string}

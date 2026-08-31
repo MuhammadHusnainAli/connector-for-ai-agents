@@ -1,0 +1,455 @@
+# Slite tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://api.slite.com/openapi.json
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: slite
+display_name: Slite
+docs_url: https://api.slite.com/openapi.json
+generated: true
+generated_from: https://api.slite.com/openapi.json
+tools:
+  ask:
+    title: Ask a question
+    description: Ask a question Ask a question to your notes in natural language. The scope of the notes
+      used to answer the question is restricted to the authenticated user. Various optional filters are
+      available to restrict the scope of the notes even more. Calls GET /v1/ask on the provider's API.
+    category: ask
+    request:
+      method: GET
+      path: /v1/ask
+      query:
+        question: ${question}
+        parentNoteId: ${parent_note_id}
+        assistantId: ${assistant_id}
+        wait: ${wait}
+    input:
+      question:
+        type: string
+        description: Question to ask on your notes
+      parent_note_id:
+        type: string
+        description: Optional filter to only return notes under this parent note id
+        optional: true
+      assistant_id:
+        type: string
+        description: Optional filter to use a specific assistant for super only
+        optional: true
+      wait:
+        type: boolean
+        description: Wait for the full answer even when it takes long, instead of receiving a 202 processing
+          response to poll via GET /threads/{threadId}. Your HTTP client's own timeout must allow several
+          minutes.
+        optional: true
+    output:
+      description: Ok
+      type: object
+    read_only: true
+  search_groups:
+    title: Search groups
+    description: Search groups Search for groups by name Calls GET /v1/groups on the provider's API.
+    category: groups
+    request:
+      method: GET
+      path: /v1/groups
+      query:
+        query: ${query}
+        cursor: ${cursor}
+    input:
+      query:
+        type: string
+        description: Search query to match against name
+      cursor:
+        type: string
+        description: Cursor to use to continue fetching groups
+        optional: true
+    output:
+      description: Ok
+      type: object
+    read_only: true
+  get_me:
+    title: Return the authenticated user information.
+    description: Return the authenticated user information. Return authenticated user information. Calls
+      GET /v1/me on the provider's API.
+    category: me
+    request:
+      method: GET
+      path: /v1/me
+    input: {}
+    output:
+      description: Ok
+      type: object
+    read_only: true
+  list_notes:
+    title: List notes
+    description: List notes List notes with optional filtering by owner Calls GET /v1/notes on the provider's
+      API.
+    category: notes
+    request:
+      method: GET
+      path: /v1/notes
+      query:
+        ownerId: ${owner_id}
+        parentNoteId: ${parent_note_id}
+        orderBy: ${order_by}
+        cursor: ${cursor}
+    input:
+      owner_id:
+        type: string
+        description: 'Optional: User id to filter notes by owner'
+        optional: true
+      parent_note_id:
+        type: string
+        description: 'Optional: filter to only return notes under this parent note id'
+        optional: true
+      order_by:
+        type: string
+        description: 'Optional: To change the order of the returned notes'
+        optional: true
+        enum:
+        - lastEditedAt_DESC
+        - lastEditedAt_ASC
+        - listPosition_DESC
+        - listPosition_ASC
+      cursor:
+        type: string
+        description: Cursor to use to continue fetching notes
+        optional: true
+    output:
+      description: Ok
+      type: object
+    read_only: true
+  create_note:
+    title: Create a note
+    description: Create a note Create a note from markdown, html, or sliteml content, with a templateId
+      or just an empty one. If no parentNoteId is specified, it will be created in your personal channel.
+      Calls POST /v1/notes on the provider's API.
+    category: notes
+    request:
+      method: POST
+      path: /v1/notes
+      body:
+        title: ${title}
+        parentNoteId: ${parent_note_id}
+        templateId: ${template_id}
+        markdown: ${markdown}
+        html: ${html}
+        attributes: ${attributes}
+        sliteml: ${sliteml}
+    input:
+      title:
+        type: string
+        description: Title of the note to create
+      parent_note_id:
+        type: string
+        description: Below which other note to create this note. If not specified, the note would be created
+          in your personal channel
+        optional: true
+      template_id:
+        type: string
+        description: If you want to apply a template to the created note
+        optional: true
+      markdown:
+        type: string
+        description: The markdown field of the request body.
+        optional: true
+      html:
+        type: string
+        description: The html field of the request body.
+        optional: true
+      attributes:
+        type: array
+        description: Attributes for the parent collection ordered by column. If they don't match the appropriate
+          type, they would be ignored
+        optional: true
+        items:
+          type: string
+      sliteml:
+        type: string
+        description: The sliteml field of the request body.
+        optional: true
+    output:
+      description: Ok
+      type: object
+  search_notes:
+    title: Search notes
+    description: Search notes Search notes based on a query. The scope of the notes is restricted to the
+      authenticated user. Various optional filters are available to restrict the scope of the search even
+      more. Calls GET /v1/search-notes on the provider's API.
+    category: search_notes
+    request:
+      method: GET
+      path: /v1/search-notes
+      query:
+        query: ${query}
+        parentNoteId: ${parent_note_id}
+        depth: ${depth}
+        reviewState: ${review_state}
+        page: ${page}
+        hitsPerPage: ${hits_per_page}
+        highlightPreTag: ${highlight_pre_tag}
+        highlightPostTag: ${highlight_post_tag}
+        lastEditedAfter: ${last_edited_after}
+        lastUpdatedAfter: ${last_updated_after}
+        includeArchived: ${include_archived}
+    input:
+      query:
+        type: string
+        description: Query used to perform the note search, default to empty string
+        optional: true
+      parent_note_id:
+        type: string
+        description: Optional filter to only return notes under this parent note id
+        optional: true
+      depth:
+        type: number
+        description: Optional filter to only return notes with a depth (number of parents) equal to a
+          specified value
+        optional: true
+      review_state:
+        type: string
+        description: Optional filter to return notes in a special review state Can be Verified, Outdated,
+          VerificationRequested or VerificationExpired
+        optional: true
+        enum:
+        - Verified
+        - Outdated
+        - VerificationRequested
+        - VerificationExpired
+      page:
+        type: integer
+        description: Used to perform pagination on search
+        optional: true
+      hits_per_page:
+        type: integer
+        description: Specify how many notes to return per page
+        optional: true
+      highlight_pre_tag:
+        type: string
+        description: Inject a tag before the matching query
+        optional: true
+      highlight_post_tag:
+        type: string
+        description: Inject a tag after the matching query
+        optional: true
+      last_edited_after:
+        type: string
+        description: Optional filter to only return notes edited after a specific date
+        optional: true
+      last_updated_after:
+        type: string
+        description: Optional filter to only return notes where metadata has changed after a specific
+          date
+        optional: true
+      include_archived:
+        type: boolean
+        description: Optional filter to also include archived notes in the search results (default to
+          false)
+        optional: true
+    output:
+      description: Ok
+      type: object
+    read_only: true
+  search_users:
+    title: Search users
+    description: Search users Search for users by email, name, or username Calls GET /v1/users on the
+      provider's API.
+    category: users
+    request:
+      method: GET
+      path: /v1/users
+      query:
+        query: ${query}
+        includeArchived: ${include_archived}
+        cursor: ${cursor}
+    input:
+      query:
+        type: string
+        description: Search query to match against email, display name
+      include_archived:
+        type: boolean
+        description: Include archived users in the search results
+        optional: true
+      cursor:
+        type: string
+        description: Cursor to use to continue fetching users
+        optional: true
+    output:
+      description: Ok
+      type: object
+    read_only: true
+  list_notes_for_knowledge_management:
+    title: List notes for knowledge management
+    description: List notes for knowledge management List notes for knowledge management. Calls GET /v1/knowledge-management/notes
+      on the provider's API.
+    category: knowledge_management
+    request:
+      method: GET
+      path: /v1/knowledge-management/notes
+      query:
+        reviewStateList: ${review_state_list}
+        ownerIdList: ${owner_id_list}
+        channelIdList: ${channel_id_list}
+        sinceDaysAgo: ${since_days_ago}
+        first: ${first}
+        cursor: ${cursor}
+    input:
+      review_state_list:
+        type: array
+        description: Optional filter to only return notes in special review states.
+        optional: true
+        items:
+          type: string
+      owner_id_list:
+        type: array
+        description: 'Optional: user or group ids to filter notes by owner'
+        optional: true
+        items:
+          type: string
+      channel_id_list:
+        type: array
+        description: 'Optional: channel ids to filter notes by channel'
+        optional: true
+        items:
+          type: string
+      since_days_ago:
+        type: number
+        description: 'Optional: number of trailing days to consider'
+        optional: true
+      first:
+        type: integer
+        description: Maximum number of notes to return. Defaults to 20.
+        optional: true
+      cursor:
+        type: string
+        description: Cursor to use to continue fetching notes
+        optional: true
+    output:
+      description: Ok
+      type: object
+    read_only: true
+  get_group_by_id:
+    title: Get group by ID
+    description: Get group by ID Get a group by ID Calls GET /v1/groups/{groupId} on the provider's API.
+    category: groups
+    request:
+      method: GET
+      path: /v1/groups/${group_id}
+    input:
+      group_id:
+        type: string
+        description: Group ID to retrieve
+    output:
+      description: Ok
+      type: object
+    read_only: true
+  delete_note_by_id:
+    title: Delete a note and its children
+    description: Delete a note and its children Delete a note and its children by id. !!! It's irreversible
+      !!! Calls DELETE /v1/notes/{noteId} on the provider's API.
+    category: notes
+    request:
+      method: DELETE
+      path: /v1/notes/${note_id}
+    input:
+      note_id:
+        type: string
+        description: Note id to delete
+    output:
+      description: No content
+      type: object
+    destructive: true
+  get_note_by_id:
+    title: Return a note
+    description: Return a note Return a note by id Calls GET /v1/notes/{noteId} on the provider's API.
+    category: notes
+    request:
+      method: GET
+      path: /v1/notes/${note_id}
+      query:
+        format: ${format}
+        css: ${css}
+        compact: ${compact}
+    input:
+      note_id:
+        type: string
+        description: Note id to return
+      format:
+        type: string
+        description: Format of the content to return (Markdown, Html, or SliteML)
+        optional: true
+        enum:
+        - md
+        - html
+        - sliteml
+      css:
+        type: string
+        description: 'For html format only: whether to inline the Slite stylesheet (inline, default) or
+          omit it so you supply your own CSS (none, much smaller payload). Ignored for other formats.'
+        optional: true
+        enum:
+        - inline
+        - none
+      compact:
+        type: boolean
+        description: 'For sliteml format only: when true, returns the compact serialization (standard
+          markdown for common blocks, XML only for rich Slite blocks) instead of the verbose full-tag
+          XML. Smaller payload, recommended for new integrations, and accepted as-is by the write endpoints.
+          Ignored for other formats.'
+        optional: true
+    output:
+      description: Ok
+      type: object
+    read_only: true
+  update_note:
+    title: Update a note
+    description: Update a note Update note content with markdown, html, or sliteml and/or title Calls
+      PUT /v1/notes/{noteId} on the provider's API.
+    category: notes
+    request:
+      method: PUT
+      path: /v1/notes/${note_id}
+      body:
+        title: ${title}
+        markdown: ${markdown}
+        html: ${html}
+        attributes: ${attributes}
+        sliteml: ${sliteml}
+    input:
+      note_id:
+        type: string
+        description: Note id to update
+      title:
+        type: string
+        description: Title of the note to update
+        optional: true
+      markdown:
+        type: string
+        description: The markdown field of the request body.
+        optional: true
+      html:
+        type: string
+        description: The html field of the request body.
+        optional: true
+      attributes:
+        type: array
+        description: Attributes for the parent collection ordered by column. If they don't match the appropriate
+          type, they would be ignored
+        optional: true
+        items:
+          type: string
+      sliteml:
+        type: string
+        description: The sliteml field of the request body.
+        optional: true
+    output:
+      description: Ok
+      type: object

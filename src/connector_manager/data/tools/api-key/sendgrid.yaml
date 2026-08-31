@@ -1,0 +1,538 @@
+# SendGrid tools.
+#
+# SendGrid API keys carry scopes, but the token itself does not disclose them,
+# so scope_discovery reads them from /v3/scopes -- the same list the API key was
+# created with. That makes check_tools_live authoritative for SendGrid even
+# though the credential is a bare API key rather than an OAuth token.
+#
+# Docs: https://www.twilio.com/docs/sendgrid/api-reference
+
+connector_id: sendgrid
+display_name: SendGrid
+docs_url: https://www.twilio.com/docs/sendgrid/api-reference
+
+scope_discovery:
+  method: GET
+  endpoint: /v3/scopes
+  scopes_path: scopes
+
+tools:
+
+  send_email:
+    title: Send an email
+    description: >-
+      Send a message through SendGrid. Personalizations carry the recipients, so
+      one call can send a separately addressed copy to each of several people.
+      Use send_email_with_attachments to attach files.
+    category: mail
+    scopes: ["mail.send"]
+    destructive: true
+    request:
+      method: POST
+      path: /v3/mail/send
+      body:
+        personalizations:
+          - to:
+              $map:
+                source: "${to}"
+                template: {email: "${item}"}
+            cc:
+              $map:
+                source: "${cc}"
+                template: {email: "${item}"}
+            bcc:
+              $map:
+                source: "${bcc}"
+                template: {email: "${item}"}
+            dynamic_template_data: "${template_data}"
+        from:
+          email: "${from_email}"
+          name: "${from_name}"
+        reply_to:
+          email: "${reply_to}"
+        subject: "${subject}"
+        content:
+          - $when: "${body}"
+            type: "${content_type}"
+            value: "${body}"
+        template_id: "${template_id}"
+        categories: "${categories}"
+    input:
+      to:
+        type: array
+        description: Recipient email addresses.
+        items: {type: string, format: email}
+      from_email:
+        type: string
+        description: Sender address. Must be a verified sender or on an authenticated domain.
+        format: email
+      subject:
+        type: string
+        description: Subject line. Omitted when a dynamic template supplies one.
+        optional: true
+      body:
+        type: string
+        description: Message body. Omitted when template_id is used.
+        optional: true
+      content_type:
+        type: string
+        description: MIME type of the body.
+        optional: true
+        default: text/html
+        enum: [text/plain, text/html]
+      from_name:
+        type: string
+        description: Display name shown for the sender.
+        optional: true
+      reply_to:
+        type: string
+        description: Address replies should go to.
+        optional: true
+        format: email
+      cc:
+        type: array
+        description: Addresses to copy.
+        optional: true
+        items: {type: string, format: email}
+      bcc:
+        type: array
+        description: Addresses to blind-copy.
+        optional: true
+        items: {type: string, format: email}
+      template_id:
+        type: string
+        description: Dynamic template id to render instead of body.
+        optional: true
+      template_data:
+        type: object
+        description: Merge values the dynamic template refers to.
+        optional: true
+      categories:
+        type: array
+        description: Categories to tag the message with, for stats.
+        optional: true
+        items: {type: string}
+    output:
+      description: Empty on success -- SendGrid answers 202 Accepted with no body.
+      type: object
+
+  send_email_with_attachments:
+    title: Send an email with attachments
+    description: >-
+      Send a message with files attached. Each attachment's bytes are
+      base64-encoded; SendGrid allows about 30 MB per message in total.
+    category: mail
+    scopes: ["mail.send"]
+    destructive: true
+    request:
+      method: POST
+      path: /v3/mail/send
+      body:
+        personalizations:
+          - to:
+              $map:
+                source: "${to}"
+                template: {email: "${item}"}
+            cc:
+              $map:
+                source: "${cc}"
+                template: {email: "${item}"}
+        from:
+          email: "${from_email}"
+          name: "${from_name}"
+        subject: "${subject}"
+        content:
+          - $when: "${body}"
+            type: "${content_type}"
+            value: "${body}"
+        attachments:
+          $map:
+            source: "${attachments}"
+            template:
+              filename: "${item.name}"
+              content: "${item.content_bytes}"
+              type: "${item.content_type}"
+              disposition: attachment
+    input:
+      to:
+        type: array
+        description: Recipient email addresses.
+        items: {type: string, format: email}
+      from_email:
+        type: string
+        description: Sender address. Must be a verified sender.
+        format: email
+      subject:
+        type: string
+        description: Subject line.
+      body:
+        type: string
+        description: Message body.
+      attachments:
+        type: array
+        description: >-
+          Files to attach, each {"name": "report.pdf", "content_bytes":
+          "<base64 of the file>", "content_type": "application/pdf"}.
+        items:
+          type: object
+          properties:
+            name: {type: string}
+            content_bytes: {type: string}
+            content_type: {type: string}
+      content_type:
+        type: string
+        description: MIME type of the body.
+        optional: true
+        default: text/html
+        enum: [text/plain, text/html]
+      from_name:
+        type: string
+        description: Display name shown for the sender.
+        optional: true
+      cc:
+        type: array
+        description: Addresses to copy.
+        optional: true
+        items: {type: string, format: email}
+    output:
+      description: Empty on success -- SendGrid answers 202 Accepted with no body.
+      type: object
+
+  list_contacts:
+    title: List marketing contacts
+    description: >-
+      Page through the Marketing Campaigns contact list. SendGrid returns 50
+      contacts per page and a token for the next.
+    category: marketing
+    scopes: ["marketing.read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/marketing/contacts
+      query:
+        page_token: "${page_token}"
+    input:
+      page_token:
+        type: string
+        description: Cursor from the previous response's _metadata.next.
+        optional: true
+    output:
+      description: A page of contacts.
+      type: object
+      properties:
+        result: {type: array}
+        contact_count: {type: integer}
+        _metadata: {type: object}
+
+  search_contacts:
+    title: Search marketing contacts
+    description: >-
+      Find contacts with SendGrid's SGQL, e.g. "email LIKE '%@example.com%'" or
+      "CONTAINS(list_ids, 'abc-123')".
+    category: marketing
+    scopes: ["marketing.read"]
+    read_only: true
+    request:
+      method: POST
+      path: /v3/marketing/contacts/search
+      body:
+        query: "${query}"
+    input:
+      query:
+        type: string
+        description: SGQL query over the contact fields.
+        example: "email LIKE '%@example.com%'"
+    output:
+      description: Matching contacts.
+      type: object
+      properties:
+        result: {type: array}
+        contact_count: {type: integer}
+
+  upsert_contacts:
+    title: Add or update marketing contacts
+    description: >-
+      Create or update contacts, matched on email address, and optionally add
+      them to lists. Asynchronous -- the response is a job id, not the result.
+    category: marketing
+    scopes: ["marketing.write"]
+    request:
+      method: PUT
+      path: /v3/marketing/contacts
+      body:
+        contacts: "${contacts}"
+        list_ids: "${list_ids}"
+    input:
+      contacts:
+        type: array
+        description: >-
+          Up to 30,000 contacts, each {"email": "ada@example.com", "first_name":
+          "Ada", "custom_fields": {...}}.
+        items: {type: object}
+      list_ids:
+        type: array
+        description: Lists to add the contacts to.
+        optional: true
+        items: {type: string}
+    output:
+      description: The queued import job.
+      type: object
+      properties:
+        job_id: {type: string}
+
+  delete_contacts:
+    title: Delete marketing contacts
+    description: >-
+      Permanently delete contacts by id, or every contact on the account. This
+      cannot be undone.
+    category: marketing
+    scopes: ["marketing.write"]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v3/marketing/contacts
+      query:
+        ids: "${contact_ids}"
+        delete_all_contacts: "${delete_all}"
+    input:
+      contact_ids:
+        type: array
+        description: Contact ids to delete.
+        optional: true
+        items: {type: string}
+      delete_all:
+        type: string
+        description: Set to "true" to delete every contact on the account.
+        optional: true
+        enum: ["true", "false"]
+    output:
+      description: The queued deletion job.
+      type: object
+      properties:
+        job_id: {type: string}
+
+  list_marketing_lists:
+    title: List marketing lists
+    description: List the account's contact lists with their ids and contact counts.
+    category: marketing
+    scopes: ["marketing.read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/marketing/lists
+      query:
+        page_size: "${limit}"
+        page_token: "${page_token}"
+    input:
+      limit:
+        type: integer
+        description: How many lists per page (1-1000).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 1000
+      page_token:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+    output:
+      description: A page of lists.
+      type: object
+      properties:
+        result: {type: array}
+        _metadata: {type: object}
+
+  create_marketing_list:
+    title: Create a marketing list
+    description: Create an empty contact list that upsert_contacts can then add people to.
+    category: marketing
+    scopes: ["marketing.write"]
+    request:
+      method: POST
+      path: /v3/marketing/lists
+      body:
+        name: "${name}"
+    input:
+      name:
+        type: string
+        description: The list's name.
+    output:
+      description: The created list.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        contact_count: {type: integer}
+
+  get_email_stats:
+    title: Get email statistics
+    description: >-
+      Read delivery statistics -- requests, delivered, opens, clicks, bounces,
+      spam reports -- over a date range, grouped by day, week or month.
+    category: stats
+    scopes: ["stats.read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/stats
+      query:
+        start_date: "${start_date}"
+        end_date: "${end_date}"
+        aggregated_by: "${aggregated_by}"
+        limit: "${limit}"
+        offset: "${offset}"
+    input:
+      start_date:
+        type: string
+        description: First day to report on, as YYYY-MM-DD.
+        example: "2026-08-01"
+      end_date:
+        type: string
+        description: Last day to report on, as YYYY-MM-DD. Defaults to today.
+        optional: true
+      aggregated_by:
+        type: string
+        description: How to group the numbers.
+        optional: true
+        enum: [day, week, month]
+      limit:
+        type: integer
+        description: How many buckets per page.
+        optional: true
+        minimum: 1
+      offset:
+        type: integer
+        description: Zero-based index to start from.
+        optional: true
+        minimum: 0
+    output:
+      description: Statistics per time bucket.
+      type: array
+      items:
+        type: object
+        properties:
+          date: {type: string}
+          stats: {type: array}
+
+  list_bounces:
+    title: List bounced addresses
+    description: >-
+      List addresses that bounced, with the reason and when. The first place to
+      look when a recipient reports not receiving mail.
+    category: suppressions
+    scopes: ["suppression.read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/suppression/bounces
+      query:
+        start_time: "${start_time}"
+        end_time: "${end_time}"
+        limit: "${limit}"
+        offset: "${offset}"
+    input:
+      start_time:
+        type: string
+        description: Only bounces at or after this Unix epoch in seconds.
+        optional: true
+      end_time:
+        type: string
+        description: Only bounces at or before this Unix epoch in seconds.
+        optional: true
+      limit:
+        type: integer
+        description: How many bounces per page.
+        optional: true
+        minimum: 1
+      offset:
+        type: integer
+        description: Zero-based index to start from.
+        optional: true
+        minimum: 0
+    output:
+      description: The bounced addresses.
+      type: array
+      items:
+        type: object
+        properties:
+          email: {type: string}
+          reason: {type: string}
+          status: {type: string}
+          created: {type: integer}
+
+  delete_bounce:
+    title: Clear a bounced address
+    description: >-
+      Remove an address from the bounce suppression list so SendGrid will try
+      delivering to it again.
+    category: suppressions
+    scopes: ["suppression.write"]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v3/suppression/bounces/${email}
+    input:
+      email:
+        type: string
+        description: The address to clear.
+        format: email
+    output:
+      description: Empty on success -- SendGrid answers 204 No Content.
+      type: object
+
+  list_templates:
+    title: List dynamic templates
+    description: >-
+      List the account's dynamic email templates with their ids, which
+      send_email's template_id takes.
+    category: templates
+    scopes: ["templates.read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/templates
+      query:
+        generations: "${generations}"
+        page_size: "${limit}"
+        page_token: "${page_token}"
+    input:
+      generations:
+        type: string
+        description: Which template generation to list.
+        optional: true
+        default: dynamic
+        enum: [legacy, dynamic, "legacy,dynamic"]
+      limit:
+        type: integer
+        description: How many templates per page (1-200).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 200
+      page_token:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+    output:
+      description: A page of templates.
+      type: object
+      properties:
+        result: {type: array}
+        _metadata: {type: object}
+
+  list_api_key_scopes:
+    title: List the API key's scopes
+    description: >-
+      Read exactly what this API key is permitted to do. The cheapest health
+      check for a SendGrid connection, and what scope discovery reads.
+    category: account
+    read_only: true
+    request:
+      method: GET
+      path: /v3/scopes
+    input: {}
+    output:
+      description: The key's scopes.
+      type: object
+      properties:
+        scopes: {type: array}

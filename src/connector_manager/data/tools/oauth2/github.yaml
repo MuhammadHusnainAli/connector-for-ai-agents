@@ -1,0 +1,1328 @@
+# GitHub REST API tools.
+#
+# Scopes are classic OAuth scopes. A fine-grained personal access token or a
+# GitHub App installation grants permissions rather than scopes, in which case
+# scope discovery returns nothing and every tool reports as unknown.
+#
+# Docs: https://docs.github.com/rest
+
+connector_id: github
+display_name: GitHub
+docs_url: https://docs.github.com/rest
+
+scope_rules:
+  implies:
+    repo: [public_repo, "repo:status", repo_deployment, security_events]
+    admin:org: ["write:org", "read:org"]
+    write:org: ["read:org"]
+    user: ["read:user", "user:email", "user:follow"]
+
+scope_discovery:
+  # GitHub reports a classic token's scopes in a response header on any call.
+  method: GET
+  endpoint: /user
+  scopes_path: "header:x-oauth-scopes"
+  separator: ","
+
+tools:
+
+  # -- repositories ----------------------------------------------------------
+
+  list_my_repos:
+    title: List repositories the token can see
+    description: >-
+      List repositories the authenticated user owns or collaborates on, newest
+      first by default. This is the way to discover owner and repo names for
+      every other tool.
+    category: repos
+    scopes: [repo]
+    read_only: true
+    request:
+      method: GET
+      path: /user/repos
+      query:
+        per_page: "${per_page}"
+        page: "${page}"
+        sort: "${sort}"
+        direction: "${direction}"
+        visibility: "${visibility}"
+        affiliation: "${affiliation}"
+    input:
+      per_page:
+        type: integer
+        description: How many repositories per page (1-100).
+        optional: true
+        default: 30
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      sort:
+        type: string
+        description: Field to order by.
+        optional: true
+        enum: [created, updated, pushed, full_name]
+      direction:
+        type: string
+        description: Sort direction.
+        optional: true
+        enum: [asc, desc]
+      visibility:
+        type: string
+        description: Restrict to public or private repositories.
+        optional: true
+        enum: [all, public, private]
+      affiliation:
+        type: string
+        description: Comma-separated relationships, e.g. "owner,collaborator".
+        optional: true
+    output:
+      description: A page of repositories.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          full_name: {type: string, description: "owner/repo -- what the other tools take."}
+          private: {type: boolean}
+          default_branch: {type: string}
+          html_url: {type: string}
+
+  get_repo:
+    title: Get a repository
+    description: >-
+      Read one repository's details -- description, default branch, visibility,
+      topics, star and fork counts.
+    category: repos
+    scopes: [repo]
+    read_only: true
+    request:
+      method: GET
+      path: /repos/${owner}/${repo}
+    input:
+      owner:
+        type: string
+        description: Repository owner, a user or organisation login.
+      repo:
+        type: string
+        description: Repository name, without the owner.
+    output:
+      description: The repository.
+      type: object
+      properties:
+        id: {type: integer}
+        full_name: {type: string}
+        description: "{type: string}"
+        default_branch: {type: string}
+        open_issues_count: {type: integer}
+
+  search_repos:
+    title: Search repositories
+    description: >-
+      Search GitHub's repositories with its query syntax, e.g.
+      "language:python stars:>1000" or "org:acme topic:api".
+    category: search
+    read_only: true
+    request:
+      method: GET
+      path: /search/repositories
+      query:
+        q: "${query}"
+        per_page: "${per_page}"
+        page: "${page}"
+        sort: "${sort}"
+    input:
+      query:
+        type: string
+        description: GitHub search query.
+        example: "language:python stars:>1000"
+      per_page:
+        type: integer
+        description: Results per page (1-100).
+        optional: true
+        default: 30
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      sort:
+        type: string
+        description: Ranking to sort by; omit for best match.
+        optional: true
+        enum: [stars, forks, updated]
+    output:
+      description: Matching repositories with the total count.
+      type: object
+      properties:
+        total_count: {type: integer}
+        items: {type: array}
+
+  # -- issues ----------------------------------------------------------------
+
+  list_issues:
+    title: List issues in a repository
+    description: >-
+      List a repository's issues, filtered by state, labels, assignee or
+      milestone. GitHub counts pull requests as issues, so filter them out by
+      checking for a pull_request field.
+    category: issues
+    scopes: [repo]
+    read_only: true
+    request:
+      method: GET
+      path: /repos/${owner}/${repo}/issues
+      query:
+        state: "${state}"
+        labels: "${labels}"
+        assignee: "${assignee}"
+        creator: "${creator}"
+        milestone: "${milestone}"
+        since: "${since}"
+        sort: "${sort}"
+        direction: "${direction}"
+        per_page: "${per_page}"
+        page: "${page}"
+    input:
+      owner:
+        type: string
+        description: Repository owner.
+      repo:
+        type: string
+        description: Repository name.
+      state:
+        type: string
+        description: Which issues to include.
+        optional: true
+        default: open
+        enum: [open, closed, all]
+      labels:
+        type: array
+        description: Only issues carrying all of these labels.
+        optional: true
+        items: {type: string}
+      assignee:
+        type: string
+        description: Login of the assignee, or "none" for unassigned.
+        optional: true
+      creator:
+        type: string
+        description: Login of the issue's author.
+        optional: true
+      milestone:
+        type: string
+        description: Milestone number, or "*" for any, or "none".
+        optional: true
+      since:
+        type: string
+        description: Only issues updated at or after this ISO 8601 instant.
+        optional: true
+      sort:
+        type: string
+        description: Field to order by.
+        optional: true
+        enum: [created, updated, comments]
+      direction:
+        type: string
+        description: Sort direction.
+        optional: true
+        enum: [asc, desc]
+      per_page:
+        type: integer
+        description: Issues per page (1-100).
+        optional: true
+        default: 30
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of issues.
+      type: array
+      items:
+        type: object
+        properties:
+          number: {type: integer, description: "Issue number -- what the other issue tools take."}
+          title: "{type: string}"
+          state: {type: string}
+          labels: {type: array}
+          assignees: {type: array}
+          html_url: {type: string}
+
+  get_issue:
+    title: Get an issue
+    description: Read one issue in full, including its body, labels and assignees.
+    category: issues
+    scopes: [repo]
+    read_only: true
+    request:
+      method: GET
+      path: /repos/${owner}/${repo}/issues/${issue_number}
+    input:
+      owner:
+        type: string
+        description: Repository owner.
+      repo:
+        type: string
+        description: Repository name.
+      issue_number:
+        type: integer
+        description: The issue number, as shown in the UI.
+    output:
+      description: The issue.
+      type: object
+      properties:
+        number: {type: integer}
+        title: "{type: string}"
+        body: {type: string}
+        state: {type: string}
+        user: {type: object}
+
+  create_issue:
+    title: Create an issue
+    description: >-
+      Open a new issue with a title, an optional Markdown body, labels and
+      assignees.
+    category: issues
+    scopes: [repo]
+    request:
+      method: POST
+      path: /repos/${owner}/${repo}/issues
+      body:
+        title: "${title}"
+        body: "${body}"
+        labels: "${labels}"
+        assignees: "${assignees}"
+        milestone: "${milestone}"
+    input:
+      owner:
+        type: string
+        description: Repository owner.
+      repo:
+        type: string
+        description: Repository name.
+      title:
+        type: string
+        description: Issue title.
+      body:
+        type: string
+        description: Issue body, in Markdown.
+        optional: true
+      labels:
+        type: array
+        description: Label names to apply. They must already exist on the repository.
+        optional: true
+        items: {type: string}
+      assignees:
+        type: array
+        description: Logins to assign it to.
+        optional: true
+        items: {type: string}
+      milestone:
+        type: integer
+        description: Milestone number to file it under.
+        optional: true
+    output:
+      description: The created issue.
+      type: object
+      properties:
+        number: {type: integer}
+        html_url: {type: string}
+        state: {type: string}
+
+  update_issue:
+    title: Update an issue
+    description: >-
+      Change an issue's title, body, state, labels or assignees. Only what is
+      supplied is written. Set state to closed to close it.
+    category: issues
+    scopes: [repo]
+    request:
+      method: PATCH
+      path: /repos/${owner}/${repo}/issues/${issue_number}
+      body:
+        title: "${title}"
+        body: "${body}"
+        state: "${state}"
+        state_reason: "${state_reason}"
+        labels: "${labels}"
+        assignees: "${assignees}"
+    input:
+      owner:
+        type: string
+        description: Repository owner.
+      repo:
+        type: string
+        description: Repository name.
+      issue_number:
+        type: integer
+        description: The issue number.
+      title:
+        type: string
+        description: New title.
+        optional: true
+      body:
+        type: string
+        description: New body, in Markdown.
+        optional: true
+      state:
+        type: string
+        description: Open or close the issue.
+        optional: true
+        enum: [open, closed]
+      state_reason:
+        type: string
+        description: Why it was closed.
+        optional: true
+        enum: [completed, not_planned, reopened]
+      labels:
+        type: array
+        description: Replaces the label set entirely.
+        optional: true
+        items: {type: string}
+      assignees:
+        type: array
+        description: Replaces the assignee set entirely.
+        optional: true
+        items: {type: string}
+    output:
+      description: The updated issue.
+      type: object
+      properties:
+        number: {type: integer}
+        state: {type: string}
+
+  comment_on_issue:
+    title: Comment on an issue or pull request
+    description: >-
+      Add a comment. Pull requests share issue numbering, so this posts to a PR
+      conversation too.
+    category: issues
+    scopes: [repo]
+    request:
+      method: POST
+      path: /repos/${owner}/${repo}/issues/${issue_number}/comments
+      body:
+        body: "${body}"
+    input:
+      owner:
+        type: string
+        description: Repository owner.
+      repo:
+        type: string
+        description: Repository name.
+      issue_number:
+        type: integer
+        description: Issue or pull request number.
+      body:
+        type: string
+        description: The comment, in Markdown.
+    output:
+      description: The created comment.
+      type: object
+      properties:
+        id: {type: integer}
+        html_url: {type: string}
+        body: {type: string}
+
+  list_issue_comments:
+    title: List an issue's comments
+    description: Read the comment thread on an issue or pull request, oldest first.
+    category: issues
+    scopes: [repo]
+    read_only: true
+    request:
+      method: GET
+      path: /repos/${owner}/${repo}/issues/${issue_number}/comments
+      query:
+        per_page: "${per_page}"
+        page: "${page}"
+    input:
+      owner:
+        type: string
+        description: Repository owner.
+      repo:
+        type: string
+        description: Repository name.
+      issue_number:
+        type: integer
+        description: Issue or pull request number.
+      per_page:
+        type: integer
+        description: Comments per page (1-100).
+        optional: true
+        default: 30
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of comments.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          user: {type: object}
+          body: {type: string}
+          created_at: {type: string}
+
+  add_labels_to_issue:
+    title: Add labels to an issue
+    description: Add labels without disturbing the ones already on the issue.
+    category: issues
+    scopes: [repo]
+    request:
+      method: POST
+      path: /repos/${owner}/${repo}/issues/${issue_number}/labels
+      body:
+        labels: "${labels}"
+    input:
+      owner:
+        type: string
+        description: Repository owner.
+      repo:
+        type: string
+        description: Repository name.
+      issue_number:
+        type: integer
+        description: Issue number.
+      labels:
+        type: array
+        description: Label names to add.
+        items: {type: string}
+    output:
+      description: The issue's labels after the change.
+      type: array
+      items: {type: object}
+
+  search_issues:
+    title: Search issues and pull requests
+    description: >-
+      Search across repositories with GitHub's issue query syntax, e.g.
+      "repo:acme/api is:open label:bug" or "is:pr author:@me is:open".
+    category: search
+    read_only: true
+    request:
+      method: GET
+      path: /search/issues
+      query:
+        q: "${query}"
+        per_page: "${per_page}"
+        page: "${page}"
+        sort: "${sort}"
+        order: "${order}"
+    input:
+      query:
+        type: string
+        description: GitHub issue search query.
+        example: "repo:acme/api is:open label:bug"
+      per_page:
+        type: integer
+        description: Results per page (1-100).
+        optional: true
+        default: 30
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      sort:
+        type: string
+        description: Ranking to sort by; omit for best match.
+        optional: true
+        enum: [comments, reactions, created, updated]
+      order:
+        type: string
+        description: Sort direction.
+        optional: true
+        enum: [asc, desc]
+    output:
+      description: Matching issues and pull requests.
+      type: object
+      properties:
+        total_count: {type: integer}
+        items: {type: array}
+
+  # -- pull requests ---------------------------------------------------------
+
+  list_pull_requests:
+    title: List pull requests
+    description: List a repository's pull requests, filtered by state, base or head branch.
+    category: pulls
+    scopes: [repo]
+    read_only: true
+    request:
+      method: GET
+      path: /repos/${owner}/${repo}/pulls
+      query:
+        state: "${state}"
+        base: "${base}"
+        head: "${head}"
+        sort: "${sort}"
+        direction: "${direction}"
+        per_page: "${per_page}"
+        page: "${page}"
+    input:
+      owner:
+        type: string
+        description: Repository owner.
+      repo:
+        type: string
+        description: Repository name.
+      state:
+        type: string
+        description: Which pull requests to include.
+        optional: true
+        default: open
+        enum: [open, closed, all]
+      base:
+        type: string
+        description: Only pull requests targeting this branch.
+        optional: true
+      head:
+        type: string
+        description: Only pull requests from this branch, as "user:branch".
+        optional: true
+      sort:
+        type: string
+        description: Field to order by.
+        optional: true
+        enum: [created, updated, popularity, long-running]
+      direction:
+        type: string
+        description: Sort direction.
+        optional: true
+        enum: [asc, desc]
+      per_page:
+        type: integer
+        description: Pull requests per page (1-100).
+        optional: true
+        default: 30
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of pull requests.
+      type: array
+      items:
+        type: object
+        properties:
+          number: {type: integer}
+          title: "{type: string}"
+          state: {type: string}
+          draft: {type: boolean}
+          head: {type: object}
+          base: {type: object}
+
+  get_pull_request:
+    title: Get a pull request
+    description: >-
+      Read one pull request in full, including its mergeable state and the
+      number of changed files, additions and deletions.
+    category: pulls
+    scopes: [repo]
+    read_only: true
+    request:
+      method: GET
+      path: /repos/${owner}/${repo}/pulls/${pull_number}
+    input:
+      owner:
+        type: string
+        description: Repository owner.
+      repo:
+        type: string
+        description: Repository name.
+      pull_number:
+        type: integer
+        description: The pull request number.
+    output:
+      description: The pull request.
+      type: object
+      properties:
+        number: {type: integer}
+        title: "{type: string}"
+        body: {type: string}
+        mergeable: {type: boolean}
+        changed_files: {type: integer}
+        additions: {type: integer}
+        deletions: {type: integer}
+
+  create_pull_request:
+    title: Open a pull request
+    description: >-
+      Open a pull request from a head branch into a base branch. Set draft to
+      open it as a draft that cannot be merged yet.
+    category: pulls
+    scopes: [repo]
+    request:
+      method: POST
+      path: /repos/${owner}/${repo}/pulls
+      body:
+        title: "${title}"
+        head: "${head}"
+        base: "${base}"
+        body: "${body}"
+        draft: "${draft}"
+        maintainer_can_modify: "${maintainer_can_modify}"
+    input:
+      owner:
+        type: string
+        description: Repository owner.
+      repo:
+        type: string
+        description: Repository name.
+      title:
+        type: string
+        description: Pull request title.
+      head:
+        type: string
+        description: Branch the changes are on. Use "user:branch" for a fork.
+      base:
+        type: string
+        description: Branch to merge into, e.g. main.
+      body:
+        type: string
+        description: Description, in Markdown.
+        optional: true
+      draft:
+        type: boolean
+        description: Open as a draft.
+        optional: true
+      maintainer_can_modify:
+        type: boolean
+        description: Let maintainers push to the head branch.
+        optional: true
+    output:
+      description: The created pull request.
+      type: object
+      properties:
+        number: {type: integer}
+        html_url: {type: string}
+        state: {type: string}
+
+  list_pull_request_files:
+    title: List the files a pull request changes
+    description: >-
+      List each changed file with its status, line counts and unified diff
+      patch -- enough to review a change without cloning.
+    category: pulls
+    scopes: [repo]
+    read_only: true
+    request:
+      method: GET
+      path: /repos/${owner}/${repo}/pulls/${pull_number}/files
+      query:
+        per_page: "${per_page}"
+        page: "${page}"
+    input:
+      owner:
+        type: string
+        description: Repository owner.
+      repo:
+        type: string
+        description: Repository name.
+      pull_number:
+        type: integer
+        description: The pull request number.
+      per_page:
+        type: integer
+        description: Files per page (1-100).
+        optional: true
+        default: 30
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+    output:
+      description: The changed files.
+      type: array
+      items:
+        type: object
+        properties:
+          filename: {type: string}
+          status: {type: string}
+          additions: {type: integer}
+          deletions: {type: integer}
+          patch: {type: string, description: "Unified diff for this file."}
+
+  create_pull_request_review:
+    title: Review a pull request
+    description: >-
+      Submit a review -- approve, request changes, or leave a comment -- with an
+      optional body and inline comments on specific lines.
+    category: pulls
+    scopes: [repo]
+    request:
+      method: POST
+      path: /repos/${owner}/${repo}/pulls/${pull_number}/reviews
+      body:
+        body: "${body}"
+        event: "${event}"
+        comments: "${comments}"
+    input:
+      owner:
+        type: string
+        description: Repository owner.
+      repo:
+        type: string
+        description: Repository name.
+      pull_number:
+        type: integer
+        description: The pull request number.
+      event:
+        type: string
+        description: What kind of review to submit.
+        enum: [APPROVE, REQUEST_CHANGES, COMMENT]
+      body:
+        type: string
+        description: The review's summary comment. Required for REQUEST_CHANGES and COMMENT.
+        optional: true
+      comments:
+        type: array
+        description: Inline comments, each with path, line and body.
+        optional: true
+        items: {type: object}
+    output:
+      description: The submitted review.
+      type: object
+      properties:
+        id: {type: integer}
+        state: {type: string}
+        html_url: {type: string}
+
+  merge_pull_request:
+    title: Merge a pull request
+    description: >-
+      Merge a pull request into its base branch. Fails if the branch is
+      protected, the checks have not passed, or there are conflicts.
+    category: pulls
+    scopes: [repo]
+    destructive: true
+    request:
+      method: PUT
+      path: /repos/${owner}/${repo}/pulls/${pull_number}/merge
+      body:
+        commit_title: "${commit_title}"
+        commit_message: "${commit_message}"
+        merge_method: "${merge_method}"
+        sha: "${sha}"
+    input:
+      owner:
+        type: string
+        description: Repository owner.
+      repo:
+        type: string
+        description: Repository name.
+      pull_number:
+        type: integer
+        description: The pull request number.
+      merge_method:
+        type: string
+        description: How to merge.
+        optional: true
+        default: merge
+        enum: [merge, squash, rebase]
+      commit_title:
+        type: string
+        description: Title for the merge commit.
+        optional: true
+      commit_message:
+        type: string
+        description: Body for the merge commit.
+        optional: true
+      sha:
+        type: string
+        description: Head SHA the merge must match, to avoid merging a newer push by mistake.
+        optional: true
+    output:
+      description: The merge result.
+      type: object
+      properties:
+        sha: {type: string}
+        merged: {type: boolean}
+        message: {type: string}
+
+  # -- contents, branches and commits ----------------------------------------
+
+  get_file_contents:
+    title: Read a file from a repository
+    description: >-
+      Read one file's contents at a branch, tag or commit. The content comes
+      back base64-encoded, with the file's blob sha, which update_file needs.
+    category: contents
+    scopes: [repo]
+    read_only: true
+    request:
+      method: GET
+      path: /repos/${owner}/${repo}/contents/${path}
+      query:
+        ref: "${ref}"
+    input:
+      owner:
+        type: string
+        description: Repository owner.
+      repo:
+        type: string
+        description: Repository name.
+      path:
+        type: string
+        description: Path to the file inside the repository.
+        example: src/main.py
+      ref:
+        type: string
+        description: Branch, tag or commit sha. Defaults to the repository's default branch.
+        optional: true
+    output:
+      description: The file.
+      type: object
+      properties:
+        name: {type: string}
+        path: {type: string}
+        sha: {type: string, description: "Blob sha -- pass to update_file."}
+        content: {type: string, description: "The file's bytes, base64-encoded."}
+        html_url: {type: string}
+
+  create_or_update_file:
+    title: Create or update a file
+    description: >-
+      Commit a file to a branch. Omit sha to create a new file; supply the blob
+      sha from get_file_contents to replace an existing one.
+    category: contents
+    scopes: [repo]
+    request:
+      method: PUT
+      path: /repos/${owner}/${repo}/contents/${path}
+      body:
+        message: "${message}"
+        content: "${content}"
+        branch: "${branch}"
+        sha: "${sha}"
+    input:
+      owner:
+        type: string
+        description: Repository owner.
+      repo:
+        type: string
+        description: Repository name.
+      path:
+        type: string
+        description: Path to the file inside the repository.
+      message:
+        type: string
+        description: Commit message.
+      content:
+        type: string
+        description: The new file contents, base64-encoded.
+      branch:
+        type: string
+        description: Branch to commit to. Defaults to the repository's default branch.
+        optional: true
+      sha:
+        type: string
+        description: Blob sha of the file being replaced. Required when updating, omitted when creating.
+        optional: true
+    output:
+      description: The commit and the resulting file.
+      type: object
+      properties:
+        content: {type: object}
+        commit: {type: object}
+
+  list_branches:
+    title: List branches
+    description: List a repository's branches with the commit each one points at.
+    category: contents
+    scopes: [repo]
+    read_only: true
+    request:
+      method: GET
+      path: /repos/${owner}/${repo}/branches
+      query:
+        protected: "${protected}"
+        per_page: "${per_page}"
+        page: "${page}"
+    input:
+      owner:
+        type: string
+        description: Repository owner.
+      repo:
+        type: string
+        description: Repository name.
+      protected:
+        type: boolean
+        description: Only branches with protection rules.
+        optional: true
+      per_page:
+        type: integer
+        description: Branches per page (1-100).
+        optional: true
+        default: 30
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+    output:
+      description: The repository's branches.
+      type: array
+      items:
+        type: object
+        properties:
+          name: {type: string}
+          commit: {type: object}
+          protected: {type: boolean}
+
+  create_branch:
+    title: Create a branch
+    description: >-
+      Create a branch pointing at an existing commit. Get the sha to branch from
+      with list_branches or list_commits.
+    category: contents
+    scopes: [repo]
+    request:
+      method: POST
+      path: /repos/${owner}/${repo}/git/refs
+      body:
+        ref: "refs/heads/${branch}"
+        sha: "${sha}"
+    input:
+      owner:
+        type: string
+        description: Repository owner.
+      repo:
+        type: string
+        description: Repository name.
+      branch:
+        type: string
+        description: New branch name, without refs/heads/.
+        example: feature/search
+      sha:
+        type: string
+        description: Commit sha the branch starts from.
+    output:
+      description: The created ref.
+      type: object
+      properties:
+        ref: {type: string}
+        object: {type: object}
+
+  list_commits:
+    title: List commits
+    description: >-
+      List commits on a branch, optionally narrowed to one file path, one
+      author, or a date range.
+    category: contents
+    scopes: [repo]
+    read_only: true
+    request:
+      method: GET
+      path: /repos/${owner}/${repo}/commits
+      query:
+        sha: "${branch}"
+        path: "${path}"
+        author: "${author}"
+        since: "${since}"
+        until: "${until}"
+        per_page: "${per_page}"
+        page: "${page}"
+    input:
+      owner:
+        type: string
+        description: Repository owner.
+      repo:
+        type: string
+        description: Repository name.
+      branch:
+        type: string
+        description: Branch, tag or sha to list from. Defaults to the default branch.
+        optional: true
+      path:
+        type: string
+        description: Only commits touching this path.
+        optional: true
+      author:
+        type: string
+        description: Login or email of the author.
+        optional: true
+      since:
+        type: string
+        description: Only commits after this ISO 8601 instant.
+        optional: true
+      until:
+        type: string
+        description: Only commits before this ISO 8601 instant.
+        optional: true
+      per_page:
+        type: integer
+        description: Commits per page (1-100).
+        optional: true
+        default: 30
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of commits.
+      type: array
+      items:
+        type: object
+        properties:
+          sha: {type: string}
+          commit: {type: object}
+          author: {type: object}
+          html_url: {type: string}
+
+  # -- releases and actions --------------------------------------------------
+
+  create_release:
+    title: Create a release
+    description: >-
+      Publish a release for a tag, with Markdown release notes. Set generate
+      _release_notes to have GitHub write them from the merged pull requests.
+    category: releases
+    scopes: [repo]
+    request:
+      method: POST
+      path: /repos/${owner}/${repo}/releases
+      body:
+        tag_name: "${tag_name}"
+        name: "${name}"
+        body: "${body}"
+        target_commitish: "${target}"
+        draft: "${draft}"
+        prerelease: "${prerelease}"
+        generate_release_notes: "${generate_release_notes}"
+    input:
+      owner:
+        type: string
+        description: Repository owner.
+      repo:
+        type: string
+        description: Repository name.
+      tag_name:
+        type: string
+        description: Tag for the release. Created at target if it does not exist.
+        example: v1.2.0
+      name:
+        type: string
+        description: Release title.
+        optional: true
+      body:
+        type: string
+        description: Release notes, in Markdown.
+        optional: true
+      target:
+        type: string
+        description: Branch or sha the tag is created from, when it is new.
+        optional: true
+      draft:
+        type: boolean
+        description: Save as an unpublished draft.
+        optional: true
+      prerelease:
+        type: boolean
+        description: Mark as a pre-release.
+        optional: true
+      generate_release_notes:
+        type: boolean
+        description: Have GitHub generate notes from merged pull requests.
+        optional: true
+    output:
+      description: The created release.
+      type: object
+      properties:
+        id: {type: integer}
+        tag_name: {type: string}
+        html_url: {type: string}
+
+  list_workflow_runs:
+    title: List GitHub Actions runs
+    description: >-
+      List workflow runs for a repository, filtered by status, branch or the
+      event that triggered them -- how to check whether CI is green.
+    category: actions
+    scopes: [repo]
+    read_only: true
+    request:
+      method: GET
+      path: /repos/${owner}/${repo}/actions/runs
+      query:
+        status: "${status}"
+        branch: "${branch}"
+        event: "${event}"
+        actor: "${actor}"
+        per_page: "${per_page}"
+        page: "${page}"
+    input:
+      owner:
+        type: string
+        description: Repository owner.
+      repo:
+        type: string
+        description: Repository name.
+      status:
+        type: string
+        description: Only runs in this state.
+        optional: true
+        enum: [queued, in_progress, completed, success, failure, cancelled, skipped, timed_out, action_required]
+      branch:
+        type: string
+        description: Only runs on this branch.
+        optional: true
+      event:
+        type: string
+        description: Only runs triggered by this event, e.g. push or pull_request.
+        optional: true
+      actor:
+        type: string
+        description: Only runs triggered by this login.
+        optional: true
+      per_page:
+        type: integer
+        description: Runs per page (1-100).
+        optional: true
+        default: 30
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+    output:
+      description: Workflow runs with the total count.
+      type: object
+      properties:
+        total_count: {type: integer}
+        workflow_runs: {type: array}
+
+  trigger_workflow:
+    title: Trigger a workflow
+    description: >-
+      Start a workflow that declares a workflow_dispatch trigger, on a chosen
+      branch or tag, passing its declared inputs.
+    category: actions
+    scopes: [workflow]
+    destructive: true
+    request:
+      method: POST
+      path: /repos/${owner}/${repo}/actions/workflows/${workflow_id}/dispatches
+      body:
+        ref: "${ref}"
+        inputs: "${inputs}"
+    input:
+      owner:
+        type: string
+        description: Repository owner.
+      repo:
+        type: string
+        description: Repository name.
+      workflow_id:
+        type: string
+        description: Workflow file name (e.g. ci.yml) or its numeric id.
+        example: ci.yml
+      ref:
+        type: string
+        description: Branch or tag to run against.
+        example: main
+      inputs:
+        type: object
+        description: Values for the workflow's declared inputs.
+        optional: true
+    output:
+      description: Empty on success -- GitHub answers 204 No Content.
+      type: object
+
+  # -- identity --------------------------------------------------------------
+
+  get_authenticated_user:
+    title: Get the authenticated user
+    description: >-
+      Read the account the token belongs to -- login, name, company and public
+      repository counts. The cheapest health check for a GitHub connection.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /user
+    input: {}
+    output:
+      description: The authenticated user.
+      type: object
+      properties:
+        login: {type: string}
+        id: {type: integer}
+        name: {type: string}
+        email: {type: string}
+        public_repos: {type: integer}
+
+  list_org_repos:
+    title: List an organisation's repositories
+    description: List the repositories belonging to an organisation the token can see.
+    category: repos
+    scopes: ["read:org"]
+    read_only: true
+    request:
+      method: GET
+      path: /orgs/${org}/repos
+      query:
+        type: "${type}"
+        sort: "${sort}"
+        per_page: "${per_page}"
+        page: "${page}"
+    input:
+      org:
+        type: string
+        description: Organisation login.
+      type:
+        type: string
+        description: Which repositories to include.
+        optional: true
+        enum: [all, public, private, forks, sources, member]
+      sort:
+        type: string
+        description: Field to order by.
+        optional: true
+        enum: [created, updated, pushed, full_name]
+      per_page:
+        type: integer
+        description: Repositories per page (1-100).
+        optional: true
+        default: 30
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+    output:
+      description: The organisation's repositories.
+      type: array
+      items: {type: object}

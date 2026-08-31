@@ -1,0 +1,417 @@
+# Newscatcher tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://catchall.newscatcherapi.com/openapi.json
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: newscatcher
+display_name: Newscatcher
+docs_url: https://www.newscatcherapi.com/docs/web-search-api/get-started/introduction
+generated: true
+generated_from: https://catchall.newscatcherapi.com/openapi.json
+tools:
+  health_check:
+    title: Check health
+    description: Check health Check API availability. Calls GET /health on the provider's API.
+    category: health
+    request:
+      method: GET
+      path: /health
+    input: {}
+    output:
+      description: API is healthy.
+      type: object
+    read_only: true
+  get_version:
+    title: Get version
+    description: Get version Returns current API version. Calls GET /version on the provider's API.
+    category: version
+    request:
+      method: GET
+      path: /version
+    input: {}
+    output:
+      description: Current API version.
+      type: object
+    read_only: true
+  continue_job:
+    title: Continue a job to fetch more results
+    description: Continue a job to fetch more results Use this after reviewing a completed job's results
+      and deciding you want more. Increases the job's limit and resumes fetching — the existing results
+      are kept and new ones are appended. The JobsConcurrency plan entitlement is re-checked; a 429 is
+      returned if it is already exhausted. Calls POST /catchAll/continue on the provider's API.
+    category: catch_all
+    request:
+      method: POST
+      path: /catchAll/continue
+      body:
+        job_id: ${job_id}
+        new_limit: ${new_limit}
+    input:
+      job_id:
+        type: string
+        description: Existing job to extend with a higher result limit.
+      new_limit:
+        type: string
+        description: New limit, must be greater than the current limit. If null, raises to the plan maximum.
+        optional: true
+    output:
+      description: Successful Response
+      type: object
+  list_datasets:
+    title: List datasets
+    description: List datasets Returns a paginated, sortable list of datasets for the organization. Filter
+      by status, ownership, or search by name. Use projectid to scope to a project. Calls GET /catchAll/datasets
+      on the provider's API.
+    category: catch_all
+    request:
+      method: GET
+      path: /catchAll/datasets
+      query:
+        page: ${page}
+        page_size: ${page_size}
+        search: ${search}
+        latest_status: ${latest_status}
+        sort_by: ${sort_by}
+        sort_order: ${sort_order}
+        ownership: ${ownership}
+        project_id: ${project_id}
+    input:
+      page:
+        type: integer
+        description: The page parameter.
+        optional: true
+        default: 1
+      page_size:
+        type: integer
+        description: The page_size parameter.
+        optional: true
+        default: 100
+      search:
+        type: string
+        description: The search parameter.
+        optional: true
+      latest_status:
+        type: string
+        description: The latest_status parameter.
+        optional: true
+      sort_by:
+        type: string
+        description: The sort_by parameter.
+        optional: true
+        enum:
+        - name
+        - created_at
+        - status
+      sort_order:
+        type: string
+        description: The sort_order parameter.
+        optional: true
+        enum:
+        - asc
+        - desc
+      ownership:
+        type: string
+        description: The ownership parameter.
+        optional: true
+        enum:
+        - all
+        - own
+        - shared
+      project_id:
+        type: string
+        description: The project_id parameter.
+        optional: true
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  create_dataset:
+    title: Create dataset
+    description: Create dataset Creates a named dataset and optionally pre-populates it with entity IDs.
+      A dataset is a curated collection of companies used to scope job searches. Calls POST /catchAll/datasets
+      on the provider's API.
+    category: catch_all
+    request:
+      method: POST
+      path: /catchAll/datasets
+      body:
+        name: ${name}
+        description: ${description}
+        entity_ids: ${entity_ids}
+        project_id: ${project_id}
+    input:
+      name:
+        type: string
+        description: Name for the dataset.
+      description:
+        type: string
+        description: Optional description.
+        optional: true
+      entity_ids:
+        type: string
+        description: IDs of existing entities to include in the dataset.
+        optional: true
+      project_id:
+        type: string
+        description: Project to assign this dataset to.
+        optional: true
+    output:
+      description: Successful Response
+      type: object
+  list_entities:
+    title: List entities
+    description: List entities Returns a paginated list of entities for the organization. Filter by status,
+      entitytype, or search by name. Supports sorting. Use projectid to scope to entities that belong
+      to datasets attached to that project. Calls GET /catchAll/entities on the provider's API.
+    category: catch_all
+    request:
+      method: GET
+      path: /catchAll/entities
+      query:
+        page: ${page}
+        page_size: ${page_size}
+        search: ${search}
+        status: ${status}
+        entity_type: ${entity_type}
+        sort_by: ${sort_by}
+        sort_order: ${sort_order}
+        project_id: ${project_id}
+    input:
+      page:
+        type: integer
+        description: The page parameter.
+        optional: true
+        default: 1
+      page_size:
+        type: integer
+        description: The page_size parameter.
+        optional: true
+        default: 100
+      search:
+        type: string
+        description: The search parameter.
+        optional: true
+      status:
+        type: string
+        description: The status parameter.
+        optional: true
+      entity_type:
+        type: string
+        description: The entity_type parameter.
+        optional: true
+      sort_by:
+        type: string
+        description: The sort_by parameter.
+        optional: true
+        enum:
+        - created_at
+        - name
+        - status
+      sort_order:
+        type: string
+        description: The sort_order parameter.
+        optional: true
+        enum:
+        - asc
+        - desc
+      project_id:
+        type: string
+        description: The project_id parameter.
+        optional: true
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  create_entity:
+    title: Create entity
+    description: Create entity Creates a single company entity for the organization. Entities are the
+      atomic units used in datasets and job targeting. Returns the new entity's ID and initial processing
+      status. In addition to name, the entity must include at least one of description or additionalattributes.companyattributes.domain
+      Calls POST /catchAll/entities on the provider's API.
+    category: catch_all
+    request:
+      method: POST
+      path: /catchAll/entities
+      body:
+        name: ${name}
+        entity_type: ${entity_type}
+        description: ${description}
+        external_entity_id: ${external_entity_id}
+        additional_attributes: ${additional_attributes}
+    input:
+      name:
+        type: string
+        description: Entity name. Required and must be non-empty.
+      entity_type:
+        type: string
+        description: The type of entity.
+        optional: true
+      description:
+        type: string
+        description: Free-text description for disambiguation. The entity must have this or additionalattributes.companyattributes.domain
+          set.
+        optional: true
+      external_entity_id:
+        type: string
+        description: Optional external identifier for this entity. Free-form string, not enforced as unique.
+        optional: true
+      additional_attributes:
+        type: string
+        description: Type-specific attributes for the entity.
+        optional: true
+    output:
+      description: Successful Response
+      type: object
+  initialize:
+    title: Preview suggested validators and enrichments
+    description: Preview suggested validators and enrichments Dry-run endpoint that returns the validators
+      and enrichments the API would auto-generate for a given query. Use this before /submit to decide
+      which fields to pass explicitly. Does not create a job or consume any quota. Calls POST /catchAll/initialize
+      on the provider's API.
+    category: catch_all
+    request:
+      method: POST
+      path: /catchAll/initialize
+      body:
+        query: ${query}
+        context: ${context}
+        connected_dataset_ids: ${connected_dataset_ids}
+        fetch_all_watchlist_news: ${fetch_all_watchlist_news}
+    input:
+      query:
+        type: string
+        description: Natural-language question to analyse. The API returns the validators and enrichments
+          it would auto-generate for this query.
+      context:
+        type: string
+        description: Optional context string that sharpens the suggested fields.
+        optional: true
+      connected_dataset_ids:
+        type: string
+        description: Optional list of watchlist dataset IDs connected to this job.
+        optional: true
+      fetch_all_watchlist_news:
+        type: string
+        description: When true, returns generic news validators and enrichments suitable for watchlist-based
+          article collection instead of query-specific fields.
+        optional: true
+    output:
+      description: Successful Response
+      type: object
+  list_monitors:
+    title: List monitors for the authenticated API key
+    description: List monitors for the authenticated API key Returns monitors owned by or shared with
+      the caller. API key values are masked. Calls GET /catchAll/monitors on the provider's API.
+    category: catch_all
+    request:
+      method: GET
+      path: /catchAll/monitors
+      query:
+        page: ${page}
+        page_size: ${page_size}
+        search: ${search}
+        ownership: ${ownership}
+        project_id: ${project_id}
+    input:
+      page:
+        type: integer
+        description: The page parameter.
+        optional: true
+        default: 1
+      page_size:
+        type: integer
+        description: The page_size parameter.
+        optional: true
+        default: 100
+      search:
+        type: string
+        description: The search parameter.
+        optional: true
+      ownership:
+        type: string
+        description: The ownership parameter.
+        optional: true
+        enum:
+        - all
+        - own
+        - shared
+      project_id:
+        type: string
+        description: The project_id parameter.
+        optional: true
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  list_projects:
+    title: List projects
+    description: List projects Returns a paginated list of projects in the organization. Use search to
+      filter by name. Use ownership=mine to see only your own projects. Calls GET /catchAll/projects on
+      the provider's API.
+    category: catch_all
+    request:
+      method: GET
+      path: /catchAll/projects
+      query:
+        page: ${page}
+        page_size: ${page_size}
+        search: ${search}
+        ownership: ${ownership}
+    input:
+      page:
+        type: integer
+        description: The page parameter.
+        optional: true
+        default: 1
+      page_size:
+        type: integer
+        description: The page_size parameter.
+        optional: true
+        default: 100
+      search:
+        type: string
+        description: The search parameter.
+        optional: true
+      ownership:
+        type: string
+        description: The ownership parameter.
+        optional: true
+        enum:
+        - all
+        - own
+        - shared
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  create_project:
+    title: Create project
+    description: Create project Creates a new project for the organization. Projects are named containers
+      used to group related jobs, monitors, datasets, monitor groups, and webhooks. Calls POST /catchAll/projects
+      on the provider's API.
+    category: catch_all
+    request:
+      method: POST
+      path: /catchAll/projects
+      body:
+        name: ${name}
+        description: ${description}
+    input:
+      name:
+        type: string
+        description: Name for the project.
+      description:
+        type: string
+        description: Optional description.
+        optional: true
+    output:
+      description: Successful Response
+      type: object

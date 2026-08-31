@@ -1,0 +1,491 @@
+# Close CRM tools.
+#
+# Close's model is lead -> contacts -> opportunities, with activities (calls,
+# emails, notes) hanging off the lead. Ids carry a type prefix: leads are
+# "lead_…", contacts "cont_…", opportunities "oppo_…".
+#
+# Paged endpoints return {data, has_more}; page with _skip and _limit.
+#
+# Docs: https://developer.close.com/
+
+connector_id: close
+display_name: Close
+docs_url: https://developer.close.com/
+
+tools:
+
+  search_leads:
+    title: Search leads
+    description: >-
+      Find leads with Close's query language, e.g. 'name:"Acme"',
+      'status:"Potential"' or 'date_created > "2026-01-01"'.
+    category: leads
+    read_only: true
+    request:
+      method: GET
+      path: /v1/lead/
+      query:
+        query: "${query}"
+        _limit: "${limit}"
+        _skip: "${skip}"
+        _fields: "${fields}"
+    input:
+      query:
+        type: string
+        description: Close search query. Omit to list every lead.
+        optional: true
+        example: 'status:"Potential"'
+      limit:
+        type: integer
+        description: How many leads per page (1-200).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 200
+      skip:
+        type: integer
+        description: How many leads to skip, for paging.
+        optional: true
+        minimum: 0
+      fields:
+        type: array
+        description: Only return these fields, e.g. ["id","display_name","status_label"].
+        optional: true
+        items: {type: string}
+    output:
+      description: A page of leads.
+      type: object
+      properties:
+        data: {type: array, description: "Each with id, display_name, contacts and opportunities."}
+        has_more: {type: boolean}
+
+  get_lead:
+    title: Get a lead
+    description: >-
+      Read one lead in full — its contacts, opportunities, addresses and custom
+      fields.
+    category: leads
+    read_only: true
+    request:
+      method: GET
+      path: /v1/lead/${lead_id}/
+    input:
+      lead_id:
+        type: string
+        description: The lead id, starting lead_.
+    output:
+      description: The lead.
+      type: object
+      properties:
+        id: {type: string}
+        display_name: {type: string}
+        status_label: {type: string}
+        contacts: {type: array}
+        opportunities: {type: array}
+
+  create_lead:
+    title: Create a lead
+    description: >-
+      Create a company-level lead, optionally with its first contacts. Custom
+      fields go in as "custom.<field-id>" keys.
+    category: leads
+    request:
+      method: POST
+      path: /v1/lead/
+      body:
+        name: "${name}"
+        url: "${url}"
+        description: "${description}"
+        status_id: "${status_id}"
+        contacts: "${contacts}"
+        addresses: "${addresses}"
+    input:
+      name:
+        type: string
+        description: The company or lead name.
+      url:
+        type: string
+        description: The company's website.
+        optional: true
+      description:
+        type: string
+        description: Free-text description of the lead.
+        optional: true
+      status_id:
+        type: string
+        description: Lead status id, from list_lead_statuses.
+        optional: true
+      contacts:
+        type: array
+        description: >-
+          People at the lead, each {"name": "Ada", "emails": [{"email":
+          "ada@example.com", "type": "office"}]}.
+        optional: true
+        items: {type: object}
+      addresses:
+        type: array
+        description: Addresses, each {"label":"business","city":"Austin","country":"US"}.
+        optional: true
+        items: {type: object}
+    output:
+      description: The created lead.
+      type: object
+      properties:
+        id: {type: string}
+        display_name: {type: string}
+
+  update_lead:
+    title: Update a lead
+    description: Change a lead's name, status, description or custom fields.
+    category: leads
+    request:
+      method: PUT
+      path: /v1/lead/${lead_id}/
+      body:
+        name: "${name}"
+        status_id: "${status_id}"
+        description: "${description}"
+        url: "${url}"
+    input:
+      lead_id:
+        type: string
+        description: The lead id.
+      name:
+        type: string
+        description: New name.
+        optional: true
+      status_id:
+        type: string
+        description: New lead status id.
+        optional: true
+      description:
+        type: string
+        description: New description.
+        optional: true
+      url:
+        type: string
+        description: New website.
+        optional: true
+    output:
+      description: The updated lead.
+      type: object
+      properties:
+        id: {type: string}
+        status_label: {type: string}
+
+  create_contact:
+    title: Add a contact to a lead
+    description: >-
+      Add a person to an existing lead, with their emails and phone numbers.
+    category: contacts
+    request:
+      method: POST
+      path: /v1/contact/
+      body:
+        lead_id: "${lead_id}"
+        name: "${name}"
+        title: "${title}"
+        emails: "${emails}"
+        phones: "${phones}"
+    input:
+      lead_id:
+        type: string
+        description: The lead the contact belongs to.
+      name:
+        type: string
+        description: The person's name.
+      title:
+        type: string
+        description: Their job title.
+        optional: true
+      emails:
+        type: array
+        description: "Email entries, each {\"email\": \"ada@example.com\", \"type\": \"office\"}."
+        optional: true
+        items: {type: object}
+      phones:
+        type: array
+        description: "Phone entries, each {\"phone\": \"+15550100\", \"type\": \"mobile\"}."
+        optional: true
+        items: {type: object}
+    output:
+      description: The created contact.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+
+  create_opportunity:
+    title: Create an opportunity
+    description: >-
+      Open a deal on a lead. `value` is in cents of value_currency, so 500000 is
+      $5,000.00.
+    category: opportunities
+    request:
+      method: POST
+      path: /v1/opportunity/
+      body:
+        lead_id: "${lead_id}"
+        status_id: "${status_id}"
+        value: "${value}"
+        value_period: "${value_period}"
+        value_currency: "${value_currency}"
+        confidence: "${confidence}"
+        note: "${note}"
+        date_won: "${date_won}"
+        user_id: "${user_id}"
+    input:
+      lead_id:
+        type: string
+        description: The lead the deal is on.
+      value:
+        type: integer
+        description: Deal value in cents, e.g. 500000 for $5,000.00.
+        optional: true
+        minimum: 0
+      status_id:
+        type: string
+        description: Opportunity status id, from list_opportunity_statuses.
+        optional: true
+      value_period:
+        type: string
+        description: Whether the value is one-off or recurring.
+        optional: true
+        enum: [one_time, monthly, annual]
+      value_currency:
+        type: string
+        description: Three-letter currency code.
+        optional: true
+      confidence:
+        type: integer
+        description: Chance of closing, 0 to 100.
+        optional: true
+        minimum: 0
+        maximum: 100
+      note:
+        type: string
+        description: Note about the deal.
+        optional: true
+      date_won:
+        type: string
+        description: Expected or actual close date as YYYY-MM-DD.
+        optional: true
+      user_id:
+        type: string
+        description: Close user who owns the deal.
+        optional: true
+    output:
+      description: The created opportunity.
+      type: object
+      properties:
+        id: {type: string}
+        status_label: {type: string}
+        value: {type: integer}
+
+  update_opportunity:
+    title: Update an opportunity
+    description: >-
+      Change a deal — move its status, adjust its value, or mark it won or lost
+      by moving it to the right status.
+    category: opportunities
+    request:
+      method: PUT
+      path: /v1/opportunity/${opportunity_id}/
+      body:
+        status_id: "${status_id}"
+        value: "${value}"
+        confidence: "${confidence}"
+        note: "${note}"
+        date_won: "${date_won}"
+    input:
+      opportunity_id:
+        type: string
+        description: The opportunity id, starting oppo_.
+      status_id:
+        type: string
+        description: New status id.
+        optional: true
+      value:
+        type: integer
+        description: New value in cents.
+        optional: true
+        minimum: 0
+      confidence:
+        type: integer
+        description: New chance of closing, 0 to 100.
+        optional: true
+        minimum: 0
+        maximum: 100
+      note:
+        type: string
+        description: New note.
+        optional: true
+      date_won:
+        type: string
+        description: New close date as YYYY-MM-DD.
+        optional: true
+    output:
+      description: The updated opportunity.
+      type: object
+      properties:
+        id: {type: string}
+        status_label: {type: string}
+
+  create_note:
+    title: Log a note on a lead
+    description: Add a note to a lead's activity timeline.
+    category: activities
+    request:
+      method: POST
+      path: /v1/activity/note/
+      body:
+        lead_id: "${lead_id}"
+        note: "${note}"
+    input:
+      lead_id:
+        type: string
+        description: The lead to annotate.
+      note:
+        type: string
+        description: The note text.
+    output:
+      description: The created note activity.
+      type: object
+      properties:
+        id: {type: string}
+        note: {type: string}
+        date_created: {type: string}
+
+  create_task:
+    title: Create a task
+    description: >-
+      Create a follow-up task on a lead, due on a date and assigned to a Close
+      user.
+    category: tasks
+    request:
+      method: POST
+      path: /v1/task/
+      body:
+        _type: lead
+        lead_id: "${lead_id}"
+        text: "${text}"
+        date: "${due_date}"
+        assigned_to: "${assigned_to}"
+        is_complete: "${is_complete}"
+    input:
+      lead_id:
+        type: string
+        description: The lead the task is about.
+      text:
+        type: string
+        description: What needs doing.
+      due_date:
+        type: string
+        description: Due date as YYYY-MM-DD.
+        optional: true
+      assigned_to:
+        type: string
+        description: Close user id to assign it to.
+        optional: true
+      is_complete:
+        type: boolean
+        description: Create it already done.
+        optional: true
+    output:
+      description: The created task.
+      type: object
+      properties:
+        id: {type: string}
+        text: {type: string}
+        date: {type: string}
+
+  list_activities:
+    title: List a lead's activity
+    description: >-
+      Read the calls, emails, notes and meetings recorded against a lead, newest
+      first.
+    category: activities
+    read_only: true
+    request:
+      method: GET
+      path: /v1/activity/
+      query:
+        lead_id: "${lead_id}"
+        _limit: "${limit}"
+        _skip: "${skip}"
+    input:
+      lead_id:
+        type: string
+        description: The lead whose activity to read.
+      limit:
+        type: integer
+        description: How many activities per page (1-200).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 200
+      skip:
+        type: integer
+        description: How many to skip, for paging.
+        optional: true
+        minimum: 0
+    output:
+      description: A page of activities.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}
+
+  list_lead_statuses:
+    title: List lead statuses
+    description: >-
+      List the organisation's lead statuses with the ids create_lead and
+      update_lead take.
+    category: settings
+    read_only: true
+    request:
+      method: GET
+      path: /v1/status/lead/
+    input: {}
+    output:
+      description: The lead statuses.
+      type: object
+      properties:
+        data: {type: array, description: "Each with id and label."}
+
+  list_opportunity_statuses:
+    title: List opportunity statuses
+    description: >-
+      List the pipeline stages deals move through, with the ids the opportunity
+      tools take.
+    category: settings
+    read_only: true
+    request:
+      method: GET
+      path: /v1/status/opportunity/
+    input: {}
+    output:
+      description: The opportunity statuses.
+      type: object
+      properties:
+        data: {type: array, description: "Each with id, label and type (active, won or lost)."}
+
+  get_me:
+    title: Get the authenticated user
+    description: >-
+      Read the Close user the token belongs to and their organisation. The
+      cheapest health check for a Close connection.
+    category: settings
+    read_only: true
+    request:
+      method: GET
+      path: /v1/me/
+    input: {}
+    output:
+      description: The authenticated user.
+      type: object
+      properties:
+        id: {type: string}
+        email: {type: string}
+        first_name: {type: string}
+        organizations: {type: array}

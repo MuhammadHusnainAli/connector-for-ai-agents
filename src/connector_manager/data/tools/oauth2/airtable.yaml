@@ -1,0 +1,415 @@
+# Airtable tools.
+#
+# Base and table ids come from list_bases and get_base_schema; a table can also
+# be addressed by its name. Field values are keyed by field name unless
+# use_field_ids is set.
+#
+# Docs: https://airtable.com/developers/web/api/introduction
+
+connector_id: airtable
+display_name: Airtable
+docs_url: https://airtable.com/developers/web/api/introduction
+
+scope_rules:
+  implies:
+    "data.records:write": ["data.records:read"]
+    "schema.bases:write": ["schema.bases:read"]
+
+tools:
+
+  list_bases:
+    title: List bases
+    description: >-
+      List the bases the token can reach, with their ids and permission level.
+      Every other tool needs a base id from here.
+    category: schema
+    scopes: ["schema.bases:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v0/meta/bases
+      query:
+        offset: "${offset}"
+    input:
+      offset:
+        type: string
+        description: Cursor from the previous response's offset.
+        optional: true
+    output:
+      description: The accessible bases.
+      type: object
+      properties:
+        bases: {type: array, description: "Each with id, name and permissionLevel."}
+        offset: {type: string}
+
+  get_base_schema:
+    title: Get a base's tables and fields
+    description: >-
+      Read a base's tables with their ids, field names, field types and select
+      options. Read this before writing records, so values match the field types.
+    category: schema
+    scopes: ["schema.bases:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v0/meta/bases/${base_id}/tables
+      query:
+        include: "${include}"
+    input:
+      base_id:
+        type: string
+        description: The base id, starting app.
+        example: appXXXXXXXXXXXXXX
+      include:
+        type: array
+        description: Extra detail to include, e.g. ["visibleFieldIds"].
+        optional: true
+        items: {type: string}
+    output:
+      description: The base's tables.
+      type: object
+      properties:
+        tables: {type: array, description: "Each with id, name, primaryFieldId, fields and views."}
+
+  list_records:
+    title: List records in a table
+    description: >-
+      Page through a table's records. Narrow with filter_by_formula, an Airtable
+      formula such as {Status} = 'Done' or AND({Owner} = 'Ada', {Priority} > 2).
+    category: records
+    scopes: ["data.records:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v0/${base_id}/${table}
+      query:
+        maxRecords: "${max_records}"
+        pageSize: "${page_size}"
+        offset: "${offset}"
+        view: "${view}"
+        filterByFormula: "${filter_by_formula}"
+        fields: "${fields}"
+        sort: "${sort}"
+    input:
+      base_id:
+        type: string
+        description: The base id.
+      table:
+        type: string
+        description: Table id or table name.
+      page_size:
+        type: integer
+        description: How many records per page (1-100).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 100
+      max_records:
+        type: integer
+        description: Stop after this many records in total.
+        optional: true
+        minimum: 1
+      offset:
+        type: string
+        description: Cursor from the previous response's offset.
+        optional: true
+      view:
+        type: string
+        description: View id or name, which applies that view's filters and order.
+        optional: true
+      filter_by_formula:
+        type: string
+        description: Airtable formula deciding which records come back.
+        optional: true
+        example: "{Status} = 'Done'"
+      fields:
+        type: array
+        description: Only return these fields, by name or id.
+        optional: true
+        items: {type: string}
+      sort:
+        type: array
+        description: Sort order, e.g. [{"field":"Created","direction":"desc"}].
+        optional: true
+        items: {type: object}
+    output:
+      description: A page of records.
+      type: object
+      properties:
+        records: {type: array, description: "Each with id, createdTime and fields."}
+        offset: {type: string}
+
+  get_record:
+    title: Get a record
+    description: Read one record's fields by its record id.
+    category: records
+    scopes: ["data.records:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v0/${base_id}/${table}/${record_id}
+    input:
+      base_id:
+        type: string
+        description: The base id.
+      table:
+        type: string
+        description: Table id or table name.
+      record_id:
+        type: string
+        description: The record id, starting rec.
+    output:
+      description: The record.
+      type: object
+      properties:
+        id: {type: string}
+        createdTime: {type: string}
+        fields: {type: object, description: "Field name to value."}
+
+  create_records:
+    title: Create records
+    description: >-
+      Create up to 10 records in one call. Each item is {"fields": {"Name":
+      "Ada", "Status": "Todo"}}, keyed by field name. Set typecast to let
+      Airtable coerce strings into select options and dates.
+    category: records
+    scopes: ["data.records:write"]
+    request:
+      method: POST
+      path: /v0/${base_id}/${table}
+      body:
+        records: "${records}"
+        typecast: "${typecast}"
+    input:
+      base_id:
+        type: string
+        description: The base id.
+      table:
+        type: string
+        description: Table id or table name.
+      records:
+        type: array
+        description: "Up to 10 records, each {\"fields\": {...}}."
+        max_length: 10
+        items:
+          type: object
+          properties:
+            fields: {type: object}
+      typecast:
+        type: boolean
+        description: Let Airtable convert values to the field's type, creating select options as needed.
+        optional: true
+    output:
+      description: The created records with their ids.
+      type: object
+      properties:
+        records: {type: array}
+
+  update_records:
+    title: Update records
+    description: >-
+      Change fields on up to 10 existing records. Each item is {"id": "rec...",
+      "fields": {...}}; only the fields named are written.
+    category: records
+    scopes: ["data.records:write"]
+    request:
+      method: PATCH
+      path: /v0/${base_id}/${table}
+      body:
+        records: "${records}"
+        typecast: "${typecast}"
+    input:
+      base_id:
+        type: string
+        description: The base id.
+      table:
+        type: string
+        description: Table id or table name.
+      records:
+        type: array
+        description: "Up to 10 records, each {\"id\": \"rec...\", \"fields\": {...}}."
+        max_length: 10
+        items: {type: object}
+      typecast:
+        type: boolean
+        description: Let Airtable convert values to the field's type.
+        optional: true
+    output:
+      description: The updated records.
+      type: object
+      properties:
+        records: {type: array}
+
+  delete_records:
+    title: Delete records
+    description: Permanently delete up to 10 records by id. This cannot be undone.
+    category: records
+    scopes: ["data.records:write"]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v0/${base_id}/${table}
+      query:
+        records: "${record_ids}"
+    input:
+      base_id:
+        type: string
+        description: The base id.
+      table:
+        type: string
+        description: Table id or table name.
+      record_ids:
+        type: array
+        description: Up to 10 record ids to delete.
+        max_length: 10
+        items: {type: string}
+    output:
+      description: Which records were deleted.
+      type: object
+      properties:
+        records: {type: array, description: "Each with id and deleted: true."}
+
+  upsert_records:
+    title: Create or update records by a key field
+    description: >-
+      Match incoming records against existing ones on one or more key fields,
+      updating where they match and creating where they do not -- an idempotent
+      sync in a single call.
+    category: records
+    scopes: ["data.records:write"]
+    request:
+      method: PATCH
+      path: /v0/${base_id}/${table}
+      body:
+        records: "${records}"
+        performUpsert:
+          fieldsToMergeOn: "${merge_on}"
+        typecast: "${typecast}"
+    input:
+      base_id:
+        type: string
+        description: The base id.
+      table:
+        type: string
+        description: Table id or table name.
+      records:
+        type: array
+        description: "Up to 10 records, each {\"fields\": {...}} including the merge fields."
+        max_length: 10
+        items: {type: object}
+      merge_on:
+        type: array
+        description: Field names to match on, e.g. ["Email"].
+        items: {type: string}
+      typecast:
+        type: boolean
+        description: Let Airtable convert values to the field's type.
+        optional: true
+    output:
+      description: Which records were created and which updated.
+      type: object
+      properties:
+        records: {type: array}
+        createdRecords: {type: array}
+        updatedRecords: {type: array}
+
+  create_table:
+    title: Create a table
+    description: >-
+      Add a table to a base, defining its fields. Each field is {"name": ...,
+      "type": "singleLineText" | "number" | "singleSelect" | ...}.
+    category: schema
+    scopes: ["schema.bases:write"]
+    request:
+      method: POST
+      path: /v0/meta/bases/${base_id}/tables
+      body:
+        name: "${name}"
+        description: "${description}"
+        fields: "${fields}"
+    input:
+      base_id:
+        type: string
+        description: The base id.
+      name:
+        type: string
+        description: Table name.
+      fields:
+        type: array
+        description: Field definitions, each with a name and a type.
+        items: {type: object}
+      description:
+        type: string
+        description: What the table holds.
+        optional: true
+    output:
+      description: The created table.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        fields: {type: array}
+
+  create_field:
+    title: Add a field to a table
+    description: >-
+      Add a column to an existing table. Choice fields need an options object,
+      e.g. {"choices": [{"name": "Todo"}, {"name": "Done"}]}.
+    category: schema
+    scopes: ["schema.bases:write"]
+    request:
+      method: POST
+      path: /v0/meta/bases/${base_id}/tables/${table_id}/fields
+      body:
+        name: "${name}"
+        type: "${type}"
+        description: "${description}"
+        options: "${options}"
+    input:
+      base_id:
+        type: string
+        description: The base id.
+      table_id:
+        type: string
+        description: The table id.
+      name:
+        type: string
+        description: Field name.
+      type:
+        type: string
+        description: Airtable field type, e.g. singleLineText, number, singleSelect, date, checkbox.
+        example: singleLineText
+      description:
+        type: string
+        description: What the field holds.
+        optional: true
+      options:
+        type: object
+        description: Type-specific options, required for select, number and date fields.
+        optional: true
+    output:
+      description: The created field.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        type: {type: string}
+
+  get_user_info:
+    title: Get the token's identity
+    description: >-
+      Read the Airtable user the token belongs to and the scopes it holds. The
+      cheapest health check for an Airtable connection.
+    category: account
+    read_only: true
+    request:
+      method: GET
+      path: /v0/meta/whoami
+    input: {}
+    output:
+      description: The token's owner.
+      type: object
+      properties:
+        id: {type: string}
+        email: {type: string}
+        scopes: {type: array}

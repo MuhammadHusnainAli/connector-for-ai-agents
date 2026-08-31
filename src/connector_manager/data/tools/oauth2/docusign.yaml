@@ -1,0 +1,493 @@
+# DocuSign eSignature tools.
+#
+# Two things to set up before these work:
+#
+#   * `account_id` is a required argument on every tool. get_user_info returns
+#     it, along with each account's `base_uri`.
+#   * DocuSign serves each account from its own host (na3.docusign.net,
+#     eu.docusign.net, ...). Record that `base_uri` as the connection's
+#     `base_url` connection-config value and the RequestBuilder will use it in
+#     place of the catalogue default.
+#
+# Docs: https://developers.docusign.com/docs/esign-rest-api/reference/
+
+connector_id: docusign
+display_name: DocuSign
+docs_url: https://developers.docusign.com/docs/esign-rest-api/reference/
+applies_to:
+  - docusign-sandbox
+
+scope_rules:
+  implies:
+    signature: [extended, impersonation]
+
+tools:
+
+  get_user_info:
+    title: Get the account id and base URI
+    description: >-
+      Read the DocuSign accounts this token can reach. Returns each account's id
+      and its `base_uri` — call this first, since every other tool needs the
+      account id and the right host.
+    category: account
+    read_only: true
+    request:
+      method: GET
+      base_url_override: https://account.docusign.com
+      path: /oauth/userinfo
+    input: {}
+    output:
+      description: The authenticated user and their accounts.
+      type: object
+      properties:
+        sub: {type: string}
+        email: {type: string}
+        name: {type: string}
+        accounts: {type: array, description: "Each with account_id, account_name, is_default and base_uri."}
+
+  list_envelopes:
+    title: List envelopes
+    description: >-
+      List envelopes changed within a time window. from_date is required by
+      DocuSign, so pass an ISO 8601 instant or a date like 2026-01-01.
+    category: envelopes
+    scopes: [signature]
+    read_only: true
+    request:
+      method: GET
+      path: /restapi/v2.1/accounts/${account_id}/envelopes
+      query:
+        from_date: "${from_date}"
+        to_date: "${to_date}"
+        status: "${status}"
+        count: "${limit}"
+        start_position: "${start_position}"
+        search_text: "${search}"
+    input:
+      account_id:
+        type: string
+        description: DocuSign account id, from get_user_info.
+      from_date:
+        type: string
+        description: Only envelopes changed at or after this date, e.g. 2026-01-01.
+        example: "2026-01-01"
+      to_date:
+        type: string
+        description: Only envelopes changed at or before this date.
+        optional: true
+      status:
+        type: string
+        description: Only envelopes in these states, comma-separated.
+        optional: true
+        enum: [created, sent, delivered, signed, completed, declined, voided, deleted]
+      limit:
+        type: integer
+        description: How many envelopes to return.
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 100
+      start_position:
+        type: integer
+        description: Zero-based index to start from.
+        optional: true
+        minimum: 0
+      search:
+        type: string
+        description: Match against subject, recipient names and email addresses.
+        optional: true
+    output:
+      description: The matching envelopes.
+      type: object
+      properties:
+        envelopes: {type: array, description: "Each with envelopeId, status and emailSubject."}
+        resultSetSize: {type: string}
+
+  get_envelope:
+    title: Get an envelope
+    description: >-
+      Read one envelope's status, subject and timestamps — where a signature
+      request currently stands.
+    category: envelopes
+    scopes: [signature]
+    read_only: true
+    request:
+      method: GET
+      path: /restapi/v2.1/accounts/${account_id}/envelopes/${envelope_id}
+      query:
+        include: "${include}"
+    input:
+      account_id:
+        type: string
+        description: DocuSign account id.
+      envelope_id:
+        type: string
+        description: The envelope id.
+      include:
+        type: array
+        description: Extra sections to inline, e.g. ["recipients","documents"].
+        optional: true
+        items: {type: string}
+    output:
+      description: The envelope.
+      type: object
+      properties:
+        envelopeId: {type: string}
+        status: {type: string}
+        emailSubject: {type: string}
+        sentDateTime: {type: string}
+        completedDateTime: {type: string}
+
+  send_envelope_for_signature:
+    title: Send a document for signature
+    description: >-
+      Create and send an envelope. Documents carry their bytes base64-encoded;
+      signers each need a name, email, recipientId and a signing order. Set
+      status "created" instead to save it as a draft.
+    category: envelopes
+    scopes: [signature]
+    destructive: true
+    request:
+      method: POST
+      path: /restapi/v2.1/accounts/${account_id}/envelopes
+      body:
+        emailSubject: "${subject}"
+        emailBlurb: "${message}"
+        status: "${status}"
+        documents: "${documents}"
+        recipients:
+          signers: "${signers}"
+          carbonCopies: "${carbon_copies}"
+    input:
+      account_id:
+        type: string
+        description: DocuSign account id.
+      subject:
+        type: string
+        description: Subject line of the signature request email.
+      documents:
+        type: array
+        description: >-
+          Documents to sign, each {"documentBase64": "<base64>", "name":
+          "Contract.pdf", "fileExtension": "pdf", "documentId": "1"}.
+        items: {type: object}
+      signers:
+        type: array
+        description: >-
+          Who must sign, each {"email": "ada@example.com", "name": "Ada",
+          "recipientId": "1", "routingOrder": "1", "tabs": {...}}.
+        items: {type: object}
+      message:
+        type: string
+        description: Body of the signature request email.
+        optional: true
+      status:
+        type: string
+        description: Set to sent to deliver it now, or created to save a draft.
+        optional: true
+        default: sent
+        enum: [sent, created]
+      carbon_copies:
+        type: array
+        description: People to copy, each with email, name and recipientId.
+        optional: true
+        items: {type: object}
+    output:
+      description: The created envelope.
+      type: object
+      properties:
+        envelopeId: {type: string}
+        status: {type: string}
+        statusDateTime: {type: string}
+
+  send_envelope_from_template:
+    title: Send a template for signature
+    description: >-
+      Create an envelope from a saved template, filling its roles with real
+      people. The usual way to send a standard agreement.
+    category: envelopes
+    scopes: [signature]
+    destructive: true
+    request:
+      method: POST
+      path: /restapi/v2.1/accounts/${account_id}/envelopes
+      body:
+        templateId: "${template_id}"
+        emailSubject: "${subject}"
+        emailBlurb: "${message}"
+        status: "${status}"
+        templateRoles: "${template_roles}"
+    input:
+      account_id:
+        type: string
+        description: DocuSign account id.
+      template_id:
+        type: string
+        description: The template id, from list_templates.
+      template_roles:
+        type: array
+        description: >-
+          Who fills each template role, each {"email": "ada@example.com",
+          "name": "Ada", "roleName": "Signer"}.
+        items: {type: object}
+      subject:
+        type: string
+        description: Subject line. Defaults to the template's.
+        optional: true
+      message:
+        type: string
+        description: Body of the request email.
+        optional: true
+      status:
+        type: string
+        description: Set to sent to deliver it now, or created to save a draft.
+        optional: true
+        default: sent
+        enum: [sent, created]
+    output:
+      description: The created envelope.
+      type: object
+      properties:
+        envelopeId: {type: string}
+        status: {type: string}
+
+  list_envelope_recipients:
+    title: List an envelope's recipients
+    description: >-
+      Read who an envelope went to and where each of them stands — sent,
+      delivered, completed or declined.
+    category: envelopes
+    scopes: [signature]
+    read_only: true
+    request:
+      method: GET
+      path: /restapi/v2.1/accounts/${account_id}/envelopes/${envelope_id}/recipients
+      query:
+        include_tabs: "${include_tabs}"
+    input:
+      account_id:
+        type: string
+        description: DocuSign account id.
+      envelope_id:
+        type: string
+        description: The envelope id.
+      include_tabs:
+        type: boolean
+        description: Include each recipient's fields and their filled-in values.
+        optional: true
+    output:
+      description: The envelope's recipients.
+      type: object
+      properties:
+        signers: {type: array}
+        carbonCopies: {type: array}
+        recipientCount: {type: string}
+
+  download_envelope_documents:
+    title: Download an envelope's documents
+    description: >-
+      Fetch an envelope's signed documents. Use "combined" for a single PDF of
+      everything, or a document id for one file.
+    category: documents
+    scopes: [signature]
+    read_only: true
+    request:
+      method: GET
+      path: /restapi/v2.1/accounts/${account_id}/envelopes/${envelope_id}/documents/${document_id}
+      query:
+        certificate: "${include_certificate}"
+    input:
+      account_id:
+        type: string
+        description: DocuSign account id.
+      envelope_id:
+        type: string
+        description: The envelope id.
+      document_id:
+        type: string
+        description: Document id, or "combined" for every document as one PDF.
+        optional: true
+        default: combined
+      include_certificate:
+        type: boolean
+        description: Append the certificate of completion.
+        optional: true
+    output:
+      description: The document bytes, as a PDF.
+      type: string
+
+  void_envelope:
+    title: Void an envelope
+    description: >-
+      Cancel a sent envelope so it can no longer be signed. Recipients are told
+      the reason, and this cannot be undone.
+    category: envelopes
+    scopes: [signature]
+    destructive: true
+    request:
+      method: PUT
+      path: /restapi/v2.1/accounts/${account_id}/envelopes/${envelope_id}
+      body:
+        status: voided
+        voidedReason: "${reason}"
+    input:
+      account_id:
+        type: string
+        description: DocuSign account id.
+      envelope_id:
+        type: string
+        description: The envelope to void.
+      reason:
+        type: string
+        description: Why it is being voided. Shown to the recipients.
+    output:
+      description: The voided envelope.
+      type: object
+      properties:
+        envelopeId: {type: string}
+        status: {type: string}
+
+  resend_envelope:
+    title: Resend a signature request
+    description: >-
+      Email the pending recipients again, for an envelope that has been sent but
+      not completed.
+    category: envelopes
+    scopes: [signature]
+    destructive: true
+    request:
+      method: PUT
+      path: /restapi/v2.1/accounts/${account_id}/envelopes/${envelope_id}
+      query:
+        resend_envelope: "true"
+      body:
+        status: sent
+    input:
+      account_id:
+        type: string
+        description: DocuSign account id.
+      envelope_id:
+        type: string
+        description: The envelope to resend.
+    output:
+      description: The envelope after the resend.
+      type: object
+      properties:
+        envelopeId: {type: string}
+        status: {type: string}
+
+  list_templates:
+    title: List templates
+    description: >-
+      List the account's saved templates with their ids and role names, which
+      send_envelope_from_template needs.
+    category: templates
+    scopes: [signature]
+    read_only: true
+    request:
+      method: GET
+      path: /restapi/v2.1/accounts/${account_id}/templates
+      query:
+        count: "${limit}"
+        start_position: "${start_position}"
+        search_text: "${search}"
+    input:
+      account_id:
+        type: string
+        description: DocuSign account id.
+      limit:
+        type: integer
+        description: How many templates to return.
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 100
+      start_position:
+        type: integer
+        description: Zero-based index to start from.
+        optional: true
+        minimum: 0
+      search:
+        type: string
+        description: Match against template names.
+        optional: true
+    output:
+      description: The account's templates.
+      type: object
+      properties:
+        envelopeTemplates: {type: array}
+        resultSetSize: {type: string}
+
+  create_recipient_view:
+    title: Get an embedded signing link
+    description: >-
+      Mint a short-lived URL that drops one recipient straight into the signing
+      ceremony, for embedding in your own app. The recipient must have been
+      added with a clientUserId.
+    category: envelopes
+    scopes: [signature]
+    request:
+      method: POST
+      path: /restapi/v2.1/accounts/${account_id}/envelopes/${envelope_id}/views/recipient
+      body:
+        returnUrl: "${return_url}"
+        authenticationMethod: "${authentication_method}"
+        email: "${email}"
+        userName: "${user_name}"
+        clientUserId: "${client_user_id}"
+    input:
+      account_id:
+        type: string
+        description: DocuSign account id.
+      envelope_id:
+        type: string
+        description: The envelope to sign.
+      return_url:
+        type: string
+        description: Where DocuSign sends the signer when they finish.
+        format: uri
+      email:
+        type: string
+        description: The recipient's email, matching the envelope exactly.
+        format: email
+      user_name:
+        type: string
+        description: The recipient's name, matching the envelope exactly.
+      client_user_id:
+        type: string
+        description: The clientUserId the recipient was added with, marking them an embedded signer.
+      authentication_method:
+        type: string
+        description: How your app authenticated the signer.
+        optional: true
+        default: none
+        enum: [none, email, password, sso, kerberos]
+    output:
+      description: The signing URL.
+      type: object
+      properties:
+        url: {type: string, description: "Short-lived signing URL -- open it once, quickly."}
+
+  get_envelope_audit_events:
+    title: Get an envelope's audit trail
+    description: >-
+      Read the timestamped history of an envelope — sent, viewed, signed,
+      declined — for compliance and support questions.
+    category: envelopes
+    scopes: [signature]
+    read_only: true
+    request:
+      method: GET
+      path: /restapi/v2.1/accounts/${account_id}/envelopes/${envelope_id}/audit_events
+    input:
+      account_id:
+        type: string
+        description: DocuSign account id.
+      envelope_id:
+        type: string
+        description: The envelope id.
+    output:
+      description: The envelope's audit events.
+      type: object
+      properties:
+        auditEvents: {type: array}

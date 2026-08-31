@@ -1,0 +1,346 @@
+# Jotform tools.
+#
+# Jotform's API is form-shaped: a form has questions, and each submission holds
+# answers keyed by question id. Read the questions before interpreting answers.
+#
+# Docs: https://api.jotform.com/docs/
+
+connector_id: jotform
+display_name: Jotform
+docs_url: https://api.jotform.com/docs/
+
+tools:
+
+  list_forms:
+    title: List forms
+    description: >-
+      List the account's forms with their ids, titles and submission counts.
+      Start here.
+    category: forms
+    read_only: true
+    request:
+      method: GET
+      path: /user/forms
+      query:
+        offset: "${offset}"
+        limit: "${limit}"
+        filter: "${filter}"
+        orderby: "${order_by}"
+    input:
+      offset:
+        type: integer
+        description: Zero-based index to start from.
+        optional: true
+        minimum: 0
+      limit:
+        type: integer
+        description: How many forms to return (1-1000).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 1000
+      filter:
+        type: object
+        description: Jotform filter object, e.g. {"status":"ENABLED"}.
+        optional: true
+      order_by:
+        type: string
+        description: Field to order by.
+        optional: true
+        enum: [id, username, title, status, created_at, updated_at, new, count, slug]
+    output:
+      description: The account's forms.
+      type: array
+      response_path: content
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          title: "{type: string}"
+          status: {type: string}
+          count: {type: string}
+          url: {type: string}
+
+  get_form:
+    title: Get a form
+    description: Read one form's title, status, creation time and submission count.
+    category: forms
+    read_only: true
+    request:
+      method: GET
+      path: /form/${form_id}
+    input:
+      form_id:
+        type: string
+        description: The form id, the number in its URL.
+    output:
+      description: The form.
+      type: object
+      response_path: content
+      properties:
+        id: {type: string}
+        title: "{type: string}"
+        status: {type: string}
+        count: {type: string}
+
+  get_form_questions:
+    title: Get a form's questions
+    description: >-
+      Read a form's questions keyed by question id, with their types and labels.
+      Submissions key their answers by these ids, so read this first.
+    category: forms
+    read_only: true
+    request:
+      method: GET
+      path: /form/${form_id}/questions
+    input:
+      form_id:
+        type: string
+        description: The form id.
+    output:
+      description: The form's questions, keyed by question id.
+      type: object
+      response_path: content
+
+  list_submissions:
+    title: List a form's submissions
+    description: >-
+      Read what people submitted through a form. Answers are keyed by question
+      id, so pair this with get_form_questions.
+    category: submissions
+    read_only: true
+    request:
+      method: GET
+      path: /form/${form_id}/submissions
+      query:
+        offset: "${offset}"
+        limit: "${limit}"
+        filter: "${filter}"
+        orderby: "${order_by}"
+    input:
+      form_id:
+        type: string
+        description: The form id.
+      offset:
+        type: integer
+        description: Zero-based index to start from.
+        optional: true
+        minimum: 0
+      limit:
+        type: integer
+        description: How many submissions to return (1-1000).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 1000
+      filter:
+        type: object
+        description: >-
+          Jotform filter, e.g. {"created_at:gt":"2026-01-01 00:00:00"} or
+          {"status":"ACTIVE"}.
+        optional: true
+      order_by:
+        type: string
+        description: Field to order by.
+        optional: true
+        enum: [id, form_id, IP, created_at, status, new, flag, updated_at]
+    output:
+      description: The form's submissions.
+      type: array
+      response_path: content
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          created_at: {type: string}
+          status: {type: string}
+          answers: {type: object, description: "Keyed by question id."}
+
+  get_submission:
+    title: Get a submission
+    description: Read one submission's answers, timestamp and IP address.
+    category: submissions
+    read_only: true
+    request:
+      method: GET
+      path: /submission/${submission_id}
+    input:
+      submission_id:
+        type: string
+        description: The submission id.
+    output:
+      description: The submission.
+      type: object
+      response_path: content
+      properties:
+        id: {type: string}
+        form_id: {type: string}
+        created_at: {type: string}
+        answers: {type: object}
+
+  list_all_submissions:
+    title: List submissions across every form
+    description: >-
+      Read submissions from all of the account's forms at once, newest first —
+      useful for a single feed of incoming responses.
+    category: submissions
+    read_only: true
+    request:
+      method: GET
+      path: /user/submissions
+      query:
+        offset: "${offset}"
+        limit: "${limit}"
+        filter: "${filter}"
+        orderby: "${order_by}"
+    input:
+      offset:
+        type: integer
+        description: Zero-based index to start from.
+        optional: true
+        minimum: 0
+      limit:
+        type: integer
+        description: How many submissions to return (1-1000).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 1000
+      filter:
+        type: object
+        description: Jotform filter object.
+        optional: true
+      order_by:
+        type: string
+        description: Field to order by.
+        optional: true
+        enum: [id, form_id, IP, created_at, status, new, flag, updated_at]
+    output:
+      description: Submissions across every form.
+      type: array
+      response_path: content
+      items: {type: object}
+
+  delete_submission:
+    title: Delete a submission
+    description: >-
+      Permanently delete a submission. Used to honour a deletion request; it
+      cannot be undone.
+    category: submissions
+    destructive: true
+    request:
+      method: DELETE
+      path: /submission/${submission_id}
+    input:
+      submission_id:
+        type: string
+        description: The submission to delete.
+    output:
+      description: Confirmation of deletion.
+      type: object
+      properties:
+        responseCode: {type: integer}
+        message: {type: string}
+
+  list_form_files:
+    title: List a form's uploaded files
+    description: >-
+      List the files people uploaded through a form, with the URLs to fetch
+      them.
+    category: submissions
+    read_only: true
+    request:
+      method: GET
+      path: /form/${form_id}/files
+    input:
+      form_id:
+        type: string
+        description: The form id.
+    output:
+      description: The form's uploaded files.
+      type: array
+      response_path: content
+      items: {type: object}
+
+  list_form_webhooks:
+    title: List a form's webhooks
+    description: List the URLs Jotform posts to when the form is submitted.
+    category: webhooks
+    read_only: true
+    request:
+      method: GET
+      path: /form/${form_id}/webhooks
+    input:
+      form_id:
+        type: string
+        description: The form id.
+    output:
+      description: The form's webhooks, keyed by index.
+      type: object
+      response_path: content
+
+  create_form_webhook:
+    title: Add a webhook to a form
+    description: >-
+      Point a form's submissions at a URL, so each new response is posted to
+      your own endpoint.
+    category: webhooks
+    request:
+      method: POST
+      path: /form/${form_id}/webhooks
+      encoding: form
+      body:
+        webhookURL: "${url}"
+    input:
+      form_id:
+        type: string
+        description: The form id.
+      url:
+        type: string
+        description: Where Jotform should POST each submission.
+        format: uri
+    output:
+      description: The form's webhooks after the change.
+      type: object
+      response_path: content
+
+  get_user:
+    title: Get the account
+    description: >-
+      Read the Jotform account the key belongs to — username, email, plan and
+      usage. The cheapest health check for the connection.
+    category: account
+    read_only: true
+    request:
+      method: GET
+      path: /user
+    input: {}
+    output:
+      description: The account.
+      type: object
+      response_path: content
+      properties:
+        username: {type: string}
+        email: {type: string}
+        accountType: {type: string}
+        status: {type: string}
+
+  get_usage:
+    title: Get the account's usage and limits
+    description: >-
+      Read how many submissions, uploads and API calls the account has used
+      against its monthly limits.
+    category: account
+    read_only: true
+    request:
+      method: GET
+      path: /user/usage
+    input: {}
+    output:
+      description: Usage against the plan's limits.
+      type: object
+      response_path: content
+      properties:
+        submissions: {type: integer}
+        api: {type: integer}
+        uploads: {type: integer}

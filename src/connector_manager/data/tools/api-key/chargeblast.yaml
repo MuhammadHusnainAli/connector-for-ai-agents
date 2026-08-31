@@ -1,0 +1,220 @@
+# Chargeblast tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://docs.chargeblast.io/openapi.json
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: chargeblast
+display_name: Chargeblast
+docs_url: https://docs.chargeblast.io/openapi.json
+generated: true
+generated_from: https://docs.chargeblast.io/openapi.json
+tools:
+  alerts:
+    title: Fetch Alerts
+    description: Fetch Alerts Get all the alerts from your chargeblast account. Calls GET /api/alerts
+      on the provider's API.
+    category: api
+    request:
+      method: GET
+      path: /api/alerts
+      query:
+        merchant_id: ${merchant_id}
+    input:
+      merchant_id:
+        type: string
+        description: The merchant_id parameter.
+        optional: true
+    output:
+      description: OK
+      type: object
+    read_only: true
+  descriptors:
+    title: Fetch Descriptors
+    description: Fetch Descriptors Fetch all the descriptors for your merchants. Calls GET /api/descriptors
+      on the provider's API.
+    category: api
+    request:
+      method: GET
+      path: /api/descriptors
+    input: {}
+    output:
+      description: OK
+      type: object
+    read_only: true
+  enrollment_status:
+    title: Enrollment Status
+    description: Enrollment Status Report your merchant's enrollment status for every program (Ethoca,
+      CDRN, RDR, Amex, Discover). Each entry is none, pending, or enrolled. Enrollment via the API files
+      a request, so a program stays pending until the provider-side enrollment confirms (which flips it
+      to enrolled). The contributing desc Calls GET /api/enrollment_status on the provider's API.
+    category: api
+    request:
+      method: GET
+      path: /api/enrollment_status
+    input: {}
+    output:
+      description: OK
+      type: object
+    read_only: true
+  merchant:
+    title: Fetch Merchant
+    description: Fetch Merchant Get an individual merchant from your chargeblast account. Calls GET /api/merchant
+      on the provider's API.
+    category: api
+    request:
+      method: GET
+      path: /api/merchant
+      query:
+        merchant_id: ${merchant_id}
+    input:
+      merchant_id:
+        type: string
+        description: The merchant_id parameter.
+        optional: true
+    output:
+      description: OK
+      type: object
+    read_only: true
+  unenroll:
+    title: Unenroll Merchant
+    description: Unenroll Merchant Unenroll one or more descriptors. Pass descriptorids (obtain ids from
+      GET /api/v2/descriptors); a single legacy descriptorid is also accepted. Descriptors that were still
+      Pending (never live with the provider) are removed immediately and returned under removed. Descriptors
+      that were live are marked Calls POST /api/unenroll on the provider's API.
+    category: api
+    request:
+      method: POST
+      path: /api/unenroll
+      body:
+        descriptor_ids: ${descriptor_ids}
+        descriptor_id: ${descriptor_id}
+    input:
+      descriptor_ids:
+        type: array
+        description: Descriptor ids to unenroll, e.g. descxxxxxxxxxxxxx. Obtain them from GET /api/v2/descriptors.
+        optional: true
+        items:
+          type: string
+      descriptor_id:
+        type: string
+        description: Legacy single descriptor id. Prefer descriptorids.
+        optional: true
+    output:
+      description: Unenrollment queued.
+      type: object
+  alerts_alt:
+    title: Fetch Alerts
+    description: Fetch Alerts Get all the alerts from your chargeblast account. Calls GET /api/v2/alerts
+      on the provider's API.
+    category: api
+    request:
+      method: GET
+      path: /api/v2/alerts
+      query:
+        filter: ${filter}
+        page: ${page}
+        per: ${per}
+    input:
+      filter:
+        type: string
+        description: 'The type of alerts to filter for, possible values: RDR, CDRN, Ethoca, TC40, SAFE'
+        optional: true
+      page:
+        type: integer
+        description: The starting page of the request. Default value of 1.
+        optional: true
+      per:
+        type: integer
+        description: How many objects to request per page. Default value of 10.
+        optional: true
+    output:
+      description: OK
+      type: object
+    read_only: true
+  descriptors_v2:
+    title: Fetch Descriptors (v2)
+    description: 'Fetch Descriptors (v2) List every descriptor on your account as a flat, filterable record
+      set: one row per descriptor with its program (ethoca, cdrn, rdr, amex, discover; null for legacy
+      types not tied to a program), status, descriptor name or BIN/CAID, owning merchant id, and timestamps.
+      Filter with program and/or status Calls GET /api/v2/descriptors on the provider''s API.'
+    category: api
+    request:
+      method: GET
+      path: /api/v2/descriptors
+      query:
+        program: ${program}
+        status: ${status}
+        page: ${page}
+        per: ${per}
+    input:
+      program:
+        type: string
+        description: Filter by program (case-insensitive).
+        optional: true
+        enum:
+        - ethoca
+        - cdrn
+        - rdr
+        - amex
+        - discover
+      status:
+        type: string
+        description: Filter by descriptor status (case-insensitive).
+        optional: true
+        enum:
+        - Pending
+        - Enrolled
+        - Disabled
+        - Surpressed
+        - Processing
+        - Rejected
+        - InReview
+        - PendingRemoval
+      page:
+        type: integer
+        description: The page to request. Default 1.
+        optional: true
+        default: 1
+      per:
+        type: integer
+        description: How many records per page. Default 10, max 1000.
+        optional: true
+        default: 10
+    output:
+      description: OK
+      type: object
+    read_only: true
+  merchants:
+    title: Fetch Merchants
+    description: Fetch Merchants Get all the merchants from your chargeblast account. Response is paginated.
+      The name field is set during onboarding of the merchant and corresponds to the individual name of
+      the merchant for multi-merchant accounts (usually associated with the DBA or billing descriptor).
+      Calls GET /api/v2/merchants on the provider's API.
+    category: api
+    request:
+      method: GET
+      path: /api/v2/merchants
+      query:
+        page: ${page}
+        per: ${per}
+    input:
+      page:
+        type: integer
+        description: The starting page of the request. Default value of 1.
+        optional: true
+      per:
+        type: integer
+        description: How many merchants to return per page. Default value of 10.
+        optional: true
+    output:
+      description: OK
+      type: object
+    read_only: true

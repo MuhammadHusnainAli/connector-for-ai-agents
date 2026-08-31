@@ -1,0 +1,631 @@
+# TheirStack tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://api.theirstack.com/openapi.json
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: theirstack
+display_name: TheirStack
+docs_url: https://api.theirstack.com/openapi.json
+generated: true
+generated_from: https://api.theirstack.com/openapi.json
+tools:
+  get_company_lists:
+    title: List All Lists
+    description: List All Lists Retrieve all company lists for the current team including list name, company
+      count, and creation date. Use company lists to organize and segment companies for targeted outreach
+      and analysis. Calls GET /v0/company_lists on the provider's API.
+    category: company_lists
+    request:
+      method: GET
+      path: /v0/company_lists
+    input: {}
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  post_company_lists:
+    title: Create Company List
+    description: Create Company List Calls POST /v0/company_lists on the provider's API.
+    category: company_lists
+    request:
+      method: POST
+      path: /v0/company_lists
+      body:
+        name: ${name}
+    input:
+      name:
+        type: string
+        description: Name of the company list
+    output:
+      description: Successful Response
+      type: object
+  get_email_preferences:
+    title: Get Email Preferences
+    description: Get Email Preferences Calls GET /v0/email-preferences on the provider's API.
+    category: email_preferences
+    request:
+      method: GET
+      path: /v0/email-preferences
+    input: {}
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  get_saved_searches:
+    title: List All Saved Searches
+    description: List All Saved Searches Retrieve all active saved searches for the current user including
+      search filters, type, and creation date. Archived saved searches are excluded. Filter by user IDs
+      or search type and sort by name, created, or updated date. Calls GET /v0/saved_searches on the provider's
+      API.
+    category: saved_searches
+    request:
+      method: GET
+      path: /v0/saved_searches
+      query:
+        user_ids: ${user_ids}
+        types: ${types}
+        order_by: ${order_by}
+        order_direction: ${order_direction}
+    input:
+      user_ids:
+        type: array
+        description: Get saved searches from users with these IDs. The IDs must be from people in the
+          current users' team.
+        optional: true
+        items:
+          type: integer
+      types:
+        type: string
+        description: Filter by type of search
+        optional: true
+      order_by:
+        type: string
+        description: Order by field
+        optional: true
+        enum:
+        - name
+        - created_at
+        - updated_at
+        default: updated_at
+      order_direction:
+        type: string
+        description: Order direction
+        optional: true
+        enum:
+        - asc
+        - desc
+        default: desc
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  post_saved_searches:
+    title: Create Saved Search
+    description: Create Saved Search Calls POST /v0/saved_searches on the provider's API.
+    category: saved_searches
+    request:
+      method: POST
+      path: /v0/saved_searches
+      body:
+        name: ${name}
+        body: ${body}
+        type: ${type}
+        is_alert_active: ${is_alert_active}
+    input:
+      name:
+        type: string
+        description: Name of the saved search
+        optional: true
+      body:
+        type: string
+        description: Filters. CompanySearchFilters if type is 'companies', JobSearchFilters if type is
+          'jobs'
+      type:
+        type: string
+        description: The type field of the request body.
+        enum:
+        - companies
+        - jobs
+      is_alert_active:
+        type: boolean
+        description: Is the alert active
+        optional: true
+    output:
+      description: Successful Response
+      type: object
+  get_webhooks:
+    title: List All Webhooks
+    description: List All Webhooks Retrieve all active webhooks configured for your team including their
+      status, target URL, event type, and linked saved search. Archived webhooks are excluded from the
+      response. Use this to monitor your webhook integrations. Calls GET /v0/webhooks on the provider's
+      API.
+    category: webhooks
+    request:
+      method: GET
+      path: /v0/webhooks
+    input: {}
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  post_webhooks:
+    title: Create New Webhook
+    description: Create New Webhook Create a new webhook that listens for events from a saved search and
+      sends real-time HTTP POST notifications to your specified URL. Configure event types, filters, and
+      delivery settings for automated data pipelines. Calls POST /v0/webhooks on the provider's API.
+    category: webhooks
+    request:
+      method: POST
+      path: /v0/webhooks
+      body:
+        url: ${url}
+        search_id: ${search_id}
+        description: ${description}
+        listening_start_time: ${listening_start_time}
+        trigger_once_per_company: ${trigger_once_per_company}
+        active_event_types: ${active_event_types}
+        secret: ${secret}
+    input:
+      url:
+        type: string
+        description: URL of the webhook
+      search_id:
+        type: integer
+        description: ID of the search that the webhook is listening to.
+      description:
+        type: string
+        description: Description of the webhook
+        optional: true
+      listening_start_time:
+        type: string
+        description: Date when the webhook started listening for events. If listeningstarttime is None,
+          the webhook will listen to all events matching the search query regardless of when they occurred.
+        optional: true
+      trigger_once_per_company:
+        type: boolean
+        description: Only for webhook type ='job.new'. If true, Company A with 5 jobs → 1 event triggered.
+          If false, Company A with 5 jobs → 5 events triggered
+        optional: true
+      active_event_types:
+        type: string
+        description: Event types this webhook subscribes to. If None, defaults to the search type's primary
+          event (jobnew for jobs, companynew for companies).
+        optional: true
+      secret:
+        type: string
+        description: Secret used to sign webhook payloads with HMAC-SHA256. If set, deliveries include
+          an X-TheirStack-Signature-256 header.
+        optional: true
+    output:
+      description: Successful Response
+      type: object
+  get_datasets:
+    title: List Datasets
+    description: List Datasets Retrieve all datasets available for your team including jobs, companies,
+      and technographics. Datasets are updated daily in Parquet format. Use this endpoint to get the latest
+      download URLs for bulk data access. Calls GET /v1/datasets on the provider's API.
+    category: datasets
+    request:
+      method: GET
+      path: /v1/datasets
+    input: {}
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  buying_intents:
+    title: Buying Intents
+    description: Buying Intents This endpoint lists the buying intent topics detected for a company. For
+      each topic, it returns the confidence level (low, medium, high), the number of jobs that mention
+      the topic, and the first and last dates it was mentioned. You must specify companydomain, companyname,
+      companylinkedinurl. It cons Calls POST /v1/companies/buying_intents on the provider's API.
+    category: companies
+    request:
+      method: POST
+      path: /v1/companies/buying_intents
+      body:
+        company_id: ${company_id}
+        company_name: ${company_name}
+        company_domain: ${company_domain}
+        company_linkedin_url: ${company_linkedin_url}
+        company_name_or: ${company_name_or}
+        order_by: ${order_by}
+        include_total_results: ${include_total_results}
+        offset: ${offset}
+        page: ${page}
+        limit: ${limit}
+        keyword_slug_or: ${keyword_slug_or}
+        keyword_category_slug_or: ${keyword_category_slug_or}
+    input:
+      company_id:
+        type: string
+        description: Only return companies that match this TheirStack Company ID exactly. This ID is temporary
+          and internal and will change in the future and become stable. Until then, it is only meant to
+          be used internally by our UI (app.theirstack.com). For deduplication logic, use companydomain
+          or companylinkedinurl instead.
+        optional: true
+      company_name:
+        type: string
+        description: Only return companies that match this name exactly, case-sensitively.
+        optional: true
+      company_domain:
+        type: string
+        description: Only return companies that match this domain exactly. It accepts full urls (https://www.google.com/)
+          and emails (john.polo@gmail.com).
+        optional: true
+      company_linkedin_url:
+        type: string
+        description: Return companies whose LinkedIn URL matches this URL exactly.
+        optional: true
+      company_name_or:
+        type: array
+        description: Only return companies that match these names exactly, case-sensitively. Deprecated,
+          use the companyname filter instead.
+        optional: true
+        items:
+          type: string
+      order_by:
+        type: array
+        description: List of column objects. You can pass several columns to order by, in order of priority.
+          Only field is required, desc is True by default.
+        optional: true
+        items:
+          type: object
+      include_total_results:
+        type: string
+        description: 'When enabled, calculates and returns totalresults and totalcompanies fields in the
+          response. WARNING: This significantly slows down responses as it requires reading the entire
+          dataset. Recommended usage: enable only for the initial request to get totals, then disable
+          for subsequent pagination requests.'
+        optional: true
+      offset:
+        type: string
+        description: Number of results to skip. Required for offset-based pagination.
+        optional: true
+      page:
+        type: string
+        description: Page number. Required when using page-based pagination.
+        optional: true
+      limit:
+        type: string
+        description: Number of results per page
+        optional: true
+      keyword_slug_or:
+        type: array
+        description: Return companies that have mentioned any of these keywords (technologies or buying
+          intent topics) in their jobs. Case sensitive. Pass slugs. Check out all keywords at GET /v0/catalog/keywords
+        optional: true
+        items:
+          type: string
+      keyword_category_slug_or:
+        type: array
+        description: Return companies that have mentioned any keyword from any of these categories in
+          their jobs. Case sensitive. Pass slugs. Check out all keyword categories at GET /v0/catalog/keywords/categories
+        optional: true
+        items:
+          type: string
+    output:
+      description: Successful Response
+      type: object
+  search_companies:
+    title: Company Search
+    description: Company Search Search and filter companies and accounts by firmographics (industry, country,
+      employee count, revenue), funding, technology and tech stack (technographics), and hiring signals
+      (which roles and technologies they are actively hiring for). Built for ABM, account and lead prospecting,
+      lookalike-account Calls POST /v1/companies/search on the provider's API.
+    category: companies
+    request:
+      method: POST
+      path: /v1/companies/search
+      body:
+        expand_technology_slugs: ${expand_technology_slugs}
+        order_by: ${order_by}
+        company_name_or: ${company_name_or}
+        company_name_case_insensitive_or: ${company_name_case_insensitive_or}
+        company_id_or: ${company_id_or}
+        company_id_not: ${company_id_not}
+        company_domain_or: ${company_domain_or}
+        company_domain_not: ${company_domain_not}
+        company_name_not: ${company_name_not}
+        company_name_partial_match_or: ${company_name_partial_match_or}
+        company_name_partial_match_not: ${company_name_partial_match_not}
+        company_linkedin_url_or: ${company_linkedin_url_or}
+    input:
+      expand_technology_slugs:
+        type: array
+        description: 'Specify technology slugs to include detailed technology usage information for each
+          company. The response will include a ''technologiesfound'' field containing metrics like confidence
+          score, ranking, and job count for each specified technology. Note: If a technology is not listed
+          for a company, it means that company does not use that technology. This feature is useful for
+          enriching company data with'
+        optional: true
+        items:
+          type: string
+      order_by:
+        type: array
+        description: List of column objects. You can pass several columns to order by, in order of priority.
+          Only field is required, desc is True by default
+        optional: true
+        items:
+          type: object
+      company_name_or:
+        type: array
+        description: Only return companies that match these names exactly, case-sensitively. This filter
+          acts as an OR filter, so if you pass more than one company name, it will return companies that
+          match any of the names.
+        optional: true
+        items:
+          type: string
+      company_name_case_insensitive_or:
+        type: array
+        description: Only return companies that match these names exactly, case-insensitively.
+        optional: true
+        items:
+          type: string
+      company_id_or:
+        type: array
+        description: Only return companies that match these IDs exactly. This filter acts as an OR filter,
+          so if you pass more than one company ID, it will return companies that match any of the IDs.
+        optional: true
+        items:
+          type: string
+      company_id_not:
+        type: array
+        description: Exclude companies that match these IDs. This filter acts as a NOT filter, so if you
+          pass more than one company ID, it will exclude companies that match any of the IDs.
+        optional: true
+        items:
+          type: string
+      company_domain_or:
+        type: array
+        description: Only return companies that match these domains exactly. It accepts full urls (https://www.google.com/)
+          and emails (john.polo@gmail.com). This filter acts as an OR filter, so if you pass more than
+          one company domain, it will return companies that match any of the domains.
+        optional: true
+        items:
+          type: string
+      company_domain_not:
+        type: array
+        description: Only return companies that don't match these domains exactly. It accepts full urls
+          (https://www.google.com/) and emails (john.polo@gmail.com).
+        optional: true
+        items:
+          type: string
+      company_name_not:
+        type: array
+        description: Only return companies that don't match these names exactly, case-sensitively.
+        optional: true
+        items:
+          type: string
+      company_name_partial_match_or:
+        type: array
+        description: Company names. Will return companies whose name contain any of the the substrings
+          passed here, case-insensitively. For example, if you pass "google", it will return "Google",
+          "Google LLC", "Google Inc", etc.
+        optional: true
+        items:
+          type: string
+      company_name_partial_match_not:
+        type: array
+        description: Company names. Will return companies whose name doesn't contain any of the the substrings
+          passed here, case-insensitively. For example, if you pass 'google', it will exclude 'Google',
+          'Google LLC', 'Google Inc', etc.
+        optional: true
+        items:
+          type: string
+      company_linkedin_url_or:
+        type: array
+        description: Return companies whose LinkedIn page matches any of the values passed here. Both
+          forms of LinkedIn company URL work — the vanity slug (https://www.linkedin.com/company/google/)
+          and the numeric company ID (https://www.linkedin.com/company/1038) — as do a bare slug (google)
+          and a bare numeric ID (1038). A numeric value is matched against the company's LinkedIn ID and
+          its slug, so you do not need to
+        optional: true
+        items:
+          type: string
+    output:
+      description: Successful Response
+      type: object
+  technographics:
+    title: Technographics
+    description: Technographics This endpoint lists the technologies used by a company. For each technology,
+      it returns the confidence level (low, medium, high), the number of jobs that mention the technology,
+      and the first and last dates it was mentioned. You must specify companydomain, companyname, companylinkedinurl.
+      It consume Calls POST /v1/companies/technologies on the provider's API.
+    category: companies
+    request:
+      method: POST
+      path: /v1/companies/technologies
+      body:
+        company_id: ${company_id}
+        company_name: ${company_name}
+        company_domain: ${company_domain}
+        company_linkedin_url: ${company_linkedin_url}
+        company_name_or: ${company_name_or}
+        order_by: ${order_by}
+        include_total_results: ${include_total_results}
+        offset: ${offset}
+        page: ${page}
+        limit: ${limit}
+        keyword_slug_or: ${keyword_slug_or}
+        keyword_category_slug_or: ${keyword_category_slug_or}
+    input:
+      company_id:
+        type: string
+        description: Only return companies that match this TheirStack Company ID exactly. This ID is temporary
+          and internal and will change in the future and become stable. Until then, it is only meant to
+          be used internally by our UI (app.theirstack.com). For deduplication logic, use companydomain
+          or companylinkedinurl instead.
+        optional: true
+      company_name:
+        type: string
+        description: Only return companies that match this name exactly, case-sensitively.
+        optional: true
+      company_domain:
+        type: string
+        description: Only return companies that match this domain exactly. It accepts full urls (https://www.google.com/)
+          and emails (john.polo@gmail.com).
+        optional: true
+      company_linkedin_url:
+        type: string
+        description: Return companies whose LinkedIn URL matches this URL exactly.
+        optional: true
+      company_name_or:
+        type: array
+        description: Only return companies that match these names exactly, case-sensitively. Deprecated,
+          use the companyname filter instead.
+        optional: true
+        items:
+          type: string
+      order_by:
+        type: array
+        description: List of column objects. You can pass several columns to order by, in order of priority.
+          Only field is required, desc is True by default.
+        optional: true
+        items:
+          type: object
+      include_total_results:
+        type: string
+        description: 'When enabled, calculates and returns totalresults and totalcompanies fields in the
+          response. WARNING: This significantly slows down responses as it requires reading the entire
+          dataset. Recommended usage: enable only for the initial request to get totals, then disable
+          for subsequent pagination requests.'
+        optional: true
+      offset:
+        type: string
+        description: Number of results to skip. Required for offset-based pagination.
+        optional: true
+      page:
+        type: string
+        description: Page number. Required when using page-based pagination.
+        optional: true
+      limit:
+        type: string
+        description: Number of results per page
+        optional: true
+      keyword_slug_or:
+        type: array
+        description: Return companies that have mentioned any of these keywords (technologies or buying
+          intent topics) in their jobs. Case sensitive. Pass slugs. Check out all keywords at GET /v0/catalog/keywords
+        optional: true
+        items:
+          type: string
+      keyword_category_slug_or:
+        type: array
+        description: Return companies that have mentioned any keyword from any of these categories in
+          their jobs. Case sensitive. Pass slugs. Check out all keyword categories at GET /v0/catalog/keywords/categories
+        optional: true
+        items:
+          type: string
+    output:
+      description: Successful Response
+      type: object
+  search_jobs:
+    title: Job Search
+    description: Job Search Search and filter job postings (job ads, vacancies, hiring data) from thousands
+      of company career sites and job boards. Filter by job title, keywords in the job description, company
+      (name, domain or LinkedIn URL), location and country, technology and tech stack, salary, seniority,
+      remote/hybrid, emp Calls POST /v1/jobs/search on the provider's API.
+    category: jobs
+    request:
+      method: POST
+      path: /v1/jobs/search
+      body:
+        order_by: ${order_by}
+        offset: ${offset}
+        page: ${page}
+        limit: ${limit}
+        cursor: ${cursor}
+        job_title_or: ${job_title_or}
+        job_title_not: ${job_title_not}
+        job_title_pattern_and: ${job_title_pattern_and}
+        job_title_pattern_or: ${job_title_pattern_or}
+        job_title_pattern_not: ${job_title_pattern_not}
+        job_country_code_or: ${job_country_code_or}
+        job_country_code_not: ${job_country_code_not}
+    input:
+      order_by:
+        type: array
+        description: List of column objects. You can pass several columns to order by, in order of priority.
+          Only field is required, desc is True by default.
+        optional: true
+        items:
+          type: object
+      offset:
+        type: integer
+        description: Number of results to skip. Required for offset-based pagination.
+        optional: true
+      page:
+        type: integer
+        description: Page number. Required when using page-based pagination.
+        optional: true
+      limit:
+        type: integer
+        description: Number of results per page
+        optional: true
+      cursor:
+        type: string
+        description: Cursor for pagination
+        optional: true
+      job_title_or:
+        type: array
+        description: Keyword-based patterns to match job titles. Case-insensitive. Returns jobs whose
+          title contains all the words in any of the patterns, in any order. For example, marketing vp
+          matches titles such as VP of Marketing or Marketing VP, EMEA. Passing ["software engineer",
+          "data scientist"] returns jobs matching either pattern.
+        optional: true
+        items:
+          type: string
+      job_title_not:
+        type: array
+        description: Keyword-based patterns to exclude job titles. Case-insensitive. Excludes jobs whose
+          title contains all the words in any of the patterns, in any order. For example, marketing vp
+          excludes titles such as VP of Marketing or Marketing VP, EMEA.
+        optional: true
+        items:
+          type: string
+      job_title_pattern_and:
+        type: array
+        description: Regex patterns to match job titles. Case-insensitive. Only jobs with title that match
+          all of these patterns will be returned.
+        optional: true
+        items:
+          type: string
+      job_title_pattern_or:
+        type: array
+        description: Regex patterns to match job titles. Case-insensitive. Jobs whose job title matches
+          of the filters will be returned.
+        optional: true
+        items:
+          type: string
+      job_title_pattern_not:
+        type: array
+        description: Regex patterns to match job titles. Case-insensitive. Jobs whose job title doesn't
+          match any of the patterns will be returned.
+        optional: true
+        items:
+          type: string
+      job_country_code_or:
+        type: array
+        description: 2-letter ISO country code of the location of the job. Can pass more than 1
+        optional: true
+        items:
+          type: string
+      job_country_code_not:
+        type: array
+        description: 2-letter ISO country code of the location of the job. Can pass more than 1. Will
+          exclude jobs from these countries
+        optional: true
+        items:
+          type: string
+    output:
+      description: Successful Response
+      type: object

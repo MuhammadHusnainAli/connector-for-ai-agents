@@ -1,0 +1,2928 @@
+# Google Gemini API tools.
+#
+# An API key carries no scope grant, so no tool here declares one.
+#
+# The Generative Language API: models, content generation, embeddings, token
+# counting, files, tuned models, cached content, batch jobs, corpora and the
+# semantic retrieval stack, plus the Live and Interactive endpoints.
+#
+# The ones most callers want:
+#
+#   * `generate_content_model` is the main call -- a prompt in, a completion
+#     out. `stream_generate_content_model` is the same thing token by token;
+#   * `count_tokens_model` measures a prompt before sending it, which is how
+#     you stay inside a model's context window and predict cost;
+#   * `embed_content_model` and `batch_embed_content_model` produce vectors;
+#   * `list_models` is worth calling rather than hard-coding a model name --
+#     Gemini model ids change, and each carries its own token limits and
+#     supported methods.
+#
+# Files uploaded here are held for a limited period and then deleted by Google,
+# so `create_file` is for material a request needs shortly, not for storage.
+#
+# Docs: https://ai.google.dev/api/rest
+
+connector_id: google-gemini
+display_name: Google Gemini
+docs_url: https://developers.generativeai.google/api
+tools:
+  create_auth_token:
+    title: Create auth token
+    description: Creates a token that can be used to constrain the behavior of a BidiGenerateContent session.
+    category: auth_tokens
+    request:
+      method: POST
+      path: /v1beta/auth_tokens
+      body:
+        expireTime: ${expire_time}
+        fieldMask: ${field_mask}
+        bidiGenerateContentSetup: ${bidi_generate_content_setup}
+        newSessionExpireTime: ${new_session_expire_time}
+        uses: ${uses}
+    input:
+      expire_time:
+        type: string
+        description: Optional. Input only. Immutable. An optional time after which, when using the resulting
+          token, messages in BidiGenerateContent sessions will be rejected. (Gemini may preemptively close
+          the session after this time.) If not set then this defaults to 30 minutes in the future. If
+          set, this value must be
+        optional: true
+      field_mask:
+        type: string
+        description: Optional. Input only. Immutable. If field_mask is empty, and bidi_generate_content_setup
+          is not present, then the effective BidiGenerateContentSetup message is taken from the Live API
+          connection. If field_mask is empty, and bidi_generate_content_setup _is_ present, then the effective
+          BidiGenerateCon
+        optional: true
+      bidi_generate_content_setup:
+        type: string
+        description: Optional. Input only. Immutable. Configuration specific to BidiGenerateContent.
+        optional: true
+      new_session_expire_time:
+        type: string
+        description: Optional. Input only. Immutable. The time after which new Live API sessions using
+          the token resulting from this request will be rejected. If not set this defaults to 60 seconds
+          in the future. If set, this value must be less than 20 hours in the future.
+        optional: true
+      uses:
+        type: integer
+        description: Optional. Input only. Immutable. The number of times the token can be used. If this
+          value is zero then no limit is applied. Resuming a Live API session does not count as a use.
+          If unspecified, the default is 1.
+        optional: true
+    output:
+      description: The AuthToken resource.
+      type: object
+  cancel_batch:
+    title: Cancel batch
+    description: Starts asynchronous cancellation on a long-running operation. The server makes a best
+      effort to cancel the operation, but success is not guaranteed. If the server doesn't support this
+      method, it returns google.rpc.Code.UNIMPLEMENTED. Clients can use Operations.GetOperation or other
+      methods to check whether the cancellation succeeded or whether the operation completed despite cancellation.
+      On successful cancellation,
+    category: batches
+    request:
+      method: POST
+      path: /v1beta/${name}:cancel
+    input:
+      name:
+        type: string
+        description: The name of the operation resource to be cancelled.
+    output:
+      description: The Empty resource.
+      type: object
+  delete_batch:
+    title: Delete batch
+    description: Deletes a long-running operation. This method indicates that the client is no longer
+      interested in the operation result. It does not cancel the operation. If the server doesn't support
+      this method, it returns google.rpc.Code.UNIMPLEMENTED.
+    category: batches
+    request:
+      method: DELETE
+      path: /v1beta/${name}
+    input:
+      name:
+        type: string
+        description: The name of the operation resource to be deleted.
+    output:
+      description: The Empty resource.
+      type: object
+    destructive: true
+  get_batch:
+    title: Get batch
+    description: Gets the latest state of a long-running operation. Clients can use this method to poll
+      the operation result at intervals as recommended by the API service.
+    category: batches
+    request:
+      method: GET
+      path: /v1beta/${name}
+    input:
+      name:
+        type: string
+        description: The name of the operation resource.
+    output:
+      description: The Operation resource.
+      type: object
+    read_only: true
+  list_batches:
+    title: List batches
+    description: Lists operations that match the specified filter in the request. If the server doesn't
+      support this method, it returns UNIMPLEMENTED.
+    category: batches
+    request:
+      method: GET
+      path: /v1beta/${name}
+      query:
+        filter: ${filter}
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+        returnPartialSuccess: ${return_partial_success}
+    input:
+      name:
+        type: string
+        description: The name of the operation's parent resource.
+      filter:
+        type: string
+        description: The standard list filter.
+        optional: true
+      page_size:
+        type: integer
+        description: The standard list page size.
+        optional: true
+      page_token:
+        type: string
+        description: The standard list page token.
+        optional: true
+      return_partial_success:
+        type: boolean
+        description: When set to true, operations that are reachable are returned as normal, and those
+          that are unreachable are returned in the ListOperationsResponse.unreachable field. This can
+          only be true when reading across collections. For example, when parent is set to "projects/example/locations/-".
+          This field is
+        optional: true
+    output:
+      description: The ListOperationsResponse resource.
+      type: object
+    read_only: true
+  update_embed_content_batch_batch:
+    title: Update embed content batch batch
+    description: Updates a batch of EmbedContent requests for batch processing.
+    category: batches
+    request:
+      method: PATCH
+      path: /v1beta/${name}:updateEmbedContentBatch
+      query:
+        updateMask: ${update_mask}
+      body:
+        displayName: ${display_name}
+        inputConfig: ${input_config}
+        model: ${model}
+        priority: ${priority}
+    input:
+      name:
+        type: string
+        description: 'Output only. Identifier. Resource name of the batch. Format: batches/{batch_id}.'
+      update_mask:
+        type: string
+        description: Optional. The list of fields to update.
+        optional: true
+      display_name:
+        type: string
+        description: Required. The user-defined name of this batch.
+        optional: true
+      input_config:
+        type: string
+        description: Required. Input configuration of the instances on which batch processing are performed.
+        optional: true
+      model:
+        type: string
+        description: 'Required. The name of the Model to use for generating the completion. Format: models/{model}.'
+        optional: true
+      priority:
+        type: string
+        description: Optional. The priority of the batch. Batches with a higher priority value will be
+          processed before batches with a lower priority value. Negative values are allowed. Default is
+          0.
+        optional: true
+    output:
+      description: The EmbedContentBatch resource.
+      type: object
+  update_generate_content_batch_batch:
+    title: Update generate content batch batch
+    description: Updates a batch of GenerateContent requests for batch processing.
+    category: batches
+    request:
+      method: PATCH
+      path: /v1beta/${name}:updateGenerateContentBatch
+      query:
+        updateMask: ${update_mask}
+      body:
+        priority: ${priority}
+        displayName: ${display_name}
+        inputConfig: ${input_config}
+        model: ${model}
+    input:
+      name:
+        type: string
+        description: 'Output only. Identifier. Resource name of the batch. Format: batches/{batch_id}.'
+      update_mask:
+        type: string
+        description: Optional. The list of fields to update.
+        optional: true
+      priority:
+        type: string
+        description: Optional. The priority of the batch. Batches with a higher priority value will be
+          processed before batches with a lower priority value. Negative values are allowed. Default is
+          0.
+        optional: true
+      display_name:
+        type: string
+        description: Required. The user-defined name of this batch.
+        optional: true
+      input_config:
+        type: string
+        description: Required. Input configuration of the instances on which batch processing are performed.
+        optional: true
+      model:
+        type: string
+        description: 'Required. The name of the Model to use for generating the completion. Format: models/{model}.'
+        optional: true
+    output:
+      description: The GenerateContentBatch resource.
+      type: object
+  create_cached_content:
+    title: Create cached content
+    description: Creates CachedContent resource. Calls cachedContents.create on the Gemini API.
+    category: cached_contents
+    request:
+      method: POST
+      path: /v1beta/cachedContents
+      body:
+        toolConfig: ${tool_config}
+        ttl: ${ttl}
+        systemInstruction: ${system_instruction}
+        model: ${model}
+        tools: ${tools}
+        contents: ${contents}
+        expireTime: ${expire_time}
+        displayName: ${display_name}
+    input:
+      tool_config:
+        type: string
+        description: Optional. Input only. Immutable. Tool config. This config is shared for all tools.
+        optional: true
+      ttl:
+        type: string
+        description: Input only. New TTL for this resource, input only.
+        optional: true
+      system_instruction:
+        type: string
+        description: Optional. Input only. Immutable. Developer set system instruction. Currently text
+          only.
+        optional: true
+      model:
+        type: string
+        description: 'Required. Immutable. The name of the Model to use for cached content Format: models/{model}'
+        optional: true
+      tools:
+        type: array
+        items:
+          type: string
+        description: Optional. Input only. Immutable. A list of Tools the model may use to generate the
+          next response
+        optional: true
+      contents:
+        type: array
+        items:
+          type: string
+        description: Optional. Input only. Immutable. The content to cache.
+        optional: true
+      expire_time:
+        type: string
+        description: Timestamp in UTC of when this resource is considered expired. This is *always* provided
+          on output, regardless of what was sent on input.
+        optional: true
+      display_name:
+        type: string
+        description: Optional. Immutable. The user-generated meaningful display name of the cached content.
+          Maximum 128 Unicode characters.
+        optional: true
+    output:
+      description: The CachedContent resource.
+      type: object
+  delete_cached_content:
+    title: Delete cached content
+    description: Deletes CachedContent resource. Calls cachedContents.delete on the Gemini API.
+    category: cached_contents
+    request:
+      method: DELETE
+      path: /v1beta/${name}
+    input:
+      name:
+        type: string
+        description: 'Required. The resource name referring to the content cache entry Format: cachedContents/{id}'
+    output:
+      description: The Empty resource.
+      type: object
+    destructive: true
+  get_cached_content:
+    title: Get cached content
+    description: Reads CachedContent resource. Calls cachedContents.get on the Gemini API.
+    category: cached_contents
+    request:
+      method: GET
+      path: /v1beta/${name}
+    input:
+      name:
+        type: string
+        description: 'Required. The resource name referring to the content cache entry. Format: cachedContents/{id}'
+    output:
+      description: The CachedContent resource.
+      type: object
+    read_only: true
+  list_cached_contents:
+    title: List cached contents
+    description: Lists CachedContents. Calls cachedContents.list on the Gemini API.
+    category: cached_contents
+    request:
+      method: GET
+      path: /v1beta/cachedContents
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      page_size:
+        type: integer
+        description: Optional. The maximum number of cached contents to return. The service may return
+          fewer than this value. If unspecified, some default (under maximum) number of items will be
+          returned. The maximum value is 1000; values above 1000 will be coerced to 1000.
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token, received from a previous ListCachedContents call. Provide
+          this to retrieve the subsequent page. When paginating, all other parameters provided to ListCachedContents
+          must match the call that provided the page token.
+        optional: true
+    output:
+      description: The ListCachedContentsResponse resource.
+      type: object
+    read_only: true
+  update_cached_content:
+    title: Update cached content
+    description: Updates CachedContent resource (only expiration is updatable).
+    category: cached_contents
+    request:
+      method: PATCH
+      path: /v1beta/${name}
+      query:
+        updateMask: ${update_mask}
+      body:
+        toolConfig: ${tool_config}
+        ttl: ${ttl}
+        systemInstruction: ${system_instruction}
+        model: ${model}
+        tools: ${tools}
+        contents: ${contents}
+        expireTime: ${expire_time}
+        displayName: ${display_name}
+    input:
+      name:
+        type: string
+        description: 'Output only. Identifier. The resource name referring to the cached content. Format:
+          cachedContents/{id}'
+      update_mask:
+        type: string
+        description: The list of fields to update.
+        optional: true
+      tool_config:
+        type: string
+        description: Optional. Input only. Immutable. Tool config. This config is shared for all tools.
+        optional: true
+      ttl:
+        type: string
+        description: Input only. New TTL for this resource, input only.
+        optional: true
+      system_instruction:
+        type: string
+        description: Optional. Input only. Immutable. Developer set system instruction. Currently text
+          only.
+        optional: true
+      model:
+        type: string
+        description: 'Required. Immutable. The name of the Model to use for cached content Format: models/{model}'
+        optional: true
+      tools:
+        type: array
+        items:
+          type: string
+        description: Optional. Input only. Immutable. A list of Tools the model may use to generate the
+          next response
+        optional: true
+      contents:
+        type: array
+        items:
+          type: string
+        description: Optional. Input only. Immutable. The content to cache.
+        optional: true
+      expire_time:
+        type: string
+        description: Timestamp in UTC of when this resource is considered expired. This is *always* provided
+          on output, regardless of what was sent on input.
+        optional: true
+      display_name:
+        type: string
+        description: Optional. Immutable. The user-generated meaningful display name of the cached content.
+          Maximum 128 Unicode characters.
+        optional: true
+    output:
+      description: The CachedContent resource.
+      type: object
+  create_corpora:
+    title: Create corpora
+    description: Creates an empty Corpus. Calls corpora.create on the Gemini API.
+    category: corpora
+    request:
+      method: POST
+      path: /v1beta/corpora
+      body:
+        displayName: ${display_name}
+    input:
+      display_name:
+        type: string
+        description: 'Optional. The human-readable display name for the Corpus. The display name must
+          be no more than 512 characters in length, including spaces. Example: "Docs on Semantic Retriever"'
+        optional: true
+    output:
+      description: The Corpus resource.
+      type: object
+  delete_corpora:
+    title: Delete corpora
+    description: Deletes a Corpus. Calls corpora.delete on the Gemini API.
+    category: corpora
+    request:
+      method: DELETE
+      path: /v1beta/${name}
+      query:
+        force: ${force}
+    input:
+      name:
+        type: string
+        description: 'Required. The resource name of the Corpus. Example: corpora/my-corpus-123'
+      force:
+        type: boolean
+        description: Optional. If set to true, any Documents and objects related to this Corpus will also
+          be deleted. If false (the default), a FAILED_PRECONDITION error will be returned if Corpus contains
+          any Documents.
+        optional: true
+    output:
+      description: The Empty resource.
+      type: object
+    destructive: true
+  get_corpora:
+    title: Get corpora
+    description: Gets information about a specific Corpus.
+    category: corpora
+    request:
+      method: GET
+      path: /v1beta/${name}
+    input:
+      name:
+        type: string
+        description: 'Required. The name of the Corpus. Example: corpora/my-corpus-123'
+    output:
+      description: The Corpus resource.
+      type: object
+    read_only: true
+  list_corpora:
+    title: List corpora
+    description: Lists all Corpora owned by the user. Calls corpora.list on the Gemini API.
+    category: corpora
+    request:
+      method: GET
+      path: /v1beta/corpora
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      page_size:
+        type: integer
+        description: Optional. The maximum number of Corpora to return (per page). The service may return
+          fewer Corpora. If unspecified, at most 10 Corpora will be returned. The maximum size limit is
+          20 Corpora per page.
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token, received from a previous ListCorpora call. Provide the next_page_token
+          returned in the response as an argument to the next request to retrieve the next page. When
+          paginating, all other parameters provided to ListCorpora must match the call that provided the
+          page token.
+        optional: true
+    output:
+      description: The ListCorporaResponse resource.
+      type: object
+    read_only: true
+  get_operation:
+    title: Get operation
+    description: Gets the latest state of a long-running operation. Clients can use this method to poll
+      the operation result at intervals as recommended by the API service.
+    category: corpora
+    request:
+      method: GET
+      path: /v1beta/${name}
+    input:
+      name:
+        type: string
+        description: The name of the operation resource.
+    output:
+      description: The Operation resource.
+      type: object
+    read_only: true
+  create_permission:
+    title: Create permission
+    description: Create a permission to a specific resource.
+    category: corpora
+    request:
+      method: POST
+      path: /v1beta/${parent}/permissions
+      body:
+        emailAddress: ${email_address}
+        granteeType: ${grantee_type}
+        role: ${role}
+    input:
+      parent:
+        type: string
+        description: 'Required. The parent resource of the Permission. Formats: tunedModels/{tuned_model}
+          corpora/{corpus}'
+      email_address:
+        type: string
+        description: Optional. Immutable. The email address of the user of group which this permission
+          refers. Field is not set when permission's grantee type is EVERYONE.
+        optional: true
+      grantee_type:
+        type: string
+        description: Optional. Immutable. The type of the grantee.
+        optional: true
+        enum:
+        - GRANTEE_TYPE_UNSPECIFIED
+        - USER
+        - GROUP
+        - EVERYONE
+      role:
+        type: string
+        description: Required. The role granted by this permission.
+        optional: true
+        enum:
+        - ROLE_UNSPECIFIED
+        - OWNER
+        - WRITER
+        - READER
+    output:
+      description: The Permission resource.
+      type: object
+  delete_permission:
+    title: Delete permission
+    description: Deletes the permission. Calls corpora.permissions.delete on the Gemini API.
+    category: corpora
+    request:
+      method: DELETE
+      path: /v1beta/${name}
+    input:
+      name:
+        type: string
+        description: 'Required. The resource name of the permission. Formats: tunedModels/{tuned_model}/permissions/{permission}
+          corpora/{corpus}/permissions/{permission}'
+    output:
+      description: The Empty resource.
+      type: object
+    destructive: true
+  get_permission:
+    title: Get permission
+    description: Gets information about a specific Permission.
+    category: corpora
+    request:
+      method: GET
+      path: /v1beta/${name}
+    input:
+      name:
+        type: string
+        description: 'Required. The resource name of the permission. Formats: tunedModels/{tuned_model}/permissions/{permission}
+          corpora/{corpus}/permissions/{permission}'
+    output:
+      description: The Permission resource.
+      type: object
+    read_only: true
+  list_permissions:
+    title: List permissions
+    description: Lists permissions for the specific resource.
+    category: corpora
+    request:
+      method: GET
+      path: /v1beta/${parent}/permissions
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      parent:
+        type: string
+        description: 'Required. The parent resource of the permissions. Formats: tunedModels/{tuned_model}
+          corpora/{corpus}'
+      page_size:
+        type: integer
+        description: Optional. The maximum number of Permissions to return (per page). The service may
+          return fewer permissions. If unspecified, at most 10 permissions will be returned. This method
+          returns at most 1000 permissions per page, even if you pass larger page_size.
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token, received from a previous ListPermissions call. Provide the
+          page_token returned by one request as an argument to the next request to retrieve the next page.
+          When paginating, all other parameters provided to ListPermissions must match the call that provided
+          the page token.
+        optional: true
+    output:
+      description: The ListPermissionsResponse resource.
+      type: object
+    read_only: true
+  update_permission:
+    title: Update permission
+    description: Updates the permission. Calls corpora.permissions.patch on the Gemini API.
+    category: corpora
+    request:
+      method: PATCH
+      path: /v1beta/${name}
+      query:
+        updateMask: ${update_mask}
+      body:
+        emailAddress: ${email_address}
+        granteeType: ${grantee_type}
+        role: ${role}
+    input:
+      name:
+        type: string
+        description: 'Output only. Identifier. The permission name. A unique name will be generated on
+          create. Examples: tunedModels/{tuned_model}/permissions/{permission} corpora/{corpus}/permissions/{permission}
+          Output only.'
+      update_mask:
+        type: string
+        description: 'Required. The list of fields to update. Accepted ones: - role (Permission.role field)'
+        optional: true
+      email_address:
+        type: string
+        description: Optional. Immutable. The email address of the user of group which this permission
+          refers. Field is not set when permission's grantee type is EVERYONE.
+        optional: true
+      grantee_type:
+        type: string
+        description: Optional. Immutable. The type of the grantee.
+        optional: true
+        enum:
+        - GRANTEE_TYPE_UNSPECIFIED
+        - USER
+        - GROUP
+        - EVERYONE
+      role:
+        type: string
+        description: Required. The role granted by this permission.
+        optional: true
+        enum:
+        - ROLE_UNSPECIFIED
+        - OWNER
+        - WRITER
+        - READER
+    output:
+      description: The Permission resource.
+      type: object
+  generate_content_dynamic:
+    title: Generate content dynamic
+    description: Generates a model response given an input GenerateContentRequest. Refer to the text generation
+      guide for detailed usage information. Input capabilities differ between models, including tuned
+      models. Refer to the model guide and tuning guide for details.
+    category: dynamic
+    request:
+      method: POST
+      path: /v1beta/${model}:generateContent
+      body:
+        toolConfig: ${tool_config}
+        contents: ${contents}
+        systemInstruction: ${system_instruction}
+        serviceTier: ${service_tier}
+        model: ${body_model}
+        tools: ${tools}
+        store: ${store}
+        generationConfig: ${generation_config}
+        safetySettings: ${safety_settings}
+        cachedContent: ${cached_content}
+    input:
+      model:
+        type: string
+        description: 'Required. The name of the Model to use for generating the completion. Format: models/{model}.'
+      tool_config:
+        type: string
+        description: Optional. Tool configuration for any Tool specified in the request. Refer to the
+          Function calling guide for a usage example.
+        optional: true
+      contents:
+        type: array
+        items:
+          type: string
+        description: Required. The content of the current conversation with the model. For single-turn
+          queries, this is a single instance. For multi-turn queries like chat, this is a repeated field
+          that contains the conversation history and the latest request.
+        optional: true
+      system_instruction:
+        type: string
+        description: Optional. Developer set system instruction(s). Currently, text only.
+        optional: true
+      service_tier:
+        type: string
+        description: Optional. The service tier of the request.
+        optional: true
+        enum:
+        - unspecified
+        - standard
+        - flex
+        - priority
+      body_model:
+        type: string
+        description: 'Required. The name of the Model to use for generating the completion. Format: models/{model}.'
+        optional: true
+      tools:
+        type: array
+        items:
+          type: string
+        description: Optional. A list of Tools the Model may use to generate the next response. A Tool
+          is a piece of code that enables the system to interact with external systems to perform an action,
+          or set of actions, outside of knowledge and scope of the Model. Supported Tools are Function
+          and code_execution. Refer
+        optional: true
+      store:
+        type: boolean
+        description: Optional. Configures the logging behavior for a given request. If set, it takes precedence
+          over the project-level logging config.
+        optional: true
+      generation_config:
+        type: string
+        description: Optional. Configuration options for model generation and outputs.
+        optional: true
+      safety_settings:
+        type: array
+        items:
+          type: string
+        description: Optional. A list of unique SafetySetting instances for blocking unsafe content. This
+          will be enforced on the GenerateContentRequest.contents and GenerateContentResponse.candidates.
+          There should not be more than one setting for each SafetyCategory type. The API will block any
+          contents and responses t
+        optional: true
+      cached_content:
+        type: string
+        description: 'Optional. The name of the content cached to use as context to serve the prediction.
+          Format: cachedContents/{cachedContent}'
+        optional: true
+    output:
+      description: The GenerateContentResponse resource.
+      type: object
+  stream_generate_content_dynamic:
+    title: Stream generate content dynamic
+    description: Generates a streamed response from the model given an input GenerateContentRequest.
+    category: dynamic
+    request:
+      method: POST
+      path: /v1beta/${model}:streamGenerateContent
+      body:
+        toolConfig: ${tool_config}
+        contents: ${contents}
+        systemInstruction: ${system_instruction}
+        serviceTier: ${service_tier}
+        model: ${body_model}
+        tools: ${tools}
+        store: ${store}
+        generationConfig: ${generation_config}
+        safetySettings: ${safety_settings}
+        cachedContent: ${cached_content}
+    input:
+      model:
+        type: string
+        description: 'Required. The name of the Model to use for generating the completion. Format: models/{model}.'
+      tool_config:
+        type: string
+        description: Optional. Tool configuration for any Tool specified in the request. Refer to the
+          Function calling guide for a usage example.
+        optional: true
+      contents:
+        type: array
+        items:
+          type: string
+        description: Required. The content of the current conversation with the model. For single-turn
+          queries, this is a single instance. For multi-turn queries like chat, this is a repeated field
+          that contains the conversation history and the latest request.
+        optional: true
+      system_instruction:
+        type: string
+        description: Optional. Developer set system instruction(s). Currently, text only.
+        optional: true
+      service_tier:
+        type: string
+        description: Optional. The service tier of the request.
+        optional: true
+        enum:
+        - unspecified
+        - standard
+        - flex
+        - priority
+      body_model:
+        type: string
+        description: 'Required. The name of the Model to use for generating the completion. Format: models/{model}.'
+        optional: true
+      tools:
+        type: array
+        items:
+          type: string
+        description: Optional. A list of Tools the Model may use to generate the next response. A Tool
+          is a piece of code that enables the system to interact with external systems to perform an action,
+          or set of actions, outside of knowledge and scope of the Model. Supported Tools are Function
+          and code_execution. Refer
+        optional: true
+      store:
+        type: boolean
+        description: Optional. Configures the logging behavior for a given request. If set, it takes precedence
+          over the project-level logging config.
+        optional: true
+      generation_config:
+        type: string
+        description: Optional. Configuration options for model generation and outputs.
+        optional: true
+      safety_settings:
+        type: array
+        items:
+          type: string
+        description: Optional. A list of unique SafetySetting instances for blocking unsafe content. This
+          will be enforced on the GenerateContentRequest.contents and GenerateContentResponse.candidates.
+          There should not be more than one setting for each SafetyCategory type. The API will block any
+          contents and responses t
+        optional: true
+      cached_content:
+        type: string
+        description: 'Optional. The name of the content cached to use as context to serve the prediction.
+          Format: cachedContents/{cachedContent}'
+        optional: true
+    output:
+      description: The GenerateContentResponse resource.
+      type: object
+  create_environment:
+    title: Create environment
+    description: Creates an environment. Calls environments.create on the Gemini API.
+    category: environments
+    request:
+      method: POST
+      path: /v1beta/environments:create
+      body:
+        networkAllowlist: ${network_allowlist}
+        networkMode: ${network_mode}
+        sources: ${sources}
+    input:
+      network_allowlist:
+        type: string
+        description: Allow only specific domains.
+        optional: true
+      network_mode:
+        type: string
+        description: Network egress mode.
+        optional: true
+        enum:
+        - NETWORK_MODE_UNSPECIFIED
+        - DISABLED
+      sources:
+        type: array
+        items:
+          type: string
+        description: Sources to be mounted into the environment.
+        optional: true
+    output:
+      description: The Environment resource.
+      type: object
+  delete_environment:
+    title: Delete environment
+    description: Deletes an environment. Calls environments.delete on the Gemini API.
+    category: environments
+    request:
+      method: DELETE
+      path: /v1beta/environments/${id}:delete
+    input:
+      id:
+        type: string
+        description: Required. The identifier of the environment to delete.
+    output:
+      description: The Empty resource.
+      type: object
+    destructive: true
+  download_media:
+    title: Download media
+    description: Retrieves a file or directory from an environment's snapshot (HTTP endpoint).
+    category: environments
+    request:
+      method: GET
+      path: /v1beta/${parent}/files/${path}
+      query:
+        page_size: ${page_size}
+        page_token: ${page_token}
+        recursive: ${recursive}
+    input:
+      parent:
+        type: string
+        description: 'Required. The resource name of the environment. Format: environments/{environment_id}'
+      path:
+        type: string
+        description: 'Optional. The path of the file or directory within the environment. If empty, defaults
+          to the root of the workspace. Example: "workspace/src/main.py"'
+      page_size:
+        type: integer
+        description: Optional. Maximum number of entries to return per page (for directory listing). If
+          unspecified, defaults to 100. Maximum is 1000. NOLINT
+        optional: true
+      page_token:
+        type: string
+        description: Optional. Pagination token for directory listing. NOLINT
+        optional: true
+      recursive:
+        type: boolean
+        description: Optional. If true and the path is a directory, recursively lists all files and subdirectories.
+          Defaults to false (immediate children only).
+        optional: true
+    output:
+      description: The GetEnvironmentFilesResponse resource.
+      type: object
+    read_only: true
+  get_environment:
+    title: Get environment
+    description: Gets an environment. Calls environments.get on the Gemini API.
+    category: environments
+    request:
+      method: GET
+      path: /v1beta/environments/${id}:get
+    input:
+      id:
+        type: string
+        description: Required. The identifier of the environment to retrieve.
+    output:
+      description: The Environment resource.
+      type: object
+    read_only: true
+  list_environments:
+    title: List environments
+    description: Lists environments. Calls environments.list on the Gemini API.
+    category: environments
+    request:
+      method: GET
+      path: /v1beta/environments:list
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      page_size:
+        type: integer
+        description: Maximum number of environments to return. If unspecified, defaults to 50. Maximum
+          is 1000.
+        optional: true
+      page_token:
+        type: string
+        description: Pagination token.
+        optional: true
+    output:
+      description: The ListEnvironmentsResponse resource.
+      type: object
+    read_only: true
+  create_file_search_store:
+    title: Create file search store
+    description: Creates an empty FileSearchStore. Calls fileSearchStores.create on the Gemini API.
+    category: file_search_stores
+    request:
+      method: POST
+      path: /v1beta/fileSearchStores
+      body:
+        embeddingModel: ${embedding_model}
+        displayName: ${display_name}
+    input:
+      embedding_model:
+        type: string
+        description: 'Optional. The embedding model to use for the FileSearchStore. The model''s resource
+          name. This serves as an ID for the Model to use. Format: models/{model}. If not specified, the
+          default embedding model will be used.'
+        optional: true
+      display_name:
+        type: string
+        description: 'Optional. The human-readable display name for the FileSearchStore. The display name
+          must be no more than 512 characters in length, including spaces. Example: "Docs on Semantic
+          Retriever"'
+        optional: true
+    output:
+      description: The FileSearchStore resource.
+      type: object
+  delete_file_search_store:
+    title: Delete file search store
+    description: Deletes a FileSearchStore. Calls fileSearchStores.delete on the Gemini API.
+    category: file_search_stores
+    request:
+      method: DELETE
+      path: /v1beta/${name}
+      query:
+        force: ${force}
+    input:
+      name:
+        type: string
+        description: 'Required. The resource name of the FileSearchStore. Example: fileSearchStores/my-file-search-store-123'
+      force:
+        type: boolean
+        description: Optional. If set to true, any Documents and objects related to this FileSearchStore
+          will also be deleted. If false (the default), a FAILED_PRECONDITION error will be returned if
+          FileSearchStore contains any Documents.
+        optional: true
+    output:
+      description: The Empty resource.
+      type: object
+    destructive: true
+  delete_document:
+    title: Delete document
+    description: Deletes a Document. Calls fileSearchStores.documents.delete on the Gemini API.
+    category: file_search_stores
+    request:
+      method: DELETE
+      path: /v1beta/${name}
+      query:
+        force: ${force}
+    input:
+      name:
+        type: string
+        description: 'Required. The resource name of the Document to delete. Example: fileSearchStores/my-file-search-store-123/documents/the-doc-abc'
+      force:
+        type: boolean
+        description: Optional. If set to true, any Chunks and objects related to this Document will also
+          be deleted. If false (the default), a FAILED_PRECONDITION error will be returned if Document
+          contains any Chunks.
+        optional: true
+    output:
+      description: The Empty resource.
+      type: object
+    destructive: true
+  get_document:
+    title: Get document
+    description: Gets information about a specific Document.
+    category: file_search_stores
+    request:
+      method: GET
+      path: /v1beta/${name}
+    input:
+      name:
+        type: string
+        description: 'Required. The name of the Document to retrieve. Example: fileSearchStores/my-file-search-store-123/documents/the-doc-abc'
+    output:
+      description: The Document resource.
+      type: object
+    read_only: true
+  list_documents:
+    title: List documents
+    description: Lists all Documents in a Corpus. Calls fileSearchStores.documents.list on the Gemini
+      API.
+    category: file_search_stores
+    request:
+      method: GET
+      path: /v1beta/${parent}/documents
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      parent:
+        type: string
+        description: 'Required. The name of the FileSearchStore containing Documents. Example: fileSearchStores/my-file-search-store-123'
+      page_size:
+        type: integer
+        description: Optional. The maximum number of Documents to return (per page). The service may return
+          fewer Documents. If unspecified, at most 10 Documents will be returned. The maximum size limit
+          is 20 Documents per page.
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token, received from a previous ListDocuments call. Provide the
+          next_page_token returned in the response as an argument to the next request to retrieve the
+          next page. When paginating, all other parameters provided to ListDocuments must match the call
+          that provided the page token.
+        optional: true
+    output:
+      description: The ListDocumentsResponse resource.
+      type: object
+    read_only: true
+  get_file_search_store:
+    title: Get file search store
+    description: Gets information about a specific FileSearchStore.
+    category: file_search_stores
+    request:
+      method: GET
+      path: /v1beta/${name}
+    input:
+      name:
+        type: string
+        description: 'Required. The name of the FileSearchStore. Example: fileSearchStores/my-file-search-store-123'
+    output:
+      description: The FileSearchStore resource.
+      type: object
+    read_only: true
+  import_file_file_search_store:
+    title: Import file file search store
+    description: Imports a File from File Service to a FileSearchStore.
+    category: file_search_stores
+    request:
+      method: POST
+      path: /v1beta/${file_search_store_name}:importFile
+      body:
+        fileName: ${file_name}
+        customMetadata: ${custom_metadata}
+        chunkingConfig: ${chunking_config}
+    input:
+      file_search_store_name:
+        type: string
+        description: 'Required. Immutable. The name of the FileSearchStore to import the file into. Example:
+          fileSearchStores/my-file-search-store-123'
+      file_name:
+        type: string
+        description: 'Required. The name of the File to import. Example: files/abc-123'
+        optional: true
+      custom_metadata:
+        type: array
+        items:
+          type: string
+        description: Custom metadata to be associated with the file.
+        optional: true
+      chunking_config:
+        type: string
+        description: Optional. Config for telling the service how to chunk the file. If not provided,
+          the service will use default parameters.
+        optional: true
+    output:
+      description: The Operation resource.
+      type: object
+  list_file_search_stores:
+    title: List file search stores
+    description: Lists all FileSearchStores owned by the user.
+    category: file_search_stores
+    request:
+      method: GET
+      path: /v1beta/fileSearchStores
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      page_size:
+        type: integer
+        description: Optional. The maximum number of FileSearchStores to return (per page). The service
+          may return fewer FileSearchStores. If unspecified, at most 10 FileSearchStores will be returned.
+          The maximum size limit is 20 FileSearchStores per page.
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token, received from a previous ListFileSearchStores call. Provide
+          the next_page_token returned in the response as an argument to the next request to retrieve
+          the next page. When paginating, all other parameters provided to ListFileSearchStores must match
+          the call that provided the
+        optional: true
+    output:
+      description: The ListFileSearchStoresResponse resource.
+      type: object
+    read_only: true
+  get_file_search_stores_operation:
+    title: Get file search stores operation
+    description: Gets the latest state of a long-running operation. Clients can use this method to poll
+      the operation result at intervals as recommended by the API service.
+    category: file_search_stores
+    request:
+      method: GET
+      path: /v1beta/${name}
+    input:
+      name:
+        type: string
+        description: The name of the operation resource.
+    output:
+      description: The Operation resource.
+      type: object
+    read_only: true
+  get_upload_operation:
+    title: Get upload operation
+    description: Gets the latest state of a long-running operation. Clients can use this method to poll
+      the operation result at intervals as recommended by the API service.
+    category: file_search_stores
+    request:
+      method: GET
+      path: /v1beta/${name}
+    input:
+      name:
+        type: string
+        description: The name of the operation resource.
+    output:
+      description: The Operation resource.
+      type: object
+    read_only: true
+  delete_file:
+    title: Delete file
+    description: Deletes the File. Calls files.delete on the Gemini API.
+    category: files
+    request:
+      method: DELETE
+      path: /v1beta/${name}
+    input:
+      name:
+        type: string
+        description: 'Required. The name of the File to delete. Example: files/abc-123'
+    output:
+      description: The Empty resource.
+      type: object
+    destructive: true
+  get_file:
+    title: Get file
+    description: Gets the metadata for the given File. Calls files.get on the Gemini API.
+    category: files
+    request:
+      method: GET
+      path: /v1beta/${name}
+    input:
+      name:
+        type: string
+        description: 'Required. The name of the File to get. Example: files/abc-123'
+    output:
+      description: The File resource.
+      type: object
+    read_only: true
+  list_files:
+    title: List files
+    description: Lists the metadata for Files owned by the requesting project.
+    category: files
+    request:
+      method: GET
+      path: /v1beta/files
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      page_size:
+        type: integer
+        description: Optional. Maximum number of Files to return per page. If unspecified, defaults to
+          10. Maximum page_size is 100.
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token from a previous ListFiles call.
+        optional: true
+    output:
+      description: The ListFilesResponse resource.
+      type: object
+    read_only: true
+  register_file:
+    title: Register file
+    description: Registers a Google Cloud Storage files with FileService. The user is expected to provide
+      Google Cloud Storage URIs and will receive a File resource for each URI in return. Note that the
+      files are not copied, just registered with File API. If one file fails to register, the whole request
+      fails.
+    category: files
+    request:
+      method: POST
+      path: /v1beta/files:register
+      body:
+        uris: ${uris}
+    input:
+      uris:
+        type: array
+        items:
+          type: string
+        description: 'Required. The Google Cloud Storage URIs to register. Example: gs://bucket/object.'
+        optional: true
+    output:
+      description: The RegisterFilesResponse resource.
+      type: object
+  list_generated_files:
+    title: List generated files
+    description: Lists the generated files owned by the requesting project.
+    category: generated_files
+    request:
+      method: GET
+      path: /v1beta/generatedFiles
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      page_size:
+        type: integer
+        description: Optional. Maximum number of GeneratedFiles to return per page. If unspecified, defaults
+          to 10. Maximum page_size is 50.
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token from a previous ListGeneratedFiles call.
+        optional: true
+    output:
+      description: The ListGeneratedFilesResponse resource.
+      type: object
+    read_only: true
+  get_generated_files_operation:
+    title: Get generated files operation
+    description: Gets the latest state of a long-running operation. Clients can use this method to poll
+      the operation result at intervals as recommended by the API service.
+    category: generated_files
+    request:
+      method: GET
+      path: /v1beta/${name}
+    input:
+      name:
+        type: string
+        description: The name of the operation resource.
+    output:
+      description: The Operation resource.
+      type: object
+    read_only: true
+  upload_media:
+    title: Upload media
+    description: Creates a File. Calls media.upload on the Gemini API.
+    category: media
+    request:
+      method: POST
+      path: /v1beta/files
+      body:
+        file: ${file}
+    input:
+      file:
+        type: string
+        description: Optional. Metadata for the file to create.
+        optional: true
+    output:
+      description: The CreateFileResponse resource.
+      type: object
+  upload_to_file_search_store_media:
+    title: Upload to file search store media
+    description: Uploads data to a FileSearchStore, preprocesses and chunks before storing it in a FileSearchStore
+      Document.
+    category: media
+    request:
+      method: POST
+      path: /v1beta/${file_search_store_name}:uploadToFileSearchStore
+      body:
+        displayName: ${display_name}
+        mimeType: ${mime_type}
+        customMetadata: ${custom_metadata}
+        chunkingConfig: ${chunking_config}
+    input:
+      file_search_store_name:
+        type: string
+        description: 'Required. Immutable. The name of the FileSearchStore to upload the file into. Example:
+          fileSearchStores/my-file-search-store-123'
+      display_name:
+        type: string
+        description: Optional. Display name of the created document.
+        optional: true
+      mime_type:
+        type: string
+        description: Optional. MIME type of the data. If not provided, it will be inferred from the uploaded
+          content.
+        optional: true
+      custom_metadata:
+        type: array
+        items:
+          type: string
+        description: Custom metadata to be associated with the data.
+        optional: true
+      chunking_config:
+        type: string
+        description: Optional. Config for telling the service how to chunk the data. If not provided,
+          the service will use default parameters.
+        optional: true
+    output:
+      description: The CustomLongRunningOperation resource.
+      type: object
+  async_batch_embed_content_model:
+    title: Async batch embed content model
+    description: Enqueues a batch of EmbedContent requests for batch processing. We have a BatchEmbedContents
+      handler in GenerativeService, but it was synchronized. So we name this one to be Async to avoid
+      confusion.
+    category: models
+    request:
+      method: POST
+      path: /v1beta/${model}:asyncBatchEmbedContent
+      body:
+        batch: ${batch}
+    input:
+      model:
+        type: string
+        description: 'Required. The name of the Model to use for generating the completion. Format: models/{model}.'
+      batch:
+        type: string
+        description: Required. The batch to create.
+        optional: true
+    output:
+      description: The Operation resource.
+      type: object
+  batch_embed_contents_model:
+    title: Batch embed contents model
+    description: Generates multiple embedding vectors from the input Content which consists of a batch
+      of strings represented as EmbedContentRequest objects.
+    category: models
+    request:
+      method: POST
+      path: /v1beta/${model}:batchEmbedContents
+      body:
+        requests: ${requests}
+    input:
+      model:
+        type: string
+        description: 'Required. The model''s resource name. This serves as an ID for the Model to use.
+          This name should match a model name returned by the ListModels method. Format: models/{model}'
+      requests:
+        type: array
+        items:
+          type: string
+        description: Required. Embed requests for the batch. The model in each of these requests must
+          match the model specified BatchEmbedContentsRequest.model.
+        optional: true
+    output:
+      description: The BatchEmbedContentsResponse resource.
+      type: object
+  batch_embed_text_model:
+    title: Batch embed text model
+    description: Generates multiple embeddings from the model given input text in a synchronous call.
+    category: models
+    request:
+      method: POST
+      path: /v1beta/${model}:batchEmbedText
+      body:
+        requests: ${requests}
+        texts: ${texts}
+    input:
+      model:
+        type: string
+        description: 'Required. The name of the Model to use for generating the embedding. Examples: models/embedding-gecko-001'
+      requests:
+        type: array
+        items:
+          type: string
+        description: Optional. Embed requests for the batch. Only one of texts or requests can be set.
+        optional: true
+      texts:
+        type: array
+        items:
+          type: string
+        description: Optional. The free-form input texts that the model will turn into an embedding. The
+          current limit is 100 texts, over which an error will be thrown.
+        optional: true
+    output:
+      description: The BatchEmbedTextResponse resource.
+      type: object
+  batch_generate_content_model:
+    title: Batch generate content model
+    description: Enqueues a batch of GenerateContent requests for batch processing.
+    category: models
+    request:
+      method: POST
+      path: /v1beta/${model}:batchGenerateContent
+      body:
+        batch: ${batch}
+    input:
+      model:
+        type: string
+        description: 'Required. The name of the Model to use for generating the completion. Format: models/{model}.'
+      batch:
+        type: string
+        description: Required. The batch to create.
+        optional: true
+    output:
+      description: The Operation resource.
+      type: object
+  count_message_tokens_model:
+    title: Count message tokens model
+    description: Runs a model's tokenizer on a string and returns the token count.
+    category: models
+    request:
+      method: POST
+      path: /v1beta/${model}:countMessageTokens
+      body:
+        prompt: ${prompt}
+    input:
+      model:
+        type: string
+        description: 'Required. The model''s resource name. This serves as an ID for the Model to use.
+          This name should match a model name returned by the ListModels method. Format: models/{model}'
+      prompt:
+        type: string
+        description: Required. The prompt, whose token count is to be returned.
+        optional: true
+    output:
+      description: The CountMessageTokensResponse resource.
+      type: object
+  count_text_tokens_model:
+    title: Count text tokens model
+    description: Runs a model's tokenizer on a text and returns the token count.
+    category: models
+    request:
+      method: POST
+      path: /v1beta/${model}:countTextTokens
+      body:
+        prompt: ${prompt}
+    input:
+      model:
+        type: string
+        description: 'Required. The model''s resource name. This serves as an ID for the Model to use.
+          This name should match a model name returned by the ListModels method. Format: models/{model}'
+      prompt:
+        type: string
+        description: Required. The free-form input text given to the model as a prompt.
+        optional: true
+    output:
+      description: The CountTextTokensResponse resource.
+      type: object
+  count_tokens_model:
+    title: Count tokens model
+    description: Runs a model's tokenizer on input Content and returns the token count. Refer to the tokens
+      guide to learn more about tokens.
+    category: models
+    request:
+      method: POST
+      path: /v1beta/${model}:countTokens
+      body:
+        generateContentRequest: ${generate_content_request}
+        contents: ${contents}
+    input:
+      model:
+        type: string
+        description: 'Required. The model''s resource name. This serves as an ID for the Model to use.
+          This name should match a model name returned by the ListModels method. Format: models/{model}'
+      generate_content_request:
+        type: string
+        description: Optional. The overall input given to the Model. This includes the prompt as well
+          as other model steering information like system instructions, and/or function declarations for
+          function calling. Models/Contents and generate_content_requests are mutually exclusive. You
+          can either send Model + Contents
+        optional: true
+      contents:
+        type: array
+        items:
+          type: string
+        description: Optional. The input given to the model as a prompt. This field is ignored when generate_content_request
+          is set.
+        optional: true
+    output:
+      description: The CountTokensResponse resource.
+      type: object
+  embed_content_model:
+    title: Embed content model
+    description: Generates a text embedding vector from the input Content using the specified Gemini Embedding
+      model.
+    category: models
+    request:
+      method: POST
+      path: /v1beta/${model}:embedContent
+      body:
+        embedContentConfig: ${embed_content_config}
+        title: ${title}
+        model: ${body_model}
+        outputDimensionality: ${output_dimensionality}
+        content: ${content}
+        taskType: ${task_type}
+    input:
+      model:
+        type: string
+        description: 'Required. The model''s resource name. This serves as an ID for the Model to use.
+          This name should match a model name returned by the ListModels method. Format: models/{model}'
+      embed_content_config:
+        type: string
+        description: Optional. Configuration for the EmbedContent request.
+        optional: true
+      title:
+        type: string
+        description: 'Optional. Deprecated: Please use EmbedContentConfig.title instead. An optional title
+          for the text. Only applicable when TaskType is RETRIEVAL_DOCUMENT. Note: Specifying a title
+          for RETRIEVAL_DOCUMENT provides better quality embeddings for retrieval.'
+        optional: true
+      body_model:
+        type: string
+        description: 'Required. The model''s resource name. This serves as an ID for the Model to use.
+          This name should match a model name returned by the ListModels method. Format: models/{model}'
+        optional: true
+      output_dimensionality:
+        type: integer
+        description: 'Optional. Deprecated: Please use EmbedContentConfig.output_dimensionality instead.
+          Optional reduced dimension for the output embedding. If set, excessive values in the output
+          embedding are truncated from the end. Supported by newer models since 2024 only. You cannot
+          set this value if using the earli'
+        optional: true
+      content:
+        type: string
+        description: Required. The content to embed. Only the parts.text fields will be counted.
+        optional: true
+      task_type:
+        type: string
+        description: 'Optional. Deprecated: Please use EmbedContentConfig.task_type instead. Optional
+          task type for which the embeddings will be used. Not supported on earlier models (models/embedding-001).'
+        optional: true
+        enum:
+        - TASK_TYPE_UNSPECIFIED
+        - RETRIEVAL_QUERY
+        - RETRIEVAL_DOCUMENT
+        - SEMANTIC_SIMILARITY
+        - CLASSIFICATION
+        - CLUSTERING
+        - QUESTION_ANSWERING
+        - FACT_VERIFICATION
+        - CODE_RETRIEVAL_QUERY
+    output:
+      description: The EmbedContentResponse resource.
+      type: object
+  embed_text_model:
+    title: Embed text model
+    description: Generates an embedding from the model given an input message.
+    category: models
+    request:
+      method: POST
+      path: /v1beta/${model}:embedText
+      body:
+        model: ${body_model}
+        text: ${text}
+    input:
+      model:
+        type: string
+        description: Required. The model name to use with the format model=models/{model}.
+      body_model:
+        type: string
+        description: Required. The model name to use with the format model=models/{model}.
+        optional: true
+      text:
+        type: string
+        description: Optional. The free-form input text that the model will turn into an embedding.
+        optional: true
+    output:
+      description: The EmbedTextResponse resource.
+      type: object
+  generate_answer_model:
+    title: Generate answer model
+    description: Generates a grounded answer from the model given an input GenerateAnswerRequest.
+    category: models
+    request:
+      method: POST
+      path: /v1beta/${model}:generateAnswer
+      body:
+        semanticRetriever: ${semantic_retriever}
+        answerStyle: ${answer_style}
+        safetySettings: ${safety_settings}
+        inlinePassages: ${inline_passages}
+        contents: ${contents}
+        temperature: ${temperature}
+    input:
+      model:
+        type: string
+        description: 'Required. The name of the Model to use for generating the grounded response. Format:
+          model=models/{model}.'
+      semantic_retriever:
+        type: string
+        description: Content retrieved from resources created via the Semantic Retriever API.
+        optional: true
+      answer_style:
+        type: string
+        description: Required. Style in which answers should be returned.
+        optional: true
+        enum:
+        - ANSWER_STYLE_UNSPECIFIED
+        - ABSTRACTIVE
+        - EXTRACTIVE
+        - VERBOSE
+      safety_settings:
+        type: array
+        items:
+          type: string
+        description: Optional. A list of unique SafetySetting instances for blocking unsafe content. This
+          will be enforced on the GenerateAnswerRequest.contents and GenerateAnswerResponse.candidate.
+          There should not be more than one setting for each SafetyCategory type. The API will block any
+          contents and responses that
+        optional: true
+      inline_passages:
+        type: string
+        description: Passages provided inline with the request.
+        optional: true
+      contents:
+        type: array
+        items:
+          type: string
+        description: 'Required. The content of the current conversation with the Model. For single-turn
+          queries, this is a single question to answer. For multi-turn queries, this is a repeated field
+          that contains conversation history and the last Content in the list containing the question.
+          Note: GenerateAnswer only supp'
+        optional: true
+      temperature:
+        type: number
+        description: Optional. Controls the randomness of the output. Values can range from [0.0,1.0],
+          inclusive. A value closer to 1.0 will produce responses that are more varied and creative, while
+          a value closer to 0.0 will typically result in more straightforward responses from the model.
+          A low temperature (~0.2) is
+        optional: true
+    output:
+      description: The GenerateAnswerResponse resource.
+      type: object
+  generate_content_model:
+    title: Generate content model
+    description: Generates a model response given an input GenerateContentRequest. Refer to the text generation
+      guide for detailed usage information. Input capabilities differ between models, including tuned
+      models. Refer to the model guide and tuning guide for details.
+    category: models
+    request:
+      method: POST
+      path: /v1beta/${model}:generateContent
+      body:
+        toolConfig: ${tool_config}
+        contents: ${contents}
+        systemInstruction: ${system_instruction}
+        serviceTier: ${service_tier}
+        model: ${body_model}
+        tools: ${tools}
+        store: ${store}
+        generationConfig: ${generation_config}
+        safetySettings: ${safety_settings}
+        cachedContent: ${cached_content}
+    input:
+      model:
+        type: string
+        description: 'Required. The name of the Model to use for generating the completion. Format: models/{model}.'
+      tool_config:
+        type: string
+        description: Optional. Tool configuration for any Tool specified in the request. Refer to the
+          Function calling guide for a usage example.
+        optional: true
+      contents:
+        type: array
+        items:
+          type: string
+        description: Required. The content of the current conversation with the model. For single-turn
+          queries, this is a single instance. For multi-turn queries like chat, this is a repeated field
+          that contains the conversation history and the latest request.
+        optional: true
+      system_instruction:
+        type: string
+        description: Optional. Developer set system instruction(s). Currently, text only.
+        optional: true
+      service_tier:
+        type: string
+        description: Optional. The service tier of the request.
+        optional: true
+        enum:
+        - unspecified
+        - standard
+        - flex
+        - priority
+      body_model:
+        type: string
+        description: 'Required. The name of the Model to use for generating the completion. Format: models/{model}.'
+        optional: true
+      tools:
+        type: array
+        items:
+          type: string
+        description: Optional. A list of Tools the Model may use to generate the next response. A Tool
+          is a piece of code that enables the system to interact with external systems to perform an action,
+          or set of actions, outside of knowledge and scope of the Model. Supported Tools are Function
+          and code_execution. Refer
+        optional: true
+      store:
+        type: boolean
+        description: Optional. Configures the logging behavior for a given request. If set, it takes precedence
+          over the project-level logging config.
+        optional: true
+      generation_config:
+        type: string
+        description: Optional. Configuration options for model generation and outputs.
+        optional: true
+      safety_settings:
+        type: array
+        items:
+          type: string
+        description: Optional. A list of unique SafetySetting instances for blocking unsafe content. This
+          will be enforced on the GenerateContentRequest.contents and GenerateContentResponse.candidates.
+          There should not be more than one setting for each SafetyCategory type. The API will block any
+          contents and responses t
+        optional: true
+      cached_content:
+        type: string
+        description: 'Optional. The name of the content cached to use as context to serve the prediction.
+          Format: cachedContents/{cachedContent}'
+        optional: true
+    output:
+      description: The GenerateContentResponse resource.
+      type: object
+  generate_message_model:
+    title: Generate message model
+    description: Generates a response from the model given an input MessagePrompt.
+    category: models
+    request:
+      method: POST
+      path: /v1beta/${model}:generateMessage
+      body:
+        topK: ${top_k}
+        prompt: ${prompt}
+        temperature: ${temperature}
+        topP: ${top_p}
+        candidateCount: ${candidate_count}
+    input:
+      model:
+        type: string
+        description: 'Required. The name of the model to use. Format: name=models/{model}.'
+      top_k:
+        type: integer
+        description: Optional. The maximum number of tokens to consider when sampling. The model uses
+          combined Top-k and nucleus sampling. Top-k sampling considers the set of top_k most probable
+          tokens.
+        optional: true
+      prompt:
+        type: string
+        description: Required. The structured textual input given to the model as a prompt. Given a prompt,
+          the model will return what it predicts is the next message in the discussion.
+        optional: true
+      temperature:
+        type: number
+        description: Optional. Controls the randomness of the output. Values can range over [0.0,1.0],
+          inclusive. A value closer to 1.0 will produce responses that are more varied, while a value
+          closer to 0.0 will typically result in less surprising responses from the model.
+        optional: true
+      top_p:
+        type: number
+        description: Optional. The maximum cumulative probability of tokens to consider when sampling.
+          The model uses combined Top-k and nucleus sampling. Nucleus sampling considers the smallest
+          set of tokens whose probability sum is at least top_p.
+        optional: true
+      candidate_count:
+        type: integer
+        description: Optional. The number of generated response messages to return. This value must be
+          between [1, 8], inclusive. If unset, this will default to 1.
+        optional: true
+    output:
+      description: The GenerateMessageResponse resource.
+      type: object
+  generate_text_model:
+    title: Generate text model
+    description: Generates a response from the model given an input message.
+    category: models
+    request:
+      method: POST
+      path: /v1beta/${model}:generateText
+      body:
+        candidateCount: ${candidate_count}
+        maxOutputTokens: ${max_output_tokens}
+        prompt: ${prompt}
+        safetySettings: ${safety_settings}
+        topK: ${top_k}
+        temperature: ${temperature}
+        stopSequences: ${stop_sequences}
+        topP: ${top_p}
+    input:
+      model:
+        type: string
+        description: 'Required. The name of the Model or TunedModel to use for generating the completion.
+          Examples: models/text-bison-001 tunedModels/sentence-translator-u3b7m'
+      candidate_count:
+        type: integer
+        description: Optional. Number of generated responses to return. This value must be between [1,
+          8], inclusive. If unset, this will default to 1.
+        optional: true
+      max_output_tokens:
+        type: integer
+        description: Optional. The maximum number of tokens to include in a candidate. If unset, this
+          will default to output_token_limit specified in the Model specification.
+        optional: true
+      prompt:
+        type: string
+        description: Required. The free-form input text given to the model as a prompt. Given a prompt,
+          the model will generate a TextCompletion response it predicts as the completion of the input
+          text.
+        optional: true
+      safety_settings:
+        type: array
+        items:
+          type: string
+        description: Optional. A list of unique SafetySetting instances for blocking unsafe content. that
+          will be enforced on the GenerateTextRequest.prompt and GenerateTextResponse.candidates. There
+          should not be more than one setting for each SafetyCategory type. The API will block any prompts
+          and responses that fail
+        optional: true
+      top_k:
+        type: integer
+        description: 'Optional. The maximum number of tokens to consider when sampling. The model uses
+          combined Top-k and nucleus sampling. Top-k sampling considers the set of top_k most probable
+          tokens. Defaults to 40. Note: The default value varies by model, see the Model.top_k attribute
+          of the Model returned the getMo'
+        optional: true
+      temperature:
+        type: number
+        description: 'Optional. Controls the randomness of the output. Note: The default value varies
+          by model, see the Model.temperature attribute of the Model returned the getModel function. Values
+          can range from [0.0,1.0], inclusive. A value closer to 1.0 will produce responses that are more
+          varied and creative, while'
+        optional: true
+      stop_sequences:
+        type: array
+        items:
+          type: string
+        description: The set of character sequences (up to 5) that will stop output generation. If specified,
+          the API will stop at the first appearance of a stop sequence. The stop sequence will not be
+          included as part of the response.
+        optional: true
+      top_p:
+        type: number
+        description: Optional. The maximum cumulative probability of tokens to consider when sampling.
+          The model uses combined Top-k and nucleus sampling. Tokens are sorted based on their assigned
+          probabilities so that only the most likely tokens are considered. Top-k sampling directly limits
+          the maximum number of token
+        optional: true
+    output:
+      description: The GenerateTextResponse resource.
+      type: object
+  get_model:
+    title: Get model
+    description: Gets information about a specific Model such as its version number, token limits, parameters
+      and other metadata. Refer to the Gemini models guide for detailed model information.
+    category: models
+    request:
+      method: GET
+      path: /v1beta/${name}
+    input:
+      name:
+        type: string
+        description: 'Required. The resource name of the model. This name should match a model name returned
+          by the ListModels method. Format: models/{model}'
+    output:
+      description: The Model resource.
+      type: object
+    read_only: true
+  list_models:
+    title: List models
+    description: Lists the Models available through the Gemini API.
+    category: models
+    request:
+      method: GET
+      path: /v1beta/models
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      page_size:
+        type: integer
+        description: The maximum number of Models to return (per page). If unspecified, 50 models will
+          be returned per page. This method returns at most 1000 models per page, even if you pass a larger
+          page_size.
+        optional: true
+      page_token:
+        type: string
+        description: A page token, received from a previous ListModels call. Provide the page_token returned
+          by one request as an argument to the next request to retrieve the next page. When paginating,
+          all other parameters provided to ListModels must match the call that provided the page token.
+        optional: true
+    output:
+      description: The ListModelsResponse resource.
+      type: object
+    read_only: true
+  get_models_operation:
+    title: Get models operation
+    description: Gets the latest state of a long-running operation. Clients can use this method to poll
+      the operation result at intervals as recommended by the API service.
+    category: models
+    request:
+      method: GET
+      path: /v1beta/${name}
+    input:
+      name:
+        type: string
+        description: The name of the operation resource.
+    output:
+      description: The Operation resource.
+      type: object
+    read_only: true
+  list_operations:
+    title: List operations
+    description: Lists operations that match the specified filter in the request. If the server doesn't
+      support this method, it returns UNIMPLEMENTED.
+    category: models
+    request:
+      method: GET
+      path: /v1beta/${name}/operations
+      query:
+        filter: ${filter}
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+        returnPartialSuccess: ${return_partial_success}
+    input:
+      name:
+        type: string
+        description: The name of the operation's parent resource.
+      filter:
+        type: string
+        description: The standard list filter.
+        optional: true
+      page_size:
+        type: integer
+        description: The standard list page size.
+        optional: true
+      page_token:
+        type: string
+        description: The standard list page token.
+        optional: true
+      return_partial_success:
+        type: boolean
+        description: When set to true, operations that are reachable are returned as normal, and those
+          that are unreachable are returned in the ListOperationsResponse.unreachable field. This can
+          only be true when reading across collections. For example, when parent is set to "projects/example/locations/-".
+          This field is
+        optional: true
+    output:
+      description: The ListOperationsResponse resource.
+      type: object
+    read_only: true
+  predict_model:
+    title: Predict model
+    description: Performs a prediction request. Calls models.predict on the Gemini API.
+    category: models
+    request:
+      method: POST
+      path: /v1beta/${model}:predict
+      body:
+        instances: ${instances}
+        parameters: ${parameters}
+    input:
+      model:
+        type: string
+        description: 'Required. The name of the model for prediction. Format: name=models/{model}.'
+      instances:
+        type: array
+        items:
+          type: object
+        description: Required. The instances that are the input to the prediction call.
+        optional: true
+      parameters:
+        type: object
+        description: Optional. The parameters that govern the prediction call.
+        optional: true
+    output:
+      description: The PredictResponse resource.
+      type: object
+  predict_long_running_model:
+    title: Predict long running model
+    description: Same as Predict but returns an LRO. Calls models.predictLongRunning on the Gemini API.
+    category: models
+    request:
+      method: POST
+      path: /v1beta/${model}:predictLongRunning
+      body:
+        instances: ${instances}
+        parameters: ${parameters}
+    input:
+      model:
+        type: string
+        description: 'Required. The name of the model for prediction. Format: name=models/{model}.'
+      instances:
+        type: array
+        items:
+          type: object
+        description: Required. The instances that are the input to the prediction call.
+        optional: true
+      parameters:
+        type: object
+        description: Optional. The parameters that govern the prediction call.
+        optional: true
+    output:
+      description: The Operation resource.
+      type: object
+  stream_generate_content_model:
+    title: Stream generate content model
+    description: Generates a streamed response from the model given an input GenerateContentRequest.
+    category: models
+    request:
+      method: POST
+      path: /v1beta/${model}:streamGenerateContent
+      body:
+        toolConfig: ${tool_config}
+        contents: ${contents}
+        systemInstruction: ${system_instruction}
+        serviceTier: ${service_tier}
+        model: ${body_model}
+        tools: ${tools}
+        store: ${store}
+        generationConfig: ${generation_config}
+        safetySettings: ${safety_settings}
+        cachedContent: ${cached_content}
+    input:
+      model:
+        type: string
+        description: 'Required. The name of the Model to use for generating the completion. Format: models/{model}.'
+      tool_config:
+        type: string
+        description: Optional. Tool configuration for any Tool specified in the request. Refer to the
+          Function calling guide for a usage example.
+        optional: true
+      contents:
+        type: array
+        items:
+          type: string
+        description: Required. The content of the current conversation with the model. For single-turn
+          queries, this is a single instance. For multi-turn queries like chat, this is a repeated field
+          that contains the conversation history and the latest request.
+        optional: true
+      system_instruction:
+        type: string
+        description: Optional. Developer set system instruction(s). Currently, text only.
+        optional: true
+      service_tier:
+        type: string
+        description: Optional. The service tier of the request.
+        optional: true
+        enum:
+        - unspecified
+        - standard
+        - flex
+        - priority
+      body_model:
+        type: string
+        description: 'Required. The name of the Model to use for generating the completion. Format: models/{model}.'
+        optional: true
+      tools:
+        type: array
+        items:
+          type: string
+        description: Optional. A list of Tools the Model may use to generate the next response. A Tool
+          is a piece of code that enables the system to interact with external systems to perform an action,
+          or set of actions, outside of knowledge and scope of the Model. Supported Tools are Function
+          and code_execution. Refer
+        optional: true
+      store:
+        type: boolean
+        description: Optional. Configures the logging behavior for a given request. If set, it takes precedence
+          over the project-level logging config.
+        optional: true
+      generation_config:
+        type: string
+        description: Optional. Configuration options for model generation and outputs.
+        optional: true
+      safety_settings:
+        type: array
+        items:
+          type: string
+        description: Optional. A list of unique SafetySetting instances for blocking unsafe content. This
+          will be enforced on the GenerateContentRequest.contents and GenerateContentResponse.candidates.
+          There should not be more than one setting for each SafetyCategory type. The API will block any
+          contents and responses t
+        optional: true
+      cached_content:
+        type: string
+        description: 'Optional. The name of the content cached to use as context to serve the prediction.
+          Format: cachedContents/{cachedContent}'
+        optional: true
+    output:
+      description: The GenerateContentResponse resource.
+      type: object
+  async_batch_embed_content_tuned_model:
+    title: Async batch embed content tuned model
+    description: Enqueues a batch of EmbedContent requests for batch processing. We have a BatchEmbedContents
+      handler in GenerativeService, but it was synchronized. So we name this one to be Async to avoid
+      confusion.
+    category: tuned_models
+    request:
+      method: POST
+      path: /v1beta/${model}:asyncBatchEmbedContent
+      body:
+        batch: ${batch}
+    input:
+      model:
+        type: string
+        description: 'Required. The name of the Model to use for generating the completion. Format: models/{model}.'
+      batch:
+        type: string
+        description: Required. The batch to create.
+        optional: true
+    output:
+      description: The Operation resource.
+      type: object
+  batch_generate_content_tuned_model:
+    title: Batch generate content tuned model
+    description: Enqueues a batch of GenerateContent requests for batch processing.
+    category: tuned_models
+    request:
+      method: POST
+      path: /v1beta/${model}:batchGenerateContent
+      body:
+        batch: ${batch}
+    input:
+      model:
+        type: string
+        description: 'Required. The name of the Model to use for generating the completion. Format: models/{model}.'
+      batch:
+        type: string
+        description: Required. The batch to create.
+        optional: true
+    output:
+      description: The Operation resource.
+      type: object
+  create_tuned_model:
+    title: Create tuned model
+    description: 'Creates a tuned model. Check intermediate tuning progress (if any) through the [google.longrunning.Operations]
+      service. Access status and results through the Operations service. Example: GET /v1/tunedModels/az2mb0bpw6i/operations/000-111-222'
+    category: tuned_models
+    request:
+      method: POST
+      path: /v1beta/tunedModels
+      query:
+        tunedModelId: ${tuned_model_id}
+      body:
+        tuningTask: ${tuning_task}
+        description: ${description}
+        displayName: ${display_name}
+        topP: ${top_p}
+        readerProjectNumbers: ${reader_project_numbers}
+        topK: ${top_k}
+        temperature: ${temperature}
+        baseModel: ${base_model}
+        tunedModelSource: ${tuned_model_source}
+    input:
+      tuned_model_id:
+        type: string
+        description: 'Optional. The unique id for the tuned model if specified. This value should be up
+          to 40 characters, the first character must be a letter, the last could be a letter or a number.
+          The id must match the regular expression: [a-z]([a-z0-9-]{0,38}[a-z0-9])?.'
+        optional: true
+      tuning_task:
+        type: string
+        description: Required. The tuning task that creates the tuned model.
+        optional: true
+      description:
+        type: string
+        description: Optional. A short description of this model.
+        optional: true
+      display_name:
+        type: string
+        description: Optional. The name to display for this model in user interfaces. The display name
+          must be up to 40 characters including spaces.
+        optional: true
+      top_p:
+        type: number
+        description: Optional. For Nucleus sampling. Nucleus sampling considers the smallest set of tokens
+          whose probability sum is at least top_p. This value specifies default to be the one used by
+          the base model while creating the model.
+        optional: true
+      reader_project_numbers:
+        type: array
+        items:
+          type: string
+        description: Optional. List of project numbers that have read access to the tuned model.
+        optional: true
+      top_k:
+        type: integer
+        description: Optional. For Top-k sampling. Top-k sampling considers the set of top_k most probable
+          tokens. This value specifies default to be used by the backend while making the call to the
+          model. This value specifies default to be the one used by the base model while creating the
+          model.
+        optional: true
+      temperature:
+        type: number
+        description: Optional. Controls the randomness of the output. Values can range over [0.0,1.0],
+          inclusive. A value closer to 1.0 will produce responses that are more varied, while a value
+          closer to 0.0 will typically result in less surprising responses from the model. This value
+          specifies default to be the one us
+        optional: true
+      base_model:
+        type: string
+        description: 'Immutable. The name of the Model to tune. Example: models/gemini-1.5-flash-001'
+        optional: true
+      tuned_model_source:
+        type: string
+        description: Optional. TunedModel to use as the starting point for training the new model.
+        optional: true
+    output:
+      description: The Operation resource.
+      type: object
+  delete_tuned_model:
+    title: Delete tuned model
+    description: Deletes a tuned model. Calls tunedModels.delete on the Gemini API.
+    category: tuned_models
+    request:
+      method: DELETE
+      path: /v1beta/${name}
+    input:
+      name:
+        type: string
+        description: 'Required. The resource name of the model. Format: tunedModels/my-model-id'
+    output:
+      description: The Empty resource.
+      type: object
+    destructive: true
+  generate_content_tuned_model:
+    title: Generate content tuned model
+    description: Generates a model response given an input GenerateContentRequest. Refer to the text generation
+      guide for detailed usage information. Input capabilities differ between models, including tuned
+      models. Refer to the model guide and tuning guide for details.
+    category: tuned_models
+    request:
+      method: POST
+      path: /v1beta/${model}:generateContent
+      body:
+        toolConfig: ${tool_config}
+        contents: ${contents}
+        systemInstruction: ${system_instruction}
+        serviceTier: ${service_tier}
+        model: ${body_model}
+        tools: ${tools}
+        store: ${store}
+        generationConfig: ${generation_config}
+        safetySettings: ${safety_settings}
+        cachedContent: ${cached_content}
+    input:
+      model:
+        type: string
+        description: 'Required. The name of the Model to use for generating the completion. Format: models/{model}.'
+      tool_config:
+        type: string
+        description: Optional. Tool configuration for any Tool specified in the request. Refer to the
+          Function calling guide for a usage example.
+        optional: true
+      contents:
+        type: array
+        items:
+          type: string
+        description: Required. The content of the current conversation with the model. For single-turn
+          queries, this is a single instance. For multi-turn queries like chat, this is a repeated field
+          that contains the conversation history and the latest request.
+        optional: true
+      system_instruction:
+        type: string
+        description: Optional. Developer set system instruction(s). Currently, text only.
+        optional: true
+      service_tier:
+        type: string
+        description: Optional. The service tier of the request.
+        optional: true
+        enum:
+        - unspecified
+        - standard
+        - flex
+        - priority
+      body_model:
+        type: string
+        description: 'Required. The name of the Model to use for generating the completion. Format: models/{model}.'
+        optional: true
+      tools:
+        type: array
+        items:
+          type: string
+        description: Optional. A list of Tools the Model may use to generate the next response. A Tool
+          is a piece of code that enables the system to interact with external systems to perform an action,
+          or set of actions, outside of knowledge and scope of the Model. Supported Tools are Function
+          and code_execution. Refer
+        optional: true
+      store:
+        type: boolean
+        description: Optional. Configures the logging behavior for a given request. If set, it takes precedence
+          over the project-level logging config.
+        optional: true
+      generation_config:
+        type: string
+        description: Optional. Configuration options for model generation and outputs.
+        optional: true
+      safety_settings:
+        type: array
+        items:
+          type: string
+        description: Optional. A list of unique SafetySetting instances for blocking unsafe content. This
+          will be enforced on the GenerateContentRequest.contents and GenerateContentResponse.candidates.
+          There should not be more than one setting for each SafetyCategory type. The API will block any
+          contents and responses t
+        optional: true
+      cached_content:
+        type: string
+        description: 'Optional. The name of the content cached to use as context to serve the prediction.
+          Format: cachedContents/{cachedContent}'
+        optional: true
+    output:
+      description: The GenerateContentResponse resource.
+      type: object
+  generate_text_tuned_model:
+    title: Generate text tuned model
+    description: Generates a response from the model given an input message.
+    category: tuned_models
+    request:
+      method: POST
+      path: /v1beta/${model}:generateText
+      body:
+        candidateCount: ${candidate_count}
+        maxOutputTokens: ${max_output_tokens}
+        prompt: ${prompt}
+        safetySettings: ${safety_settings}
+        topK: ${top_k}
+        temperature: ${temperature}
+        stopSequences: ${stop_sequences}
+        topP: ${top_p}
+    input:
+      model:
+        type: string
+        description: 'Required. The name of the Model or TunedModel to use for generating the completion.
+          Examples: models/text-bison-001 tunedModels/sentence-translator-u3b7m'
+      candidate_count:
+        type: integer
+        description: Optional. Number of generated responses to return. This value must be between [1,
+          8], inclusive. If unset, this will default to 1.
+        optional: true
+      max_output_tokens:
+        type: integer
+        description: Optional. The maximum number of tokens to include in a candidate. If unset, this
+          will default to output_token_limit specified in the Model specification.
+        optional: true
+      prompt:
+        type: string
+        description: Required. The free-form input text given to the model as a prompt. Given a prompt,
+          the model will generate a TextCompletion response it predicts as the completion of the input
+          text.
+        optional: true
+      safety_settings:
+        type: array
+        items:
+          type: string
+        description: Optional. A list of unique SafetySetting instances for blocking unsafe content. that
+          will be enforced on the GenerateTextRequest.prompt and GenerateTextResponse.candidates. There
+          should not be more than one setting for each SafetyCategory type. The API will block any prompts
+          and responses that fail
+        optional: true
+      top_k:
+        type: integer
+        description: 'Optional. The maximum number of tokens to consider when sampling. The model uses
+          combined Top-k and nucleus sampling. Top-k sampling considers the set of top_k most probable
+          tokens. Defaults to 40. Note: The default value varies by model, see the Model.top_k attribute
+          of the Model returned the getMo'
+        optional: true
+      temperature:
+        type: number
+        description: 'Optional. Controls the randomness of the output. Note: The default value varies
+          by model, see the Model.temperature attribute of the Model returned the getModel function. Values
+          can range from [0.0,1.0], inclusive. A value closer to 1.0 will produce responses that are more
+          varied and creative, while'
+        optional: true
+      stop_sequences:
+        type: array
+        items:
+          type: string
+        description: The set of character sequences (up to 5) that will stop output generation. If specified,
+          the API will stop at the first appearance of a stop sequence. The stop sequence will not be
+          included as part of the response.
+        optional: true
+      top_p:
+        type: number
+        description: Optional. The maximum cumulative probability of tokens to consider when sampling.
+          The model uses combined Top-k and nucleus sampling. Tokens are sorted based on their assigned
+          probabilities so that only the most likely tokens are considered. Top-k sampling directly limits
+          the maximum number of token
+        optional: true
+    output:
+      description: The GenerateTextResponse resource.
+      type: object
+  get_tuned_model:
+    title: Get tuned model
+    description: Gets information about a specific TunedModel.
+    category: tuned_models
+    request:
+      method: GET
+      path: /v1beta/${name}
+    input:
+      name:
+        type: string
+        description: 'Required. The resource name of the model. Format: tunedModels/my-model-id'
+    output:
+      description: The TunedModel resource.
+      type: object
+    read_only: true
+  list_tuned_models:
+    title: List tuned models
+    description: Lists created tuned models. Calls tunedModels.list on the Gemini API.
+    category: tuned_models
+    request:
+      method: GET
+      path: /v1beta/tunedModels
+      query:
+        filter: ${filter}
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      filter:
+        type: string
+        description: 'Optional. A filter is a full text search over the tuned model''s description and
+          display name. By default, results will not include tuned models shared with everyone. Additional
+          operators: - owner:me - writers:me - readers:me - readers:everyone Examples: "owner:me" returns
+          all tuned models to which c'
+        optional: true
+      page_size:
+        type: integer
+        description: Optional. The maximum number of TunedModels to return (per page). The service may
+          return fewer tuned models. If unspecified, at most 10 tuned models will be returned. This method
+          returns at most 1000 models per page, even if you pass a larger page_size.
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token, received from a previous ListTunedModels call. Provide the
+          page_token returned by one request as an argument to the next request to retrieve the next page.
+          When paginating, all other parameters provided to ListTunedModels must match the call that provided
+          the page token.
+        optional: true
+    output:
+      description: The ListTunedModelsResponse resource.
+      type: object
+    read_only: true
+  get_tuned_models_operation:
+    title: Get tuned models operation
+    description: Gets the latest state of a long-running operation. Clients can use this method to poll
+      the operation result at intervals as recommended by the API service.
+    category: tuned_models
+    request:
+      method: GET
+      path: /v1beta/${name}
+    input:
+      name:
+        type: string
+        description: The name of the operation resource.
+    output:
+      description: The Operation resource.
+      type: object
+    read_only: true
+  list_tuned_models_operations:
+    title: List tuned models operations
+    description: Lists operations that match the specified filter in the request. If the server doesn't
+      support this method, it returns UNIMPLEMENTED.
+    category: tuned_models
+    request:
+      method: GET
+      path: /v1beta/${name}/operations
+      query:
+        filter: ${filter}
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+        returnPartialSuccess: ${return_partial_success}
+    input:
+      name:
+        type: string
+        description: The name of the operation's parent resource.
+      filter:
+        type: string
+        description: The standard list filter.
+        optional: true
+      page_size:
+        type: integer
+        description: The standard list page size.
+        optional: true
+      page_token:
+        type: string
+        description: The standard list page token.
+        optional: true
+      return_partial_success:
+        type: boolean
+        description: When set to true, operations that are reachable are returned as normal, and those
+          that are unreachable are returned in the ListOperationsResponse.unreachable field. This can
+          only be true when reading across collections. For example, when parent is set to "projects/example/locations/-".
+          This field is
+        optional: true
+    output:
+      description: The ListOperationsResponse resource.
+      type: object
+    read_only: true
+  update_tuned_model:
+    title: Update tuned model
+    description: Updates a tuned model. Calls tunedModels.patch on the Gemini API.
+    category: tuned_models
+    request:
+      method: PATCH
+      path: /v1beta/${name}
+      query:
+        updateMask: ${update_mask}
+      body:
+        tuningTask: ${tuning_task}
+        description: ${description}
+        displayName: ${display_name}
+        topP: ${top_p}
+        readerProjectNumbers: ${reader_project_numbers}
+        topK: ${top_k}
+        temperature: ${temperature}
+        baseModel: ${base_model}
+        tunedModelSource: ${tuned_model_source}
+    input:
+      name:
+        type: string
+        description: 'Output only. The tuned model name. A unique name will be generated on create. Example:
+          tunedModels/az2mb0bpw6i If display_name is set on create, the id portion of the name will be
+          set by concatenating the words of the display_name with hyphens and adding a random portion
+          for uniqueness. Example: * d'
+      update_mask:
+        type: string
+        description: Optional. The list of fields to update.
+        optional: true
+      tuning_task:
+        type: string
+        description: Required. The tuning task that creates the tuned model.
+        optional: true
+      description:
+        type: string
+        description: Optional. A short description of this model.
+        optional: true
+      display_name:
+        type: string
+        description: Optional. The name to display for this model in user interfaces. The display name
+          must be up to 40 characters including spaces.
+        optional: true
+      top_p:
+        type: number
+        description: Optional. For Nucleus sampling. Nucleus sampling considers the smallest set of tokens
+          whose probability sum is at least top_p. This value specifies default to be the one used by
+          the base model while creating the model.
+        optional: true
+      reader_project_numbers:
+        type: array
+        items:
+          type: string
+        description: Optional. List of project numbers that have read access to the tuned model.
+        optional: true
+      top_k:
+        type: integer
+        description: Optional. For Top-k sampling. Top-k sampling considers the set of top_k most probable
+          tokens. This value specifies default to be used by the backend while making the call to the
+          model. This value specifies default to be the one used by the base model while creating the
+          model.
+        optional: true
+      temperature:
+        type: number
+        description: Optional. Controls the randomness of the output. Values can range over [0.0,1.0],
+          inclusive. A value closer to 1.0 will produce responses that are more varied, while a value
+          closer to 0.0 will typically result in less surprising responses from the model. This value
+          specifies default to be the one us
+        optional: true
+      base_model:
+        type: string
+        description: 'Immutable. The name of the Model to tune. Example: models/gemini-1.5-flash-001'
+        optional: true
+      tuned_model_source:
+        type: string
+        description: Optional. TunedModel to use as the starting point for training the new model.
+        optional: true
+    output:
+      description: The TunedModel resource.
+      type: object
+  create_tuned_models_permission:
+    title: Create tuned models permission
+    description: Create a permission to a specific resource.
+    category: tuned_models
+    request:
+      method: POST
+      path: /v1beta/${parent}/permissions
+      body:
+        emailAddress: ${email_address}
+        granteeType: ${grantee_type}
+        role: ${role}
+    input:
+      parent:
+        type: string
+        description: 'Required. The parent resource of the Permission. Formats: tunedModels/{tuned_model}
+          corpora/{corpus}'
+      email_address:
+        type: string
+        description: Optional. Immutable. The email address of the user of group which this permission
+          refers. Field is not set when permission's grantee type is EVERYONE.
+        optional: true
+      grantee_type:
+        type: string
+        description: Optional. Immutable. The type of the grantee.
+        optional: true
+        enum:
+        - GRANTEE_TYPE_UNSPECIFIED
+        - USER
+        - GROUP
+        - EVERYONE
+      role:
+        type: string
+        description: Required. The role granted by this permission.
+        optional: true
+        enum:
+        - ROLE_UNSPECIFIED
+        - OWNER
+        - WRITER
+        - READER
+    output:
+      description: The Permission resource.
+      type: object
+  delete_tuned_models_permission:
+    title: Delete tuned models permission
+    description: Deletes the permission. Calls tunedModels.permissions.delete on the Gemini API.
+    category: tuned_models
+    request:
+      method: DELETE
+      path: /v1beta/${name}
+    input:
+      name:
+        type: string
+        description: 'Required. The resource name of the permission. Formats: tunedModels/{tuned_model}/permissions/{permission}
+          corpora/{corpus}/permissions/{permission}'
+    output:
+      description: The Empty resource.
+      type: object
+    destructive: true
+  get_tuned_models_permission:
+    title: Get tuned models permission
+    description: Gets information about a specific Permission.
+    category: tuned_models
+    request:
+      method: GET
+      path: /v1beta/${name}
+    input:
+      name:
+        type: string
+        description: 'Required. The resource name of the permission. Formats: tunedModels/{tuned_model}/permissions/{permission}
+          corpora/{corpus}/permissions/{permission}'
+    output:
+      description: The Permission resource.
+      type: object
+    read_only: true
+  list_tuned_models_permissions:
+    title: List tuned models permissions
+    description: Lists permissions for the specific resource.
+    category: tuned_models
+    request:
+      method: GET
+      path: /v1beta/${parent}/permissions
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      parent:
+        type: string
+        description: 'Required. The parent resource of the permissions. Formats: tunedModels/{tuned_model}
+          corpora/{corpus}'
+      page_size:
+        type: integer
+        description: Optional. The maximum number of Permissions to return (per page). The service may
+          return fewer permissions. If unspecified, at most 10 permissions will be returned. This method
+          returns at most 1000 permissions per page, even if you pass larger page_size.
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token, received from a previous ListPermissions call. Provide the
+          page_token returned by one request as an argument to the next request to retrieve the next page.
+          When paginating, all other parameters provided to ListPermissions must match the call that provided
+          the page token.
+        optional: true
+    output:
+      description: The ListPermissionsResponse resource.
+      type: object
+    read_only: true
+  update_tuned_models_permission:
+    title: Update tuned models permission
+    description: Updates the permission. Calls tunedModels.permissions.patch on the Gemini API.
+    category: tuned_models
+    request:
+      method: PATCH
+      path: /v1beta/${name}
+      query:
+        updateMask: ${update_mask}
+      body:
+        emailAddress: ${email_address}
+        granteeType: ${grantee_type}
+        role: ${role}
+    input:
+      name:
+        type: string
+        description: 'Output only. Identifier. The permission name. A unique name will be generated on
+          create. Examples: tunedModels/{tuned_model}/permissions/{permission} corpora/{corpus}/permissions/{permission}
+          Output only.'
+      update_mask:
+        type: string
+        description: 'Required. The list of fields to update. Accepted ones: - role (Permission.role field)'
+        optional: true
+      email_address:
+        type: string
+        description: Optional. Immutable. The email address of the user of group which this permission
+          refers. Field is not set when permission's grantee type is EVERYONE.
+        optional: true
+      grantee_type:
+        type: string
+        description: Optional. Immutable. The type of the grantee.
+        optional: true
+        enum:
+        - GRANTEE_TYPE_UNSPECIFIED
+        - USER
+        - GROUP
+        - EVERYONE
+      role:
+        type: string
+        description: Required. The role granted by this permission.
+        optional: true
+        enum:
+        - ROLE_UNSPECIFIED
+        - OWNER
+        - WRITER
+        - READER
+    output:
+      description: The Permission resource.
+      type: object
+  stream_generate_content_tuned_model:
+    title: Stream generate content tuned model
+    description: Generates a streamed response from the model given an input GenerateContentRequest.
+    category: tuned_models
+    request:
+      method: POST
+      path: /v1beta/${model}:streamGenerateContent
+      body:
+        toolConfig: ${tool_config}
+        contents: ${contents}
+        systemInstruction: ${system_instruction}
+        serviceTier: ${service_tier}
+        model: ${body_model}
+        tools: ${tools}
+        store: ${store}
+        generationConfig: ${generation_config}
+        safetySettings: ${safety_settings}
+        cachedContent: ${cached_content}
+    input:
+      model:
+        type: string
+        description: 'Required. The name of the Model to use for generating the completion. Format: models/{model}.'
+      tool_config:
+        type: string
+        description: Optional. Tool configuration for any Tool specified in the request. Refer to the
+          Function calling guide for a usage example.
+        optional: true
+      contents:
+        type: array
+        items:
+          type: string
+        description: Required. The content of the current conversation with the model. For single-turn
+          queries, this is a single instance. For multi-turn queries like chat, this is a repeated field
+          that contains the conversation history and the latest request.
+        optional: true
+      system_instruction:
+        type: string
+        description: Optional. Developer set system instruction(s). Currently, text only.
+        optional: true
+      service_tier:
+        type: string
+        description: Optional. The service tier of the request.
+        optional: true
+        enum:
+        - unspecified
+        - standard
+        - flex
+        - priority
+      body_model:
+        type: string
+        description: 'Required. The name of the Model to use for generating the completion. Format: models/{model}.'
+        optional: true
+      tools:
+        type: array
+        items:
+          type: string
+        description: Optional. A list of Tools the Model may use to generate the next response. A Tool
+          is a piece of code that enables the system to interact with external systems to perform an action,
+          or set of actions, outside of knowledge and scope of the Model. Supported Tools are Function
+          and code_execution. Refer
+        optional: true
+      store:
+        type: boolean
+        description: Optional. Configures the logging behavior for a given request. If set, it takes precedence
+          over the project-level logging config.
+        optional: true
+      generation_config:
+        type: string
+        description: Optional. Configuration options for model generation and outputs.
+        optional: true
+      safety_settings:
+        type: array
+        items:
+          type: string
+        description: Optional. A list of unique SafetySetting instances for blocking unsafe content. This
+          will be enforced on the GenerateContentRequest.contents and GenerateContentResponse.candidates.
+          There should not be more than one setting for each SafetyCategory type. The API will block any
+          contents and responses t
+        optional: true
+      cached_content:
+        type: string
+        description: 'Optional. The name of the content cached to use as context to serve the prediction.
+          Format: cachedContents/{cachedContent}'
+        optional: true
+    output:
+      description: The GenerateContentResponse resource.
+      type: object
+  transfer_ownership_tuned_model:
+    title: Transfer ownership tuned model
+    description: Transfers ownership of the tuned model. This is the only way to change ownership of the
+      tuned model. The current owner will be downgraded to writer role.
+    category: tuned_models
+    request:
+      method: POST
+      path: /v1beta/${name}:transferOwnership
+      body:
+        emailAddress: ${email_address}
+    input:
+      name:
+        type: string
+        description: 'Required. The resource name of the tuned model to transfer ownership. Format: tunedModels/my-model-id'
+      email_address:
+        type: string
+        description: Required. The email address of the user to whom the tuned model is being transferred
+          to.
+        optional: true
+    output:
+      description: The TransferOwnershipResponse resource.
+      type: object

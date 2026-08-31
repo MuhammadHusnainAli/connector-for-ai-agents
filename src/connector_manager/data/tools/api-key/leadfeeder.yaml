@@ -1,0 +1,335 @@
+# Leadfeeder tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://api.leadfeeder.com/openapi.yaml
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: leadfeeder
+display_name: Leadfeeder
+docs_url: https://docs.leadfeeder.com/api/public
+generated: true
+generated_from: https://api.leadfeeder.com/openapi.yaml
+tools:
+  get_account_info:
+    title: List Accounts
+    description: 'List Accounts Retrieves a list of Leadfeeder accounts associated with this API key.
+      When listing all accounts, only the account names are returned. Detailed credit information is accessible
+      only when querying a specific account. :::info Requires the accounts:read OAuth2 scope. ::: Calls
+      GET /v1/accounts on the provider''s API.'
+    category: accounts
+    request:
+      method: GET
+      path: /v1/accounts
+      query:
+        account_id: ${account_id}
+        include: ${include}
+    input:
+      account_id:
+        type: string
+        description: The Leadfeeder Account ID. When provided, the response returns a single account including
+          credit details. If omitted, it returns a list of all accessible accounts without credit information.
+          The Account ID can be retrieved using the List Accounts endpoint.
+        optional: true
+      include:
+        type: string
+        description: Specify which additional data should be attached to the result. When accountcompany
+          is included, the company attributes are inlined in the relationships.accountcompany field. Otherwise
+          only id and type are returned.
+        optional: true
+        enum:
+        - account_company
+    output:
+      description: Success
+      type: object
+    read_only: true
+  get_buyer_personas:
+    title: Retrieve Buyer Personas
+    description: 'Retrieve Buyer Personas Retrieve all buyer personas defined in the account. Each buyer
+      persona is a saved set of contact-level filter criteria (department, job title, location, seniority)
+      used to identify target contacts. Credit Note: Retrieving buyer persona definitions does not consume
+      credits. :::info Requires the buyer Calls GET /v1/buyer-personas on the provider''s API.'
+    category: buyer_personas
+    request:
+      method: GET
+      path: /v1/buyer-personas
+      query:
+        account_id: ${account_id}
+    input:
+      account_id:
+        type: string
+        description: The Leadfeeder Account ID. The Account ID can be retrieved using the List Accounts
+          endpoint.
+    output:
+      description: Success
+      type: object
+    read_only: true
+  create_buyer_persona:
+    title: Create a Buyer Persona
+    description: 'Create a Buyer Persona Create a new buyer persona in the account. Credit Note: Creating
+      a buyer persona does not consume credits. :::info Requires the buyerpersonas:write OAuth2 scope.
+      ::: Calls POST /v1/buyer-personas on the provider''s API.'
+    category: buyer_personas
+    request:
+      method: POST
+      path: /v1/buyer-personas
+      query:
+        account_id: ${account_id}
+      body:
+        type: ${type}
+        attributes: ${attributes}
+    input:
+      account_id:
+        type: string
+        description: The Leadfeeder Account ID. The Account ID can be retrieved using the List Accounts
+          endpoint.
+      type:
+        type: string
+        description: The type of the object
+      attributes:
+        type: object
+        description: The attributes field of the request body.
+    output:
+      description: Success
+      type: object
+  get_campaigns:
+    title: Retrieve Campaigns
+    description: 'Retrieve Campaigns Retrieve the list of all campaigns available in the account. Use
+      pagination to control the number of campaigns returned, and include related campaign data, campaign
+      settings, list, or custom feed information when needed. :::info Requires the campaigns:read OAuth2
+      scope. ::: Calls GET /v1/campaigns on the provider''s API.'
+    category: campaigns
+    request:
+      method: GET
+      path: /v1/campaigns
+      query:
+        account_id: ${account_id}
+        page[num]: ${page_num}
+        page[size]: ${page_size}
+        include: ${include}
+    input:
+      account_id:
+        type: string
+        description: The Leadfeeder Account ID. The Account ID can be retrieved using the List Accounts
+          endpoint.
+      page_num:
+        type: integer
+        description: Page of results to fetch.
+        optional: true
+      page_size:
+        type: integer
+        description: The number of items per page. Maximum is 100.
+        optional: true
+        default: 20
+      include:
+        type: string
+        description: 'Comma-separated list of related resources to inline inside each campaign''s relationships
+          block. Unknown values are silently ignored. Supported values: - campaignsummary — aggregated
+          lifetime campaign performance metrics (impressions, clicks, costs, reach, …). - campaignsettings
+          — campaign-level configuration toggles such as brand safety domain exclusion and auto-include
+          behaviour. - campaignlocati'
+        optional: true
+    output:
+      description: Success
+      type: object
+    read_only: true
+  get_companies:
+    title: Retrieve Companies
+    description: 'Retrieve Companies Retrieve the list of companies based on provided IDs. Credit Note:
+      Each company will contain it''s full deep data and it will consumes 1 credit, unless the company
+      was already accessed within the last 12 months. :::info Requires the companies:read OAuth2 scope.
+      ::: Calls GET /v1/companies on the provider''s API.'
+    category: companies
+    request:
+      method: GET
+      path: /v1/companies
+      query:
+        ids: ${ids}
+        account_id: ${account_id}
+        include: ${include}
+    input:
+      ids:
+        type: string
+        description: Comma separated list of company IDs. A maximum of 100 IDs can be passed to this endpoint.
+          Note that the older string-based ID format continues to be supported.
+      account_id:
+        type: string
+        description: The Leadfeeder Account ID. The Account ID can be retrieved using the List Accounts
+          endpoint.
+      include:
+        type: string
+        description: Specify which additional data should be attached to the result.
+        optional: true
+        enum:
+        - group_company
+        - tags
+        - lists
+        - web_visits
+        - icps
+        - crm_connections
+        - crm_connections.crm_record
+        - crm_connections.crm_record.crm_owner
+        - crm_suggestions
+        - crm_suggestions.crm_record
+        - crm_suggestions.crm_record.crm_owner
+        - crm_group_connections
+        - crm_group_connections.crm_connection
+        - crm_group_connections.crm_connection.crm_record
+        - crm_group_connections.crm_connection.crm_record.crm_owner
+    output:
+      description: Success
+      type: object
+    read_only: true
+  get_contacts:
+    title: Retrieve Contacts
+    description: 'Retrieve Contacts Retrieve a list of contacts based on the provided IDs. Credit Note:
+      Each contact will contain its full deep data and it will consume 1 credit, unless the contact has
+      already been accessed within the last 12 months. :::info Requires the contacts:read OAuth2 scope.
+      ::: Calls GET /v1/contacts on the provider''s API.'
+    category: contacts
+    request:
+      method: GET
+      path: /v1/contacts
+      query:
+        ids: ${ids}
+        account_id: ${account_id}
+        include: ${include}
+    input:
+      ids:
+        type: string
+        description: Comma separated list of contact IDs. A maximum of 100 IDs can be passed to this endpoint.
+          Note that the older string-based ID format continues to be supported.
+      account_id:
+        type: string
+        description: The Leadfeeder Account ID. The Account ID can be retrieved using the List Accounts
+          endpoint.
+      include:
+        type: string
+        description: Specify which additional data should be attached to the result.
+        optional: true
+        enum:
+        - company
+        - lists
+        - buyer_personas
+        - crm_connections
+        - crm_connections.crm_record
+        - crm_connections.crm_record.crm_owner
+        - crm_suggestions
+        - crm_suggestions.crm_record
+        - crm_suggestions.crm_record.crm_owner
+    output:
+      description: Returns the contact details for the specified IDs. If include=company is supplied,
+        the responses include the company details. If no contact is found for a certain ID, the data field
+        will not contain an entry for that ID.
+      type: object
+    read_only: true
+  get_custom_fields:
+    title: Retrieve Custom Fields
+    description: 'Retrieve Custom Fields Retrieve the list of all custom field definitions available in
+      the account. The response includes each field''s attributes. Credit Note: Retrieving custom field
+      definitions does not consume credits. :::info Requires the customfields:read OAuth2 scope. ::: Calls
+      GET /v1/custom-fields on the provider''s API.'
+    category: custom_fields
+    request:
+      method: GET
+      path: /v1/custom-fields
+      query:
+        account_id: ${account_id}
+        page[num]: ${page_num}
+        page[size]: ${page_size}
+        filter[scope]: ${filter_scope}
+        filter[type]: ${filter_type}
+    input:
+      account_id:
+        type: string
+        description: The Leadfeeder Account ID. The Account ID can be retrieved using the List Accounts
+          endpoint.
+      page_num:
+        type: integer
+        description: Page of results to fetch.
+        optional: true
+      page_size:
+        type: integer
+        description: The number of items per page. Maximum is 100.
+        optional: true
+        default: 20
+      filter_scope:
+        type: string
+        description: Filter by entities that apply to either company or contact. If omitted, returns both
+          kinds of entities.
+        optional: true
+        enum:
+        - company
+        - contact
+      filter_type:
+        type: string
+        description: Filter by field type. If omitted, returns all field types.
+        optional: true
+        enum:
+        - text
+        - number
+        - boolean
+        - date
+        - contact_collection
+        - ai_score
+        - ai_text
+        - ai_number
+        - ai_boolean
+    output:
+      description: Success
+      type: object
+    read_only: true
+  create_custom_field:
+    title: Create Custom Field
+    description: 'Create Custom Field Create a new custom field in the account. :::info Requires the customfields:write
+      OAuth2 scope. ::: Calls POST /v1/custom-fields on the provider''s API.'
+    category: custom_fields
+    request:
+      method: POST
+      path: /v1/custom-fields
+      query:
+        account_id: ${account_id}
+      body:
+        type: ${type}
+        attributes: ${attributes}
+    input:
+      account_id:
+        type: string
+        description: The Leadfeeder Account ID. The Account ID can be retrieved using the List Accounts
+          endpoint.
+      type:
+        type: string
+        description: The type field of the request body.
+      attributes:
+        type: object
+        description: The attributes field of the request body.
+    output:
+      description: Success
+      type: object
+  get_icps:
+    title: Retrieve Ideal Customer Profiles
+    description: 'Retrieve Ideal Customer Profiles Retrieve all Ideal Customer Profiles (ICPs) defined
+      in the account. Each ICP is a saved set of company-level filter criteria (employee count, industry,
+      location) used to identify target companies. Credit Note: Retrieving ICP definitions does not consume
+      credits. :::info Requires the icps:read OAuth2 Calls GET /v1/icps on the provider''s API.'
+    category: icps
+    request:
+      method: GET
+      path: /v1/icps
+      query:
+        account_id: ${account_id}
+    input:
+      account_id:
+        type: string
+        description: The Leadfeeder Account ID. The Account ID can be retrieved using the List Accounts
+          endpoint.
+    output:
+      description: Success
+      type: object
+    read_only: true

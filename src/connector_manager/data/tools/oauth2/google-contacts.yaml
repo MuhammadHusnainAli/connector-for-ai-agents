@@ -1,0 +1,1093 @@
+# Google Contacts tools (People API).
+#
+# Resource names look like "people/c12345"; that whole string is the id. Reads
+# must name the fields they want through person_fields, and updates must repeat
+# them in update_person_fields or the API refuses.
+#
+# Docs: https://developers.google.com/people/api/rest
+#
+# The tools below the "rest of the API" divider come from Google's own
+# discovery document for this API -- the machine readable contract its client
+# libraries are generated from -- so their paths, parameters and per-tool OAuth
+# scopes are Google's. The hand-authored tools above it are kept because they
+# offer a friendlier shape for the common cases.
+#
+connector_id: google-contacts
+display_name: Google Contacts
+docs_url: https://developers.google.com/people/api/rest
+
+scope_rules:
+  strip_prefixes:
+    - https://www.googleapis.com/auth/
+  implies:
+    contacts: [contacts.readonly, contacts.other.readonly]
+    directory.readonly: [contacts.readonly]
+
+scope_discovery:
+  method: GET
+  base_url_override: https://oauth2.googleapis.com
+  endpoint: /tokeninfo
+  query:
+    access_token: ${credentials.access_token}
+  scopes_path: scope
+
+tools:
+
+  list_contacts:
+    title: List contacts
+    description: >-
+      Page through the user's contacts. person_fields decides what comes back —
+      without it the API returns almost nothing.
+    category: contacts
+    scopes_any: [contacts.readonly, contacts]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/people/me/connections
+      query:
+        personFields: "${person_fields}"
+        pageSize: "${limit}"
+        pageToken: "${page_token}"
+        sortOrder: "${sort_order}"
+    input:
+      person_fields:
+        type: array
+        description: Fields to return, e.g. ["names","emailAddresses","phoneNumbers","organizations"].
+        optional: true
+        default: "[names, emailAddresses, phoneNumbers]"
+        items: {type: string}
+      limit:
+        type: integer
+        description: How many contacts per page (1-1000).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 1000
+      page_token:
+        type: string
+        description: Cursor from the previous response's nextPageToken.
+        optional: true
+      sort_order:
+        type: string
+        description: How to order the results.
+        optional: true
+        enum: [LAST_MODIFIED_ASCENDING, LAST_MODIFIED_DESCENDING, FIRST_NAME_ASCENDING, LAST_NAME_ASCENDING]
+    output:
+      description: A page of contacts.
+      type: object
+      properties:
+        connections: {type: array, description: "Each with resourceName and the requested fields."}
+        nextPageToken: {type: string}
+        totalPeople: {type: integer}
+
+  search_contacts:
+    title: Search contacts
+    description: >-
+      Search the user's contacts by name, email or phone. Google warms this
+      index lazily, so an empty first call followed by the real one is the
+      documented pattern.
+    category: contacts
+    scopes_any: [contacts.readonly, contacts]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/people:searchContacts
+      query:
+        query: "${query}"
+        readMask: "${person_fields}"
+        pageSize: "${limit}"
+    input:
+      query:
+        type: string
+        description: Words to match against names, emails and phone numbers.
+        example: ada
+      person_fields:
+        type: array
+        description: Fields to return.
+        optional: true
+        default: "[names, emailAddresses, phoneNumbers]"
+        items: {type: string}
+      limit:
+        type: integer
+        description: How many results to return (1-30).
+        optional: true
+        default: 10
+        minimum: 1
+        maximum: 30
+    output:
+      description: Matching contacts.
+      type: object
+      properties:
+        results: {type: array, description: "Each holds a `person` object."}
+
+  get_contact:
+    title: Get a contact
+    description: Read one contact by resource name, e.g. "people/c12345".
+    category: contacts
+    scopes_any: [contacts.readonly, contacts]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/${resource_name}
+      query:
+        personFields: "${person_fields}"
+    input:
+      resource_name:
+        type: string
+        description: The contact's resource name, e.g. people/c12345.
+        example: people/c12345
+      person_fields:
+        type: array
+        description: Fields to return.
+        optional: true
+        default: "[names, emailAddresses, phoneNumbers, organizations, addresses, biographies]"
+        items: {type: string}
+    output:
+      description: The contact.
+      type: object
+      properties:
+        resourceName: {type: string}
+        etag: {type: string, description: "Pass to update_contact -- the API needs it."}
+        names: {type: array}
+        emailAddresses: {type: array}
+
+  create_contact:
+    title: Create a contact
+    description: >-
+      Add a contact. Each field is a list of typed objects, e.g. names
+      [{"givenName": "Ada", "familyName": "Lovelace"}] and emailAddresses
+      [{"value": "ada@example.com"}].
+    category: contacts
+    scopes: [contacts]
+    request:
+      method: POST
+      path: /v1/people:createContact
+      body:
+        names: "${names}"
+        emailAddresses: "${emails}"
+        phoneNumbers: "${phones}"
+        organizations: "${organizations}"
+        addresses: "${addresses}"
+        biographies: "${biographies}"
+    input:
+      names:
+        type: array
+        description: Name objects, e.g. [{"givenName":"Ada","familyName":"Lovelace"}].
+        items: {type: object}
+      emails:
+        type: array
+        description: Email objects, e.g. [{"value":"ada@example.com","type":"work"}].
+        optional: true
+        items: {type: object}
+      phones:
+        type: array
+        description: Phone objects, e.g. [{"value":"+14155552671","type":"mobile"}].
+        optional: true
+        items: {type: object}
+      organizations:
+        type: array
+        description: Organisation objects, e.g. [{"name":"Acme","title":"Engineer"}].
+        optional: true
+        items: {type: object}
+      addresses:
+        type: array
+        description: Address objects.
+        optional: true
+        items: {type: object}
+      biographies:
+        type: array
+        description: Note objects, e.g. [{"value":"Met at the conference"}].
+        optional: true
+        items: {type: object}
+    output:
+      description: The created contact.
+      type: object
+      properties:
+        resourceName: {type: string}
+        etag: {type: string}
+
+  update_contact:
+    title: Update a contact
+    description: >-
+      Change a contact's fields. The People API needs the contact's current etag
+      from get_contact, and update_person_fields must name every field being
+      written or the call is refused.
+    category: contacts
+    scopes: [contacts]
+    request:
+      method: PATCH
+      path: /v1/${resource_name}:updateContact
+      query:
+        updatePersonFields: "${update_person_fields}"
+      body:
+        etag: "${etag}"
+        names: "${names}"
+        emailAddresses: "${emails}"
+        phoneNumbers: "${phones}"
+        organizations: "${organizations}"
+    input:
+      resource_name:
+        type: string
+        description: The contact's resource name.
+      etag:
+        type: string
+        description: The contact's current etag, from get_contact.
+      update_person_fields:
+        type: array
+        description: Which fields this call writes, e.g. ["names","emailAddresses"].
+        items: {type: string}
+      names:
+        type: array
+        description: Replacement name objects.
+        optional: true
+        items: {type: object}
+      emails:
+        type: array
+        description: Replacement email objects.
+        optional: true
+        items: {type: object}
+      phones:
+        type: array
+        description: Replacement phone objects.
+        optional: true
+        items: {type: object}
+      organizations:
+        type: array
+        description: Replacement organisation objects.
+        optional: true
+        items: {type: object}
+    output:
+      description: The updated contact.
+      type: object
+      properties:
+        resourceName: {type: string}
+        etag: {type: string}
+
+  delete_contact:
+    title: Delete a contact
+    description: Permanently remove a contact from the user's address book.
+    category: contacts
+    scopes: [contacts]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/${resource_name}:deleteContact
+    input:
+      resource_name:
+        type: string
+        description: The contact's resource name.
+    output:
+      description: An empty object on success.
+      type: object
+
+  list_other_contacts:
+    title: List "other contacts"
+    description: >-
+      List addresses Google has seen the user correspond with but which are not
+      saved contacts — useful for resolving a half-remembered email address.
+    category: contacts
+    scopes_any: [contacts.other.readonly, contacts.readonly, contacts]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/otherContacts
+      query:
+        readMask: "${person_fields}"
+        pageSize: "${limit}"
+        pageToken: "${page_token}"
+    input:
+      person_fields:
+        type: array
+        description: Fields to return. Only names, emailAddresses and metadata are available here.
+        optional: true
+        default: "[names, emailAddresses]"
+        items: {type: string}
+      limit:
+        type: integer
+        description: How many entries per page (1-1000).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 1000
+      page_token:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+    output:
+      description: A page of other contacts.
+      type: object
+      properties:
+        otherContacts: {type: array}
+        nextPageToken: {type: string}
+
+  search_directory:
+    title: Search the Workspace directory
+    description: >-
+      Search the organisation's directory rather than the user's own contacts.
+      Only works on a Google Workspace account.
+    category: directory
+    scopes: [directory.readonly]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/people:searchDirectoryPeople
+      query:
+        query: "${query}"
+        readMask: "${person_fields}"
+        sources: "${sources}"
+        pageSize: "${limit}"
+    input:
+      query:
+        type: string
+        description: Words to match against directory entries.
+      person_fields:
+        type: array
+        description: Fields to return.
+        optional: true
+        default: "[names, emailAddresses, organizations]"
+        items: {type: string}
+      sources:
+        type: array
+        description: Which directory sources to search.
+        optional: true
+        default: "[DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE]"
+        items: {type: string}
+      limit:
+        type: integer
+        description: How many results to return.
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 500
+    output:
+      description: Matching directory people.
+      type: object
+      properties:
+        people: {type: array}
+        nextPageToken: {type: string}
+
+  get_my_profile:
+    title: Get the signed-in user's profile
+    description: >-
+      Read the Google account the token belongs to. The cheapest health check
+      for a Contacts connection.
+    category: directory
+    scopes_any: [contacts.readonly, contacts, userinfo.profile]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/people/me
+      query:
+        personFields: "${person_fields}"
+    input:
+      person_fields:
+        type: array
+        description: Fields to return.
+        optional: true
+        default: "[names, emailAddresses, photos]"
+        items: {type: string}
+    output:
+      description: The signed-in user.
+      type: object
+      properties:
+        resourceName: {type: string}
+        names: {type: array}
+        emailAddresses: {type: array}
+
+  # -- the rest of the API, from Google's own discovery document ------------
+
+  batch_get_contact_group:
+    title: Batch get contact group
+    description: Get a list of contact groups owned by the authenticated user by specifying a list of
+      contact group resource names.
+    category: contact_groups
+    request:
+      method: GET
+      path: /v1/contactGroups:batchGet
+      query:
+        groupFields: ${group_fields}
+        maxMembers: ${max_members}
+        resourceNames: ${resource_names}
+    input:
+      group_fields:
+        type: string
+        description: 'Optional. A field mask to restrict which fields on the group are returned. Defaults
+          to metadata, groupType, memberCount, and name if not set or set to empty. Valid fields are:
+          * clientData * groupType * memberCount * metadata * name'
+        optional: true
+      max_members:
+        type: integer
+        description: Optional. Specifies the maximum number of members to return for each group. Defaults
+          to 0 if not set, which will return zero members.
+        optional: true
+      resource_names:
+        type: string
+        description: Required. The resource names of the contact groups to get. There is a maximum of
+          200 resource names.
+        optional: true
+    output:
+      description: The BatchGetContactGroupsResponse resource.
+      type: object
+    scopes_any:
+    - contacts
+    - contacts.readonly
+    read_only: true
+  create_contact_group:
+    title: Create contact group
+    description: Create a new contact group owned by the authenticated user. Created contact group names
+      must be unique to the users contact groups. Attempting to create a group with a duplicate name will
+      return a HTTP 409 error. Mutate requests for the same user should be sent sequentially to avoid
+      increased latency and failures.
+    category: contact_groups
+    request:
+      method: POST
+      path: /v1/contactGroups
+      body:
+        contactGroup: ${contact_group}
+        readGroupFields: ${read_group_fields}
+    input:
+      contact_group:
+        type: string
+        description: Required. The contact group to create.
+        optional: true
+      read_group_fields:
+        type: string
+        description: 'Optional. A field mask to restrict which fields on the group are returned. Defaults
+          to metadata, groupType, and name if not set or set to empty. Valid fields are: * clientData
+          * groupType * metadata * name'
+        optional: true
+    output:
+      description: The ContactGroup resource.
+      type: object
+    scopes:
+    - contacts
+  delete_contact_group:
+    title: Delete contact group
+    description: Delete an existing contact group owned by the authenticated user by specifying a contact
+      group resource name. Mutate requests for the same user should be sent sequentially to avoid increased
+      latency and failures.
+    category: contact_groups
+    request:
+      method: DELETE
+      path: /v1/${resource_name}
+      query:
+        deleteContacts: ${delete_contacts}
+    input:
+      resource_name:
+        type: string
+        description: Required. The resource name of the contact group to delete.
+      delete_contacts:
+        type: boolean
+        description: Optional. Set to true to also delete the contacts in the specified group.
+        optional: true
+    output:
+      description: The Empty resource.
+      type: object
+    scopes:
+    - contacts
+    destructive: true
+  list_contact_groups:
+    title: List contact groups
+    description: List all contact groups owned by the authenticated user. Members of the contact groups
+      are not populated.
+    category: contact_groups
+    request:
+      method: GET
+      path: /v1/contactGroups
+      query:
+        groupFields: ${group_fields}
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+        syncToken: ${sync_token}
+    input:
+      group_fields:
+        type: string
+        description: 'Optional. A field mask to restrict which fields on the group are returned. Defaults
+          to metadata, groupType, memberCount, and name if not set or set to empty. Valid fields are:
+          * clientData * groupType * memberCount * metadata * name'
+        optional: true
+      page_size:
+        type: integer
+        description: Optional. The maximum number of resources to return. Valid values are between 1 and
+          1000, inclusive. Defaults to 30 if not set or set to 0.
+        optional: true
+      page_token:
+        type: string
+        description: Optional. The next_page_token value returned from a previous call to [ListContactGroups](/people/api/rest/v1/contactgroups/list).
+          Requests the next page of resources.
+        optional: true
+      sync_token:
+        type: string
+        description: Optional. A sync token, returned by a previous call to contactgroups.list. Only resources
+          changed since the sync token was created will be returned.
+        optional: true
+    output:
+      description: The ListContactGroupsResponse resource.
+      type: object
+    scopes_any:
+    - contacts
+    - contacts.readonly
+    read_only: true
+  modify_member:
+    title: Modify member
+    description: Modify the members of a contact group owned by the authenticated user. The only system
+      contact groups that can have members added are contactGroups/myContacts and contactGroups/starred.
+      Other system contact groups are deprecated and can only have contacts removed.
+    category: contact_groups
+    request:
+      method: POST
+      path: /v1/${resource_name}/members:modify
+      body:
+        resourceNamesToAdd: ${resource_names_to_add}
+        resourceNamesToRemove: ${resource_names_to_remove}
+    input:
+      resource_name:
+        type: string
+        description: Required. The resource name of the contact group to modify.
+      resource_names_to_add:
+        type: array
+        items:
+          type: string
+        description: Optional. The resource names of the contact people to add in the form of people/{person_id}.
+          The total number of resource names in resource_names_to_add and resource_names_to_remove must
+          be less than or equal to 1000.
+        optional: true
+      resource_names_to_remove:
+        type: array
+        items:
+          type: string
+        description: Optional. The resource names of the contact people to remove in the form of people/{person_id}.
+          The total number of resource names in resource_names_to_add and resource_names_to_remove must
+          be less than or equal to 1000.
+        optional: true
+    output:
+      description: The ModifyContactGroupMembersResponse resource.
+      type: object
+    scopes:
+    - contacts
+  replace_contact_group:
+    title: Replace contact group
+    description: Update the name of an existing contact group owned by the authenticated user. Updated
+      contact group names must be unique to the users contact groups. Attempting to create a group with
+      a duplicate name will return a HTTP 409 error. Mutate requests for the same user should be sent
+      sequentially to avoid increased latency and failures.
+    category: contact_groups
+    request:
+      method: PUT
+      path: /v1/${resource_name}
+      body:
+        contactGroup: ${contact_group}
+        updateGroupFields: ${update_group_fields}
+        readGroupFields: ${read_group_fields}
+    input:
+      resource_name:
+        type: string
+        description: The resource name for the contact group, assigned by the server. An ASCII string,
+          in the form of contactGroups/{contact_group_id}.
+      contact_group:
+        type: string
+        description: Required. The contact group to update.
+        optional: true
+      update_group_fields:
+        type: string
+        description: 'Optional. A field mask to restrict which fields on the group are updated. Multiple
+          fields can be specified by separating them with commas. Defaults to name if not set or set to
+          empty. Updated fields are replaced. Valid values are: * clientData * name'
+        optional: true
+      read_group_fields:
+        type: string
+        description: 'Optional. A field mask to restrict which fields on the group are returned. Defaults
+          to metadata, groupType, and name if not set or set to empty. Valid fields are: * clientData
+          * groupType * memberCount * metadata * name'
+        optional: true
+    output:
+      description: The ContactGroup resource.
+      type: object
+    scopes:
+    - contacts
+  copy_other_contact_to_my_contacts_group_other_contact:
+    title: Copy other contact to my contacts group other contact
+    description: Copies an "Other contact" to a new contact in the user's "myContacts" group Mutate requests
+      for the same user should be sent sequentially to avoid increased latency and failures.
+    category: other_contacts
+    request:
+      method: POST
+      path: /v1/${resource_name}:copyOtherContactToMyContactsGroup
+      body:
+        sources: ${sources}
+        copyMask: ${copy_mask}
+        readMask: ${read_mask}
+    input:
+      resource_name:
+        type: string
+        description: Required. The resource name of the "Other contact" to copy.
+      sources:
+        type: array
+        items:
+          type: string
+        description: Optional. A mask of what source types to return. Defaults to READ_SOURCE_TYPE_CONTACT
+          and READ_SOURCE_TYPE_PROFILE if not set.
+        optional: true
+      copy_mask:
+        type: string
+        description: 'Required. A field mask to restrict which fields are copied into the new contact.
+          Valid values are: * emailAddresses * names * phoneNumbers'
+        optional: true
+      read_mask:
+        type: string
+        description: 'Optional. A field mask to restrict which fields on the person are returned. Multiple
+          fields can be specified by separating them with commas. Defaults to the copy mask with metadata
+          and membership fields if not set. Valid values are: * addresses * ageRanges * biographies *
+          birthdays * calendarUrls *'
+        optional: true
+    output:
+      description: The Person resource.
+      type: object
+    scopes_any:
+    - contacts
+    - contacts.other.readonly
+  search_other_contact:
+    title: Search other contact
+    description: 'Provides a list of contacts in the authenticated user''s other contacts that matches
+      the search query. The query matches on a contact''s names, emailAddresses, and phoneNumbers fields
+      that are from the OTHER_CONTACT source. **IMPORTANT**: Before searching, clients should send a warmup
+      request with an empty query to update the cache. See https://developers.google.com/people/v1/other-contacts#search_the_users_other_conta'
+    category: other_contacts
+    request:
+      method: GET
+      path: /v1/otherContacts:search
+      query:
+        pageSize: ${page_size}
+        query: ${query}
+        readMask: ${read_mask}
+    input:
+      page_size:
+        type: integer
+        description: Optional. The number of results to return. Defaults to 10 if field is not set, or
+          set to 0. Values greater than 30 will be capped to 30.
+        optional: true
+      query:
+        type: string
+        description: Required. The plain-text query for the request. The query is used to match prefix
+          phrases of the fields on a person. For example, a person with name "foo name" matches queries
+          such as "f", "fo", "foo", "foo n", "nam", etc., but not "oo n".
+        optional: true
+      read_mask:
+        type: string
+        description: 'Required. A field mask to restrict which fields on each person are returned. Multiple
+          fields can be specified by separating them with commas. Valid values are: * emailAddresses *
+          metadata * names * phoneNumbers'
+        optional: true
+    output:
+      description: The SearchResponse resource.
+      type: object
+    scopes:
+    - contacts.other.readonly
+    read_only: true
+  batch_create_contacts_people:
+    title: Batch create contacts people
+    description: Create a batch of new contacts and return the PersonResponses for the newly Mutate requests
+      for the same user should be sent sequentially to avoid increased latency and failures.
+    category: people
+    request:
+      method: POST
+      path: /v1/people:batchCreateContacts
+      body:
+        readMask: ${read_mask}
+        sources: ${sources}
+        contacts: ${contacts}
+    input:
+      read_mask:
+        type: string
+        description: 'Required. A field mask to restrict which fields on each person are returned in the
+          response. Multiple fields can be specified by separating them with commas. If read mask is left
+          empty, the post-mutate-get is skipped and no data will be returned in the response. Valid values
+          are: * addresses * ageRa'
+        optional: true
+      sources:
+        type: array
+        items:
+          type: string
+        description: Optional. A mask of what source types to return in the post mutate read. Defaults
+          to READ_SOURCE_TYPE_CONTACT and READ_SOURCE_TYPE_PROFILE if not set.
+        optional: true
+      contacts:
+        type: array
+        items:
+          type: string
+        description: Required. The contact to create. Allows up to 200 contacts in a single request.
+        optional: true
+    output:
+      description: The BatchCreateContactsResponse resource.
+      type: object
+    scopes:
+    - contacts
+  batch_delete_contacts_people:
+    title: Batch delete contacts people
+    description: Delete a batch of contacts. Any non-contact data will not be deleted. Mutate requests
+      for the same user should be sent sequentially to avoid increased latency and failures.
+    category: people
+    request:
+      method: POST
+      path: /v1/people:batchDeleteContacts
+      body:
+        resourceNames: ${resource_names}
+    input:
+      resource_names:
+        type: array
+        items:
+          type: string
+        description: Required. The resource names of the contact to delete. It's repeatable. Allows up
+          to 500 resource names in a single request.
+        optional: true
+    output:
+      description: The Empty resource.
+      type: object
+    scopes:
+    - contacts
+  batch_update_contacts_people:
+    title: Batch update contacts people
+    description: Update a batch of contacts and return a map of resource names to PersonResponses for
+      the updated contacts. Mutate requests for the same user should be sent sequentially to avoid increased
+      latency and failures.
+    category: people
+    request:
+      method: POST
+      path: /v1/people:batchUpdateContacts
+      body:
+        updateMask: ${update_mask}
+        contacts: ${contacts}
+        sources: ${sources}
+        readMask: ${read_mask}
+    input:
+      update_mask:
+        type: string
+        description: 'Required. A field mask to restrict which fields on the person are updated. Multiple
+          fields can be specified by separating them with commas. All specified fields will be replaced,
+          or cleared if left empty for each person. Valid values are: * addresses * biographies * birthdays
+          * calendarUrls * client'
+        optional: true
+      contacts:
+        type: object
+        description: Required. A map of resource names to the person data to be updated. Allows up to
+          200 contacts in a single request.
+        optional: true
+      sources:
+        type: array
+        items:
+          type: string
+        description: Optional. A mask of what source types to return. Defaults to READ_SOURCE_TYPE_CONTACT
+          and READ_SOURCE_TYPE_PROFILE if not set.
+        optional: true
+      read_mask:
+        type: string
+        description: 'Required. A field mask to restrict which fields on each person are returned. Multiple
+          fields can be specified by separating them with commas. If read mask is left empty, the post-mutate-get
+          is skipped and no data will be returned in the response. Valid values are: * addresses * ageRanges
+          * biographi'
+        optional: true
+    output:
+      description: The BatchUpdateContactsResponse resource.
+      type: object
+    scopes:
+    - contacts
+  list_connections:
+    title: List connections
+    description: Provides a list of the authenticated user's contacts. Sync tokens expire 7 days after
+      the full sync. A request with an expired sync token will get an error with an google.rpc.ErrorInfo
+      with reason "EXPIRED_SYNC_TOKEN". In the case of such an error clients should make a full sync request
+      without a sync_token. The first page of a full sync request has an additional quota. If the quota
+      is exceeded, a 429 error will be r
+    category: people
+    request:
+      method: GET
+      path: /v1/${resource_name}/connections
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+        personFields: ${person_fields}
+        requestMask.includeField: ${request_mask_include_field}
+        requestSyncToken: ${request_sync_token}
+        sortOrder: ${sort_order}
+        sources: ${sources}
+        syncToken: ${sync_token}
+    input:
+      resource_name:
+        type: string
+        description: Required. The resource name to return connections for. Only people/me is valid.
+      page_size:
+        type: integer
+        description: Optional. The number of connections to include in the response. Valid values are
+          between 1 and 1000, inclusive. Defaults to 100 if not set or set to 0.
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token, received from a previous response next_page_token. Provide
+          this to retrieve the subsequent page. When paginating, all other parameters provided to people.connections.list
+          must match the first call that provided the page token.
+        optional: true
+      person_fields:
+        type: string
+        description: 'Required. A field mask to restrict which fields on each person are returned. Multiple
+          fields can be specified by separating them with commas. Valid values are: * addresses * ageRanges
+          * biographies * birthdays * calendarUrls * clientData * coverPhotos * emailAddresses * events
+          * externalIds * gender'
+        optional: true
+      request_mask_include_field:
+        type: string
+        description: 'Required. Comma-separated list of person fields to be included in the response.
+          Each path should start with person.: for example, person.names or person.photos.'
+        optional: true
+      request_sync_token:
+        type: boolean
+        description: Optional. Whether the response should return next_sync_token on the last page of
+          results. It can be used to get incremental changes since the last request by setting it on the
+          request sync_token. More details about sync behavior at people.connections.list.
+        optional: true
+      sort_order:
+        type: string
+        description: Optional. The order in which the connections should be sorted. Defaults to LAST_MODIFIED_ASCENDING.
+        optional: true
+        enum:
+        - LAST_MODIFIED_ASCENDING
+        - LAST_MODIFIED_DESCENDING
+        - FIRST_NAME_ASCENDING
+        - LAST_NAME_ASCENDING
+      sources:
+        type: string
+        description: Optional. A mask of what source types to return. Defaults to READ_SOURCE_TYPE_CONTACT
+          and READ_SOURCE_TYPE_PROFILE if not set.
+        optional: true
+        enum:
+        - READ_SOURCE_TYPE_UNSPECIFIED
+        - READ_SOURCE_TYPE_PROFILE
+        - READ_SOURCE_TYPE_CONTACT
+        - READ_SOURCE_TYPE_DOMAIN_CONTACT
+        - READ_SOURCE_TYPE_OTHER_CONTACT
+      sync_token:
+        type: string
+        description: Optional. A sync token, received from a previous response next_sync_token Provide
+          this to retrieve only the resources changed since the last request. When syncing, all other
+          parameters provided to people.connections.list must match the first call that provided the sync
+          token. More details about sync
+        optional: true
+    output:
+      description: The ListConnectionsResponse resource.
+      type: object
+    scopes_any:
+    - contacts
+    - contacts.readonly
+    read_only: true
+  delete_contact_photo_people:
+    title: Delete contact photo people
+    description: Delete a contact's photo. Mutate requests for the same user should be done sequentially
+      to avoid // lock contention.
+    category: people
+    request:
+      method: DELETE
+      path: /v1/${resource_name}:deleteContactPhoto
+      query:
+        personFields: ${person_fields}
+        sources: ${sources}
+    input:
+      resource_name:
+        type: string
+        description: Required. The resource name of the contact whose photo will be deleted.
+      person_fields:
+        type: string
+        description: 'Optional. A field mask to restrict which fields on the person are returned. Multiple
+          fields can be specified by separating them with commas. Defaults to empty if not set, which
+          will skip the post mutate get. Valid values are: * addresses * ageRanges * biographies * birthdays
+          * calendarUrls * clientD'
+        optional: true
+      sources:
+        type: string
+        description: Optional. A mask of what source types to return. Defaults to READ_SOURCE_TYPE_CONTACT
+          and READ_SOURCE_TYPE_PROFILE if not set.
+        optional: true
+        enum:
+        - READ_SOURCE_TYPE_UNSPECIFIED
+        - READ_SOURCE_TYPE_PROFILE
+        - READ_SOURCE_TYPE_CONTACT
+        - READ_SOURCE_TYPE_DOMAIN_CONTACT
+        - READ_SOURCE_TYPE_OTHER_CONTACT
+    output:
+      description: The DeleteContactPhotoResponse resource.
+      type: object
+    scopes:
+    - contacts
+    destructive: true
+  get_batch_get_people:
+    title: Get batch get people
+    description: Provides information about a list of specific people by specifying a list of requested
+      resource names. Use people/me to indicate the authenticated user. The request returns a 400 error
+      if 'personFields' is not specified.
+    category: people
+    request:
+      method: GET
+      path: /v1/people:batchGet
+      query:
+        personFields: ${person_fields}
+        requestMask.includeField: ${request_mask_include_field}
+        resourceNames: ${resource_names}
+        sources: ${sources}
+    input:
+      person_fields:
+        type: string
+        description: 'Required. A field mask to restrict which fields on each person are returned. Multiple
+          fields can be specified by separating them with commas. Valid values are: * addresses * ageRanges
+          * biographies * birthdays * calendarUrls * clientData * coverPhotos * emailAddresses * events
+          * externalIds * gender'
+        optional: true
+      request_mask_include_field:
+        type: string
+        description: 'Required. Comma-separated list of person fields to be included in the response.
+          Each path should start with person.: for example, person.names or person.photos.'
+        optional: true
+      resource_names:
+        type: string
+        description: Required. The resource names of the people to provide information about. It's repeatable.
+          The URL query parameter should be resourceNames=<name1>&resourceNames=<name2>&... - To get information
+          about the authenticated user, specify people/me. - To get information about a google account,
+          specify peopl
+        optional: true
+      sources:
+        type: string
+        description: Optional. A mask of what source types to return. Defaults to READ_SOURCE_TYPE_CONTACT
+          and READ_SOURCE_TYPE_PROFILE if not set.
+        optional: true
+        enum:
+        - READ_SOURCE_TYPE_UNSPECIFIED
+        - READ_SOURCE_TYPE_PROFILE
+        - READ_SOURCE_TYPE_CONTACT
+        - READ_SOURCE_TYPE_DOMAIN_CONTACT
+        - READ_SOURCE_TYPE_OTHER_CONTACT
+    output:
+      description: The GetPeopleResponse resource.
+      type: object
+    scopes_any:
+    - contacts
+    - contacts.other.readonly
+    - contacts.readonly
+    - directory.readonly
+    - user.addresses.read
+    - user.birthday.read
+    - user.emails.read
+    - user.gender.read
+    - user.organization.read
+    - user.phonenumbers.read
+    - userinfo.email
+    - userinfo.profile
+    read_only: true
+  list_directory_people_people:
+    title: List directory people people
+    description: Provides a list of domain profiles and domain contacts in the authenticated user's domain
+      directory. When the sync_token is specified, resources deleted since the last sync will be returned
+      as a person with PersonMetadata.deleted set to true. When the page_token or sync_token is specified,
+      all other request parameters must match the first call. Writes may have a propagation delay of several
+      minutes for sync requests.
+    category: people
+    request:
+      method: GET
+      path: /v1/people:listDirectoryPeople
+      query:
+        mergeSources: ${merge_sources}
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+        readMask: ${read_mask}
+        requestSyncToken: ${request_sync_token}
+        sources: ${sources}
+        syncToken: ${sync_token}
+    input:
+      merge_sources:
+        type: string
+        description: Optional. Additional data to merge into the directory sources if they are connected
+          through verified join keys such as email addresses or phone numbers.
+        optional: true
+        enum:
+        - DIRECTORY_MERGE_SOURCE_TYPE_UNSPECIFIED
+        - DIRECTORY_MERGE_SOURCE_TYPE_CONTACT
+      page_size:
+        type: integer
+        description: Optional. The number of people to include in the response. Valid values are between
+          1 and 1000, inclusive. Defaults to 100 if not set or set to 0.
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token, received from a previous response next_page_token. Provide
+          this to retrieve the subsequent page. When paginating, all other parameters provided to people.listDirectoryPeople
+          must match the first call that provided the page token.
+        optional: true
+      read_mask:
+        type: string
+        description: 'Required. A field mask to restrict which fields on each person are returned. Multiple
+          fields can be specified by separating them with commas. Valid values are: * addresses * ageRanges
+          * biographies * birthdays * calendarUrls * clientData * coverPhotos * emailAddresses * events
+          * externalIds * gender'
+        optional: true
+      request_sync_token:
+        type: boolean
+        description: Optional. Whether the response should return next_sync_token. It can be used to get
+          incremental changes since the last request by setting it on the request sync_token. More details
+          about sync behavior at people.listDirectoryPeople.
+        optional: true
+      sources:
+        type: string
+        description: Required. Directory sources to return.
+        optional: true
+        enum:
+        - DIRECTORY_SOURCE_TYPE_UNSPECIFIED
+        - DIRECTORY_SOURCE_TYPE_DOMAIN_CONTACT
+        - DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE
+      sync_token:
+        type: string
+        description: Optional. A sync token, received from a previous response next_sync_token Provide
+          this to retrieve only the resources changed since the last request. When syncing, all other
+          parameters provided to people.listDirectoryPeople must match the first call that provided the
+          sync token. More details about s
+        optional: true
+    output:
+      description: The ListDirectoryPeopleResponse resource.
+      type: object
+    scopes:
+    - directory.readonly
+    read_only: true
+  update_contact_photo_people:
+    title: Update contact photo people
+    description: Update a contact's photo. Mutate requests for the same user should be sent sequentially
+      to avoid increased latency and failures.
+    category: people
+    request:
+      method: PATCH
+      path: /v1/${resource_name}:updateContactPhoto
+      body:
+        photoBytes: ${photo_bytes}
+        sources: ${sources}
+        personFields: ${person_fields}
+    input:
+      resource_name:
+        type: string
+        description: Required. Person resource name
+      photo_bytes:
+        type: string
+        description: Required. Raw photo bytes
+        optional: true
+      sources:
+        type: array
+        items:
+          type: string
+        description: Optional. A mask of what source types to return. Defaults to READ_SOURCE_TYPE_CONTACT
+          and READ_SOURCE_TYPE_PROFILE if not set.
+        optional: true
+      person_fields:
+        type: string
+        description: 'Optional. A field mask to restrict which fields on the person are returned. Multiple
+          fields can be specified by separating them with commas. Defaults to empty if not set, which
+          will skip the post mutate get. Valid values are: * addresses * ageRanges * biographies * birthdays
+          * calendarUrls * clientD'
+        optional: true
+    output:
+      description: The UpdateContactPhotoResponse resource.
+      type: object
+    scopes:
+    - contacts

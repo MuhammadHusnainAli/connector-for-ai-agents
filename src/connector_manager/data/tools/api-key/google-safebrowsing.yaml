@@ -1,0 +1,253 @@
+# Google Safe Browsing API tools.
+#
+# An API key carries no scope grant, so no tool here declares one.
+#
+# Safe Browsing v4 answers one question: is this URL known to be dangerous.
+# It offers two ways to ask, and the choice matters:
+#
+#   * **Lookup** (`find_threat_matche`) sends the URLs themselves to Google and
+#     gets a verdict back. Simple, but it means telling Google which URLs you
+#     are checking;
+#   * **Update** (`fetch_threat_list_update`, `find_full_hashe`) downloads
+#     hash prefixes and checks locally, only asking Google about a prefix that
+#     matched. More work, and the reason it exists is privacy.
+#
+# The connector's base url already ends at /v4, which these paths also carry,
+# so each tool addresses the host directly rather than doubling the version.
+#
+# Docs: https://developers.google.com/safe-browsing/v4
+
+connector_id: google-safebrowsing
+display_name: Google Safebrowsing
+docs_url: https://developers.google.com/safe-browsing/
+tools:
+  get_encoded_full_hash:
+    title: Get encoded full hash
+    description: Calls encodedFullHashes.get on the Safe Browsing API.
+    category: encoded_full_hashes
+    request:
+      method: GET
+      path: /v4/encodedFullHashes/${encoded_request}
+      base_url_override: https://safebrowsing.googleapis.com
+      query:
+        clientId: ${client_id}
+        clientVersion: ${client_version}
+    input:
+      encoded_request:
+        type: string
+        description: A serialized FindFullHashesRequest proto.
+      client_id:
+        type: string
+        description: A client ID that (hopefully) uniquely identifies the client implementation of the
+          Safe Browsing API.
+        optional: true
+      client_version:
+        type: string
+        description: The version of the client implementation.
+        optional: true
+    output:
+      description: The GoogleSecuritySafebrowsingV4FindFullHashesResponse resource.
+      type: object
+    read_only: true
+  get_encoded_update:
+    title: Get encoded update
+    description: Calls encodedUpdates.get on the Safe Browsing API.
+    category: encoded_updates
+    request:
+      method: GET
+      path: /v4/encodedUpdates/${encoded_request}
+      base_url_override: https://safebrowsing.googleapis.com
+      query:
+        clientId: ${client_id}
+        clientVersion: ${client_version}
+    input:
+      encoded_request:
+        type: string
+        description: A serialized FetchThreatListUpdatesRequest proto.
+      client_id:
+        type: string
+        description: A client ID that uniquely identifies the client implementation of the Safe Browsing
+          API.
+        optional: true
+      client_version:
+        type: string
+        description: The version of the client implementation.
+        optional: true
+    output:
+      description: The GoogleSecuritySafebrowsingV4FetchThreatListUpdatesResponse resource.
+      type: object
+    read_only: true
+  find_full_hash:
+    title: Find full hash
+    description: Finds the full hashes that match the requested hash prefixes.
+    category: full_hashes
+    request:
+      method: POST
+      path: /v4/fullHashes:find
+      base_url_override: https://safebrowsing.googleapis.com
+      body:
+        client: ${client}
+        apiClient: ${api_client}
+        clientStates: ${client_states}
+        threatInfo: ${threat_info}
+    input:
+      client:
+        type: string
+        description: The client metadata.
+        optional: true
+      api_client:
+        type: string
+        description: Client metadata associated with callers of higher-level APIs built on top of the
+          client's implementation.
+        optional: true
+      client_states:
+        type: array
+        items:
+          type: string
+        description: The current client states for each of the client's local threat lists.
+        optional: true
+      threat_info:
+        type: string
+        description: The lists and hashes to be checked.
+        optional: true
+    output:
+      description: The GoogleSecuritySafebrowsingV4FindFullHashesResponse resource.
+      type: object
+  create_threat_hit:
+    title: Create threat hit
+    description: Reports a Safe Browsing threat list hit to Google. Only projects with TRUSTED_REPORTER
+      visibility can use this method.
+    category: threat_hits
+    request:
+      method: POST
+      path: /v4/threatHits
+      base_url_override: https://safebrowsing.googleapis.com
+      body:
+        entry: ${entry}
+        clientInfo: ${client_info}
+        resources: ${resources}
+        platformType: ${platform_type}
+        threatType: ${threat_type}
+        userInfo: ${user_info}
+    input:
+      entry:
+        type: string
+        description: The threat entry responsible for the hit. Full hash should be reported for hash-based
+          hits.
+        optional: true
+      client_info:
+        type: string
+        description: Client-reported identification.
+        optional: true
+      resources:
+        type: array
+        items:
+          type: string
+        description: The resources related to the threat hit.
+        optional: true
+      platform_type:
+        type: string
+        description: The platform type reported.
+        optional: true
+        enum:
+        - PLATFORM_TYPE_UNSPECIFIED
+        - WINDOWS
+        - LINUX
+        - ANDROID
+        - OSX
+        - IOS
+        - ANY_PLATFORM
+        - ALL_PLATFORMS
+        - CHROME
+      threat_type:
+        type: string
+        description: The threat type reported.
+        optional: true
+        enum:
+        - THREAT_TYPE_UNSPECIFIED
+        - MALWARE
+        - SOCIAL_ENGINEERING
+        - UNWANTED_SOFTWARE
+        - POTENTIALLY_HARMFUL_APPLICATION
+        - SOCIAL_ENGINEERING_INTERNAL
+        - API_ABUSE
+        - MALICIOUS_BINARY
+        - CSD_WHITELIST
+        - CSD_DOWNLOAD_WHITELIST
+        - CLIENT_INCIDENT
+        - CLIENT_INCIDENT_WHITELIST
+        - APK_MALWARE_OFFLINE
+        - SUBRESOURCE_FILTER
+        - SUSPICIOUS
+        - TRICK_TO_BILL
+        - HIGH_CONFIDENCE_ALLOWLIST
+        - ACCURACY_TIPS
+      user_info:
+        type: string
+        description: Details about the user that encountered the threat.
+        optional: true
+    output:
+      description: The GoogleProtobufEmpty resource.
+      type: object
+  fetch_threat_list_update:
+    title: Fetch threat list update
+    description: Fetches the most recent threat list updates. A client can request updates for multiple
+      lists at once.
+    category: threat_list_updates
+    request:
+      method: POST
+      path: /v4/threatListUpdates:fetch
+      base_url_override: https://safebrowsing.googleapis.com
+      body:
+        client: ${client}
+        listUpdateRequests: ${list_update_requests}
+    input:
+      client:
+        type: string
+        description: The client metadata.
+        optional: true
+      list_update_requests:
+        type: array
+        items:
+          type: string
+        description: The requested threat list updates.
+        optional: true
+    output:
+      description: The GoogleSecuritySafebrowsingV4FetchThreatListUpdatesResponse resource.
+      type: object
+  list_threat_lists:
+    title: List threat lists
+    description: Lists the Safe Browsing threat lists available for download.
+    category: threat_lists
+    request:
+      method: GET
+      path: /v4/threatLists
+      base_url_override: https://safebrowsing.googleapis.com
+    input: {}
+    output:
+      description: The GoogleSecuritySafebrowsingV4ListThreatListsResponse resource.
+      type: object
+    read_only: true
+  find_threat_match:
+    title: Find threat match
+    description: Finds the threat entries that match the Safe Browsing lists.
+    category: threat_matches
+    request:
+      method: POST
+      path: /v4/threatMatches:find
+      base_url_override: https://safebrowsing.googleapis.com
+      body:
+        threatInfo: ${threat_info}
+        client: ${client}
+    input:
+      threat_info:
+        type: string
+        description: The lists and entries to be checked for matches.
+        optional: true
+      client:
+        type: string
+        description: The client metadata.
+        optional: true
+    output:
+      description: The GoogleSecuritySafebrowsingV4FindThreatMatchesResponse resource.
+      type: object

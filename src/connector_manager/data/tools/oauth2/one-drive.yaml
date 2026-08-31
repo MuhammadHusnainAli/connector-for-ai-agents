@@ -1,0 +1,422 @@
+# OneDrive tools (Microsoft Graph).
+#
+# Files are addressed either by item id or by path (`/drive/root:/Reports/q3.pdf:`).
+# These tools use item ids, with search_drive and list_folder to find them.
+#
+# Docs: https://learn.microsoft.com/graph/api/resources/onedrive
+
+connector_id: one-drive
+display_name: OneDrive
+docs_url: https://learn.microsoft.com/graph/api/resources/onedrive
+
+scope_rules:
+  case_insensitive: true
+  implies:
+    Files.ReadWrite.All: [Files.ReadWrite, Files.Read.All, Files.Read]
+    Files.ReadWrite: [Files.Read]
+    Files.Read.All: [Files.Read]
+
+scope_discovery:
+  jwt_claim: scp
+
+tools:
+
+  list_folder:
+    title: List a folder's contents
+    description: >-
+      List the files and folders inside a OneDrive folder. Use "root" for the
+      top of the drive. A "folder" facet on an entry marks it as a folder.
+    category: files
+    scopes: [Files.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/drive/items/${folder_id}/children
+      query:
+        $top: "${limit}"
+        $orderby: "${order_by}"
+        $select: "${select}"
+    input:
+      folder_id:
+        type: string
+        description: Folder id. Use "root" for the top of the drive.
+        optional: true
+        default: root
+      limit:
+        type: integer
+        description: How many entries per page.
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 999
+      order_by:
+        type: string
+        description: OData $orderby expression, e.g. "lastModifiedDateTime desc".
+        optional: true
+      select:
+        type: array
+        description: Fields to return, e.g. ["id","name","size"].
+        optional: true
+        items: {type: string}
+    output:
+      description: The folder's contents.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          name: {type: string}
+          size: {type: integer}
+          webUrl: {type: string}
+          folder: {type: object, description: "Present when the item is a folder."}
+
+  search_drive:
+    title: Search OneDrive
+    description: >-
+      Search the whole drive by file name and content, returning matching items
+      with their ids.
+    category: files
+    scopes: [Files.Read]
+    read_only: true
+    request:
+      method: GET
+      path: "/v1.0/me/drive/root/search(q='${query}')"
+      query:
+        $top: "${limit}"
+    input:
+      query:
+        type: string
+        description: Words to search for.
+        example: quarterly budget
+      limit:
+        type: integer
+        description: How many matches to return.
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 999
+    output:
+      description: Matching drive items.
+      type: array
+      response_path: value
+      items: {type: object}
+
+  get_item:
+    title: Get a file or folder
+    description: >-
+      Read one item's metadata, including a short-lived direct download URL
+      under "@microsoft.graph.downloadUrl".
+    category: files
+    scopes: [Files.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/drive/items/${item_id}
+    input:
+      item_id:
+        type: string
+        description: The drive item id.
+    output:
+      description: The drive item.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        size: {type: integer}
+        webUrl: {type: string}
+        "@microsoft.graph.downloadUrl": {type: string}
+
+  download_file:
+    title: Download a file
+    description: >-
+      Fetch a file's contents. Graph answers with a redirect to a signed URL,
+      which the HTTP client follows.
+    category: files
+    scopes: [Files.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/drive/items/${item_id}/content
+    input:
+      item_id:
+        type: string
+        description: The file's item id.
+    output:
+      description: The file's contents.
+      type: string
+
+  upload_file:
+    title: Upload a file to a path
+    description: >-
+      Create or replace a file at a path in the drive, sending its content
+      directly. Graph accepts up to 4 MB this way; larger files need an upload
+      session, which this tool does not cover.
+    category: files
+    scopes: [Files.ReadWrite]
+    request:
+      method: PUT
+      path: "/v1.0/me/drive/root:/${path}:/content"
+      content: "${content}"
+      headers:
+        content-type: "${content_type}"
+    input:
+      path:
+        type: string
+        description: Destination path inside the drive, e.g. "Reports/q3.txt".
+        example: Reports/q3.txt
+      content:
+        type: string
+        description: The file's contents, as text.
+      content_type:
+        type: string
+        description: MIME type of the content.
+        optional: true
+        default: text/plain
+    output:
+      description: The created or updated file.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        size: {type: integer}
+        webUrl: {type: string}
+
+  create_folder:
+    title: Create a folder
+    description: Create a folder inside another folder, or at the drive root.
+    category: files
+    scopes: [Files.ReadWrite]
+    request:
+      method: POST
+      path: /v1.0/me/drive/items/${parent_id}/children
+      body:
+        name: "${name}"
+        folder: {}
+        "@microsoft.graph.conflictBehavior": "${conflict_behavior}"
+    input:
+      name:
+        type: string
+        description: Folder name.
+      parent_id:
+        type: string
+        description: Parent folder id. Use "root" for the top of the drive.
+        optional: true
+        default: root
+      conflict_behavior:
+        type: string
+        description: What to do when that name is taken.
+        optional: true
+        default: rename
+        enum: [rename, replace, fail]
+    output:
+      description: The created folder.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+
+  move_item:
+    title: Move or rename an item
+    description: >-
+      Move a file or folder into another folder, rename it, or both. Only what
+      is supplied is changed.
+    category: files
+    scopes: [Files.ReadWrite]
+    request:
+      method: PATCH
+      path: /v1.0/me/drive/items/${item_id}
+      body:
+        name: "${name}"
+        parentReference:
+          $when: "${parent_id}"
+          id: "${parent_id}"
+    input:
+      item_id:
+        type: string
+        description: The item to move or rename.
+      name:
+        type: string
+        description: New name.
+        optional: true
+      parent_id:
+        type: string
+        description: Folder id to move it into.
+        optional: true
+    output:
+      description: The item at its new name and location.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        parentReference: {type: object}
+
+  copy_item:
+    title: Copy an item
+    description: >-
+      Copy a file or folder into another folder. Graph performs the copy
+      asynchronously and answers with a monitor URL rather than the new item.
+    category: files
+    scopes: [Files.ReadWrite]
+    request:
+      method: POST
+      path: /v1.0/me/drive/items/${item_id}/copy
+      body:
+        name: "${name}"
+        parentReference:
+          $when: "${parent_id}"
+          id: "${parent_id}"
+    input:
+      item_id:
+        type: string
+        description: The item to copy.
+      name:
+        type: string
+        description: Name for the copy.
+        optional: true
+      parent_id:
+        type: string
+        description: Destination folder id. Defaults to the item's own folder.
+        optional: true
+    output:
+      description: Empty -- Graph answers 202 Accepted with a Location header to poll.
+      type: object
+
+  delete_item:
+    title: Delete a file or folder
+    description: >-
+      Move an item to the recycle bin. Deleting a folder takes its contents with
+      it; this tool cannot restore either.
+    category: files
+    scopes: [Files.ReadWrite]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1.0/me/drive/items/${item_id}
+    input:
+      item_id:
+        type: string
+        description: The item to delete.
+    output:
+      description: Empty on success -- Graph answers 204 No Content.
+      type: object
+
+  create_share_link:
+    title: Create a sharing link
+    description: >-
+      Mint a sharing URL for an item. "organization" scope works for anyone in
+      the tenant; "anonymous" may be blocked by policy.
+    category: sharing
+    scopes: [Files.ReadWrite]
+    request:
+      method: POST
+      path: /v1.0/me/drive/items/${item_id}/createLink
+      body:
+        type: "${link_type}"
+        scope: "${link_scope}"
+        expirationDateTime: "${expires_at}"
+        password: "${password}"
+    input:
+      item_id:
+        type: string
+        description: The item to share.
+      link_type:
+        type: string
+        description: What the link allows.
+        optional: true
+        default: view
+        enum: [view, edit, embed]
+      link_scope:
+        type: string
+        description: Who the link works for.
+        optional: true
+        default: organization
+        enum: [anonymous, organization, users]
+      expires_at:
+        type: string
+        description: When the link stops working, ISO 8601.
+        optional: true
+      password:
+        type: string
+        description: Password required to open the link.
+        optional: true
+        secret: true
+    output:
+      description: The sharing permission, with the link itself.
+      type: object
+      properties:
+        id: {type: string}
+        link: {type: object, description: "Holds webUrl -- the sharing URL."}
+
+  list_recent_files:
+    title: List recently used files
+    description: >-
+      List the files the signed-in user touched most recently across their
+      drives — a fast way to find "the document I was just working on".
+    category: files
+    scopes: [Files.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/drive/recent
+      query:
+        $top: "${limit}"
+    input:
+      limit:
+        type: integer
+        description: How many items to return.
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 999
+    output:
+      description: Recently used files.
+      type: array
+      response_path: value
+      items: {type: object}
+
+  list_shared_with_me:
+    title: List files shared with me
+    description: List the items other people have shared with the signed-in user.
+    category: sharing
+    scopes: [Files.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/drive/sharedWithMe
+      query:
+        $top: "${limit}"
+    input:
+      limit:
+        type: integer
+        description: How many items to return.
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 999
+    output:
+      description: Items shared with the user.
+      type: array
+      response_path: value
+      items: {type: object}
+
+  get_drive:
+    title: Get the drive and its quota
+    description: >-
+      Read the signed-in user's drive, including how much storage is used and
+      remaining. The cheapest health check for a OneDrive connection.
+    category: drive
+    scopes: [Files.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/drive
+    input: {}
+    output:
+      description: The drive.
+      type: object
+      properties:
+        id: {type: string}
+        driveType: {type: string}
+        owner: {type: object}
+        quota: {type: object}

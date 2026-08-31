@@ -1,0 +1,823 @@
+# Absorb LMS REST API v1 tools.
+#
+# The connector points at the customer's own portal host and sends the private
+# REST key as x-api-key, which is the surface Absorb serves under /api/rest/v1
+# on that host. Paths follow the casing the reference uses -- lower-case for
+# users, courses, enrollments and departments, capitalised for the newer
+# Curriculums, Groups, Resources and CourseVersions routes.
+#
+# Absorb's newer Integration API v2 is a different service on its own regional
+# host (rest.myabsorb.com and friends) and is not reachable through this
+# connection.
+#
+# Paging is Offset/Limit, and most list endpoints take ModifiedSince so a sync
+# can ask only for what changed.
+#
+# Docs: https://myabsorb.com/api/rest/v1/Help
+
+connector_id: absorb-lms
+display_name: Absorb LMS
+docs_url: https://myabsorb.com/api/rest/v1/Help
+
+tools:
+
+  get_my_details:
+    title: Get the authenticated user
+    description: >-
+      Read the profile the API credentials act as. The cheapest check that a
+      connection to the portal is working.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /api/rest/v1/mydetails
+    input: {}
+    output:
+      description: The authenticated user's profile.
+      type: object
+
+  list_users:
+    title: List learners
+    description: >-
+      Page through the portal's learners. Filter by email, username or your own
+      external id to find one, or pass ModifiedSince to pull only the records
+      that changed since your last sync.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /api/rest/v1/users
+      query:
+        Email: "${email}"
+        Username: "${username}"
+        ExternalId: "${external_id}"
+        ModifiedSince: "${modified_since}"
+        Offset: "${offset}"
+        Limit: "${limit}"
+    input:
+      email:
+        type: string
+        description: Only return the learner with this email address.
+        optional: true
+        example: ada@example.com
+      username:
+        type: string
+        description: Only return the learner with this username.
+        optional: true
+      external_id:
+        type: string
+        description: Only return the learner carrying this external id, the one your own system assigns.
+        optional: true
+      modified_since:
+        type: string
+        description: Only return learners changed since this timestamp, for incremental syncs.
+        optional: true
+        example: "2026-01-01T00:00:00Z"
+      offset:
+        type: integer
+        description: How many learners to skip, for paging.
+        optional: true
+        minimum: 0
+      limit:
+        type: integer
+        description: How many learners to return.
+        optional: true
+        minimum: 1
+    output:
+      description: The matching learners.
+      type: array
+      items: {type: object}
+
+  get_user:
+    title: Get a learner
+    description: >-
+      Read one learner in full by their Absorb id -- their profile, department
+      and account state.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /api/rest/v1/users/${user_id}
+    input:
+      user_id:
+        type: string
+        description: The learner's Absorb id, from list_users.
+    output:
+      description: The learner.
+      type: object
+
+  create_user:
+    title: Create or update a learner
+    description: >-
+      Add a learner to the portal, or update the matching one where the key
+      already exists. `key` decides what Absorb matches on -- username or
+      external id -- which is what makes this safe to run from a nightly sync.
+    category: users
+    request:
+      method: POST
+      path: /api/rest/v1/users
+      query:
+        Key: "${key}"
+      body: "${fields}"
+    input:
+      fields:
+        type: object
+        description: >-
+          The learner record -- typically FirstName, LastName, EmailAddress,
+          Username, Password, DepartmentId and ExternalId. Read an existing
+          learner with get_user to see the full shape your portal expects.
+      key:
+        type: string
+        description: >-
+          Which field identifies an existing learner, so a repeat call updates
+          rather than duplicates.
+        optional: true
+    output:
+      description: The created or updated learner.
+      type: object
+
+  update_user:
+    title: Update a learner
+    description: >-
+      Change an existing learner's record by their Absorb id. Send the whole
+      record -- this is a PUT, so what you leave out is not preserved.
+    category: users
+    request:
+      method: PUT
+      path: /api/rest/v1/users/${user_id}
+      body: "${fields}"
+    input:
+      user_id:
+        type: string
+        description: The learner's Absorb id.
+      fields:
+        type: object
+        description: The full learner record, as returned by get_user.
+    output:
+      description: The updated learner.
+      type: object
+
+  update_user_management_settings:
+    title: Set a learner's admin rights
+    description: >-
+      Change what a learner may administer -- which users, departments and
+      courses fall inside their scope when they act as an admin.
+    category: users
+    request:
+      method: PUT
+      path: /api/rest/v1/users/${user_id}/user-management-settings
+      body: "${settings}"
+    input:
+      user_id:
+        type: string
+        description: The learner's Absorb id.
+      settings:
+        type: object
+        description: >-
+          The management scope to apply. See the portal's own API help for the
+          fields your Absorb version accepts.
+    output:
+      description: The updated settings.
+      type: object
+
+  list_courses:
+    title: List courses
+    description: >-
+      Page through the portal's course catalogue, with each course's title,
+      type and category.
+    category: courses
+    read_only: true
+    request:
+      method: GET
+      path: /api/rest/v1/courses
+      query:
+        ModifiedSince: "${modified_since}"
+        Offset: "${offset}"
+        Limit: "${limit}"
+    input:
+      modified_since:
+        type: string
+        description: Only return courses changed since this timestamp.
+        optional: true
+        example: "2026-01-01T00:00:00Z"
+      offset:
+        type: integer
+        description: How many courses to skip, for paging.
+        optional: true
+        minimum: 0
+      limit:
+        type: integer
+        description: How many courses to return.
+        optional: true
+        minimum: 1
+    output:
+      description: The matching courses.
+      type: array
+      items: {type: object}
+
+  get_course:
+    title: Get a course
+    description: >-
+      Read one course in full by its Absorb id -- its description, type,
+      category and settings.
+    category: courses
+    read_only: true
+    request:
+      method: GET
+      path: /api/rest/v1/courses/${course_id}
+    input:
+      course_id:
+        type: string
+        description: The course's Absorb id, from list_courses.
+    output:
+      description: The course.
+      type: object
+
+  list_user_courses:
+    title: List a learner's courses
+    description: >-
+      List the courses one learner can see, which is the catalogue as filtered
+      by their department, groups and enrolment rules.
+    category: courses
+    read_only: true
+    request:
+      method: GET
+      path: /api/rest/v1/users/${user_id}/courses
+      query:
+        Offset: "${offset}"
+        Limit: "${limit}"
+    input:
+      user_id:
+        type: string
+        description: The learner's Absorb id.
+      offset:
+        type: integer
+        description: How many courses to skip, for paging.
+        optional: true
+        minimum: 0
+      limit:
+        type: integer
+        description: How many courses to return.
+        optional: true
+        minimum: 1
+    output:
+      description: The courses visible to that learner.
+      type: array
+      items: {type: object}
+
+  list_my_courses:
+    title: List the authenticated user's courses
+    description: >-
+      List the courses available to whoever the credentials act as, without
+      having to look their id up first.
+    category: courses
+    read_only: true
+    request:
+      method: GET
+      path: /api/rest/v1/mycourses
+    input: {}
+    output:
+      description: The authenticated user's courses.
+      type: array
+      items: {type: object}
+
+  list_courses_for_sale:
+    title: List courses for sale
+    description: >-
+      List the courses published to the e-commerce catalogue, with the price
+      each is offered at.
+    category: courses
+    read_only: true
+    request:
+      method: GET
+      path: /api/rest/v1/courses/forsale
+    input: {}
+    output:
+      description: The courses available for purchase.
+      type: array
+      items: {type: object}
+
+  list_course_versions:
+    title: List a course's versions
+    description: >-
+      List every version of one course, which is how you tell which revision a
+      learner was enrolled against.
+    category: courses
+    read_only: true
+    request:
+      method: GET
+      path: /api/Rest/v1/course/${course_id}/versions
+    input:
+      course_id:
+        type: string
+        description: The course's Absorb id.
+    output:
+      description: The course's versions.
+      type: array
+      items: {type: object}
+
+  get_course_version:
+    title: Get a course version
+    description: >-
+      Read one specific version of a course, rather than whatever the current
+      revision happens to be.
+    category: courses
+    read_only: true
+    request:
+      method: GET
+      path: /api/Rest/v1/CourseVersions/${course_version_id}
+    input:
+      course_version_id:
+        type: string
+        description: The version's id, from list_course_versions.
+    output:
+      description: The course version.
+      type: object
+
+  list_user_enrollments:
+    title: List a learner's enrolments
+    description: >-
+      List everything one learner is enrolled in, with progress and completion
+      state for each. The record behind a transcript.
+    category: enrollments
+    read_only: true
+    request:
+      method: GET
+      path: /api/rest/v1/users/${user_id}/enrollments
+      query:
+        Offset: "${offset}"
+        Limit: "${limit}"
+    input:
+      user_id:
+        type: string
+        description: The learner's Absorb id.
+      offset:
+        type: integer
+        description: How many enrolments to skip, for paging.
+        optional: true
+        minimum: 0
+      limit:
+        type: integer
+        description: How many enrolments to return.
+        optional: true
+        minimum: 1
+    output:
+      description: The learner's enrolments.
+      type: array
+      items: {type: object}
+
+  get_user_enrollment:
+    title: Get one enrolment
+    description: >-
+      Read one learner's enrolment in one course -- their progress, score and
+      completion date.
+    category: enrollments
+    read_only: true
+    request:
+      method: GET
+      path: /api/rest/v1/users/${user_id}/enrollments/${course_id}
+    input:
+      user_id:
+        type: string
+        description: The learner's Absorb id.
+      course_id:
+        type: string
+        description: The course's Absorb id.
+    output:
+      description: The enrolment.
+      type: object
+
+  list_course_enrollments:
+    title: List a course's enrolments
+    description: >-
+      List everyone enrolled in one course, with each learner's progress. The
+      other way round from list_user_enrollments.
+    category: enrollments
+    read_only: true
+    request:
+      method: GET
+      path: /api/rest/v1/courses/${course_id}/enrollments
+      query:
+        Offset: "${offset}"
+        Limit: "${limit}"
+    input:
+      course_id:
+        type: string
+        description: The course's Absorb id.
+      offset:
+        type: integer
+        description: How many enrolments to skip, for paging.
+        optional: true
+        minimum: 0
+      limit:
+        type: integer
+        description: How many enrolments to return.
+        optional: true
+        minimum: 1
+    output:
+      description: The course's enrolments.
+      type: array
+      items: {type: object}
+
+  enroll_user:
+    title: Enrol a learner in a course
+    description: >-
+      Put one learner into one course. This is what a joiner workflow calls
+      once the learner's record exists.
+    category: enrollments
+    request:
+      method: POST
+      path: /api/rest/v1/users/${user_id}/enrollments/${course_id}
+      body: "${fields}"
+    input:
+      user_id:
+        type: string
+        description: The learner's Absorb id.
+      course_id:
+        type: string
+        description: The course's Absorb id.
+      fields:
+        type: object
+        description: >-
+          Enrolment options, such as a due date. Omit for a plain enrolment.
+        optional: true
+    output:
+      description: The created enrolment.
+      type: object
+
+  unenroll_users:
+    title: Unenrol learners
+    description: >-
+      Remove enrolments in bulk. The learners lose access to those courses and
+      their progress against them stops counting.
+    category: enrollments
+    destructive: true
+    request:
+      method: POST
+      path: /api/rest/v1/enrollments/unenroll
+      body: "${fields}"
+    input:
+      fields:
+        type: object
+        description: >-
+          Which enrolments to remove -- typically the enrolment or user and
+          course ids. See the portal's own API help for the exact shape.
+    output:
+      description: The result of the unenrolment.
+      type: object
+
+  list_departments:
+    title: List departments
+    description: >-
+      Page through the portal's departments, the tree learners are filed into
+      and that most visibility rules key off.
+    category: departments
+    read_only: true
+    request:
+      method: GET
+      path: /api/rest/v1/departments
+      query:
+        Offset: "${offset}"
+        Limit: "${limit}"
+    input:
+      offset:
+        type: integer
+        description: How many departments to skip, for paging.
+        optional: true
+        minimum: 0
+      limit:
+        type: integer
+        description: How many departments to return.
+        optional: true
+        minimum: 1
+    output:
+      description: The portal's departments.
+      type: array
+      items: {type: object}
+
+  get_department:
+    title: Get a department
+    description: >-
+      Read one department by id, including where it sits in the department
+      tree.
+    category: departments
+    read_only: true
+    request:
+      method: GET
+      path: /api/rest/v1/departments/${department_id}
+    input:
+      department_id:
+        type: string
+        description: The department's Absorb id.
+    output:
+      description: The department.
+      type: object
+
+  create_department:
+    title: Create a department
+    description: >-
+      Add a department to the portal, optionally under an existing one, so
+      learners can be filed into it.
+    category: departments
+    request:
+      method: POST
+      path: /api/rest/v1/departments
+      body: "${fields}"
+    input:
+      fields:
+        type: object
+        description: >-
+          The department, e.g. {"Name": "Engineering", "ParentId": "..."}. Read
+          an existing one with get_department to see the full shape.
+    output:
+      description: The created department.
+      type: object
+
+  get_certificate:
+    title: Get a certificate
+    description: >-
+      Read one certificate by id -- what it was awarded for, and when it
+      expires.
+    category: certificates
+    read_only: true
+    request:
+      method: GET
+      path: /api/rest/v1/certificates/${certificate_id}
+    input:
+      certificate_id:
+        type: string
+        description: The certificate's Absorb id.
+    output:
+      description: The certificate.
+      type: object
+
+  list_user_certificates:
+    title: List a learner's certificates
+    description: >-
+      List everything one learner has been certified in, with award and expiry
+      dates. The basis of a compliance report.
+    category: certificates
+    read_only: true
+    request:
+      method: GET
+      path: /api/rest/v1/users/${user_id}/certificates
+    input:
+      user_id:
+        type: string
+        description: The learner's Absorb id.
+    output:
+      description: The learner's certificates.
+      type: array
+      items: {type: object}
+
+  list_course_certificates:
+    title: List a course's certificates
+    description: >-
+      List the certificates awarded for one course, across every learner who
+      earned one.
+    category: certificates
+    read_only: true
+    request:
+      method: GET
+      path: /api/rest/v1/courses/${course_id}/certificates
+    input:
+      course_id:
+        type: string
+        description: The course's Absorb id.
+    output:
+      description: The course's certificates.
+      type: array
+      items: {type: object}
+
+  list_categories:
+    title: List categories
+    description: >-
+      Page through the catalogue's categories, the folders courses are grouped
+      under for learners browsing the catalogue.
+    category: catalogue
+    read_only: true
+    request:
+      method: GET
+      path: /api/rest/v1/categories
+      query:
+        Offset: "${offset}"
+        Limit: "${limit}"
+    input:
+      offset:
+        type: integer
+        description: How many categories to skip, for paging.
+        optional: true
+        minimum: 0
+      limit:
+        type: integer
+        description: How many categories to return.
+        optional: true
+        minimum: 1
+    output:
+      description: The catalogue's categories.
+      type: array
+      items: {type: object}
+
+  get_category:
+    title: Get a category
+    description: >-
+      Read one catalogue category by id, including where it sits in the
+      category tree.
+    category: catalogue
+    read_only: true
+    request:
+      method: GET
+      path: /api/rest/v1/categories/${category_id}
+    input:
+      category_id:
+        type: string
+        description: The category's Absorb id.
+    output:
+      description: The category.
+      type: object
+
+  list_curricula:
+    title: List curricula
+    description: >-
+      List the portal's curricula -- Absorb's learning paths, the ordered sets
+      of courses a learner works through as one programme.
+    category: curricula
+    read_only: true
+    request:
+      method: GET
+      path: /api/Rest/v1/Curriculums
+    input: {}
+    output:
+      description: The portal's curricula.
+      type: array
+      items: {type: object}
+
+  get_curriculum:
+    title: Get a curriculum
+    description: >-
+      Read one curriculum by id, including the courses it strings together and
+      the order they must be taken in.
+    category: curricula
+    read_only: true
+    request:
+      method: GET
+      path: /api/Rest/v1/Curriculums
+      query:
+        id: "${curriculum_id}"
+    input:
+      curriculum_id:
+        type: string
+        description: The curriculum's Absorb id, from list_curricula.
+    output:
+      description: The curriculum.
+      type: object
+
+  list_curricula_for_sale:
+    title: List curricula for sale
+    description: >-
+      List the curricula published to the e-commerce catalogue, optionally
+      narrowed to one category or a date window.
+    category: curricula
+    read_only: true
+    request:
+      method: GET
+      path: /api/Rest/v1/Curriculums/ForSale
+      query:
+        Id: "${curriculum_id}"
+        CatId: "${category_id}"
+        StartDate: "${start_date}"
+        ExpiryDate: "${expiry_date}"
+    input:
+      curriculum_id:
+        type: string
+        description: Only return this curriculum.
+        optional: true
+      category_id:
+        type: string
+        description: Only return curricula in this category.
+        optional: true
+      start_date:
+        type: string
+        description: Only return curricula on sale from this date.
+        optional: true
+        example: "2026-01-01T00:00:00Z"
+      expiry_date:
+        type: string
+        description: Only return curricula on sale until this date.
+        optional: true
+        example: "2026-12-31T00:00:00Z"
+    output:
+      description: The curricula available for purchase.
+      type: array
+      items: {type: object}
+
+  get_curriculum_group:
+    title: Get a curriculum group
+    description: >-
+      Read one curriculum group -- the set of courses inside a curriculum that
+      are taken together as a block.
+    category: curricula
+    read_only: true
+    request:
+      method: GET
+      path: /api/Rest/v1/Curriculums/CurriculumGroup
+      query:
+        Id: "${group_id}"
+    input:
+      group_id:
+        type: string
+        description: The curriculum group's id.
+    output:
+      description: The curriculum group.
+      type: object
+
+  get_curriculum_groups:
+    title: Get several curriculum groups
+    description: >-
+      Read a batch of curriculum groups in one call, rather than one request
+      per group when walking a whole curriculum.
+    category: curricula
+    read_only: true
+    request:
+      method: POST
+      path: /api/Rest/v1/Curriculums/MultipleCurriculumGroups
+      body: "${fields}"
+    input:
+      fields:
+        type: object
+        description: >-
+          Which groups to read, typically a list of ids. See the portal's own
+          API help for the exact shape.
+    output:
+      description: The requested curriculum groups.
+      type: array
+      items: {type: object}
+
+  list_groups:
+    title: List groups
+    description: >-
+      List the portal's groups, the ad-hoc sets of learners used to target
+      enrolments and visibility outside the department tree.
+    category: groups
+    read_only: true
+    request:
+      method: GET
+      path: /api/Rest/v1/Groups
+    input: {}
+    output:
+      description: The portal's groups.
+      type: array
+      items: {type: object}
+
+  get_group:
+    title: Get a group
+    description: >-
+      Read one group by id, including the rule or membership that decides who
+      is in it.
+    category: groups
+    read_only: true
+    request:
+      method: GET
+      path: /api/Rest/v1/Groups/${group_id}
+    input:
+      group_id:
+        type: string
+        description: The group's Absorb id, from list_groups.
+    output:
+      description: The group.
+      type: object
+
+  list_resources:
+    title: List resources
+    description: >-
+      List the portal's resources -- the documents, links and files published
+      to learners outside of a course.
+    category: resources
+    read_only: true
+    request:
+      method: GET
+      path: /api/Rest/v1/Resources
+    input: {}
+    output:
+      description: The portal's resources.
+      type: array
+      items: {type: object}
+
+  list_course_resources:
+    title: List a course's resources
+    description: >-
+      List the resources attached to one course, the supporting material a
+      learner gets alongside the lessons.
+    category: resources
+    read_only: true
+    request:
+      method: GET
+      path: /api/Rest/v1/courses/${course_id}/resources
+    input:
+      course_id:
+        type: string
+        description: The course's Absorb id.
+    output:
+      description: The course's resources.
+      type: array
+      items: {type: object}

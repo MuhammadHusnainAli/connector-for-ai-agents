@@ -1,0 +1,1115 @@
+# Google Health API tools.
+#
+# Built from Google's own discovery document for the API, which is the machine
+# readable contract its client libraries are generated from -- so every path,
+# parameter, enum, default and description here is Google's, and so are the
+# per-tool OAuth scopes. That last part is what makes `check_tools()` useful on
+# this connector: it can say which of these a given grant actually permits.
+#
+# The v4 API covers health data subscriptions and the notifications they
+# produce -- how an application is told that a user's health or fitness data
+# has changed, rather than reading the data itself.
+#
+# This is health information about identifiable people. Whatever comes back
+# here carries the handling obligations that go with that, and Google's own
+# terms for the API restrict what it may be used for.
+#
+# Docs: https://developers.google.com/health
+
+connector_id: google-health
+display_name: Google Health
+docs_url: https://developers.google.com/health
+scope_rules:
+  strip_prefixes:
+  - https://www.googleapis.com/auth/
+scope_discovery:
+  method: GET
+  base_url_override: https://oauth2.googleapis.com
+  endpoint: /tokeninfo
+  query:
+    access_token: ${credentials.access_token}
+  scopes_path: scope
+tools:
+  create_subscriber:
+    title: Create subscriber
+    description: Registers a new subscriber endpoint to receive notifications. A subscriber represents
+      an application or service that wishes to receive data change notifications for users who have granted
+      consent. **Endpoint Verification:** For a subscriber to be successfully created, the provided endpoint_uri
+      must be a valid HTTPS endpoint and must pass an automated verification check. The backend will send
+      two HTTP POST requests to
+    category: projects
+    request:
+      method: POST
+      path: /v4/${parent}/subscribers
+      query:
+        subscriberId: ${subscriber_id}
+      body:
+        endpointAuthorization: ${endpoint_authorization}
+        subscriberConfigs: ${subscriber_configs}
+        endpointUri: ${endpoint_uri}
+    input:
+      parent:
+        type: string
+        description: 'Required. The parent resource where this subscriber will be created. Format: projects/{project_number}
+          Example: projects/1234567890'
+      subscriber_id:
+        type: string
+        description: Optional. The ID to use for the subscriber, which will become the final component
+          of the subscriber's resource name. This value should be 4-36 characters, and valid characters
+          are /[a-z]([a-z0-9-]{2,34}[a-z0-9])/.
+        optional: true
+      endpoint_authorization:
+        type: string
+        description: Required. Authorization mechanism for the subscriber endpoint. The secret within
+          this message is crucial for endpoint verification and for securing webhook notifications.
+        optional: true
+      subscriber_configs:
+        type: array
+        items:
+          type: string
+        description: Optional. Configuration for the subscriber.
+        optional: true
+      endpoint_uri:
+        type: string
+        description: Required. The full HTTPS URI where update notifications will be sent. The URI must
+          be a valid URL and use HTTPS as the scheme. This endpoint will be verified during the CreateSubscriber
+          call. See CreateSubscriber RPC documentation for verification details.
+        optional: true
+    output:
+      description: The Operation resource.
+      type: object
+    scopes:
+    - cloud-platform
+  delete_subscriber:
+    title: Delete subscriber
+    description: Deletes a subscriber registration. This will stop all notifications to the subscriber's
+      endpoint.
+    category: projects
+    request:
+      method: DELETE
+      path: /v4/${name}
+      query:
+        force: ${force}
+    input:
+      name:
+        type: string
+        description: 'Required. The name of the subscriber to delete. Format: projects/{project}/subscribers/{subscriber}
+          Example: projects/my-project/subscribers/my-subscriber-123 The {subscriber} ID is user-settable
+          (4-36 characters, matching /[a-z]([a-z0-9-]{2,34}[a-z0-9])/) or system-generated if not provided
+          during'
+      force:
+        type: boolean
+        description: Optional. If set to true, any child resources (e.g., subscriptions) will also be
+          deleted. If false (default) and child resources exist, the request will fail.
+        optional: true
+    output:
+      description: The Operation resource.
+      type: object
+    scopes:
+    - cloud-platform
+    destructive: true
+  list_subscribers:
+    title: List subscribers
+    description: Lists all subscribers registered within the owned Google Cloud Project.
+    category: projects
+    request:
+      method: GET
+      path: /v4/${parent}/subscribers
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      parent:
+        type: string
+        description: 'Required. The parent, which owns this collection of subscribers. Format: projects/{project}'
+      page_size:
+        type: integer
+        description: Optional. The maximum number of subscribers to return. The service may return fewer
+          than this value. If unspecified, at most 50 subscribers will be returned. The maximum value
+          is 1000; values above 1000 will be coerced to 1000.
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token, received from a previous ListSubscribers call. Provide this
+          to retrieve the subsequent page. When paginating, all other parameters provided to ListSubscribers
+          must match the call that provided the page token.
+        optional: true
+    output:
+      description: The ListSubscribersResponse resource.
+      type: object
+    scopes:
+    - cloud-platform
+    read_only: true
+  update_subscriber:
+    title: Update subscriber
+    description: 'Updates the configuration of an existing subscriber, such as the endpoint URI or the
+      data types it''s interested in. **Endpoint Verification:** If the endpoint_uri or endpoint_authorization
+      field is included in the update_mask, the backend will re-verify the endpoint. The verification
+      process is the same as described in CreateSubscriber: 1. **Verification with Authorization:** POST
+      to the new or existing endpoint_uri'
+    category: projects
+    request:
+      method: PATCH
+      path: /v4/${name}
+      query:
+        updateMask: ${update_mask}
+      body:
+        name: ${body_name}
+        endpointUri: ${endpoint_uri}
+        subscriberConfigs: ${subscriber_configs}
+        endpointAuthorization: ${endpoint_authorization}
+    input:
+      name:
+        type: string
+        description: 'Identifier. The resource name of the Subscriber. Format: projects/{project}/subscribers/{subscriber}
+          The {project} ID is a Google Cloud Project ID or Project Number. The {subscriber} ID is user-settable
+          (4-36 characters, matching /[a-z]([a-z0-9-]{2,34}[a-z0-9])/) if provided during creation, or
+          syst'
+      update_mask:
+        type: string
+        description: 'Optional. A field mask that specifies which fields of the Subscriber message are
+          to be updated. This allows for partial updates. Supported fields: - endpoint_uri - subscriber_configs
+          - endpoint_authorization'
+        optional: true
+      body_name:
+        type: string
+        description: 'Identifier. The resource name of the Subscriber. Format: projects/{project}/subscribers/{subscriber}
+          The {project} ID is a Google Cloud Project ID or Project Number. The {subscriber} ID is user-settable
+          (4-36 characters, matching /[a-z]([a-z0-9-]{2,34}[a-z0-9])/) if provided during creation, or
+          syst'
+        optional: true
+      endpoint_uri:
+        type: string
+        description: Required. The full HTTPS URI where update notifications will be sent. The URI must
+          be a valid URL and use HTTPS as the scheme. This endpoint will be verified during CreateSubscriber
+          and UpdateSubscriber calls. See RPC documentation for verification details.
+        optional: true
+      subscriber_configs:
+        type: array
+        items:
+          type: string
+        description: Optional. Configuration for the subscriber.
+        optional: true
+      endpoint_authorization:
+        type: string
+        description: Required. Authorization mechanism for a subscriber endpoint. This is required to
+          ensure the endpoint can be verified.
+        optional: true
+    output:
+      description: The Operation resource.
+      type: object
+    scopes:
+    - cloud-platform
+  create_subscription:
+    title: Create subscription
+    description: Creates a subscription for a specific user to a specific subscriber. This method requires
+      the subscriber to have a SubscriptionCreatePolicy set to MANUAL for the given data types.
+    category: projects
+    request:
+      method: POST
+      path: /v4/${parent}/subscriptions
+      query:
+        subscriptionId: ${subscription_id}
+      body:
+        user: ${user}
+        dataTypes: ${data_types}
+    input:
+      parent:
+        type: string
+        description: 'Required. The parent subscriber. Format: projects/{project}/subscribers/{subscriber}
+          The {subscriber} ID is user-settable (4-36 characters, matching /[a-z]([a-z0-9-]{2,34}[a-z0-9])/)
+          if provided during creation, or system-generated otherwise.'
+      subscription_id:
+        type: string
+        description: Optional. The {subscription_id} is user-settable (4-36 chars, matching /[a-z]([a-z0-9-]{2,34}[a-z0-9])/)
+          or system-generated otherwise. If provided, the ID must be unique within the parent subscriber.
+        optional: true
+      user:
+        type: string
+        description: 'Required. Immutable. The resource name of the user for whom this subscription is
+          active. Format: users/{user} where {user} is the public healthUserId as returned by the GetIdentity
+          action in the profile PAPI (see google.devicesandservices.health.v4main.HealthProfileService.GetIdentity).'
+        optional: true
+      data_types:
+        type: array
+        items:
+          type: string
+        description: Optional. Data types subscribed to.
+        optional: true
+    output:
+      description: The Subscription resource.
+      type: object
+    scopes:
+    - cloud-platform
+  delete_subscription:
+    title: Delete subscription
+    description: Deletes a specific user subscription, stopping notifications for this user to this subscriber.
+    category: projects
+    request:
+      method: DELETE
+      path: /v4/${name}
+    input:
+      name:
+        type: string
+        description: 'Required. The resource name of the subscription to delete. Format: projects/{project}/subscribers/{subscriber}/subscriptions/{subscription}
+          Example: projects/my-project/subscribers/my-subscriber-123/subscriptions/my-subscription-456
+          The {subscriber} ID is user-settable (4-36 characters, matching /[a'
+    output:
+      description: The Empty resource.
+      type: object
+    scopes:
+    - cloud-platform
+    destructive: true
+  list_subscriptions:
+    title: List subscriptions
+    description: Lists all active subscriptions for a given subscriber. This can be filtered, for example,
+      by user or data type.
+    category: projects
+    request:
+      method: GET
+      path: /v4/${parent}/subscriptions
+      query:
+        filter: ${filter}
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      parent:
+        type: string
+        description: 'Required. The parent subscriber. Format: projects/{project}/subscribers/{subscriber}
+          The {subscriber} ID is user-settable (4-36 characters, matching /[a-z]([a-z0-9-]{2,34}[a-z0-9])/)
+          if provided during creation, or system-generated otherwise.'
+      filter:
+        type: string
+        description: 'Optional. A filter to apply to the list of subscriptions. The filter syntax is described
+          in https://google.aip.dev/160. The filter can be applied to the following fields: - user - data_type
+          The user identifier (e.g., user1 in users/user1) refers to the public health_user_id Example:
+          user = "users/us'
+        optional: true
+      page_size:
+        type: integer
+        description: Optional. The maximum number of subscriptions to return. The service may return fewer
+          than this value. If unspecified, at most 50 subscriptions will be returned. The maximum value
+          is 1000; values above 1000 will be coerced to 1000.
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token, received from a previous ListSubscriptions call. Provide
+          this to retrieve the subsequent page. When paginating, all other parameters provided to ListSubscriptions
+          must match the call that provided the page token.
+        optional: true
+    output:
+      description: The ListSubscriptionsResponse resource.
+      type: object
+    scopes:
+    - cloud-platform
+    read_only: true
+  update_subscription:
+    title: Update subscription
+    description: Updates the data types for an existing user subscription.
+    category: projects
+    request:
+      method: PATCH
+      path: /v4/${name}
+      query:
+        updateMask: ${update_mask}
+      body:
+        user: ${user}
+        name: ${body_name}
+        dataTypes: ${data_types}
+    input:
+      name:
+        type: string
+        description: 'Identifier. The resource name of the Subscription. Format: projects/{project}/subscribers/{subscriber}/subscriptions/{subscription}
+          Example: projects/my-project/subscribers/my-subscriber-123/subscriptions/my-subscription-456
+          The {project} ID is mandatory (6-30 characters, matching /a-z{6,30}/) The {'
+      update_mask:
+        type: string
+        description: Optional. The list of fields to update.
+        optional: true
+      user:
+        type: string
+        description: 'Immutable. The resource name of the user for whom this subscription is active. Format:
+          users/{user} where {user} is the public healthUserId as returned by the GetIdentity action in
+          the profile PAPI (see google.devicesandservices.health.v4main.HealthProfileService.GetIdentity).'
+        optional: true
+      body_name:
+        type: string
+        description: 'Identifier. The resource name of the Subscription. Format: projects/{project}/subscribers/{subscriber}/subscriptions/{subscription}
+          Example: projects/my-project/subscribers/my-subscriber-123/subscriptions/my-subscription-456
+          The {project} ID is mandatory (6-30 characters, matching /a-z{6,30}/) The {'
+        optional: true
+      data_types:
+        type: array
+        items:
+          type: string
+        description: Optional. Data types subscribed to. A subscriber will only receive notifications
+          for data types that are declared here. A subscription can only subscribe to the data types of
+          the subscriber. The values should be in the format "users/{health_user_id}/dataTypes/{data_type}"
+          where {data_type} is one of
+        optional: true
+    output:
+      description: The Subscription resource.
+      type: object
+    scopes:
+    - cloud-platform
+  get_shl_manifest_m:
+    title: Get shl manifest m
+    description: Forward a manifest request for a given SHL
+    category: shl
+    request:
+      method: POST
+      path: /v4/shl/m/${external_shl_id}
+      body:
+        recipient: ${recipient}
+        passcode: ${passcode}
+        embeddedLengthMax: ${embedded_length_max}
+    input:
+      external_shl_id:
+        type: string
+        description: Required. External ID mapping to a ShlSharedLinkCapabilityToken object See https://docs.google.com/document/d/1Pch20pxJHRbsaMxp0EYgs3ZU0Gu7QTUznk8LhvbQvfY/edit?tab=t.0#heading=h.17wg41voij6q
+      recipient:
+        type: string
+        description: Required. A string describing the recipient (e.g.,the name of an organization or
+          person) suitable for display to the Receiving User
+        optional: true
+      passcode:
+        type: string
+        description: Optional.
+        optional: true
+      embedded_length_max:
+        type: integer
+        description: Optional. Integer upper bound on the length of embedded payloads
+        optional: true
+    output:
+      description: The HttpBody resource.
+      type: object
+  get_r:
+    title: Get r
+    description: Forward a resource request for a given SHL
+    category: shl
+    request:
+      method: GET
+      path: /v4/shl/r/${external_shl_id}/${resource_token}
+    input:
+      external_shl_id:
+        type: string
+        description: Required. External ID mapping to a ShlSharedLinkCapabilityToken object See https://docs.google.com/document/d/1Pch20pxJHRbsaMxp0EYgs3ZU0Gu7QTUznk8LhvbQvfY/edit?tab=t.0#heading=h.17wg41voij6q
+      resource_token:
+        type: string
+        description: Required. Encoded, encrypted message containing resource access details
+    output:
+      description: The HttpBody resource.
+      type: object
+    read_only: true
+  batch_delete_data_point:
+    title: Batch delete data point
+    description: Delete a batch of identifyable data points.
+    category: users
+    request:
+      method: POST
+      path: /v4/${parent}/dataPoints:batchDelete
+      body:
+        names: ${names}
+    input:
+      parent:
+        type: string
+        description: 'Optional. Parent (data type) for the Data Point collection Format: users/me/dataTypes/{data_type},
+          e.g.: - users/me/dataTypes/steps - users/me/dataTypes/- For a list of the supported data types
+          see the DataPoint data union field. Deleting data points across multiple data type collections
+          is supporte'
+      names:
+        type: array
+        items:
+          type: string
+        description: Required. The names of the DataPoints to delete. A maximum of 10000 data points can
+          be deleted in a single request.
+        optional: true
+    output:
+      description: The Operation resource.
+      type: object
+    scopes_any:
+    - googlehealth.activity_and_fitness.writeonly
+    - googlehealth.health_metrics_and_measurements.writeonly
+    - googlehealth.logged_symptoms.writeonly
+    - googlehealth.mindfulness.writeonly
+    - googlehealth.nutrition.writeonly
+    - googlehealth.reproductive_health.writeonly
+    - googlehealth.sleep.writeonly
+  create_data_point:
+    title: Create data point
+    description: Creates a single identifiable data point.
+    category: users
+    request:
+      method: POST
+      path: /v4/${parent}/dataPoints
+      body: ${body}
+    input:
+      parent:
+        type: string
+        description: 'Required. The parent resource name where the data point will be created. Format:
+          users/{user}/dataTypes/{data_type}'
+      body:
+        type: object
+        description: The DataPoint resource, as the API's own reference defines it.
+    output:
+      description: The Operation resource.
+      type: object
+    scopes_any:
+    - googlehealth.activity_and_fitness.writeonly
+    - googlehealth.health_metrics_and_measurements.writeonly
+    - googlehealth.logged_symptoms.writeonly
+    - googlehealth.mindfulness.writeonly
+    - googlehealth.nutrition.writeonly
+    - googlehealth.reproductive_health.writeonly
+    - googlehealth.sleep.writeonly
+  daily_roll_up_data_point:
+    title: Daily roll up data point
+    description: Roll up data points over civil time intervals for supported data types.
+    category: users
+    request:
+      method: POST
+      path: /v4/${parent}/dataPoints:dailyRollUp
+      body:
+        dataSourceFamily: ${data_source_family}
+        range: ${range}
+        windowSizeDays: ${window_size_days}
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      parent:
+        type: string
+        description: 'Required. Parent data type of the Data Point collection. Format: users/{user}/dataTypes/{data_type},
+          e.g.: - users/me/dataTypes/steps - users/me/dataTypes/distance For a list of the supported data
+          types see the DailyRollupDataPoint value union field.'
+      data_source_family:
+        type: string
+        description: 'Optional. The data source family name to roll up. If empty, data points from all
+          available data sources will be rolled up. Format: users/me/dataSourceFamilies/{data_source_family}
+          The supported values are: - users/me/dataSourceFamilies/all-sources - Default value. Includes
+          data from all available da'
+        optional: true
+      range:
+        type: string
+        description: Required. Closed-open range of data points that will be rolled up. The start time
+          must be aligned with the aggregation window. The maximum range for calories-in-heart-rate-zone,
+          heart-rate, active-minutes and total-calories is 14 days. The maximum range for all other data
+          types is 90 days.
+        optional: true
+      window_size_days:
+        type: integer
+        description: Optional. Aggregation window size, in number of days. Defaults to 1 if not specified.
+        optional: true
+      page_size:
+        type: integer
+        description: Optional. The maximum number of data points to return. If unspecified, at most 1440
+          data points will be returned. The maximum page size is 10000; values above that will be truncated
+          accordingly.
+        optional: true
+      page_token:
+        type: string
+        description: Optional. The next_page_token from a previous request, if any. All other request
+          fields need to be the same as in the initial request when the page token is specified.
+        optional: true
+    output:
+      description: The DailyRollUpDataPointsResponse resource.
+      type: object
+    scopes_any:
+    - googlehealth.activity_and_fitness.readonly
+    - googlehealth.activity_and_fitness.writeonly
+    - googlehealth.health_metrics_and_measurements.readonly
+    - googlehealth.health_metrics_and_measurements.writeonly
+    - googlehealth.location.readonly
+    - googlehealth.logged_symptoms.writeonly
+    - googlehealth.mindfulness.writeonly
+    - googlehealth.nutrition.writeonly
+    - googlehealth.reproductive_health.writeonly
+    - googlehealth.sleep.readonly
+    - googlehealth.sleep.writeonly
+  export_exercise_tcx_data_point:
+    title: Export exercise tcx data point
+    description: 'Exports exercise data in TCX format. **IMPORTANT:** HTTP clients must append ?alt=media
+      to the request URL to download the raw TCX file. Example: https://health.googleapis.com/v4/users/me/dataTypes/exercise/dataPoints/EXERCISE_ID:exportExerciseTcx?alt=media
+      Without alt=media, the server returns a JSON response (ExportExerciseTcxResponse) which is intended
+      primarily for gRPC clients. **Note:** While the Authorization'
+    category: users
+    request:
+      method: GET
+      path: /v4/${name}:exportExerciseTcx
+      query:
+        partialData: ${partial_data}
+    input:
+      name:
+        type: string
+        description: 'Required. The resource name of the exercise data point to export. Format: users/{user}/dataTypes/exercise/dataPoints/{data_point}
+          Example: users/me/dataTypes/exercise/dataPoints/2026443605080188808 The {user} is the alias
+          "me" currently. Future versions may support user IDs. The {data_point} ID maps'
+      partial_data:
+        type: boolean
+        description: Optional. Indicates whether to include the TCX data points when the GPS data is not
+          available. If not specified, defaults to false and partial data will not be included.
+        optional: true
+    output:
+      description: The ExportExerciseTcxResponse resource.
+      type: object
+    scopes_any:
+    - googlehealth.activity_and_fitness.readonly
+    - googlehealth.location.readonly
+    read_only: true
+  get_data_point:
+    title: Get data point
+    description: Get a single identifyable data point. Calls users.dataTypes.dataPoints.get on the Google
+      Health API.
+    category: users
+    request:
+      method: GET
+      path: /v4/${name}
+    input:
+      name:
+        type: string
+        description: 'Required. The name of the data point to retrieve. Format: users/{user}/dataTypes/{data_type}/dataPoints/{data_point}
+          See DataPoint.name for examples and possible values.'
+    output:
+      description: The DataPoint resource.
+      type: object
+    scopes_any:
+    - googlehealth.activity_and_fitness.readonly
+    - googlehealth.activity_and_fitness.writeonly
+    - googlehealth.health_metrics_and_measurements.readonly
+    - googlehealth.health_metrics_and_measurements.writeonly
+    - googlehealth.location.readonly
+    - googlehealth.logged_symptoms.writeonly
+    - googlehealth.mindfulness.writeonly
+    - googlehealth.nutrition.writeonly
+    - googlehealth.reproductive_health.writeonly
+    - googlehealth.sleep.readonly
+    - googlehealth.sleep.writeonly
+    read_only: true
+  list_data_points:
+    title: List data points
+    description: Query user health and fitness data points.
+    category: users
+    request:
+      method: GET
+      path: /v4/${parent}/dataPoints
+      query:
+        filter: ${filter}
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      parent:
+        type: string
+        description: 'Required. Parent data type of the Data Point collection. Format: users/me/dataTypes/{data_type},
+          e.g.: - users/me/dataTypes/steps - users/me/dataTypes/weight For a list of the supported data
+          types see the DataPoint data union field.'
+      filter:
+        type: string
+        description: 'Optional. Filter expression following https://google.aip.dev/160. A time range (either
+          physical or civil) can be specified. The supported filter fields are: - Interval start time:
+          - Pattern: {interval_data_type}.interval.start_time - Supported comparison operators: >=, <
+          - Timestamp literal expected'
+        optional: true
+      page_size:
+        type: integer
+        description: Optional. The maximum number of data points to return. If unspecified, at most 1440
+          data points will be returned. The maximum page size is 10000; values above that will be truncated
+          accordingly. For exercise and sleep the default page size is 25. The maximum page size for exercise
+          and sleep is 25.
+        optional: true
+      page_token:
+        type: string
+        description: Optional. The next_page_token from a previous request, if any.
+        optional: true
+    output:
+      description: The ListDataPointsResponse resource.
+      type: object
+    scopes_any:
+    - googlehealth.activity_and_fitness.readonly
+    - googlehealth.activity_and_fitness.writeonly
+    - googlehealth.health_metrics_and_measurements.readonly
+    - googlehealth.health_metrics_and_measurements.writeonly
+    - googlehealth.location.readonly
+    - googlehealth.logged_symptoms.writeonly
+    - googlehealth.mindfulness.writeonly
+    - googlehealth.nutrition.writeonly
+    - googlehealth.reproductive_health.writeonly
+    - googlehealth.sleep.readonly
+    - googlehealth.sleep.writeonly
+    read_only: true
+  update_data_point:
+    title: Update data point
+    description: Updates a single identifiable data point. If a data point with the specified name is
+      not found, the request will fail.
+    category: users
+    request:
+      method: PATCH
+      path: /v4/${name}
+      body: ${body}
+    input:
+      name:
+        type: string
+        description: 'Identifier. Data point name, only supported for the subset of identifiable data
+          types. For the majority of the data types, individual data points do not need to be identified
+          and this field would be empty. Format: users/{user}/dataTypes/{data_type}/dataPoints/{data_point}
+          Example: users/abcd1234/dat'
+      body:
+        type: object
+        description: The DataPoint resource, as the API's own reference defines it.
+    output:
+      description: The Operation resource.
+      type: object
+    scopes_any:
+    - googlehealth.activity_and_fitness.writeonly
+    - googlehealth.health_metrics_and_measurements.writeonly
+    - googlehealth.logged_symptoms.writeonly
+    - googlehealth.mindfulness.writeonly
+    - googlehealth.nutrition.writeonly
+    - googlehealth.reproductive_health.writeonly
+    - googlehealth.sleep.writeonly
+  reconcile_data_point:
+    title: Reconcile data point
+    description: Reconcile data points from multiple data sources into a single data stream.
+    category: users
+    request:
+      method: GET
+      path: /v4/${parent}/dataPoints:reconcile
+      query:
+        dataSourceFamily: ${data_source_family}
+        filter: ${filter}
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      parent:
+        type: string
+        description: 'Required. Parent data type of the Data Point collection. Format: users/me/dataTypes/{data_type},
+          e.g.: - users/me/dataTypes/steps - users/me/dataTypes/heart-rate For a list of the supported
+          data types see the DataPoint data union field.'
+      data_source_family:
+        type: string
+        description: 'Optional. The data source family name to reconcile. If empty, data points from all
+          data sources will be reconciled. Format: users/me/dataSourceFamilies/{data_source_family} -
+          users/me/dataSourceFamilies/all-sources - Default value. Includes data from all available data
+          sources. - users/me/dataSource'
+        optional: true
+      filter:
+        type: string
+        description: Optional. Filter expression based on https://aip.dev/160. A time range, either physical
+          or civil, can be specified. See the ListDataPointsRequest.filter for the supported fields and
+          syntax.
+        optional: true
+      page_size:
+        type: integer
+        description: Optional. The maximum number of data points to return. If unspecified, at most 1440
+          data points will be returned. The maximum page size is 10000; values above that will be truncated
+          accordingly. For exercise and sleep the default page size is 25. The maximum page size for exercise
+          and sleep is 25.
+        optional: true
+      page_token:
+        type: string
+        description: Optional. The next_page_token from a previous request, if any.
+        optional: true
+    output:
+      description: The ReconcileDataPointsResponse resource.
+      type: object
+    scopes_any:
+    - googlehealth.activity_and_fitness.readonly
+    - googlehealth.activity_and_fitness.writeonly
+    - googlehealth.health_metrics_and_measurements.readonly
+    - googlehealth.health_metrics_and_measurements.writeonly
+    - googlehealth.location.readonly
+    - googlehealth.logged_symptoms.writeonly
+    - googlehealth.mindfulness.writeonly
+    - googlehealth.nutrition.writeonly
+    - googlehealth.reproductive_health.writeonly
+    - googlehealth.sleep.readonly
+    - googlehealth.sleep.writeonly
+    read_only: true
+  roll_up_data_point:
+    title: Roll up data point
+    description: Roll up data points over physical time intervals for supported data types.
+    category: users
+    request:
+      method: POST
+      path: /v4/${parent}/dataPoints:rollUp
+      body:
+        windowSize: ${window_size}
+        pageSize: ${page_size}
+        dataSourceFamily: ${data_source_family}
+        range: ${range}
+        pageToken: ${page_token}
+    input:
+      parent:
+        type: string
+        description: 'Required. Parent data type of the Data Point collection. Format: users/{user}/dataTypes/{data_type},
+          e.g.: - users/me/dataTypes/steps - users/me/dataTypes/distance For a list of the supported data
+          types see the RollupDataPoint value union field.'
+      window_size:
+        type: string
+        description: Required. The size of the time window to group data points into before applying the
+          aggregation functions. Must be at least 1 second.
+        optional: true
+      page_size:
+        type: integer
+        description: Optional. The maximum number of data points to return. If unspecified, at most 1440
+          data points will be returned. The maximum page size is 10000; values above that will be truncated
+          accordingly.
+        optional: true
+      data_source_family:
+        type: string
+        description: 'Optional. The data source family name to roll up. If empty, data points from all
+          available data sources will be rolled up. Format: users/me/dataSourceFamilies/{data_source_family}
+          The supported values are: - users/me/dataSourceFamilies/all-sources - Default value. Includes
+          data from all available da'
+        optional: true
+      range:
+        type: string
+        description: Required. Closed-open range of data points that will be rolled up. The maximum range
+          for calories-in-heart-rate-zone, heart-rate, active-minutes and total-calories is 14 days. The
+          maximum range for all other data types is 90 days.
+        optional: true
+      page_token:
+        type: string
+        description: Optional. The next_page_token from a previous request, if any. All other request
+          fields need to be the same as in the initial request when the page token is specified.
+        optional: true
+    output:
+      description: The RollUpDataPointsResponse resource.
+      type: object
+    scopes_any:
+    - googlehealth.activity_and_fitness.readonly
+    - googlehealth.activity_and_fitness.writeonly
+    - googlehealth.health_metrics_and_measurements.readonly
+    - googlehealth.health_metrics_and_measurements.writeonly
+    - googlehealth.location.readonly
+    - googlehealth.logged_symptoms.writeonly
+    - googlehealth.mindfulness.writeonly
+    - googlehealth.nutrition.writeonly
+    - googlehealth.reproductive_health.writeonly
+    - googlehealth.sleep.readonly
+    - googlehealth.sleep.writeonly
+  get_identity_user:
+    title: Get identity user
+    description: Gets the user's identity. It includes the legacy Fitbit user ID and the Google user ID
+      and it can be used by migrating clients to map identifiers between the two systems.
+    category: users
+    request:
+      method: GET
+      path: /v4/${name}
+    input:
+      name:
+        type: string
+        description: 'Required. The resource name of the Identity. Format: users/me/identity'
+    output:
+      description: The Identity resource.
+      type: object
+    scopes_any:
+    - googlehealth.activity_and_fitness.readonly
+    - googlehealth.ecg.readonly
+    - googlehealth.health_metrics_and_measurements.readonly
+    - googlehealth.irn.readonly
+    - googlehealth.profile.readonly
+    - googlehealth.settings.readonly
+    - googlehealth.sleep.readonly
+    read_only: true
+  get_irn_profile_user:
+    title: Get irn profile user
+    description: Returns user's IRN Profile details. Calls users.getIrnProfile on the Google Health API.
+    category: users
+    request:
+      method: GET
+      path: /v4/${name}
+    input:
+      name:
+        type: string
+        description: 'Required. The resource name of the IRN Profile. Format: users/{user}/irnProfile
+          Example: users/1234567890/irnProfile or users/me/irnProfile The {user} ID is a system-generated
+          Google Health API user ID, a string of 1-63 characters consisting of lowercase and uppercase
+          letters, numbers, and hyphens.'
+    output:
+      description: The IrnProfile resource.
+      type: object
+    scopes:
+    - googlehealth.irn.readonly
+    read_only: true
+  get_profile_user:
+    title: Get profile user
+    description: Returns user Profile details. Calls users.getProfile on the Google Health API.
+    category: users
+    request:
+      method: GET
+      path: /v4/${name}
+    input:
+      name:
+        type: string
+        description: 'Required. The name of the Profile. Format: users/me/profile.'
+    output:
+      description: The Profile resource.
+      type: object
+    scopes:
+    - googlehealth.profile.readonly
+    read_only: true
+  get_settings_user:
+    title: Get settings user
+    description: Returns user settings details. Calls users.getSettings on the Google Health API.
+    category: users
+    request:
+      method: GET
+      path: /v4/${name}
+    input:
+      name:
+        type: string
+        description: 'Required. The name of the Settings. Format: users/me/settings.'
+    output:
+      description: The Settings resource.
+      type: object
+    scopes:
+    - googlehealth.settings.readonly
+    read_only: true
+  get_paired_device:
+    title: Get paired device
+    description: Returns user's Device. Calls users.pairedDevices.get on the Google Health API.
+    category: users
+    request:
+      method: GET
+      path: /v4/${name}
+    input:
+      name:
+        type: string
+        description: 'Required. The name of the device to retrieve. Format: users/{user}/devices/{device}'
+    output:
+      description: The PairedDevice resource.
+      type: object
+    scopes:
+    - googlehealth.settings.readonly
+    read_only: true
+  list_paired_devices:
+    title: List paired devices
+    description: Returns the user's list of paired 1P trackers and smartwatches.
+    category: users
+    request:
+      method: GET
+      path: /v4/${parent}/pairedDevices
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      parent:
+        type: string
+        description: 'Required. The parent, which owns this collection of devices. Format: users/{user}'
+      page_size:
+        type: integer
+        description: Optional. The maximum number of devices to return. The service may return fewer than
+          this value. If unspecified, at most 5 devices will be returned. The maximum value is 100. values
+          above 100 will be coerced to 100.
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token, received from a previous ListPairedDevices call. Provide
+          this to retrieve the subsequent page. When paginating, all other parameters provided to ListPairedDevices
+          must match the call that provided the page token.
+        optional: true
+    output:
+      description: The ListPairedDevicesResponse resource.
+      type: object
+    scopes:
+    - googlehealth.settings.readonly
+    read_only: true
+  update_profile_user:
+    title: Update profile user
+    description: Updates the user's profile details. Calls users.updateProfile on the Google Health API.
+    category: users
+    request:
+      method: PATCH
+      path: /v4/${name}
+      query:
+        updateMask: ${update_mask}
+      body:
+        userConfiguredWalkingStrideLengthMm: ${user_configured_walking_stride_length_mm}
+        age: ${age}
+        userConfiguredRunningStrideLengthMm: ${user_configured_running_stride_length_mm}
+        name: ${body_name}
+    input:
+      name:
+        type: string
+        description: 'Identifier. The resource name of this Profile resource. Format: users/{user}/profile
+          Example: users/1234567890/profile or users/me/profile The {user} ID is a system-generated Google
+          Health API user ID, a string of 1-63 characters consisting of lowercase and uppercase letters,
+          numbers, and hyphens. T'
+      update_mask:
+        type: string
+        description: Optional. The list of fields to be updated.
+        optional: true
+      user_configured_walking_stride_length_mm:
+        type: integer
+        description: 'Optional. The user''s user configured walking stride length, in millimeters. The
+          user must consent to one of the following access scopes to access this field: - https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly
+          - https://www.googleapis.com/auth/googlehealth.activity_and_fitne'
+        optional: true
+      age:
+        type: integer
+        description: Optional. The age in years based on the user's birth date. Updates to this field
+          are currently not supported.
+        optional: true
+      user_configured_running_stride_length_mm:
+        type: integer
+        description: 'Optional. The user''s user configured running stride length, in millimeters. The
+          user must consent to one of the following access scopes to access this field: - https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly
+          - https://www.googleapis.com/auth/googlehealth.activity_and_fitne'
+        optional: true
+      body_name:
+        type: string
+        description: 'Identifier. The resource name of this Profile resource. Format: users/{user}/profile
+          Example: users/1234567890/profile or users/me/profile The {user} ID is a system-generated Google
+          Health API user ID, a string of 1-63 characters consisting of lowercase and uppercase letters,
+          numbers, and hyphens. T'
+        optional: true
+    output:
+      description: The Profile resource.
+      type: object
+    scopes:
+    - googlehealth.profile.writeonly
+  update_settings_user:
+    title: Update settings user
+    description: Updates the user's settings details. Calls users.updateSettings on the Google Health
+      API.
+    category: users
+    request:
+      method: PATCH
+      path: /v4/${name}
+      query:
+        updateMask: ${update_mask}
+      body:
+        utcOffset: ${utc_offset}
+        strideLengthRunningType: ${stride_length_running_type}
+        timeZone: ${time_zone}
+        strideLengthWalkingType: ${stride_length_walking_type}
+        languageLocale: ${language_locale}
+        weightUnit: ${weight_unit}
+        name: ${body_name}
+        swimUnit: ${swim_unit}
+        temperatureUnit: ${temperature_unit}
+        waterUnit: ${water_unit}
+        distanceUnit: ${distance_unit}
+        autoStrideEnabled: ${auto_stride_enabled}
+        glucoseUnit: ${glucose_unit}
+        heightUnit: ${height_unit}
+    input:
+      name:
+        type: string
+        description: 'Identifier. The resource name of this Settings resource. Format: users/{user}/settings
+          Example: users/1234567890/settings or users/me/settings The {user} ID is a system-generated
+          Google Health API user ID, a string of 1-63 characters consisting of lowercase and uppercase
+          letters, numbers, and hyphen'
+      update_mask:
+        type: string
+        description: Optional. The list of fields to be updated.
+        optional: true
+      utc_offset:
+        type: string
+        description: Optional. The user's timezone offset relative to UTC. Updates to this field are currently
+          not supported.
+        optional: true
+      stride_length_running_type:
+        type: string
+        description: Optional. The stride length type defined in the user's account settings for running.
+          Updates to this field are currently not supported.
+        optional: true
+        enum:
+        - STRIDE_LENGTH_TYPE_UNSPECIFIED
+        - STRIDE_LENGTH_TYPE_DEFAULT
+        - STRIDE_LENGTH_TYPE_MANUAL
+        - STRIDE_LENGTH_TYPE_AUTO
+      time_zone:
+        type: string
+        description: Optional. The timezone defined in the user's account settings. This follows the IANA
+          Time Zone Database. Updates to this field are currently not supported.
+        optional: true
+      stride_length_walking_type:
+        type: string
+        description: Optional. The stride length type defined in the user's account settings for walking.
+          Updates to this field are currently not supported.
+        optional: true
+        enum:
+        - STRIDE_LENGTH_TYPE_UNSPECIFIED
+        - STRIDE_LENGTH_TYPE_DEFAULT
+        - STRIDE_LENGTH_TYPE_MANUAL
+        - STRIDE_LENGTH_TYPE_AUTO
+      language_locale:
+        type: string
+        description: Optional. The locale defined in the user's account settings. Updates to this field
+          are currently not supported.
+        optional: true
+      weight_unit:
+        type: string
+        description: Optional. The measurement unit defined in the user's account settings.
+        optional: true
+        enum:
+        - WEIGHT_UNIT_UNSPECIFIED
+        - WEIGHT_UNIT_POUNDS
+        - WEIGHT_UNIT_STONE
+        - WEIGHT_UNIT_KILOGRAMS
+      body_name:
+        type: string
+        description: 'Identifier. The resource name of this Settings resource. Format: users/{user}/settings
+          Example: users/1234567890/settings or users/me/settings The {user} ID is a system-generated
+          Google Health API user ID, a string of 1-63 characters consisting of lowercase and uppercase
+          letters, numbers, and hyphen'
+        optional: true
+      swim_unit:
+        type: string
+        description: Optional. The measurement unit defined in the user's account settings.
+        optional: true
+        enum:
+        - SWIM_UNIT_UNSPECIFIED
+        - SWIM_UNIT_METERS
+        - SWIM_UNIT_YARDS
+      temperature_unit:
+        type: string
+        description: Optional. The measurement unit defined in the user's account settings.
+        optional: true
+        enum:
+        - TEMPERATURE_UNIT_UNSPECIFIED
+        - TEMPERATURE_UNIT_CELSIUS
+        - TEMPERATURE_UNIT_FAHRENHEIT
+      water_unit:
+        type: string
+        description: Optional. The measurement unit defined in the user's account settings.
+        optional: true
+        enum:
+        - WATER_UNIT_UNSPECIFIED
+        - WATER_UNIT_ML
+        - WATER_UNIT_FL_OZ
+        - WATER_UNIT_CUP
+      distance_unit:
+        type: string
+        description: Optional. The measurement unit defined in the user's account settings.
+        optional: true
+        enum:
+        - DISTANCE_UNIT_UNSPECIFIED
+        - DISTANCE_UNIT_MILES
+        - DISTANCE_UNIT_KILOMETERS
+      auto_stride_enabled:
+        type: boolean
+        description: Optional. True if the user's stride length is determined automatically. Updates to
+          this field are currently not supported.
+        optional: true
+      glucose_unit:
+        type: string
+        description: Optional. The measurement unit defined in the user's account settings.
+        optional: true
+        enum:
+        - GLUCOSE_UNIT_UNSPECIFIED
+        - GLUCOSE_UNIT_MG_DL
+        - GLUCOSE_UNIT_MMOL_L
+      height_unit:
+        type: string
+        description: Optional. The measurement unit defined in the user's account settings.
+        optional: true
+        enum:
+        - HEIGHT_UNIT_UNSPECIFIED
+        - HEIGHT_UNIT_INCHES
+        - HEIGHT_UNIT_CENTIMETERS
+    output:
+      description: The Settings resource.
+      type: object
+    scopes:
+    - googlehealth.settings.writeonly

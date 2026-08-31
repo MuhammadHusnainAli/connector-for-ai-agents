@@ -1,0 +1,202 @@
+# A-Leads Gateway v1 tools.
+#
+# The connector's base url already ends in /gateway, so paths start at /v1.
+# Every route is a POST, including the lookups: A-Leads takes its search input
+# as a JSON body rather than a query string.
+#
+# Two body shapes appear, and the reference is explicit about which is which:
+# the finders and the verifier wrap their input in a `data` object, while
+# advanced search takes its fields at the top level.
+#
+# Each call spends credits from the account's balance, so the read-only tools
+# here are read-only in the sense that they create nothing -- not in the sense
+# that they are free.
+#
+# Docs: https://docs.a-leads.co/reference
+
+connector_id: a-leads
+display_name: A-Leads
+docs_url: https://docs.a-leads.co/reference
+
+tools:
+
+  advanced_search:
+    title: Search for leads
+    description: >-
+      Run the same people-and-company search the A-Leads dashboard runs, over
+      30-plus filters covering the person (title, seniority, skills, location),
+      the company (industry, size, revenue, tech stack), funding, hiring and
+      web-traffic signals. Results are paged.
+    category: search
+    request:
+      method: POST
+      path: /v1/search/advanced-search
+      body:
+        advanced_filters: "${advanced_filters}"
+        current_page: "${current_page}"
+        search_type: "${search_type}"
+        name: "${name}"
+    input:
+      advanced_filters:
+        type: object
+        description: >-
+          The filter set, keyed by filter name. Most take an include/exclude
+          list, e.g. {"person_seniority": {"include": ["Founder/Owner"]},
+          "company_industry": {"exclude": ["Semiconductors"]}}. Min/max filters
+          such as min_revenue_annual take a plain value.
+      current_page:
+        type: integer
+        description: Which page of results to return, starting at 1.
+        minimum: 1
+        example: 1
+      search_type:
+        type: string
+        description: >-
+          Which slice to return -- 'new' for leads not seen before, 'saved' for
+          ones already saved, 'total' for both.
+        enum: [new, saved, total]
+      name:
+        type: string
+        description: A name for the search, which saves it for reuse in the dashboard.
+        optional: true
+    output:
+      description: A page of matching leads, with the counts behind the search.
+      type: object
+      properties:
+        message: {type: object}
+        data: {type: array}
+        meta_data: {type: object}
+
+  find_email:
+    title: Find a business email
+    description: >-
+      Resolve someone's work email from their name and their company's website,
+      or from a document_id returned by advanced search. Answers with the
+      address, a quality grade, and whether the domain accepts everything.
+    category: enrichment
+    read_only: true
+    request:
+      method: POST
+      path: /v1/search/find-email
+      body:
+        data:
+          first_name: "${first_name}"
+          last_name: "${last_name}"
+          website: "${website}"
+          document_id: "${document_id}"
+          request_uuid: "${request_uuid}"
+    input:
+      first_name:
+        type: string
+        description: The person's first name.
+        optional: true
+        example: John
+      last_name:
+        type: string
+        description: The person's last name.
+        optional: true
+        example: Doe
+      website:
+        type: string
+        description: The company's website or domain.
+        optional: true
+        example: acme.com
+      document_id:
+        type: string
+        description: The lead's id from an advanced_search result, used instead of name and website.
+        optional: true
+      request_uuid:
+        type: string
+        description: Your own id for this lookup, echoed back so you can match it to a request.
+        optional: true
+    output:
+      description: The address found, with its quality grade.
+      type: object
+      properties:
+        message: {type: object}
+        data: {type: object}
+
+  find_personal_email:
+    title: Find a personal email
+    description: >-
+      Resolve someone's personal email address from their LinkedIn profile,
+      for the cases where a work address will not reach them.
+    category: enrichment
+    read_only: true
+    request:
+      method: POST
+      path: /v1/search/find-email/personal
+      body:
+        data:
+          linkedin_username: "${linkedin_username}"
+          request_uuid: "${request_uuid}"
+    input:
+      linkedin_username:
+        type: string
+        description: The person's LinkedIn profile url or username.
+        example: jordan-lee
+      request_uuid:
+        type: string
+        description: Your own id for this lookup, echoed back so you can match it to a request.
+        optional: true
+    output:
+      description: The personal address, or null where none was found.
+      type: object
+      properties:
+        message: {type: object}
+        data: {type: object}
+
+  find_phone:
+    title: Find a phone number
+    description: >-
+      Resolve a direct dial or mobile number from someone's LinkedIn profile.
+      Answers with null rather than an error when A-Leads holds no number.
+    category: enrichment
+    read_only: true
+    request:
+      method: POST
+      path: /v1/search/find-phone
+      body:
+        data:
+          linkedin_username: "${linkedin_username}"
+          request_uuid: "${request_uuid}"
+    input:
+      linkedin_username:
+        type: string
+        description: The person's LinkedIn profile url or username.
+        example: jordan-lee
+      request_uuid:
+        type: string
+        description: Your own id for this lookup, echoed back so you can match it to a request.
+        optional: true
+    output:
+      description: The number found, under data.response.phone_number.
+      type: object
+      properties:
+        message: {type: object}
+        data: {type: object}
+
+  verify_email:
+    title: Verify an email address
+    description: >-
+      Check an address before sending to it -- whether it is valid, its quality
+      grade, whether the domain is catch-all, and which provider hosts it.
+    category: verification
+    read_only: true
+    request:
+      method: POST
+      path: /v1/search/verify-email
+      body:
+        data:
+          email: "${email}"
+    input:
+      email:
+        type: string
+        description: The address to verify.
+        example: john@acme.com
+    output:
+      description: The verdict, under data.response.
+      type: object
+      properties:
+        message: {type: object}
+        data: {type: object}

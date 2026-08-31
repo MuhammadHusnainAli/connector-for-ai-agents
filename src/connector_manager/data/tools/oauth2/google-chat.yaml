@@ -1,0 +1,1414 @@
+# Google Chat tools.
+#
+# Spaces are named "spaces/AAAA…" and messages "spaces/AAAA…/messages/BBBB…";
+# those full strings are the ids. An app can only see spaces it has been added
+# to.
+#
+# Docs: https://developers.google.com/chat/api/reference/rest
+#
+# The tools below the "rest of the API" divider come from Google's own
+# discovery document for this API -- the machine readable contract its client
+# libraries are generated from -- so their paths, parameters and per-tool OAuth
+# scopes are Google's. The hand-authored tools above it are kept because they
+# offer a friendlier shape for the common cases.
+#
+connector_id: google-chat
+display_name: Google Chat
+docs_url: https://developers.google.com/chat/api/reference/rest
+
+scope_rules:
+  strip_prefixes:
+    - https://www.googleapis.com/auth/
+  implies:
+    chat.messages: [chat.messages.readonly, chat.messages.create]
+    chat.spaces: [chat.spaces.readonly]
+    chat.memberships: [chat.memberships.readonly]
+
+scope_discovery:
+  method: GET
+  base_url_override: https://oauth2.googleapis.com
+  endpoint: /tokeninfo
+  query:
+    access_token: ${credentials.access_token}
+  scopes_path: scope
+
+tools:
+
+  list_spaces:
+    title: List spaces
+    description: >-
+      List the spaces and direct messages the caller can see, with the space
+      names every message tool takes.
+    category: spaces
+    scopes_any: [chat.spaces.readonly, chat.spaces]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/spaces
+      query:
+        pageSize: "${limit}"
+        pageToken: "${page_token}"
+        filter: "${filter}"
+    input:
+      limit:
+        type: integer
+        description: How many spaces per page (1-1000).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 1000
+      page_token:
+        type: string
+        description: Cursor from the previous response's nextPageToken.
+        optional: true
+      filter:
+        type: string
+        description: Filter expression, e.g. "spaceType = \"SPACE\"".
+        optional: true
+    output:
+      description: A page of spaces.
+      type: object
+      properties:
+        spaces: {type: array, description: "Each with name, displayName and spaceType."}
+        nextPageToken: {type: string}
+
+  get_space:
+    title: Get a space
+    description: Read one space's display name, type and membership settings.
+    category: spaces
+    scopes_any: [chat.spaces.readonly, chat.spaces]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/${space}
+    input:
+      space:
+        type: string
+        description: The space resource name, e.g. spaces/AAAAAAAAAAA.
+        example: spaces/AAAAAAAAAAA
+    output:
+      description: The space.
+      type: object
+      properties:
+        name: {type: string}
+        displayName: {type: string}
+        spaceType: {type: string}
+
+  send_message:
+    title: Send a message to a space
+    description: >-
+      Post a message into a space or direct message. Text uses Chat's simple
+      formatting (*bold*, _italic_); cards go in cardsV2 for richer layout.
+    category: messages
+    scopes_any: [chat.messages.create, chat.messages]
+    destructive: true
+    request:
+      method: POST
+      path: /v1/${space}/messages
+      query:
+        messageReplyOption: "${reply_option}"
+      body:
+        text: "${text}"
+        cardsV2: "${cards}"
+        thread:
+          $when: "${thread_key}"
+          threadKey: "${thread_key}"
+    input:
+      space:
+        type: string
+        description: Space resource name to post into.
+      text:
+        type: string
+        description: The message text, in Chat's simple formatting.
+      cards:
+        type: array
+        description: "Card objects for rich layout, each {\"cardId\": ..., \"card\": {...}}."
+        optional: true
+        items: {type: object}
+      thread_key:
+        type: string
+        description: Your own thread key, so related messages group together.
+        optional: true
+      reply_option:
+        type: string
+        description: What to do when the thread key names an existing thread.
+        optional: true
+        enum: [MESSAGE_REPLY_OPTION_UNSPECIFIED, REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD, REPLY_MESSAGE_OR_FAIL]
+    output:
+      description: The posted message.
+      type: object
+      properties:
+        name: {type: string, description: "Message resource name -- pass to update or delete."}
+        createTime: {type: string}
+        thread: {type: object}
+
+  list_messages:
+    title: List a space's messages
+    description: >-
+      Read the messages in a space. Requires a user token with chat.messages
+      scope; an app token cannot list history it did not create.
+    category: messages
+    scopes_any: [chat.messages.readonly, chat.messages]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/${space}/messages
+      query:
+        pageSize: "${limit}"
+        pageToken: "${page_token}"
+        filter: "${filter}"
+        orderBy: "${order_by}"
+    input:
+      space:
+        type: string
+        description: Space resource name to read.
+      limit:
+        type: integer
+        description: How many messages per page (1-1000).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 1000
+      page_token:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+      filter:
+        type: string
+        description: Filter expression, e.g. "createTime > \"2026-01-01T00:00:00Z\"".
+        optional: true
+      order_by:
+        type: string
+        description: Sort order, e.g. "createTime desc".
+        optional: true
+    output:
+      description: A page of messages.
+      type: object
+      properties:
+        messages: {type: array}
+        nextPageToken: {type: string}
+
+  update_message:
+    title: Edit a message
+    description: >-
+      Replace the text or cards of a message the caller posted. update_mask must
+      name the fields being written.
+    category: messages
+    scopes: [chat.messages]
+    request:
+      method: PATCH
+      path: /v1/${message}
+      query:
+        updateMask: "${update_mask}"
+      body:
+        text: "${text}"
+        cardsV2: "${cards}"
+    input:
+      message:
+        type: string
+        description: Message resource name, e.g. spaces/AAA/messages/BBB.
+      update_mask:
+        type: array
+        description: Fields being written, e.g. ["text"] or ["cardsV2"].
+        optional: true
+        default: "[text]"
+        items: {type: string}
+      text:
+        type: string
+        description: Replacement text.
+        optional: true
+      cards:
+        type: array
+        description: Replacement cards.
+        optional: true
+        items: {type: object}
+    output:
+      description: The edited message.
+      type: object
+      properties:
+        name: {type: string}
+        text: {type: string}
+        lastUpdateTime: {type: string}
+
+  delete_message:
+    title: Delete a message
+    description: Permanently remove a message the caller posted. It cannot be recovered.
+    category: messages
+    scopes: [chat.messages]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/${message}
+    input:
+      message:
+        type: string
+        description: Message resource name.
+    output:
+      description: An empty object on success.
+      type: object
+
+  list_members:
+    title: List a space's members
+    description: List who belongs to a space, people and apps alike.
+    category: members
+    scopes_any: [chat.memberships.readonly, chat.memberships]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/${space}/members
+      query:
+        pageSize: "${limit}"
+        pageToken: "${page_token}"
+    input:
+      space:
+        type: string
+        description: Space resource name.
+      limit:
+        type: integer
+        description: How many members per page (1-1000).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 1000
+      page_token:
+        type: string
+        description: Cursor from the previous response.
+        optional: true
+    output:
+      description: The space's members.
+      type: object
+      properties:
+        memberships: {type: array}
+        nextPageToken: {type: string}
+
+  create_space:
+    title: Create a space
+    description: >-
+      Create a named space. Requires a user token — an app cannot create a space
+      on its own behalf.
+    category: spaces
+    scopes: [chat.spaces]
+    request:
+      method: POST
+      path: /v1/spaces
+      body:
+        displayName: "${display_name}"
+        spaceType: "${space_type}"
+        spaceDetails:
+          $when: "${description}"
+          description: "${description}"
+    input:
+      display_name:
+        type: string
+        description: The space's name.
+      space_type:
+        type: string
+        description: What kind of space to create.
+        optional: true
+        default: SPACE
+        enum: [SPACE, GROUP_CHAT, DIRECT_MESSAGE]
+      description:
+        type: string
+        description: What the space is for.
+        optional: true
+    output:
+      description: The created space.
+      type: object
+      properties:
+        name: {type: string}
+        displayName: {type: string}
+
+  add_member:
+    title: Add someone to a space
+    description: >-
+      Add a person to a space by their Chat user name, "users/{id}" or
+      "users/{email}".
+    category: members
+    scopes: [chat.memberships]
+    request:
+      method: POST
+      path: /v1/${space}/members
+      body:
+        member:
+          name: "${member}"
+          type: HUMAN
+    input:
+      space:
+        type: string
+        description: Space resource name.
+      member:
+        type: string
+        description: Member resource name, e.g. users/ada@example.com.
+    output:
+      description: The new membership.
+      type: object
+      properties:
+        name: {type: string}
+        state: {type: string}
+        member: {type: object}
+
+  # -- the rest of the API, from Google's own discovery document ------------
+
+  create_custom_emoji:
+    title: Create custom emoji
+    description: 'Creates a custom emoji. Custom emojis are only available for Google Workspace accounts,
+      and the administrator must turn custom emojis on for the organization. For more information, see
+      Learn about custom emojis in Google Chat and Manage custom emoji permissions. Requires user authentication
+      with the authorization scope: - https://www.googleapis.com/auth/chat.customemojis'
+    category: custom_emojis
+    request:
+      method: POST
+      path: /v1/customEmojis
+      body:
+        emojiName: ${emoji_name}
+        payload: ${payload}
+        name: ${name}
+    input:
+      emoji_name:
+        type: string
+        description: Optional. Immutable. User-provided name for the custom emoji, which is unique within
+          the organization. Required when the custom emoji is created, output only otherwise. Emoji names
+          must start and end with colons, must be lowercase and can only contain alphanumeric characters,
+          hyphens, and underscore
+        optional: true
+      payload:
+        type: string
+        description: Optional. Input only. Payload data. Required when the custom emoji is created.
+        optional: true
+      name:
+        type: string
+        description: 'Identifier. The resource name of the custom emoji, assigned by the server. Format:
+          customEmojis/{customEmoji}'
+        optional: true
+    output:
+      description: The CustomEmoji resource.
+      type: object
+    scopes:
+    - chat.customemojis
+  list_custom_emojis:
+    title: List custom emojis
+    description: 'Lists custom emojis visible to the authenticated user. Custom emojis are only available
+      for Google Workspace accounts, and the administrator must turn custom emojis on for the organization.
+      For more information, see Learn about custom emojis in Google Chat and Manage custom emoji permissions.
+      Requires user authentication with one of the following authorization scopes: - https://www.googleapis.com/auth/chat.customemoj'
+    category: custom_emojis
+    request:
+      method: GET
+      path: /v1/customEmojis
+      query:
+        filter: ${filter}
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      filter:
+        type: string
+        description: Optional. A query filter. Supports filtering by creator. To filter by creator, you
+          must specify a valid value. Currently only creator("users/me") and NOT creator("users/me") are
+          accepted to filter custom emojis by whether they were created by the calling user or not. For
+          example, the following query
+        optional: true
+      page_size:
+        type: integer
+        description: Optional. The maximum number of custom emojis returned. The service can return fewer
+          custom emojis than this value. If unspecified, the default value is 25. The maximum value is
+          200; values above 200 are changed to 200.
+        optional: true
+      page_token:
+        type: string
+        description: Optional. (If resuming from a previous query.) A page token received from a previous
+          list custom emoji call. Provide this to retrieve the subsequent page. When paginating, the filter
+          value should match the call that provided the page token. Passing a different value might lead
+          to unexpected results.
+        optional: true
+    output:
+      description: The ListCustomEmojisResponse resource.
+      type: object
+    scopes_any:
+    - chat.customemojis
+    - chat.customemojis.readonly
+    read_only: true
+  download_media:
+    title: Download media
+    description: Downloads media. Download is supported on the URI /v1/media/{+name}?alt=media.
+    category: media
+    request:
+      method: GET
+      path: /v1/media/${resource_name}
+    input:
+      resource_name:
+        type: string
+        description: Name of the media that is being downloaded. See ReadRequest.resource_name.
+    output:
+      description: The Media resource.
+      type: object
+    scopes_any:
+    - chat.bot
+    - chat.messages
+    - chat.messages.readonly
+    read_only: true
+  upload_media:
+    title: Upload media
+    description: 'Uploads an attachment. For an example, see Upload media as a file attachment. Requires
+      user authentication with one of the following authorization scopes: - https://www.googleapis.com/auth/chat.messages.create
+      - https://www.googleapis.com/auth/chat.messages - https://www.googleapis.com/auth/chat.import (import
+      mode spaces only) You can upload attachments up to 200 MB. Certain file types aren''t supported.
+      For details,'
+    category: media
+    request:
+      method: POST
+      path: /v1/${parent}/attachments:upload
+      body:
+        filename: ${filename}
+    input:
+      parent:
+        type: string
+        description: Required. Resource name of the Chat space in which the attachment is uploaded. Format
+          "spaces/{space}".
+      filename:
+        type: string
+        description: Required. The filename of the attachment, including the file extension.
+        optional: true
+    output:
+      description: The UploadAttachmentResponse resource.
+      type: object
+    scopes_any:
+    - chat.import
+    - chat.messages
+    - chat.messages.create
+  complete_import_space:
+    title: Complete import space
+    description: 'Completes the import process for the specified space and makes it visible to users.
+      Requires user authentication and domain-wide delegation with the authorization scope: - https://www.googleapis.com/auth/chat.import
+      For more information, see Authorize Google Chat apps to import data.'
+    category: spaces
+    request:
+      method: POST
+      path: /v1/${name}:completeImport
+      body: ${body}
+    input:
+      name:
+        type: string
+        description: 'Required. Resource name of the import mode space. Format: spaces/{space}'
+      body:
+        type: object
+        description: The CompleteImportSpaceRequest resource, as the API's own reference defines it.
+    output:
+      description: The CompleteImportSpaceResponse resource.
+      type: object
+    scopes:
+    - chat.import
+  find_direct_message_space:
+    title: Find direct message space
+    description: Returns the existing direct message with the specified user. If no direct message space
+      is found, returns a 404 NOT_FOUND error. For an example, see [Find a direct message](/chat/api/guides/v1/spaces/find-direct-message).
+      With app authentication, returns the direct message space between the specified user and the calling
+      Chat app. With user authentication, returns the direct message space between the specified user
+      a
+    category: spaces
+    request:
+      method: GET
+      path: /v1/spaces:findDirectMessage
+      query:
+        name: ${name}
+    input:
+      name:
+        type: string
+        description: 'Required. Resource name of the user to find direct message with. Format: users/{user},
+          where {user} is either the id for the person from the People API, or the id for the user in
+          the Directory API. For example, if the People API profile ID is 123456789, you can find a direct
+          message with that person'
+        optional: true
+    output:
+      description: The Space resource.
+      type: object
+    scopes_any:
+    - chat.bot
+    - chat.spaces
+    - chat.spaces.readonly
+    read_only: true
+  find_group_chats_space:
+    title: Find group chats space
+    description: Returns all spaces with spaceType == GROUP_CHAT, whose human memberships contain exactly
+      the calling user, and the users specified in FindGroupChatsRequest.users. Only members that have
+      joined the conversation are supported. For an example, see Find group chats. If the calling user
+      blocks, or is blocked by, some users, and no spaces with the entire specified set of users are found,
+      this method returns spaces that don
+    category: spaces
+    request:
+      method: GET
+      path: /v1/spaces:findGroupChats
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+        spaceView: ${space_view}
+        users: ${users}
+    input:
+      page_size:
+        type: integer
+        description: Optional. The maximum number of spaces to return. The service might return fewer
+          than this value. If unspecified, at most 10 spaces are returned. The maximum value is 30. If
+          you use a value more than 30, it's automatically changed to 30. Negative values return an INVALID_ARGUMENT
+          error.
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token, received from a previous call to find group chats. Provide
+          this parameter to retrieve the subsequent page. When paginating, all other parameters provided
+          should match the call that provided the token. Passing different values may lead to unexpected
+          results.
+        optional: true
+      space_view:
+        type: string
+        description: Requested space view type. If unset, defaults to SPACE_VIEW_RESOURCE_NAME_ONLY. Requests
+          that specify SPACE_VIEW_EXPANDED must include scopes that allow reading space data, for example,
+          https://www.googleapis.com/auth/chat.spaces or https://www.googleapis.com/auth/chat.spaces.readonly.
+        optional: true
+        enum:
+        - SPACE_VIEW_UNSPECIFIED
+        - SPACE_VIEW_RESOURCE_NAME_ONLY
+        - SPACE_VIEW_EXPANDED
+      users:
+        type: string
+        description: 'Optional. Resource names of all human users in group chat with the calling user.
+          Chat apps can''t be included in the request. The maximum number of users that can be specified
+          in a single request is 49. Format: users/{user}, where {user} is either the id for the person
+          from the People API, or the id'
+        optional: true
+    output:
+      description: The FindGroupChatsResponse resource.
+      type: object
+    scopes_any:
+    - chat.memberships
+    - chat.memberships.readonly
+    read_only: true
+  create_message_pin:
+    title: Create message pin
+    description: 'Creates a message pin. Requires user authentication with one of the following authorization
+      scopes: - https://www.googleapis.com/auth/chat.spaces.pins - https://www.googleapis.com/auth/chat.spaces'
+    category: spaces
+    request:
+      method: POST
+      path: /v1/${parent}/messagePins
+      body:
+        name: ${name}
+        message: ${message}
+    input:
+      parent:
+        type: string
+        description: 'Required. The parent space in which to create the message pin. Format: spaces/{space}'
+      name:
+        type: string
+        description: 'Identifier. The resource name of the message pin. Format: spaces/{space}/messagePins/{message_pin}
+          The resource ID component matches the resource ID component of the message. For example, a message
+          with spaces/AAA/messages/bbb.ccc corresponds to the message pin with the resource name spaces/AAA/mess'
+        optional: true
+      message:
+        type: string
+        description: 'Required. Immutable. The resource name of the message that is pinned. Format: spaces/{space}/messages/{message}'
+        optional: true
+    output:
+      description: The MessagePin resource.
+      type: object
+    scopes_any:
+    - chat.spaces
+    - chat.spaces.pins
+  list_message_pins:
+    title: List message pins
+    description: 'Lists message pins in a space. Users can pin important messages in spaces for easy access.
+      For more information, see Pin or unpin a conversation in Google Chat. Requires user authentication
+      with one of the following authorization scopes: - https://www.googleapis.com/auth/chat.spaces.pins.readonly
+      - https://www.googleapis.com/auth/chat.spaces.pins - https://www.googleapis.com/auth/chat.spaces.readonly
+      - https://www.go'
+    category: spaces
+    request:
+      method: GET
+      path: /v1/${parent}/messagePins
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      parent:
+        type: string
+        description: 'Required. The parent space which owns the collection of pinned items Format: spaces/{space}'
+      page_size:
+        type: integer
+        description: Optional. The maximum number of message pins returned. The service might return fewer
+          messages than this value. The maximum value is 100. If you use a value more than 100, it's automatically
+          changed to 100. If unspecified, at most 100 message pins will be returned. Negative values return
+          an INVALID_
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token received from a previous list message pins call. Provide this
+          parameter to retrieve the subsequent page. When paginating, all other parameters provided should
+          match the call that provided the page token. Passing different values to the other parameters
+          might lead to unexpected
+        optional: true
+    output:
+      description: The ListMessagePinsResponse resource.
+      type: object
+    scopes_any:
+    - chat.spaces
+    - chat.spaces.pins
+    - chat.spaces.pins.readonly
+    - chat.spaces.readonly
+    read_only: true
+  create_reaction:
+    title: Create reaction
+    description: 'Creates a reaction and adds it to a message. For an example, see Add a reaction to a
+      message. Requires user authentication with one of the following authorization scopes: - https://www.googleapis.com/auth/chat.messages.reactions.create
+      - https://www.googleapis.com/auth/chat.messages.reactions - https://www.googleapis.com/auth/chat.messages
+      - https://www.googleapis.com/auth/chat.import (import mode spaces only)'
+    category: spaces
+    request:
+      method: POST
+      path: /v1/${parent}/reactions
+      body:
+        emoji: ${emoji}
+        name: ${name}
+    input:
+      parent:
+        type: string
+        description: 'Required. The message where the reaction is created. Format: spaces/{space}/messages/{message}'
+      emoji:
+        type: string
+        description: Required. The emoji used in the reaction.
+        optional: true
+      name:
+        type: string
+        description: 'Identifier. The resource name of the reaction. Format: spaces/{space}/messages/{message}/reactions/{reaction}'
+        optional: true
+    output:
+      description: The Reaction resource.
+      type: object
+    scopes_any:
+    - chat.import
+    - chat.messages
+    - chat.messages.reactions
+    - chat.messages.reactions.create
+  list_reactions:
+    title: List reactions
+    description: 'Lists reactions to a message. For an example, see List reactions for a message. Requires
+      user authentication with one of the following authorization scopes: - https://www.googleapis.com/auth/chat.messages.reactions.readonly
+      - https://www.googleapis.com/auth/chat.messages.reactions - https://www.googleapis.com/auth/chat.messages.readonly
+      - https://www.googleapis.com/auth/chat.messages'
+    category: spaces
+    request:
+      method: GET
+      path: /v1/${parent}/reactions
+      query:
+        filter: ${filter}
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      parent:
+        type: string
+        description: 'Required. The message users reacted to. Format: spaces/{space}/messages/{message}'
+      filter:
+        type: string
+        description: Optional. A query filter. You can filter reactions by emoji (either emoji.unicode
+          or emoji.custom_emoji.uid) and user (user.name). To filter reactions for multiple emojis or
+          users, join similar fields with the OR operator, such as emoji.unicode = "🙂" OR emoji.unicode
+          = "👍" and user.name = "users/AAA
+        optional: true
+      page_size:
+        type: integer
+        description: Optional. The maximum number of reactions returned. The service can return fewer
+          reactions than this value. If unspecified, the default value is 25. The maximum value is 200;
+          values above 200 are changed to 200.
+        optional: true
+      page_token:
+        type: string
+        description: Optional. (If resuming from a previous query.) A page token received from a previous
+          list reactions call. Provide this to retrieve the subsequent page. When paginating, the filter
+          value should match the call that provided the page token. Passing a different value might lead
+          to unexpected results.
+        optional: true
+    output:
+      description: The ListReactionsResponse resource.
+      type: object
+    scopes_any:
+    - chat.messages
+    - chat.messages.reactions
+    - chat.messages.reactions.readonly
+    - chat.messages.readonly
+    read_only: true
+  search_message:
+    title: Search message
+    description: Searches for messages in Google Chat that the calling user has access to. Returns a list
+      of messages matching the search criteria. To search across all spaces the user has access to, set
+      parent to spaces/-. Using any other value for parent results in an INVALID_ARGUMENT error. The returned
+      messages have their name field populated with the full resource name, which includes the specific
+      space in which the message resi
+    category: spaces
+    request:
+      method: POST
+      path: /v1/${parent}/messages:search
+      body:
+        markupSyntax: ${markup_syntax}
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+        orderBy: ${order_by}
+        filter: ${filter}
+        view: ${view}
+    input:
+      parent:
+        type: string
+        description: Required. The resource name of the space to search within. To search across all spaces
+          the user has access to, set this field to spaces/-. Using any other value for parent results
+          in an INVALID_ARGUMENT error. To limit the search to one or more spaces, use space.name or space.display_name
+          in the fil
+      markup_syntax:
+        type: string
+        description: Optional. Specifies the desired output syntax for the Chat message formatted_text
+          field.
+        optional: true
+        enum:
+        - MARKUP_SYNTAX_UNSPECIFIED
+        - MARKUP_SYNTAX_CHAT
+        - MARKUP_SYNTAX_MARKDOWN
+      page_size:
+        type: integer
+        description: Optional. The maximum number of results to return. The service may return fewer than
+          this value. If unspecified, at most 25 are returned. The maximum value is 100. If you use a
+          value more than 100, it's automatically changed to 100.
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A token, received from the previous search messages call. Provide this
+          parameter to retrieve the subsequent page. When paginating, all other parameters provided should
+          match the call that provided the page token. Passing different values to the other parameters
+          might lead to unexpected res
+        optional: true
+      order_by:
+        type: string
+        description: 'Optional. How the results list is ordered. Supported attributes to order by are:
+          - create_time: Sorts the results by the time of the message creation. Default value. - relevance:
+          Sorts the results by relevance. Developer Preview. The default ordering is create_time desc.
+          Only a single order per quer'
+        optional: true
+      filter:
+        type: string
+        description: 'Required. A search query. The query can specify one or more search keywords, which
+          are used to filter the results, You can also filter the results using the following message
+          fields: - create_time: Accepts a timestamp in RFC-3339 format and the supported comparison operators
+          are: < and >=. - sender.'
+        optional: true
+      view:
+        type: string
+        description: Optional. Specifies what kind of search results view to return. The default is SEARCH_MESSAGES_VIEW_BASIC.
+        optional: true
+        enum:
+        - SEARCH_MESSAGES_VIEW_UNSPECIFIED
+        - SEARCH_MESSAGES_VIEW_BASIC
+        - SEARCH_MESSAGES_VIEW_FULL
+    output:
+      description: The SearchMessagesResponse resource.
+      type: object
+    scopes_any:
+    - chat.messages
+    - chat.messages.readonly
+  replace_message:
+    title: Replace message
+    description: 'Updates a message. There''s a difference between the patch and update methods. The patch
+      method uses a patch request while the update method uses a put request. We recommend using the patch
+      method. For an example, see Update a message. Supports the following types of authentication: -
+      App authentication with the authorization scope: - https://www.googleapis.com/auth/chat.bot - User
+      authentication with one of the follo'
+    category: spaces
+    request:
+      method: PUT
+      path: /v1/${name}
+      query:
+        allowMissing: ${allow_missing}
+        updateMask: ${update_mask}
+      body:
+        accessoryWidgets: ${accessory_widgets}
+        privateMessageViewer: ${private_message_viewer}
+        actionResponse: ${action_response}
+        createTime: ${create_time}
+        name: ${body_name}
+        text: ${text}
+        clientAssignedMessageId: ${client_assigned_message_id}
+        cardsV2: ${cards_v2}
+        markupSyntax: ${markup_syntax}
+        cards: ${cards}
+        attachment: ${attachment}
+        fallbackText: ${fallback_text}
+        quotedMessageMetadata: ${quoted_message_metadata}
+        thread: ${thread}
+    input:
+      name:
+        type: string
+        description: 'Identifier. Resource name of the message. Format: spaces/{space}/messages/{message}
+          Where {space} is the ID of the space where the message is posted and {message} is a system-assigned
+          ID for the message. For example, spaces/AAAAAAAAAAA/messages/BBBBBBBBBBB.BBBBBBBBBBB. If you
+          set a custom ID when yo'
+      allow_missing:
+        type: boolean
+        description: Optional. If true and the message isn't found, a new message is created and updateMask
+          is ignored. The specified message ID must be client-assigned or the request fails.
+        optional: true
+      update_mask:
+        type: string
+        description: 'Required. The field paths to update. Separate multiple values with commas or use
+          * to update all field paths. Currently supported field paths: - text - attachment - cards (Requires
+          [app authentication](/chat/api/guides/auth/service-accounts).) - cards_v2 (Requires [app authentication](/chat/api/guid'
+        optional: true
+      accessory_widgets:
+        type: array
+        items:
+          type: string
+        description: Optional. One or more interactive widgets that appear at the bottom of a message.
+          You can add accessory widgets to messages that contain text, cards, or both text and cards.
+          Not supported for messages that contain dialogs. For details, see Add interactive widgets at
+          the bottom of a message. Creating
+        optional: true
+      private_message_viewer:
+        type: string
+        description: Optional. Immutable. Input for creating a message, otherwise output only. The user
+          that can view the message. When set, the message is private and only visible to the specified
+          user and the Chat app. To include this field in your request, you must call the Chat API using
+          app authentication and omit
+        optional: true
+      action_response:
+        type: string
+        description: Input only. Parameters that a Chat app can use to configure how its response is posted.
+        optional: true
+      create_time:
+        type: string
+        description: Optional. Immutable. For spaces created in Chat, the time at which the message was
+          created. This field is output only, except when used in import mode spaces. For import mode
+          spaces, set this field to the historical timestamp at which the message was created in the source
+          in order to preserve the or
+        optional: true
+      body_name:
+        type: string
+        description: 'Identifier. Resource name of the message. Format: spaces/{space}/messages/{message}
+          Where {space} is the ID of the space where the message is posted and {message} is a system-assigned
+          ID for the message. For example, spaces/AAAAAAAAAAA/messages/BBBBBBBBBBB.BBBBBBBBBBB. If you
+          set a custom ID when yo'
+        optional: true
+      text:
+        type: string
+        description: Optional. Plain-text body of the message. The first link to an image, video, or web
+          page generates a preview chip. You can also @mention a Google Chat user, or everyone in the
+          space. To learn about creating text messages, see Send a message.
+        optional: true
+      client_assigned_message_id:
+        type: string
+        description: Optional. A custom ID for the message. You can use field to identify a message, or
+          to get, delete, or update a message. To set a custom ID, specify the messageId field when you
+          create the message. For details, see Name a message.
+        optional: true
+      cards_v2:
+        type: array
+        items:
+          type: string
+        description: Optional. An array of cards. Chat apps can create cards with app authentication.
+          As part of the Developer Preview Program, if your Chat app authenticates as a user, it can create
+          card messages. If your Chat app is not part of Developer Preview Program, it can't create cards
+          with user authentication.
+        optional: true
+      markup_syntax:
+        type: string
+        description: Optional. Specifies how the server interprets the message text field content.
+        optional: true
+        enum:
+        - MARKUP_SYNTAX_UNSPECIFIED
+        - MARKUP_SYNTAX_CHAT
+        - MARKUP_SYNTAX_MARKDOWN
+      cards:
+        type: array
+        items:
+          type: string
+        description: 'Deprecated: Use cards_v2 instead. Rich, formatted, and interactive cards that you
+          can use to display UI elements such as: formatted texts, buttons, and clickable images. Cards
+          are normally displayed below the plain-text body of the message. cards and cards_v2 can have
+          a maximum size of 32 KB.'
+        optional: true
+      attachment:
+        type: array
+        items:
+          type: string
+        description: Optional. User-uploaded attachment.
+        optional: true
+      fallback_text:
+        type: string
+        description: Optional. A plain-text description of the message's cards, used when the actual cards
+          can't be displayed—for example, mobile notifications.
+        optional: true
+      quoted_message_metadata:
+        type: string
+        description: Optional. Information about a message that another message quotes. When you create
+          a message, you can quote messages within the same thread, or quote a root message to create
+          a new root message. However, you can't quote a message reply from a different thread. When you
+          update a message, you can't ad
+        optional: true
+      thread:
+        type: string
+        description: The thread the message belongs to. For example usage, see Start or reply to a message
+          thread.
+        optional: true
+    output:
+      description: The Message resource.
+      type: object
+    scopes_any:
+    - chat.bot
+    - chat.import
+    - chat.messages
+  search_space:
+    title: Search space
+    description: 'Returns a list of spaces in a Google Workspace organization. For an example, see Search
+      for and manage spaces. When use_admin_access is set to false, the results are limited to spaces
+      where the calling user is a joined member. To search with administrator privileges, set use_admin_access
+      to true. Supports the following types of authentication: - User authentication with one of the following
+      authorization scopes: - ht'
+    category: spaces
+    request:
+      method: GET
+      path: /v1/spaces:search
+      query:
+        orderBy: ${order_by}
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+        query: ${query}
+        useAdminAccess: ${use_admin_access}
+    input:
+      order_by:
+        type: string
+        description: 'Optional. How the list of spaces is ordered. Supported attributes to order by are:
+          - membership_count.joined_direct_human_user_count — Denotes the count of human users that have
+          directly joined a space. - last_active_time — Denotes the time when last eligible item is added
+          to any topic of this space'
+        optional: true
+      page_size:
+        type: integer
+        description: The maximum number of spaces to return. The service may return fewer than this value.
+          If unspecified, at most 100 spaces are returned. The maximum value is 1000 when useAdminAccess
+          is set to true. Otherwise, the maximum value is 100. If you use a value more than the maximum
+          value, it's automatically
+        optional: true
+      page_token:
+        type: string
+        description: A token, received from the previous search spaces call. Provide this parameter to
+          retrieve the subsequent page. When paginating, all other parameters provided should match the
+          call that provided the page token. Passing different values to the other parameters might lead
+          to unexpected results.
+        optional: true
+      query:
+        type: string
+        description: 'Required. A search query. You can search by using the following parameters when
+          useAdminAccess is set to true: - create_time - customer - display_name - external_user_allowed
+          - last_active_time - space_history_state - space_type When useAdminAccess is set to false: -
+          display_name - external_user_all'
+        optional: true
+      use_admin_access:
+        type: boolean
+        description: When true, the method runs using the user's Google Workspace administrator privileges.
+          The calling user must be a Google Workspace administrator with the manage chat and spaces conversations
+          privilege. Requires either the chat.admin.spaces.readonly or chat.admin.spaces OAuth 2.0 scope.
+        optional: true
+    output:
+      description: The SearchSpacesResponse resource.
+      type: object
+    scopes_any:
+    - chat.admin.spaces
+    - chat.admin.spaces.readonly
+    - chat.spaces
+    - chat.spaces.readonly
+    read_only: true
+  setup_space:
+    title: Setup space
+    description: Creates a space and adds specified users to it. The calling user is automatically added
+      to the space, and shouldn't be specified as a membership in the request. For an example, see Set
+      up a space with initial members. To specify the human members to add, add memberships with the appropriate
+      membership.member.name. To add a human user, use users/{user}, where {user} can be the email address
+      for the user. For users in
+    category: spaces
+    request:
+      method: POST
+      path: /v1/spaces:setup
+      body:
+        space: ${space}
+        memberships: ${memberships}
+        requestId: ${request_id}
+    input:
+      space:
+        type: string
+        description: Required. The Space.spaceType field is required. To create a space, set Space.spaceType
+          to SPACE and set Space.displayName. If you receive the error message ALREADY_EXISTS when setting
+          up a space, try a different displayName. An existing space within the Google Workspace organization
+          might already u
+        optional: true
+      memberships:
+        type: array
+        items:
+          type: string
+        description: 'Optional. The Google Chat users or groups to invite to join the space. Omit the
+          calling user, as they are added automatically. The set currently allows up to 49 memberships
+          (in addition to the caller). For human membership, the Membership.member field must contain
+          a user with name populated (format:'
+        optional: true
+      request_id:
+        type: string
+        description: Optional. A unique identifier for this request. A random UUID is recommended. Specifying
+          an existing request ID returns the space created with that ID instead of creating a new space.
+          Specifying an existing request ID from the same Chat app with a different authenticated user
+          returns an error.
+        optional: true
+    output:
+      description: The Space resource.
+      type: object
+    scopes_any:
+    - chat.spaces
+    - chat.spaces.create
+  list_space_events:
+    title: List space events
+    description: Lists events from a Google Chat space. For each event, the payload contains the most
+      recent version of the Chat resource. For example, if you list events about new space members, the
+      server returns Membership resources that contain the latest membership details. If new members were
+      removed during the requested period, the event payload contains an empty Membership resource. Supports
+      the following types of authenticat
+    category: spaces
+    request:
+      method: GET
+      path: /v1/${parent}/spaceEvents
+      query:
+        filter: ${filter}
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      parent:
+        type: string
+        description: 'Required. Resource name of the Google Chat space where the events occurred. Format:
+          spaces/{space}.'
+      filter:
+        type: string
+        description: 'Required. A query filter. You must specify at least one event type (event_type)
+          using the has : operator. To filter by multiple event types, use the OR operator. Omit batch
+          event types in your filter. The request automatically returns any related batch events. For
+          example, if you filter by new react'
+        optional: true
+      page_size:
+        type: integer
+        description: Optional. The maximum number of space events returned. The service might return fewer
+          than this value. Negative values return an INVALID_ARGUMENT error.
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token, received from a previous list space events call. Provide
+          this to retrieve the subsequent page. When paginating, all other parameters provided to list
+          space events must match the call that provided the page token. Passing different values to the
+          other parameters might lead to
+        optional: true
+    output:
+      description: The ListSpaceEventsResponse resource.
+      type: object
+    scopes_any:
+    - chat.app.all.memberships.readonly
+    - chat.app.all.messages.readonly
+    - chat.app.all.spaces.readonly
+    - chat.app.memberships
+    - chat.app.memberships.readonly
+    - chat.app.messages.readonly
+    - chat.app.spaces
+    - chat.app.spaces.readonly
+    - chat.memberships
+    - chat.memberships.readonly
+    - chat.messages
+    - chat.messages.reactions
+    - chat.messages.reactions.readonly
+    - chat.messages.readonly
+    - chat.spaces
+    - chat.spaces.readonly
+    read_only: true
+  mark_as_active_availability:
+    title: Mark as active availability
+    description: 'Marks user as ACTIVE in Google Chat. Sets the user''s availability state to ACTIVE.
+      The ACTIVE state lasts until the specified expiration, at which point the user''s state becomes
+      AWAY. Note that if the user is actively using Chat, the ACTIVE state duration may extend beyond
+      the provided expiration. This method only updates the authenticated user''s availability. Requires
+      user authentication with authorization scope: -'
+    category: users
+    request:
+      method: POST
+      path: /v1/${name}:markAsActive
+      body:
+        expireTime: ${expire_time}
+        ttl: ${ttl}
+    input:
+      name:
+        type: string
+        description: 'Required. The resource name of the availability to mark as active. Format: users/{user}/availability
+          {user} is the id for the Person in the People API or Admin SDK directory API. For example, users/123456789.
+          The user''s email address or me can also be used as an alias to refer to the caller. For exa'
+      expire_time:
+        type: string
+        description: The absolute timestamp when the ACTIVE state expires.
+        optional: true
+      ttl:
+        type: string
+        description: The duration from the current time until the ACTIVE state expires. Using a short
+          TTL can effectively reset the user's state to be based on activity after this brief duration.
+        optional: true
+    output:
+      description: The Availability resource.
+      type: object
+    scopes:
+    - chat.users.availability
+  mark_as_away_availability:
+    title: Mark as away availability
+    description: 'Marks user as AWAY in Google Chat. Sets the user''s state to away and is not affected
+      by the user''s activity. This method only updates the authenticated user''s availability. Requires
+      user authentication with authorization scope: - https://www.googleapis.com/auth/chat.users.availability'
+    category: users
+    request:
+      method: POST
+      path: /v1/${name}:markAsAway
+      body: ${body}
+    input:
+      name:
+        type: string
+        description: 'Required. The resource name of the availability to mark as away. Format: users/{user}/availability
+          {user} is the id for the Person in the People API or Admin SDK directory API. For example, users/123456789.
+          The user''s email address or me can also be used as an alias to refer to the caller. For examp'
+      body:
+        type: object
+        description: The MarkAsAwayRequest resource, as the API's own reference defines it.
+    output:
+      description: The Availability resource.
+      type: object
+    scopes:
+    - chat.users.availability
+  mark_as_do_not_disturb_availability:
+    title: Mark as do not disturb availability
+    description: 'Marks user as DO_NOT_DISTURB in Google Chat. Sets a user''s availability state to DO_NOT_DISTURB
+      until a specified expiration time. When in DO_NOT_DISTURB, users typically won''t receive notifications.
+      This method only updates the authenticated user''s availability. Requires user authentication with
+      authorization scope: - https://www.googleapis.com/auth/chat.users.availability'
+    category: users
+    request:
+      method: POST
+      path: /v1/${name}:markAsDoNotDisturb
+      body:
+        expireTime: ${expire_time}
+        ttl: ${ttl}
+    input:
+      name:
+        type: string
+        description: 'Required. The resource name of the availability to mark as Do Not Disturb. Format:
+          users/{user}/availability {user} is the id for the Person in the People API or Admin SDK directory
+          API. For example, users/123456789. The user''s email address or me can also be used as an alias
+          to refer to the caller.'
+      expire_time:
+        type: string
+        description: The absolute timestamp when the DND state expires.
+        optional: true
+      ttl:
+        type: string
+        description: The duration from the current time until the DND state expires.
+        optional: true
+    output:
+      description: The Availability resource.
+      type: object
+    scopes:
+    - chat.users.availability
+  create_section:
+    title: Create section
+    description: 'Creates a section in Google Chat. Sections help users group conversations and customize
+      the list of spaces displayed in Chat navigation panel. Only sections of type CUSTOM_SECTION can
+      be created. For details, see Create and organize sections in Google Chat. Requires user authentication
+      with the authorization scope: - https://www.googleapis.com/auth/chat.users.sections'
+    category: users
+    request:
+      method: POST
+      path: /v1/${parent}/sections
+      body:
+        displayName: ${display_name}
+        type: ${type}
+        name: ${name}
+        sortOrder: ${sort_order}
+    input:
+      parent:
+        type: string
+        description: 'Required. The parent resource name where the section is created. Format: users/{user}'
+      display_name:
+        type: string
+        description: Optional. The section's display name. Only populated for sections of type CUSTOM_SECTION.
+          Supports up to 80 characters. Required when creating a CUSTOM_SECTION.
+        optional: true
+      type:
+        type: string
+        description: Required. The type of the section.
+        optional: true
+        enum:
+        - SECTION_TYPE_UNSPECIFIED
+        - CUSTOM_SECTION
+        - DEFAULT_DIRECT_MESSAGES
+        - DEFAULT_SPACES
+        - DEFAULT_APPS
+      name:
+        type: string
+        description: 'Identifier. Resource name of the section. For system sections, the section ID is
+          a constant string: - DEFAULT_DIRECT_MESSAGES: users/{user}/sections/default-direct-messages
+          - DEFAULT_SPACES: users/{user}/sections/default-spaces - DEFAULT_APPS: users/{user}/sections/default-apps
+          Format: users/{user}/'
+        optional: true
+      sort_order:
+        type: integer
+        description: Output only. The order of the section in relation to other sections. Sections with
+          a lower sort_order value appear before sections with a higher value.
+        optional: true
+    output:
+      description: The GoogleChatV1Section resource.
+      type: object
+    scopes:
+    - chat.users.sections
+  list_items:
+    title: List items
+    description: 'Lists items in a section. Only spaces can be section items. For details, see Create
+      and organize sections in Google Chat. Requires user authentication with the authorization scope:
+      - https://www.googleapis.com/auth/chat.users.sections - https://www.googleapis.com/auth/chat.users.sections.readonly'
+    category: users
+    request:
+      method: GET
+      path: /v1/${parent}/items
+      query:
+        filter: ${filter}
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      parent:
+        type: string
+        description: 'Required. The parent, which is the section resource name that owns this collection
+          of section items. Only supports listing section items for the calling user. When you''re filtering
+          by space, use the wildcard - to search across all sections. For example, users/{user}/sections/-.
+          Format: users/{user}/'
+      filter:
+        type: string
+        description: Optional. A query filter. Currently only supports filtering by space. For example,
+          space = spaces/{space}. Invalid queries are rejected with an INVALID_ARGUMENT error.
+        optional: true
+      page_size:
+        type: integer
+        description: Optional. The maximum number of section items to return. The service may return fewer
+          than this value. If unspecified, at most 10 section items will be returned. The maximum value
+          is 100. If you use a value more than 100, it's automatically changed to 100. Negative values
+          return an INVALID_ARGUMENT
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token, received from a previous list section items call. Provide
+          this to retrieve the subsequent page. When paginating, all other parameters provided should
+          match the call that provided the page token. Passing different values to the other parameters
+          might lead to unexpected results
+        optional: true
+    output:
+      description: The ListSectionItemsResponse resource.
+      type: object
+    scopes_any:
+    - chat.users.sections
+    - chat.users.sections.readonly
+    read_only: true
+  move_item:
+    title: Move item
+    description: 'Moves an item from one section to another. For example, if a section contains spaces,
+      this method can be used to move a space to a different section. For details, see Create and organize
+      sections in Google Chat. Requires user authentication with the authorization scope: - https://www.googleapis.com/auth/chat.users.sections'
+    category: users
+    request:
+      method: POST
+      path: /v1/${name}:move
+      body:
+        targetSection: ${target_section}
+    input:
+      name:
+        type: string
+        description: 'Required. The resource name of the section item to move. Format: users/{user}/sections/{section}/items/{item}'
+      target_section:
+        type: string
+        description: 'Required. The resource name of the section to move the section item to. Format:
+          users/{user}/sections/{section}'
+        optional: true
+    output:
+      description: The MoveSectionItemResponse resource.
+      type: object
+    scopes:
+    - chat.users.sections
+  list_sections:
+    title: List sections
+    description: 'Lists sections available to the Chat user. Sections help users group their conversations
+      and customize the list of spaces displayed in Chat navigation panel. For details, see Create and
+      organize sections in Google Chat. Requires user authentication with the authorization scope: - https://www.googleapis.com/auth/chat.users.sections
+      - https://www.googleapis.com/auth/chat.users.sections.readonly'
+    category: users
+    request:
+      method: GET
+      path: /v1/${parent}/sections
+      query:
+        pageSize: ${page_size}
+        pageToken: ${page_token}
+    input:
+      parent:
+        type: string
+        description: 'Required. The parent, which is the user resource name that owns this collection
+          of sections. Only supports listing sections for the calling user. To refer to the calling user,
+          set one of the following: - The me alias. For example, users/me. - Their Workspace email address.
+          For example, users/user@ex'
+      page_size:
+        type: integer
+        description: Optional. The maximum number of sections to return. The service may return fewer
+          than this value. If unspecified, at most 10 sections will be returned. The maximum value is
+          100. If you use a value more than 100, it's automatically changed to 100. Negative values return
+          an INVALID_ARGUMENT error.
+        optional: true
+      page_token:
+        type: string
+        description: Optional. A page token, received from a previous list sections call. Provide this
+          to retrieve the subsequent page. When paginating, all other parameters provided should match
+          the call that provided the page token. Passing different values to the other parameters might
+          lead to unexpected results.
+        optional: true
+    output:
+      description: The ListSectionsResponse resource.
+      type: object
+    scopes_any:
+    - chat.users.sections
+    - chat.users.sections.readonly
+    read_only: true
+  position_section:
+    title: Position section
+    description: 'Changes the sort order of a section. For details, see Create and organize sections in
+      Google Chat. Requires user authentication with the authorization scope: - https://www.googleapis.com/auth/chat.users.sections'
+    category: users
+    request:
+      method: POST
+      path: /v1/${name}:position
+      body:
+        sortOrder: ${sort_order}
+        relativePosition: ${relative_position}
+    input:
+      name:
+        type: string
+        description: 'Required. The resource name of the section to position. Format: users/{user}/sections/{section}'
+      sort_order:
+        type: integer
+        description: Optional. The absolute position of the section in the list of sections. The position
+          must be greater than 0. If the position is greater than the number of sections, the section
+          will be appended to the end of the list. This operation inserts the section at the given position
+          and shifts the original s
+        optional: true
+      relative_position:
+        type: string
+        description: Optional. The relative position of the section in the list of sections.
+        optional: true
+        enum:
+        - POSITION_UNSPECIFIED
+        - START
+        - END
+    output:
+      description: The PositionSectionResponse resource.
+      type: object
+    scopes:
+    - chat.users.sections

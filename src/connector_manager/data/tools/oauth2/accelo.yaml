@@ -1,0 +1,1919 @@
+# Accelo API v0 tools.
+#
+# Accelo is one API shape repeated over a dozen objects: every collection lists
+# with the same five underscore-prefixed parameters, and every record is read
+# by appending its id.
+#
+#   _fields   extra fields, comma separated, with linked objects nested --
+#             "website,company(name)" -- or _ALL for everything
+#   _filters  "status(1),date_created_after(1704067200)", ordered with
+#             order_by_asc(field), combined with _AND / _OR / _not
+#   _search   free text over the endpoint's own searchable fields
+#   _limit    per page, default 10, maximum 100
+#   _page     counted from 0
+#
+# Every response is wrapped: `meta` carries the status, `response` carries the
+# data.
+#
+# Scopes are Accelo's own read(object) / write(object) form. Two rules follow
+# from the documentation and are declared below: write access to an object
+# includes read access to it, and read(all) / write(all) cover every object.
+# Accelo also lets one granted scope name several objects at once --
+# "read(companies,contacts)" -- so the pack sets expand_groups, without which a
+# real grant would read as missing.
+#
+# Docs: https://api.accelo.com/docs/
+
+connector_id: accelo
+display_name: Accelo
+docs_url: https://api.accelo.com/docs/
+
+scope_rules:
+  expand_groups: true
+  implies:
+    "read(all)":
+      - read(companies)
+      - read(contacts)
+      - read(jobs)
+      - read(issues)
+      - read(activities)
+      - read(invoices)
+      - read(prospects)
+      - read(tasks)
+      - read(staff)
+      - read(expenses)
+      - read(contracts)
+      - read(timers)
+    "write(all)":
+      - read(all)
+      - write(companies)
+      - write(contacts)
+      - write(jobs)
+      - write(issues)
+      - write(activities)
+      - write(invoices)
+      - write(prospects)
+      - write(tasks)
+      - write(staff)
+      - write(expenses)
+      - write(contracts)
+      - write(timers)
+    "write(companies)":
+      - read(companies)
+    "write(contacts)":
+      - read(contacts)
+    "write(jobs)":
+      - read(jobs)
+    "write(issues)":
+      - read(issues)
+    "write(activities)":
+      - read(activities)
+    "write(invoices)":
+      - read(invoices)
+    "write(prospects)":
+      - read(prospects)
+    "write(tasks)":
+      - read(tasks)
+    "write(staff)":
+      - read(staff)
+    "write(expenses)":
+      - read(expenses)
+    "write(contracts)":
+      - read(contracts)
+    "write(timers)":
+      - read(timers)
+
+tools:
+
+  list_companies:
+    title: List companies
+    description: >-
+      Page through the organisations you do business with -- clients, prospects and suppliers. Narrow with _filters,
+      search with _search, and pull linked objects in with _fields rather than
+      making a second call.
+    category: companies
+    read_only: true
+    scopes: ["read(companies)"]
+    request:
+      method: GET
+      path: /api/v0/companies
+      query:
+        _fields: "${fields}"
+        _filters: "${filters}"
+        _search: "${search}"
+        _limit: "${limit}"
+        _page: "${page}"
+    input:
+      fields:
+        type: string
+        description: >-
+          Extra fields to return beyond the defaults, comma separated. Linked
+          objects nest, e.g. "website,company(name)". Pass _ALL for everything.
+        optional: true
+      filters:
+        type: string
+        description: >-
+          Accelo filter expression, e.g. "status(1),date_created_after(1704067200)".
+          Combine with commas, and order with order_by_asc(field).
+        optional: true
+      search:
+        type: string
+        description: Free-text search across this endpoint's searchable fields.
+        optional: true
+      limit:
+        type: integer
+        description: How many to return per page. Accelo's maximum is 100 and its default is 10.
+        optional: true
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: Which page to return, counted from 0.
+        optional: true
+        minimum: 0
+    output:
+      description: A page of companies, under the response object.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: array}
+
+  get_company:
+    title: Get a company
+    description: >-
+      Read one record from the organisations you do business with -- clients, prospects and suppliers,
+      by its id. Use _fields to pull in the linked objects you need alongside
+      it.
+    category: companies
+    read_only: true
+    scopes: ["read(companies)"]
+    request:
+      method: GET
+      path: /api/v0/companies/${company_id}
+      query:
+        _fields: "${fields}"
+    input:
+      company_id:
+        type: string
+        description: The record's Accelo id, from list_companies.
+      fields:
+        type: string
+        description: >-
+          Extra fields to return beyond the defaults, comma separated. Pass
+          _ALL for everything Accelo holds.
+        optional: true
+    output:
+      description: The company.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  create_company:
+    title: Create a company
+    description: >-
+      Add a record to the organisations you do business with -- clients, prospects and suppliers.
+      `fields` takes name, status, website, phone and postal address; read an existing one first to see what else
+      your deployment requires.
+    category: companies
+    scopes: ["write(companies)"]
+    request:
+      method: POST
+      path: /api/v0/companies
+      body: "${fields}"
+    input:
+      fields:
+        type: object
+        description: >-
+          The record to create -- name, status, website, phone and postal address.
+    output:
+      description: The created company.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  update_company:
+    title: Update a company
+    description: >-
+      Change fields on one record in the organisations you do business with -- clients, prospects and suppliers.
+      Only the fields you send are written; the rest are left as they are.
+    category: companies
+    scopes: ["write(companies)"]
+    request:
+      method: PUT
+      path: /api/v0/companies/${company_id}
+      body: "${fields}"
+    input:
+      company_id:
+        type: string
+        description: The record's Accelo id.
+      fields:
+        type: object
+        description: >-
+          The fields to change -- any of name, status, website, phone and postal address.
+    output:
+      description: The updated company.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  delete_company:
+    title: Delete a company
+    description: >-
+      Permanently remove one record from the organisations you do business with -- clients, prospects and suppliers.
+      Anything hanging off it in Accelo goes with it, and this cannot be undone
+      through the API.
+    category: companies
+    destructive: true
+    scopes: ["write(companies)"]
+    request:
+      method: DELETE
+      path: /api/v0/companies/${company_id}
+    input:
+      company_id:
+        type: string
+        description: The record's Accelo id.
+    output:
+      description: Accelo's confirmation, under the meta object.
+      type: object
+      properties:
+        meta: {type: object}
+
+  list_contacts:
+    title: List contacts
+    description: >-
+      Page through the people at those companies, each affiliated to a company. Narrow with _filters,
+      search with _search, and pull linked objects in with _fields rather than
+      making a second call.
+    category: contacts
+    read_only: true
+    scopes: ["read(contacts)"]
+    request:
+      method: GET
+      path: /api/v0/contacts
+      query:
+        _fields: "${fields}"
+        _filters: "${filters}"
+        _search: "${search}"
+        _limit: "${limit}"
+        _page: "${page}"
+    input:
+      fields:
+        type: string
+        description: >-
+          Extra fields to return beyond the defaults, comma separated. Linked
+          objects nest, e.g. "website,company(name)". Pass _ALL for everything.
+        optional: true
+      filters:
+        type: string
+        description: >-
+          Accelo filter expression, e.g. "status(1),date_created_after(1704067200)".
+          Combine with commas, and order with order_by_asc(field).
+        optional: true
+      search:
+        type: string
+        description: Free-text search across this endpoint's searchable fields.
+        optional: true
+      limit:
+        type: integer
+        description: How many to return per page. Accelo's maximum is 100 and its default is 10.
+        optional: true
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: Which page to return, counted from 0.
+        optional: true
+        minimum: 0
+    output:
+      description: A page of contacts, under the response object.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: array}
+
+  get_contact:
+    title: Get a contact
+    description: >-
+      Read one record from the people at those companies, each affiliated to a company,
+      by its id. Use _fields to pull in the linked objects you need alongside
+      it.
+    category: contacts
+    read_only: true
+    scopes: ["read(contacts)"]
+    request:
+      method: GET
+      path: /api/v0/contacts/${contact_id}
+      query:
+        _fields: "${fields}"
+    input:
+      contact_id:
+        type: string
+        description: The record's Accelo id, from list_contacts.
+      fields:
+        type: string
+        description: >-
+          Extra fields to return beyond the defaults, comma separated. Pass
+          _ALL for everything Accelo holds.
+        optional: true
+    output:
+      description: The contact.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  create_contact:
+    title: Create a contact
+    description: >-
+      Add a record to the people at those companies, each affiliated to a company.
+      `fields` takes firstname, surname, email, mobile, company and status; read an existing one first to see what else
+      your deployment requires.
+    category: contacts
+    scopes: ["write(contacts)"]
+    request:
+      method: POST
+      path: /api/v0/contacts
+      body: "${fields}"
+    input:
+      fields:
+        type: object
+        description: >-
+          The record to create -- firstname, surname, email, mobile, company and status.
+    output:
+      description: The created contact.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  update_contact:
+    title: Update a contact
+    description: >-
+      Change fields on one record in the people at those companies, each affiliated to a company.
+      Only the fields you send are written; the rest are left as they are.
+    category: contacts
+    scopes: ["write(contacts)"]
+    request:
+      method: PUT
+      path: /api/v0/contacts/${contact_id}
+      body: "${fields}"
+    input:
+      contact_id:
+        type: string
+        description: The record's Accelo id.
+      fields:
+        type: object
+        description: >-
+          The fields to change -- any of firstname, surname, email, mobile, company and status.
+    output:
+      description: The updated contact.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  delete_contact:
+    title: Delete a contact
+    description: >-
+      Permanently remove one record from the people at those companies, each affiliated to a company.
+      Anything hanging off it in Accelo goes with it, and this cannot be undone
+      through the API.
+    category: contacts
+    destructive: true
+    scopes: ["write(contacts)"]
+    request:
+      method: DELETE
+      path: /api/v0/contacts/${contact_id}
+    input:
+      contact_id:
+        type: string
+        description: The record's Accelo id.
+    output:
+      description: Accelo's confirmation, under the meta object.
+      type: object
+      properties:
+        meta: {type: object}
+
+  list_jobs:
+    title: List jobs
+    description: >-
+      Page through projects -- Accelo's unit of delivered work, run against a company. Narrow with _filters,
+      search with _search, and pull linked objects in with _fields rather than
+      making a second call.
+    category: jobs
+    read_only: true
+    scopes: ["read(jobs)"]
+    request:
+      method: GET
+      path: /api/v0/jobs
+      query:
+        _fields: "${fields}"
+        _filters: "${filters}"
+        _search: "${search}"
+        _limit: "${limit}"
+        _page: "${page}"
+    input:
+      fields:
+        type: string
+        description: >-
+          Extra fields to return beyond the defaults, comma separated. Linked
+          objects nest, e.g. "website,company(name)". Pass _ALL for everything.
+        optional: true
+      filters:
+        type: string
+        description: >-
+          Accelo filter expression, e.g. "status(1),date_created_after(1704067200)".
+          Combine with commas, and order with order_by_asc(field).
+        optional: true
+      search:
+        type: string
+        description: Free-text search across this endpoint's searchable fields.
+        optional: true
+      limit:
+        type: integer
+        description: How many to return per page. Accelo's maximum is 100 and its default is 10.
+        optional: true
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: Which page to return, counted from 0.
+        optional: true
+        minimum: 0
+    output:
+      description: A page of jobs, under the response object.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: array}
+
+  get_job:
+    title: Get a job
+    description: >-
+      Read one record from projects -- Accelo's unit of delivered work, run against a company,
+      by its id. Use _fields to pull in the linked objects you need alongside
+      it.
+    category: jobs
+    read_only: true
+    scopes: ["read(jobs)"]
+    request:
+      method: GET
+      path: /api/v0/jobs/${job_id}
+      query:
+        _fields: "${fields}"
+    input:
+      job_id:
+        type: string
+        description: The record's Accelo id, from list_jobs.
+      fields:
+        type: string
+        description: >-
+          Extra fields to return beyond the defaults, comma separated. Pass
+          _ALL for everything Accelo holds.
+        optional: true
+    output:
+      description: The job.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  create_job:
+    title: Create a job
+    description: >-
+      Add a record to projects -- Accelo's unit of delivered work, run against a company.
+      `fields` takes title, company, job_type, description, status and start and end dates; read an existing one first to see what else
+      your deployment requires.
+    category: jobs
+    scopes: ["write(jobs)"]
+    request:
+      method: POST
+      path: /api/v0/jobs
+      body: "${fields}"
+    input:
+      fields:
+        type: object
+        description: >-
+          The record to create -- title, company, job_type, description, status and start and end dates.
+    output:
+      description: The created job.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  update_job:
+    title: Update a job
+    description: >-
+      Change fields on one record in projects -- Accelo's unit of delivered work, run against a company.
+      Only the fields you send are written; the rest are left as they are.
+    category: jobs
+    scopes: ["write(jobs)"]
+    request:
+      method: PUT
+      path: /api/v0/jobs/${job_id}
+      body: "${fields}"
+    input:
+      job_id:
+        type: string
+        description: The record's Accelo id.
+      fields:
+        type: object
+        description: >-
+          The fields to change -- any of title, company, job_type, description, status and start and end dates.
+    output:
+      description: The updated job.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  delete_job:
+    title: Delete a job
+    description: >-
+      Permanently remove one record from projects -- Accelo's unit of delivered work, run against a company.
+      Anything hanging off it in Accelo goes with it, and this cannot be undone
+      through the API.
+    category: jobs
+    destructive: true
+    scopes: ["write(jobs)"]
+    request:
+      method: DELETE
+      path: /api/v0/jobs/${job_id}
+    input:
+      job_id:
+        type: string
+        description: The record's Accelo id.
+    output:
+      description: Accelo's confirmation, under the meta object.
+      type: object
+      properties:
+        meta: {type: object}
+
+  list_issues:
+    title: List issues
+    description: >-
+      Page through tickets, the reactive work raised against a company or a job. Narrow with _filters,
+      search with _search, and pull linked objects in with _fields rather than
+      making a second call.
+    category: issues
+    read_only: true
+    scopes: ["read(issues)"]
+    request:
+      method: GET
+      path: /api/v0/issues
+      query:
+        _fields: "${fields}"
+        _filters: "${filters}"
+        _search: "${search}"
+        _limit: "${limit}"
+        _page: "${page}"
+    input:
+      fields:
+        type: string
+        description: >-
+          Extra fields to return beyond the defaults, comma separated. Linked
+          objects nest, e.g. "website,company(name)". Pass _ALL for everything.
+        optional: true
+      filters:
+        type: string
+        description: >-
+          Accelo filter expression, e.g. "status(1),date_created_after(1704067200)".
+          Combine with commas, and order with order_by_asc(field).
+        optional: true
+      search:
+        type: string
+        description: Free-text search across this endpoint's searchable fields.
+        optional: true
+      limit:
+        type: integer
+        description: How many to return per page. Accelo's maximum is 100 and its default is 10.
+        optional: true
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: Which page to return, counted from 0.
+        optional: true
+        minimum: 0
+    output:
+      description: A page of issues, under the response object.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: array}
+
+  get_issue:
+    title: Get a issue
+    description: >-
+      Read one record from tickets, the reactive work raised against a company or a job,
+      by its id. Use _fields to pull in the linked objects you need alongside
+      it.
+    category: issues
+    read_only: true
+    scopes: ["read(issues)"]
+    request:
+      method: GET
+      path: /api/v0/issues/${issue_id}
+      query:
+        _fields: "${fields}"
+    input:
+      issue_id:
+        type: string
+        description: The record's Accelo id, from list_issues.
+      fields:
+        type: string
+        description: >-
+          Extra fields to return beyond the defaults, comma separated. Pass
+          _ALL for everything Accelo holds.
+        optional: true
+    output:
+      description: The issue.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  create_issue:
+    title: Create a issue
+    description: >-
+      Add a record to tickets, the reactive work raised against a company or a job.
+      `fields` takes title, description, status, priority, type and what it is against; read an existing one first to see what else
+      your deployment requires.
+    category: issues
+    scopes: ["write(issues)"]
+    request:
+      method: POST
+      path: /api/v0/issues
+      body: "${fields}"
+    input:
+      fields:
+        type: object
+        description: >-
+          The record to create -- title, description, status, priority, type and what it is against.
+    output:
+      description: The created issue.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  update_issue:
+    title: Update a issue
+    description: >-
+      Change fields on one record in tickets, the reactive work raised against a company or a job.
+      Only the fields you send are written; the rest are left as they are.
+    category: issues
+    scopes: ["write(issues)"]
+    request:
+      method: PUT
+      path: /api/v0/issues/${issue_id}
+      body: "${fields}"
+    input:
+      issue_id:
+        type: string
+        description: The record's Accelo id.
+      fields:
+        type: object
+        description: >-
+          The fields to change -- any of title, description, status, priority, type and what it is against.
+    output:
+      description: The updated issue.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  delete_issue:
+    title: Delete a issue
+    description: >-
+      Permanently remove one record from tickets, the reactive work raised against a company or a job.
+      Anything hanging off it in Accelo goes with it, and this cannot be undone
+      through the API.
+    category: issues
+    destructive: true
+    scopes: ["write(issues)"]
+    request:
+      method: DELETE
+      path: /api/v0/issues/${issue_id}
+    input:
+      issue_id:
+        type: string
+        description: The record's Accelo id.
+    output:
+      description: Accelo's confirmation, under the meta object.
+      type: object
+      properties:
+        meta: {type: object}
+
+  list_activities:
+    title: List activities
+    description: >-
+      Page through the timeline -- emails, notes, calls and meetings logged against any object. Narrow with _filters,
+      search with _search, and pull linked objects in with _fields rather than
+      making a second call.
+    category: activities
+    read_only: true
+    scopes: ["read(activities)"]
+    request:
+      method: GET
+      path: /api/v0/activities
+      query:
+        _fields: "${fields}"
+        _filters: "${filters}"
+        _search: "${search}"
+        _limit: "${limit}"
+        _page: "${page}"
+    input:
+      fields:
+        type: string
+        description: >-
+          Extra fields to return beyond the defaults, comma separated. Linked
+          objects nest, e.g. "website,company(name)". Pass _ALL for everything.
+        optional: true
+      filters:
+        type: string
+        description: >-
+          Accelo filter expression, e.g. "status(1),date_created_after(1704067200)".
+          Combine with commas, and order with order_by_asc(field).
+        optional: true
+      search:
+        type: string
+        description: Free-text search across this endpoint's searchable fields.
+        optional: true
+      limit:
+        type: integer
+        description: How many to return per page. Accelo's maximum is 100 and its default is 10.
+        optional: true
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: Which page to return, counted from 0.
+        optional: true
+        minimum: 0
+    output:
+      description: A page of activities, under the response object.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: array}
+
+  get_activity:
+    title: Get a activity
+    description: >-
+      Read one record from the timeline -- emails, notes, calls and meetings logged against any object,
+      by its id. Use _fields to pull in the linked objects you need alongside
+      it.
+    category: activities
+    read_only: true
+    scopes: ["read(activities)"]
+    request:
+      method: GET
+      path: /api/v0/activities/${activity_id}
+      query:
+        _fields: "${fields}"
+    input:
+      activity_id:
+        type: string
+        description: The record's Accelo id, from list_activities.
+      fields:
+        type: string
+        description: >-
+          Extra fields to return beyond the defaults, comma separated. Pass
+          _ALL for everything Accelo holds.
+        optional: true
+    output:
+      description: The activity.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  create_activity:
+    title: Create a activity
+    description: >-
+      Add a record to the timeline -- emails, notes, calls and meetings logged against any object.
+      `fields` takes subject, body, medium, visibility, what it is against, and billable time; read an existing one first to see what else
+      your deployment requires.
+    category: activities
+    scopes: ["write(activities)"]
+    request:
+      method: POST
+      path: /api/v0/activities
+      body: "${fields}"
+    input:
+      fields:
+        type: object
+        description: >-
+          The record to create -- subject, body, medium, visibility, what it is against, and billable time.
+    output:
+      description: The created activity.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  update_activity:
+    title: Update a activity
+    description: >-
+      Change fields on one record in the timeline -- emails, notes, calls and meetings logged against any object.
+      Only the fields you send are written; the rest are left as they are.
+    category: activities
+    scopes: ["write(activities)"]
+    request:
+      method: PUT
+      path: /api/v0/activities/${activity_id}
+      body: "${fields}"
+    input:
+      activity_id:
+        type: string
+        description: The record's Accelo id.
+      fields:
+        type: object
+        description: >-
+          The fields to change -- any of subject, body, medium, visibility, what it is against, and billable time.
+    output:
+      description: The updated activity.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  delete_activity:
+    title: Delete a activity
+    description: >-
+      Permanently remove one record from the timeline -- emails, notes, calls and meetings logged against any object.
+      Anything hanging off it in Accelo goes with it, and this cannot be undone
+      through the API.
+    category: activities
+    destructive: true
+    scopes: ["write(activities)"]
+    request:
+      method: DELETE
+      path: /api/v0/activities/${activity_id}
+    input:
+      activity_id:
+        type: string
+        description: The record's Accelo id.
+    output:
+      description: Accelo's confirmation, under the meta object.
+      type: object
+      properties:
+        meta: {type: object}
+
+  list_invoices:
+    title: List invoices
+    description: >-
+      Page through invoices raised against a company or contact. Narrow with _filters,
+      search with _search, and pull linked objects in with _fields rather than
+      making a second call.
+    category: invoices
+    read_only: true
+    scopes: ["read(invoices)"]
+    request:
+      method: GET
+      path: /api/v0/invoices
+      query:
+        _fields: "${fields}"
+        _filters: "${filters}"
+        _search: "${search}"
+        _limit: "${limit}"
+        _page: "${page}"
+    input:
+      fields:
+        type: string
+        description: >-
+          Extra fields to return beyond the defaults, comma separated. Linked
+          objects nest, e.g. "website,company(name)". Pass _ALL for everything.
+        optional: true
+      filters:
+        type: string
+        description: >-
+          Accelo filter expression, e.g. "status(1),date_created_after(1704067200)".
+          Combine with commas, and order with order_by_asc(field).
+        optional: true
+      search:
+        type: string
+        description: Free-text search across this endpoint's searchable fields.
+        optional: true
+      limit:
+        type: integer
+        description: How many to return per page. Accelo's maximum is 100 and its default is 10.
+        optional: true
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: Which page to return, counted from 0.
+        optional: true
+        minimum: 0
+    output:
+      description: A page of invoices, under the response object.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: array}
+
+  get_invoice:
+    title: Get a invoice
+    description: >-
+      Read one record from invoices raised against a company or contact,
+      by its id. Use _fields to pull in the linked objects you need alongside
+      it.
+    category: invoices
+    read_only: true
+    scopes: ["read(invoices)"]
+    request:
+      method: GET
+      path: /api/v0/invoices/${invoice_id}
+      query:
+        _fields: "${fields}"
+    input:
+      invoice_id:
+        type: string
+        description: The record's Accelo id, from list_invoices.
+      fields:
+        type: string
+        description: >-
+          Extra fields to return beyond the defaults, comma separated. Pass
+          _ALL for everything Accelo holds.
+        optional: true
+    output:
+      description: The invoice.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  create_invoice:
+    title: Create a invoice
+    description: >-
+      Add a record to invoices raised against a company or contact.
+      `fields` takes company, contact, date issued, due date, total and description; read an existing one first to see what else
+      your deployment requires.
+    category: invoices
+    scopes: ["write(invoices)"]
+    request:
+      method: POST
+      path: /api/v0/invoices
+      body: "${fields}"
+    input:
+      fields:
+        type: object
+        description: >-
+          The record to create -- company, contact, date issued, due date, total and description.
+    output:
+      description: The created invoice.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  update_invoice:
+    title: Update a invoice
+    description: >-
+      Change fields on one record in invoices raised against a company or contact.
+      Only the fields you send are written; the rest are left as they are.
+    category: invoices
+    scopes: ["write(invoices)"]
+    request:
+      method: PUT
+      path: /api/v0/invoices/${invoice_id}
+      body: "${fields}"
+    input:
+      invoice_id:
+        type: string
+        description: The record's Accelo id.
+      fields:
+        type: object
+        description: >-
+          The fields to change -- any of company, contact, date issued, due date, total and description.
+    output:
+      description: The updated invoice.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  list_prospects:
+    title: List sales
+    description: >-
+      Page through sales opportunities, with their value and probability of closing. Narrow with _filters,
+      search with _search, and pull linked objects in with _fields rather than
+      making a second call.
+    category: prospects
+    read_only: true
+    scopes: ["read(prospects)"]
+    request:
+      method: GET
+      path: /api/v0/prospects
+      query:
+        _fields: "${fields}"
+        _filters: "${filters}"
+        _search: "${search}"
+        _limit: "${limit}"
+        _page: "${page}"
+    input:
+      fields:
+        type: string
+        description: >-
+          Extra fields to return beyond the defaults, comma separated. Linked
+          objects nest, e.g. "website,company(name)". Pass _ALL for everything.
+        optional: true
+      filters:
+        type: string
+        description: >-
+          Accelo filter expression, e.g. "status(1),date_created_after(1704067200)".
+          Combine with commas, and order with order_by_asc(field).
+        optional: true
+      search:
+        type: string
+        description: Free-text search across this endpoint's searchable fields.
+        optional: true
+      limit:
+        type: integer
+        description: How many to return per page. Accelo's maximum is 100 and its default is 10.
+        optional: true
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: Which page to return, counted from 0.
+        optional: true
+        minimum: 0
+    output:
+      description: A page of sales, under the response object.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: array}
+
+  get_prospect:
+    title: Get a prospect
+    description: >-
+      Read one record from sales opportunities, with their value and probability of closing,
+      by its id. Use _fields to pull in the linked objects you need alongside
+      it.
+    category: prospects
+    read_only: true
+    scopes: ["read(prospects)"]
+    request:
+      method: GET
+      path: /api/v0/prospects/${prospect_id}
+      query:
+        _fields: "${fields}"
+    input:
+      prospect_id:
+        type: string
+        description: The record's Accelo id, from list_prospects.
+      fields:
+        type: string
+        description: >-
+          Extra fields to return beyond the defaults, comma separated. Pass
+          _ALL for everything Accelo holds.
+        optional: true
+    output:
+      description: The prospect.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  create_prospect:
+    title: Create a prospect
+    description: >-
+      Add a record to sales opportunities, with their value and probability of closing.
+      `fields` takes title, description, value, probability, company and contact; read an existing one first to see what else
+      your deployment requires.
+    category: prospects
+    scopes: ["write(prospects)"]
+    request:
+      method: POST
+      path: /api/v0/prospects
+      body: "${fields}"
+    input:
+      fields:
+        type: object
+        description: >-
+          The record to create -- title, description, value, probability, company and contact.
+    output:
+      description: The created prospect.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  update_prospect:
+    title: Update a prospect
+    description: >-
+      Change fields on one record in sales opportunities, with their value and probability of closing.
+      Only the fields you send are written; the rest are left as they are.
+    category: prospects
+    scopes: ["write(prospects)"]
+    request:
+      method: PUT
+      path: /api/v0/prospects/${prospect_id}
+      body: "${fields}"
+    input:
+      prospect_id:
+        type: string
+        description: The record's Accelo id.
+      fields:
+        type: object
+        description: >-
+          The fields to change -- any of title, description, value, probability, company and contact.
+    output:
+      description: The updated prospect.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  delete_prospect:
+    title: Delete a prospect
+    description: >-
+      Permanently remove one record from sales opportunities, with their value and probability of closing.
+      Anything hanging off it in Accelo goes with it, and this cannot be undone
+      through the API.
+    category: prospects
+    destructive: true
+    scopes: ["write(prospects)"]
+    request:
+      method: DELETE
+      path: /api/v0/prospects/${prospect_id}
+    input:
+      prospect_id:
+        type: string
+        description: The record's Accelo id.
+    output:
+      description: Accelo's confirmation, under the meta object.
+      type: object
+      properties:
+        meta: {type: object}
+
+  list_tasks:
+    title: List tasks
+    description: >-
+      Page through individual pieces of work assigned to staff, hung off a job, issue or company. Narrow with _filters,
+      search with _search, and pull linked objects in with _fields rather than
+      making a second call.
+    category: tasks
+    read_only: true
+    scopes: ["read(tasks)"]
+    request:
+      method: GET
+      path: /api/v0/tasks
+      query:
+        _fields: "${fields}"
+        _filters: "${filters}"
+        _search: "${search}"
+        _limit: "${limit}"
+        _page: "${page}"
+    input:
+      fields:
+        type: string
+        description: >-
+          Extra fields to return beyond the defaults, comma separated. Linked
+          objects nest, e.g. "website,company(name)". Pass _ALL for everything.
+        optional: true
+      filters:
+        type: string
+        description: >-
+          Accelo filter expression, e.g. "status(1),date_created_after(1704067200)".
+          Combine with commas, and order with order_by_asc(field).
+        optional: true
+      search:
+        type: string
+        description: Free-text search across this endpoint's searchable fields.
+        optional: true
+      limit:
+        type: integer
+        description: How many to return per page. Accelo's maximum is 100 and its default is 10.
+        optional: true
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: Which page to return, counted from 0.
+        optional: true
+        minimum: 0
+    output:
+      description: A page of tasks, under the response object.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: array}
+
+  get_task:
+    title: Get a task
+    description: >-
+      Read one record from individual pieces of work assigned to staff, hung off a job, issue or company,
+      by its id. Use _fields to pull in the linked objects you need alongside
+      it.
+    category: tasks
+    read_only: true
+    scopes: ["read(tasks)"]
+    request:
+      method: GET
+      path: /api/v0/tasks/${task_id}
+      query:
+        _fields: "${fields}"
+    input:
+      task_id:
+        type: string
+        description: The record's Accelo id, from list_tasks.
+      fields:
+        type: string
+        description: >-
+          Extra fields to return beyond the defaults, comma separated. Pass
+          _ALL for everything Accelo holds.
+        optional: true
+    output:
+      description: The task.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  create_task:
+    title: Create a task
+    description: >-
+      Add a record to individual pieces of work assigned to staff, hung off a job, issue or company.
+      `fields` takes title, description, status, priority, assignee and what it is against; read an existing one first to see what else
+      your deployment requires.
+    category: tasks
+    scopes: ["write(tasks)"]
+    request:
+      method: POST
+      path: /api/v0/tasks
+      body: "${fields}"
+    input:
+      fields:
+        type: object
+        description: >-
+          The record to create -- title, description, status, priority, assignee and what it is against.
+    output:
+      description: The created task.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  update_task:
+    title: Update a task
+    description: >-
+      Change fields on one record in individual pieces of work assigned to staff, hung off a job, issue or company.
+      Only the fields you send are written; the rest are left as they are.
+    category: tasks
+    scopes: ["write(tasks)"]
+    request:
+      method: PUT
+      path: /api/v0/tasks/${task_id}
+      body: "${fields}"
+    input:
+      task_id:
+        type: string
+        description: The record's Accelo id.
+      fields:
+        type: object
+        description: >-
+          The fields to change -- any of title, description, status, priority, assignee and what it is against.
+    output:
+      description: The updated task.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  delete_task:
+    title: Delete a task
+    description: >-
+      Permanently remove one record from individual pieces of work assigned to staff, hung off a job, issue or company.
+      Anything hanging off it in Accelo goes with it, and this cannot be undone
+      through the API.
+    category: tasks
+    destructive: true
+    scopes: ["write(tasks)"]
+    request:
+      method: DELETE
+      path: /api/v0/tasks/${task_id}
+    input:
+      task_id:
+        type: string
+        description: The record's Accelo id.
+    output:
+      description: Accelo's confirmation, under the meta object.
+      type: object
+      properties:
+        meta: {type: object}
+
+  list_staff:
+    title: List staff
+    description: >-
+      Page through the people in your own organisation who do the work. Narrow with _filters,
+      search with _search, and pull linked objects in with _fields rather than
+      making a second call.
+    category: staff
+    read_only: true
+    scopes: ["read(staff)"]
+    request:
+      method: GET
+      path: /api/v0/staff
+      query:
+        _fields: "${fields}"
+        _filters: "${filters}"
+        _search: "${search}"
+        _limit: "${limit}"
+        _page: "${page}"
+    input:
+      fields:
+        type: string
+        description: >-
+          Extra fields to return beyond the defaults, comma separated. Linked
+          objects nest, e.g. "website,company(name)". Pass _ALL for everything.
+        optional: true
+      filters:
+        type: string
+        description: >-
+          Accelo filter expression, e.g. "status(1),date_created_after(1704067200)".
+          Combine with commas, and order with order_by_asc(field).
+        optional: true
+      search:
+        type: string
+        description: Free-text search across this endpoint's searchable fields.
+        optional: true
+      limit:
+        type: integer
+        description: How many to return per page. Accelo's maximum is 100 and its default is 10.
+        optional: true
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: Which page to return, counted from 0.
+        optional: true
+        minimum: 0
+    output:
+      description: A page of staff, under the response object.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: array}
+
+  get_staff_member:
+    title: Get a staff member
+    description: >-
+      Read one record from the people in your own organisation who do the work,
+      by its id. Use _fields to pull in the linked objects you need alongside
+      it.
+    category: staff
+    read_only: true
+    scopes: ["read(staff)"]
+    request:
+      method: GET
+      path: /api/v0/staff/${staff_member_id}
+      query:
+        _fields: "${fields}"
+    input:
+      staff_member_id:
+        type: string
+        description: The record's Accelo id, from list_staff.
+      fields:
+        type: string
+        description: >-
+          Extra fields to return beyond the defaults, comma separated. Pass
+          _ALL for everything Accelo holds.
+        optional: true
+    output:
+      description: The staff member.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  create_staff_member:
+    title: Create a staff member
+    description: >-
+      Add a record to the people in your own organisation who do the work.
+      `fields` takes firstname, surname, email, phone, status and role; read an existing one first to see what else
+      your deployment requires.
+    category: staff
+    scopes: ["write(staff)"]
+    request:
+      method: POST
+      path: /api/v0/staff
+      body: "${fields}"
+    input:
+      fields:
+        type: object
+        description: >-
+          The record to create -- firstname, surname, email, phone, status and role.
+    output:
+      description: The created staff member.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  update_staff_member:
+    title: Update a staff member
+    description: >-
+      Change fields on one record in the people in your own organisation who do the work.
+      Only the fields you send are written; the rest are left as they are.
+    category: staff
+    scopes: ["write(staff)"]
+    request:
+      method: PUT
+      path: /api/v0/staff/${staff_member_id}
+      body: "${fields}"
+    input:
+      staff_member_id:
+        type: string
+        description: The record's Accelo id.
+      fields:
+        type: object
+        description: >-
+          The fields to change -- any of firstname, surname, email, phone, status and role.
+    output:
+      description: The updated staff member.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  list_expenses:
+    title: List expenses
+    description: >-
+      Page through costs booked against a job or an issue so they can be billed on. Narrow with _filters,
+      search with _search, and pull linked objects in with _fields rather than
+      making a second call.
+    category: expenses
+    read_only: true
+    scopes: ["read(expenses)"]
+    request:
+      method: GET
+      path: /api/v0/expenses
+      query:
+        _fields: "${fields}"
+        _filters: "${filters}"
+        _search: "${search}"
+        _limit: "${limit}"
+        _page: "${page}"
+    input:
+      fields:
+        type: string
+        description: >-
+          Extra fields to return beyond the defaults, comma separated. Linked
+          objects nest, e.g. "website,company(name)". Pass _ALL for everything.
+        optional: true
+      filters:
+        type: string
+        description: >-
+          Accelo filter expression, e.g. "status(1),date_created_after(1704067200)".
+          Combine with commas, and order with order_by_asc(field).
+        optional: true
+      search:
+        type: string
+        description: Free-text search across this endpoint's searchable fields.
+        optional: true
+      limit:
+        type: integer
+        description: How many to return per page. Accelo's maximum is 100 and its default is 10.
+        optional: true
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: Which page to return, counted from 0.
+        optional: true
+        minimum: 0
+    output:
+      description: A page of expenses, under the response object.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: array}
+
+  get_expense:
+    title: Get a expense
+    description: >-
+      Read one record from costs booked against a job or an issue so they can be billed on,
+      by its id. Use _fields to pull in the linked objects you need alongside
+      it.
+    category: expenses
+    read_only: true
+    scopes: ["read(expenses)"]
+    request:
+      method: GET
+      path: /api/v0/expenses/${expense_id}
+      query:
+        _fields: "${fields}"
+    input:
+      expense_id:
+        type: string
+        description: The record's Accelo id, from list_expenses.
+      fields:
+        type: string
+        description: >-
+          Extra fields to return beyond the defaults, comma separated. Pass
+          _ALL for everything Accelo holds.
+        optional: true
+    output:
+      description: The expense.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  create_expense:
+    title: Create a expense
+    description: >-
+      Add a record to costs booked against a job or an issue so they can be billed on.
+      `fields` takes the object it is against, the amount, and the date incurred; read an existing one first to see what else
+      your deployment requires.
+    category: expenses
+    scopes: ["write(expenses)"]
+    request:
+      method: POST
+      path: /api/v0/expenses
+      body: "${fields}"
+    input:
+      fields:
+        type: object
+        description: >-
+          The record to create -- the object it is against, the amount, and the date incurred.
+    output:
+      description: The created expense.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  update_expense:
+    title: Update a expense
+    description: >-
+      Change fields on one record in costs booked against a job or an issue so they can be billed on.
+      Only the fields you send are written; the rest are left as they are.
+    category: expenses
+    scopes: ["write(expenses)"]
+    request:
+      method: PUT
+      path: /api/v0/expenses/${expense_id}
+      body: "${fields}"
+    input:
+      expense_id:
+        type: string
+        description: The record's Accelo id.
+      fields:
+        type: object
+        description: >-
+          The fields to change -- any of the object it is against, the amount, and the date incurred.
+    output:
+      description: The updated expense.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  delete_expense:
+    title: Delete a expense
+    description: >-
+      Permanently remove one record from costs booked against a job or an issue so they can be billed on.
+      Anything hanging off it in Accelo goes with it, and this cannot be undone
+      through the API.
+    category: expenses
+    destructive: true
+    scopes: ["write(expenses)"]
+    request:
+      method: DELETE
+      path: /api/v0/expenses/${expense_id}
+    input:
+      expense_id:
+        type: string
+        description: The record's Accelo id.
+    output:
+      description: Accelo's confirmation, under the meta object.
+      type: object
+      properties:
+        meta: {type: object}
+
+  list_contracts:
+    title: List retainers
+    description: >-
+      Page through retainers -- ongoing agreements a company is billed against periodically. Narrow with _filters,
+      search with _search, and pull linked objects in with _fields rather than
+      making a second call.
+    category: contracts
+    read_only: true
+    scopes: ["read(contracts)"]
+    request:
+      method: GET
+      path: /api/v0/contracts
+      query:
+        _fields: "${fields}"
+        _filters: "${filters}"
+        _search: "${search}"
+        _limit: "${limit}"
+        _page: "${page}"
+    input:
+      fields:
+        type: string
+        description: >-
+          Extra fields to return beyond the defaults, comma separated. Linked
+          objects nest, e.g. "website,company(name)". Pass _ALL for everything.
+        optional: true
+      filters:
+        type: string
+        description: >-
+          Accelo filter expression, e.g. "status(1),date_created_after(1704067200)".
+          Combine with commas, and order with order_by_asc(field).
+        optional: true
+      search:
+        type: string
+        description: Free-text search across this endpoint's searchable fields.
+        optional: true
+      limit:
+        type: integer
+        description: How many to return per page. Accelo's maximum is 100 and its default is 10.
+        optional: true
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: Which page to return, counted from 0.
+        optional: true
+        minimum: 0
+    output:
+      description: A page of retainers, under the response object.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: array}
+
+  get_contract:
+    title: Get a contract
+    description: >-
+      Read one record from retainers -- ongoing agreements a company is billed against periodically,
+      by its id. Use _fields to pull in the linked objects you need alongside
+      it.
+    category: contracts
+    read_only: true
+    scopes: ["read(contracts)"]
+    request:
+      method: GET
+      path: /api/v0/contracts/${contract_id}
+      query:
+        _fields: "${fields}"
+    input:
+      contract_id:
+        type: string
+        description: The record's Accelo id, from list_contracts.
+      fields:
+        type: string
+        description: >-
+          Extra fields to return beyond the defaults, comma separated. Pass
+          _ALL for everything Accelo holds.
+        optional: true
+    output:
+      description: The contract.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  create_contract:
+    title: Create a contract
+    description: >-
+      Add a record to retainers -- ongoing agreements a company is billed against periodically.
+      `fields` takes the company, the period, and the value; read an existing one first to see what else
+      your deployment requires.
+    category: contracts
+    scopes: ["write(contracts)"]
+    request:
+      method: POST
+      path: /api/v0/contracts
+      body: "${fields}"
+    input:
+      fields:
+        type: object
+        description: >-
+          The record to create -- the company, the period, and the value.
+    output:
+      description: The created contract.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  update_contract:
+    title: Update a contract
+    description: >-
+      Change fields on one record in retainers -- ongoing agreements a company is billed against periodically.
+      Only the fields you send are written; the rest are left as they are.
+    category: contracts
+    scopes: ["write(contracts)"]
+    request:
+      method: PUT
+      path: /api/v0/contracts/${contract_id}
+      body: "${fields}"
+    input:
+      contract_id:
+        type: string
+        description: The record's Accelo id.
+      fields:
+        type: object
+        description: >-
+          The fields to change -- any of the company, the period, and the value.
+    output:
+      description: The updated contract.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  list_timers:
+    title: List timers
+    description: >-
+      Page through running and stopped work timers, the raw material of billable time. Narrow with _filters,
+      search with _search, and pull linked objects in with _fields rather than
+      making a second call.
+    category: timers
+    read_only: true
+    scopes: ["read(timers)"]
+    request:
+      method: GET
+      path: /api/v0/timers
+      query:
+        _fields: "${fields}"
+        _filters: "${filters}"
+        _search: "${search}"
+        _limit: "${limit}"
+        _page: "${page}"
+    input:
+      fields:
+        type: string
+        description: >-
+          Extra fields to return beyond the defaults, comma separated. Linked
+          objects nest, e.g. "website,company(name)". Pass _ALL for everything.
+        optional: true
+      filters:
+        type: string
+        description: >-
+          Accelo filter expression, e.g. "status(1),date_created_after(1704067200)".
+          Combine with commas, and order with order_by_asc(field).
+        optional: true
+      search:
+        type: string
+        description: Free-text search across this endpoint's searchable fields.
+        optional: true
+      limit:
+        type: integer
+        description: How many to return per page. Accelo's maximum is 100 and its default is 10.
+        optional: true
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: Which page to return, counted from 0.
+        optional: true
+        minimum: 0
+    output:
+      description: A page of timers, under the response object.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: array}
+
+  get_timer:
+    title: Get a timer
+    description: >-
+      Read one record from running and stopped work timers, the raw material of billable time,
+      by its id. Use _fields to pull in the linked objects you need alongside
+      it.
+    category: timers
+    read_only: true
+    scopes: ["read(timers)"]
+    request:
+      method: GET
+      path: /api/v0/timers/${timer_id}
+      query:
+        _fields: "${fields}"
+    input:
+      timer_id:
+        type: string
+        description: The record's Accelo id, from list_timers.
+      fields:
+        type: string
+        description: >-
+          Extra fields to return beyond the defaults, comma separated. Pass
+          _ALL for everything Accelo holds.
+        optional: true
+    output:
+      description: The timer.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  create_timer:
+    title: Create a timer
+    description: >-
+      Add a record to running and stopped work timers, the raw material of billable time.
+      `fields` takes the object being worked on and the staff member doing it; read an existing one first to see what else
+      your deployment requires.
+    category: timers
+    scopes: ["write(timers)"]
+    request:
+      method: POST
+      path: /api/v0/timers
+      body: "${fields}"
+    input:
+      fields:
+        type: object
+        description: >-
+          The record to create -- the object being worked on and the staff member doing it.
+    output:
+      description: The created timer.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  update_timer:
+    title: Update a timer
+    description: >-
+      Change fields on one record in running and stopped work timers, the raw material of billable time.
+      Only the fields you send are written; the rest are left as they are.
+    category: timers
+    scopes: ["write(timers)"]
+    request:
+      method: PUT
+      path: /api/v0/timers/${timer_id}
+      body: "${fields}"
+    input:
+      timer_id:
+        type: string
+        description: The record's Accelo id.
+      fields:
+        type: object
+        description: >-
+          The fields to change -- any of the object being worked on and the staff member doing it.
+    output:
+      description: The updated timer.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}
+
+  delete_timer:
+    title: Delete a timer
+    description: >-
+      Permanently remove one record from running and stopped work timers, the raw material of billable time.
+      Anything hanging off it in Accelo goes with it, and this cannot be undone
+      through the API.
+    category: timers
+    destructive: true
+    scopes: ["write(timers)"]
+    request:
+      method: DELETE
+      path: /api/v0/timers/${timer_id}
+    input:
+      timer_id:
+        type: string
+        description: The record's Accelo id.
+    output:
+      description: Accelo's confirmation, under the meta object.
+      type: object
+      properties:
+        meta: {type: object}
+
+  get_current_staff:
+    title: Get the authenticated staff member
+    description: >-
+      Read the staff record the credentials act as, without having to know its
+      id first. The cheapest check that a connection to Accelo is working.
+    category: staff
+    read_only: true
+    scopes: ["read(staff)"]
+    request:
+      method: GET
+      path: /api/v0/staff/current
+      query:
+        _fields: "${fields}"
+    input:
+      fields:
+        type: string
+        description: >-
+          Extra fields to return beyond the defaults, comma separated. Pass
+          _ALL for everything Accelo holds.
+        optional: true
+    output:
+      description: The authenticated staff member.
+      type: object
+      properties:
+        meta: {type: object}
+        response: {type: object}

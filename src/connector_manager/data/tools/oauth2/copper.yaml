@@ -1,0 +1,664 @@
+# Copper CRM tools.
+#
+# Copper's list endpoints are POST /search with a filter body rather than GET
+# with query parameters, which is why the read tools here are POSTs marked
+# read-only.
+#
+# Dates are Unix epochs in seconds, and monetary values are plain numbers in the
+# account's currency.
+#
+# Docs: https://developer.copper.com/
+
+connector_id: copper
+display_name: Copper
+docs_url: https://developer.copper.com/
+
+tools:
+
+  search_people:
+    title: Search people
+    description: >-
+      Find contacts by name, email, phone or assignee. Copper returns 200 per
+      page and pages with page_number.
+    category: people
+    read_only: true
+    request:
+      method: POST
+      path: /v1/people/search
+      body:
+        page_number: "${page}"
+        page_size: "${page_size}"
+        name: "${name}"
+        emails: "${emails}"
+        phone_number: "${phone_number}"
+        assignee_ids: "${assignee_ids}"
+        sort_by: "${sort_by}"
+        sort_direction: "${sort_direction}"
+    input:
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      page_size:
+        type: integer
+        description: How many people per page (1-200).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 200
+      name:
+        type: string
+        description: Match against the person's name.
+        optional: true
+      emails:
+        type: array
+        description: Only people with one of these email addresses.
+        optional: true
+        items: {type: string}
+      phone_number:
+        type: string
+        description: Only people with this phone number.
+        optional: true
+      assignee_ids:
+        type: array
+        description: Only people owned by these users.
+        optional: true
+        items: {type: integer}
+      sort_by:
+        type: string
+        description: Field to order by, e.g. name or date_modified.
+        optional: true
+      sort_direction:
+        type: string
+        description: Sort direction.
+        optional: true
+        enum: [asc, desc]
+    output:
+      description: The matching people.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          name: {type: string}
+          emails: {type: array}
+          company_name: {type: string}
+
+  get_person:
+    title: Get a person
+    description: Read one contact in full, including custom fields and their company.
+    category: people
+    read_only: true
+    request:
+      method: GET
+      path: /v1/people/${person_id}
+    input:
+      person_id:
+        type: integer
+        description: The person's numeric id.
+    output:
+      description: The person.
+      type: object
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        emails: {type: array}
+        phone_numbers: {type: array}
+        custom_fields: {type: array}
+
+  create_person:
+    title: Create a person
+    description: >-
+      Add a contact. Emails and phone numbers are typed entries, e.g.
+      [{"email": "ada@example.com", "category": "work"}].
+    category: people
+    request:
+      method: POST
+      path: /v1/people
+      body:
+        name: "${name}"
+        emails: "${emails}"
+        phone_numbers: "${phone_numbers}"
+        title: "${title}"
+        company_name: "${company_name}"
+        assignee_id: "${assignee_id}"
+        address: "${address}"
+        details: "${details}"
+        tags: "${tags}"
+        custom_fields: "${custom_fields}"
+    input:
+      name:
+        type: string
+        description: The person's full name.
+      emails:
+        type: array
+        description: Typed emails, e.g. [{"email":"ada@example.com","category":"work"}].
+        optional: true
+        items: {type: object}
+      phone_numbers:
+        type: array
+        description: Typed phones, e.g. [{"number":"555 0100","category":"mobile"}].
+        optional: true
+        items: {type: object}
+      title:
+        type: string
+        description: Their job title.
+        optional: true
+      company_name:
+        type: string
+        description: Where they work.
+        optional: true
+      assignee_id:
+        type: integer
+        description: Copper user who owns the record.
+        optional: true
+      address:
+        type: object
+        description: Address object, e.g. {"street":"1 Main St","city":"Austin"}.
+        optional: true
+      details:
+        type: string
+        description: Free-text notes about the person.
+        optional: true
+      tags:
+        type: array
+        description: Tags to apply.
+        optional: true
+        items: {type: string}
+      custom_fields:
+        type: array
+        description: "Custom field values, each {\"custom_field_definition_id\": 1, \"value\": \"x\"}."
+        optional: true
+        items: {type: object}
+    output:
+      description: The created person.
+      type: object
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        date_created: {type: integer}
+
+  update_person:
+    title: Update a person
+    description: Change a contact's details. Only what is supplied is written.
+    category: people
+    request:
+      method: PUT
+      path: /v1/people/${person_id}
+      body:
+        name: "${name}"
+        emails: "${emails}"
+        phone_numbers: "${phone_numbers}"
+        title: "${title}"
+        assignee_id: "${assignee_id}"
+        details: "${details}"
+        tags: "${tags}"
+        custom_fields: "${custom_fields}"
+    input:
+      person_id:
+        type: integer
+        description: The person's numeric id.
+      name:
+        type: string
+        description: New name.
+        optional: true
+      emails:
+        type: array
+        description: Replaces the email list entirely.
+        optional: true
+        items: {type: object}
+      phone_numbers:
+        type: array
+        description: Replaces the phone list entirely.
+        optional: true
+        items: {type: object}
+      title:
+        type: string
+        description: New job title.
+        optional: true
+      assignee_id:
+        type: integer
+        description: New owner's Copper user id.
+        optional: true
+      details:
+        type: string
+        description: New notes.
+        optional: true
+      tags:
+        type: array
+        description: Replaces the tag set entirely.
+        optional: true
+        items: {type: string}
+      custom_fields:
+        type: array
+        description: Custom field values to write.
+        optional: true
+        items: {type: object}
+    output:
+      description: The updated person.
+      type: object
+      properties:
+        id: {type: integer}
+        name: {type: string}
+
+  search_opportunities:
+    title: Search opportunities
+    description: >-
+      Find deals by pipeline, stage, assignee or status — the way to read a
+      Copper pipeline.
+    category: opportunities
+    read_only: true
+    request:
+      method: POST
+      path: /v1/opportunities/search
+      body:
+        page_number: "${page}"
+        page_size: "${page_size}"
+        name: "${name}"
+        assignee_ids: "${assignee_ids}"
+        pipeline_ids: "${pipeline_ids}"
+        pipeline_stage_ids: "${pipeline_stage_ids}"
+        status_ids: "${status_ids}"
+        sort_by: "${sort_by}"
+    input:
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      page_size:
+        type: integer
+        description: How many opportunities per page (1-200).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 200
+      name:
+        type: string
+        description: Match against the opportunity name.
+        optional: true
+      assignee_ids:
+        type: array
+        description: Only deals owned by these users.
+        optional: true
+        items: {type: integer}
+      pipeline_ids:
+        type: array
+        description: Only deals in these pipelines.
+        optional: true
+        items: {type: integer}
+      pipeline_stage_ids:
+        type: array
+        description: Only deals at these stages.
+        optional: true
+        items: {type: integer}
+      status_ids:
+        type: array
+        description: Only deals with these status ids.
+        optional: true
+        items: {type: integer}
+      sort_by:
+        type: string
+        description: Field to order by, e.g. date_modified.
+        optional: true
+    output:
+      description: The matching opportunities.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          name: {type: string}
+          monetary_value: {type: number}
+          pipeline_stage_id: {type: integer}
+          status: {type: string}
+
+  create_opportunity:
+    title: Create an opportunity
+    description: >-
+      Open a deal against a company. Copper requires the primary contact's
+      company, so `company_id` should be set where possible.
+    category: opportunities
+    request:
+      method: POST
+      path: /v1/opportunities
+      body:
+        name: "${name}"
+        primary_contact_id: "${primary_contact_id}"
+        company_id: "${company_id}"
+        pipeline_id: "${pipeline_id}"
+        pipeline_stage_id: "${pipeline_stage_id}"
+        monetary_value: "${monetary_value}"
+        close_date: "${close_date}"
+        assignee_id: "${assignee_id}"
+        details: "${details}"
+        priority: "${priority}"
+    input:
+      name:
+        type: string
+        description: What the deal is called.
+      primary_contact_id:
+        type: integer
+        description: Person id the deal is with.
+        optional: true
+      company_id:
+        type: integer
+        description: Company id the deal belongs to.
+        optional: true
+      pipeline_id:
+        type: integer
+        description: Pipeline to place it in, from list_pipelines.
+        optional: true
+      pipeline_stage_id:
+        type: integer
+        description: Stage within the pipeline.
+        optional: true
+      monetary_value:
+        type: number
+        description: Deal value in the account's currency.
+        optional: true
+        minimum: 0
+      close_date:
+        type: string
+        description: Expected close date as MM/DD/YYYY.
+        optional: true
+      assignee_id:
+        type: integer
+        description: Copper user who owns the deal.
+        optional: true
+      details:
+        type: string
+        description: Notes about the deal.
+        optional: true
+      priority:
+        type: string
+        description: Deal priority.
+        optional: true
+        enum: [None, Low, Medium, High]
+    output:
+      description: The created opportunity.
+      type: object
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        pipeline_stage_id: {type: integer}
+
+  update_opportunity:
+    title: Update an opportunity
+    description: >-
+      Change a deal — move its stage, adjust its value, or mark it won or lost
+      through status.
+    category: opportunities
+    request:
+      method: PUT
+      path: /v1/opportunities/${opportunity_id}
+      body:
+        name: "${name}"
+        pipeline_stage_id: "${pipeline_stage_id}"
+        monetary_value: "${monetary_value}"
+        status: "${status}"
+        close_date: "${close_date}"
+        assignee_id: "${assignee_id}"
+        details: "${details}"
+    input:
+      opportunity_id:
+        type: integer
+        description: The opportunity's numeric id.
+      name:
+        type: string
+        description: New name.
+        optional: true
+      pipeline_stage_id:
+        type: integer
+        description: Stage to move it to.
+        optional: true
+      monetary_value:
+        type: number
+        description: New value.
+        optional: true
+        minimum: 0
+      status:
+        type: string
+        description: New status.
+        optional: true
+        enum: [Open, Won, Lost, Abandoned]
+      close_date:
+        type: string
+        description: New close date as MM/DD/YYYY.
+        optional: true
+      assignee_id:
+        type: integer
+        description: New owner's Copper user id.
+        optional: true
+      details:
+        type: string
+        description: New notes.
+        optional: true
+    output:
+      description: The updated opportunity.
+      type: object
+      properties:
+        id: {type: integer}
+        status: {type: string}
+
+  search_companies:
+    title: Search companies
+    description: Find companies by name, email domain or assignee.
+    category: companies
+    read_only: true
+    request:
+      method: POST
+      path: /v1/companies/search
+      body:
+        page_number: "${page}"
+        page_size: "${page_size}"
+        name: "${name}"
+        email_domains: "${email_domains}"
+        assignee_ids: "${assignee_ids}"
+    input:
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      page_size:
+        type: integer
+        description: How many companies per page (1-200).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 200
+      name:
+        type: string
+        description: Match against the company name.
+        optional: true
+      email_domains:
+        type: array
+        description: Only companies on these email domains.
+        optional: true
+        items: {type: string}
+      assignee_ids:
+        type: array
+        description: Only companies owned by these users.
+        optional: true
+        items: {type: integer}
+    output:
+      description: The matching companies.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          name: {type: string}
+          email_domain: {type: string}
+
+  create_task:
+    title: Create a task
+    description: >-
+      Create a follow-up task, optionally linked to a person, company or
+      opportunity through `related_resource`.
+    category: tasks
+    request:
+      method: POST
+      path: /v1/tasks
+      body:
+        name: "${name}"
+        related_resource: "${related_resource}"
+        assignee_id: "${assignee_id}"
+        due_date: "${due_date}"
+        reminder_date: "${reminder_date}"
+        priority: "${priority}"
+        status: "${status}"
+        details: "${details}"
+    input:
+      name:
+        type: string
+        description: What needs doing.
+      related_resource:
+        type: object
+        description: "What it relates to, e.g. {\"id\": 123, \"type\": \"person\"}."
+        optional: true
+      assignee_id:
+        type: integer
+        description: Copper user the task is for.
+        optional: true
+      due_date:
+        type: integer
+        description: Due date as a Unix epoch in seconds.
+        optional: true
+      reminder_date:
+        type: integer
+        description: When to remind, as a Unix epoch in seconds.
+        optional: true
+      priority:
+        type: string
+        description: Task priority.
+        optional: true
+        enum: [None, High]
+      status:
+        type: string
+        description: Task status.
+        optional: true
+        enum: [Open, Completed]
+      details:
+        type: string
+        description: Longer description.
+        optional: true
+    output:
+      description: The created task.
+      type: object
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        status: {type: string}
+
+  log_activity:
+    title: Log an activity on a record
+    description: >-
+      Record a note, call or meeting against a person, company or opportunity.
+      Activity type ids come from list_activity_types.
+    category: activities
+    request:
+      method: POST
+      path: /v1/activities
+      body:
+        parent: "${parent}"
+        type: "${type}"
+        details: "${details}"
+        activity_date: "${activity_date}"
+    input:
+      parent:
+        type: object
+        description: "What the activity is about, e.g. {\"id\": 123, \"type\": \"person\"}."
+      type:
+        type: object
+        description: "Activity type, e.g. {\"category\": \"user\", \"id\": 1}."
+      details:
+        type: string
+        description: What happened.
+        optional: true
+      activity_date:
+        type: integer
+        description: When it happened, as a Unix epoch in seconds. Defaults to now.
+        optional: true
+    output:
+      description: The logged activity.
+      type: object
+      properties:
+        id: {type: integer}
+        activity_date: {type: integer}
+
+  list_pipelines:
+    title: List pipelines and stages
+    description: >-
+      List the account's opportunity pipelines with their stages, and the ids
+      the opportunity tools take.
+    category: metadata
+    read_only: true
+    request:
+      method: GET
+      path: /v1/pipelines
+    input: {}
+    output:
+      description: The account's pipelines.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          name: {type: string}
+          stages: {type: array}
+
+  list_users:
+    title: List Copper users
+    description: >-
+      List the account's users with the ids that assignee fields take.
+    category: metadata
+    read_only: true
+    request:
+      method: POST
+      path: /v1/users/search
+      body:
+        page_number: "${page}"
+        page_size: "${page_size}"
+    input:
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      page_size:
+        type: integer
+        description: How many users per page (1-200).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 200
+    output:
+      description: The account's users.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          name: {type: string}
+          email: {type: string}
+
+  get_account:
+    title: Get the connected account
+    description: >-
+      Read the Copper account the token belongs to. The cheapest health check
+      for the connection.
+    category: metadata
+    read_only: true
+    request:
+      method: GET
+      path: /v1/account
+    input: {}
+    output:
+      description: The account.
+      type: object
+      properties:
+        id: {type: integer}
+        name: {type: string}

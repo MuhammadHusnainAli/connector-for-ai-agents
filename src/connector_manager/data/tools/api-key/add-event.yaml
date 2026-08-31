@@ -1,0 +1,1097 @@
+# AddEvent Calendar and Event API tools.
+#
+# Every endpoint AddEvent's Calendar and Event API (v2) documents is here -- 22
+# of them -- so this pack is the whole surface rather than a slice.
+#
+# Three things are worth knowing before calling any of it:
+#
+#   * The connector's base url is the api host only, while the API itself lives
+#     under /calevent/v2, so every path below starts there.
+#   * Ids are opaque strings, not integers, and each object type has its own
+#     (`calendar_id`, `event_id`, `attendee_id`, `subscriber_id`).
+#   * The search endpoints page with `page` and `page_size`, and `page_size` is
+#     capped at 20 by the provider -- there is no cursor.
+#
+# Dates go in as `YYYY-MM-DD`, `YYYY-MM-DD hh:mm` or `YYYY-MM-DD hh:mm:ss`, and
+# the timezone is a separate field rather than an offset on the timestamp.
+#
+# Docs: https://docs.addevent.com/reference/getting-started
+
+connector_id: add-event
+display_name: AddEvent
+docs_url: https://docs.addevent.com/reference/getting-started
+
+tools:
+
+  # -- calendars -------------------------------------------------------------
+
+  search_calendars:
+    title: Search calendars
+    description: >-
+      Page through the calendars on the account, newest first by default.
+      Narrow to specific calendars with `calendar_ids`, or sort by title. The
+      response holds a `calendars` array plus the total count, so an empty
+      array means nothing matched rather than an error.
+    category: calendars
+    read_only: true
+    request:
+      method: GET
+      path: /calevent/v2/calendars
+      query:
+        calendar_ids: "${calendar_ids}"
+        page: "${page}"
+        page_size: "${page_size}"
+        sort_by: "${sort_by}"
+        sort_order: "${sort_order}"
+    input:
+      calendar_ids:
+        type: array
+        description: Only return these calendars, by id. Sent as a comma-separated list.
+        optional: true
+        items: {type: string}
+      page:
+        type: integer
+        description: Which page of results to return. The first page is 1.
+        optional: true
+        default: 1
+        minimum: 1
+      page_size:
+        type: integer
+        description: How many calendars per page, 1-20.
+        optional: true
+        default: 10
+        minimum: 1
+        maximum: 20
+      sort_by:
+        type: string
+        description: Which calendar property to sort by.
+        optional: true
+        default: created
+        enum: [created, title]
+      sort_order:
+        type: string
+        description: Sort direction for `sort_by`.
+        optional: true
+        default: desc
+        enum: [asc, desc]
+    output:
+      description: A page of calendars.
+      type: object
+      properties:
+        calendars: {type: array, description: "Each a calendar with id, title, timezone, description and custom_data."}
+        page: {type: integer}
+        page_size: {type: integer}
+        total: {type: integer, description: "How many calendars matched in total."}
+
+  get_calendar:
+    title: Get a calendar
+    description: >-
+      Read one calendar by id, with its title, default timezone, description,
+      landing-page and embeddable-calendar template ids, and any custom_data
+      stored on it.
+    category: calendars
+    read_only: true
+    request:
+      method: GET
+      path: /calevent/v2/calendars/${calendar_id}
+    input:
+      calendar_id:
+        type: string
+        description: The calendar's id.
+    output:
+      description: The calendar object.
+      type: object
+      properties:
+        id: {type: string}
+        title: {type: string}
+        timezone: {type: string}
+        description: {type: string}
+        internal_name: {type: string}
+        calendar_color: {type: integer}
+        custom_data: {type: object}
+
+  create_calendar:
+    title: Create a calendar
+    description: >-
+      Create a calendar to hold events. Only the title is required; the
+      timezone becomes the default for events created on this calendar, so
+      setting it is worth the extra field. Returns the new calendar, whose id
+      is what `create_event` takes.
+    category: calendars
+    request:
+      method: POST
+      path: /calevent/v2/calendars
+      body:
+        title: "${title}"
+        timezone: "${timezone}"
+        weekday_begin: "${weekday_begin}"
+        description: "${description}"
+        internal_name: "${internal_name}"
+        calendar_color: "${calendar_color}"
+        landing_page_template_id: "${landing_page_template_id}"
+        embeddable_calendar_template_id: "${embeddable_calendar_template_id}"
+        custom_data: "${custom_data}"
+    input:
+      title:
+        type: string
+        description: The calendar's title. A non-empty single line of text.
+        example: Product webinars
+      timezone:
+        type: string
+        description: >-
+          Default timezone for events on this calendar, as an IANA name.
+          `list_timezones` returns every value AddEvent accepts.
+        optional: true
+        example: America/Los_Angeles
+      weekday_begin:
+        type: string
+        description: Which day the calendar's week starts on.
+        optional: true
+        enum: [sunday, monday]
+      description:
+        type: string
+        description: Shown on the calendar's landing page.
+        optional: true
+      internal_name:
+        type: string
+        description: A private name for the calendar, never shown publicly.
+        optional: true
+      calendar_color:
+        type: integer
+        description: Colour index in the calendar palette, 1-20.
+        optional: true
+        minimum: 1
+        maximum: 20
+      landing_page_template_id:
+        type: string
+        description: >-
+          Id of a calendar landing page template, or "default" for AddEvent's
+          own. `list_calendar_templates` lists the custom ones.
+        optional: true
+      embeddable_calendar_template_id:
+        type: string
+        description: Id of an embeddable calendar template, or "default".
+        optional: true
+      custom_data:
+        type: object
+        description: Arbitrary key/value pairs to store on the calendar, e.g. an id from your own system.
+        optional: true
+    output:
+      description: The calendar that was created.
+      type: object
+      properties:
+        id: {type: string}
+        title: {type: string}
+        timezone: {type: string}
+
+  update_calendar:
+    title: Update a calendar
+    description: >-
+      Change a calendar's settings. Only the fields you send are touched, the
+      rest are left as they are, so this is a partial update rather than a
+      replacement.
+    category: calendars
+    request:
+      method: PATCH
+      path: /calevent/v2/calendars/${calendar_id}
+      body:
+        title: "${title}"
+        timezone: "${timezone}"
+        weekday_begin: "${weekday_begin}"
+        description: "${description}"
+        internal_name: "${internal_name}"
+        calendar_color: "${calendar_color}"
+        landing_page_template_id: "${landing_page_template_id}"
+        embeddable_calendar_template_id: "${embeddable_calendar_template_id}"
+        custom_data: "${custom_data}"
+    input:
+      calendar_id:
+        type: string
+        description: The calendar's id.
+      title:
+        type: string
+        description: New title for the calendar.
+        optional: true
+      timezone:
+        type: string
+        description: New default timezone, as an IANA name.
+        optional: true
+      weekday_begin:
+        type: string
+        description: Which day the calendar's week starts on.
+        optional: true
+        enum: [sunday, monday]
+      description:
+        type: string
+        description: New public description.
+        optional: true
+      internal_name:
+        type: string
+        description: New private name.
+        optional: true
+      calendar_color:
+        type: integer
+        description: Colour index in the calendar palette, 1-20.
+        optional: true
+        minimum: 1
+        maximum: 20
+      landing_page_template_id:
+        type: string
+        description: Id of a calendar landing page template, or "default".
+        optional: true
+      embeddable_calendar_template_id:
+        type: string
+        description: Id of an embeddable calendar template, or "default".
+        optional: true
+      custom_data:
+        type: object
+        description: Replacement key/value pairs stored on the calendar.
+        optional: true
+    output:
+      description: The updated calendar.
+      type: object
+      properties:
+        id: {type: string}
+        title: {type: string}
+
+  delete_calendar:
+    title: Delete a calendar
+    description: >-
+      Permanently delete a calendar. AddEvent does not undo this, and the
+      events that lived on the calendar go with it, so read the calendar first
+      if you are not certain which one this is.
+    category: calendars
+    destructive: true
+    request:
+      method: DELETE
+      path: /calevent/v2/calendars/${calendar_id}
+    input:
+      calendar_id:
+        type: string
+        description: The calendar's id.
+    output:
+      description: Confirmation that the calendar was deleted.
+      type: object
+      properties:
+        deleted: {type: boolean}
+
+  list_calendar_templates:
+    title: List calendar templates
+    description: >-
+      List your calendar landing page templates, or your embeddable calendar
+      templates, newest first. Their ids are what the calendar fields
+      `landing_page_template_id` and `embeddable_calendar_template_id` take.
+    category: templates
+    read_only: true
+    request:
+      method: GET
+      path: /calevent/v2/calendars/templates
+      query:
+        type: "${type}"
+    input:
+      type:
+        type: string
+        description: Which family of calendar template to list.
+        optional: true
+        default: calendar-landing
+        enum: [calendar-landing, calendar-embed]
+    output:
+      description: The calendar templates of the requested type.
+      type: object
+      properties:
+        templates: {type: array, description: "Each with an id and a name."}
+
+  # -- events ----------------------------------------------------------------
+
+  search_events:
+    title: Search events
+    description: >-
+      Find events by calendar, id, free text, time window or a custom_data
+      key/value pair. `datetime_min` keeps events that end after it and
+      `datetime_max` events that start before it, and the comparison ignores
+      timezones, so both are read as wall-clock times.
+    category: events
+    read_only: true
+    request:
+      method: GET
+      path: /calevent/v2/events
+      query:
+        calendar_ids: "${calendar_ids}"
+        event_ids: "${event_ids}"
+        datetime_min: "${datetime_min}"
+        datetime_max: "${datetime_max}"
+        search: "${search}"
+        custom_data_key: "${custom_data_key}"
+        custom_data_value: "${custom_data_value}"
+        page: "${page}"
+        page_size: "${page_size}"
+        sort_by: "${sort_by}"
+        sort_order: "${sort_order}"
+    input:
+      calendar_ids:
+        type: array
+        description: Only search these calendars, by id.
+        optional: true
+        items: {type: string}
+      event_ids:
+        type: array
+        description: Only return these events, by id.
+        optional: true
+        items: {type: string}
+      datetime_min:
+        type: string
+        description: Keep events ending at or after this time, as YYYY-MM-DD hh:mm:ss.
+        optional: true
+        example: "2026-09-01 00:00:00"
+      datetime_max:
+        type: string
+        description: Keep events starting at or before this time, as YYYY-MM-DD hh:mm:ss.
+        optional: true
+        example: "2026-09-30 23:59:59"
+      search:
+        type: string
+        description: >-
+          Case-insensitive term matched against the event's title,
+          internal_name, description and location.
+        optional: true
+      custom_data_key:
+        type: string
+        description: Custom-data key to match. Must be sent with `custom_data_value`.
+        optional: true
+      custom_data_value:
+        type: string
+        description: Custom-data value to match. Must be sent with `custom_data_key`.
+        optional: true
+      page:
+        type: integer
+        description: Which page of results to return. The first page is 1.
+        optional: true
+        default: 1
+        minimum: 1
+      page_size:
+        type: integer
+        description: How many events per page, 1-20.
+        optional: true
+        default: 10
+        minimum: 1
+        maximum: 20
+      sort_by:
+        type: string
+        description: Which event property to sort by.
+        optional: true
+        default: created
+        enum: [created, title, calendar_id, datetime_start]
+      sort_order:
+        type: string
+        description: Sort direction for `sort_by`.
+        optional: true
+        default: desc
+        enum: [asc, desc]
+    output:
+      description: A page of events.
+      type: object
+      properties:
+        events: {type: array, description: "Each an event with id, title, datetime_start, datetime_end, timezone and calendar_id."}
+        page: {type: integer}
+        page_size: {type: integer}
+        total: {type: integer}
+
+  get_event:
+    title: Get an event
+    description: >-
+      Read one event by id, with its times and timezone, description,
+      location, organizer, RSVP settings, landing page template and the
+      calendar it belongs to.
+    category: events
+    read_only: true
+    request:
+      method: GET
+      path: /calevent/v2/events/${event_id}
+    input:
+      event_id:
+        type: string
+        description: The event's id.
+    output:
+      description: The event object.
+      type: object
+      properties:
+        id: {type: string}
+        title: {type: string}
+        calendar_id: {type: string}
+        datetime_start: {type: string}
+        datetime_end: {type: string}
+        timezone: {type: string}
+        all_day_event: {type: boolean}
+        location: {type: string}
+        rsvp_enabled: {type: boolean}
+        custom_data: {type: object}
+
+  create_event:
+    title: Create an event
+    description: >-
+      Add an event to a calendar. Title and start are required; leave
+      `calendar_id` out and it lands on the account's default calendar, and
+      leave `datetime_end` out and AddEvent ends it an hour after it starts.
+      Set `rsvp_enabled` to collect attendee responses -- `create_rsvp_attendee`
+      then works against the event.
+    category: events
+    request:
+      method: POST
+      path: /calevent/v2/events
+      body:
+        title: "${title}"
+        calendar_id: "${calendar_id}"
+        datetime_start: "${datetime_start}"
+        datetime_end: "${datetime_end}"
+        all_day_event: "${all_day_event}"
+        timezone: "${timezone}"
+        recurring_rule: "${recurring_rule}"
+        description: "${description}"
+        internal_name: "${internal_name}"
+        location: "${location}"
+        location_id: "${location_id}"
+        organizer_name: "${organizer_name}"
+        organizer_email: "${organizer_email}"
+        reminder: "${reminder}"
+        color: "${color}"
+        free_busy: "${free_busy}"
+        landing_page_template_id: "${landing_page_template_id}"
+        rsvp_enabled: "${rsvp_enabled}"
+        rsvp_form_id: "${rsvp_form_id}"
+        custom_data: "${custom_data}"
+    input:
+      title:
+        type: string
+        description: The event's title. A non-empty single line of text.
+        example: Quarterly product update
+      datetime_start:
+        type: string
+        description: >-
+          When the event starts, as YYYY-MM-DD, YYYY-MM-DD hh:mm or
+          YYYY-MM-DD hh:mm:ss.
+        example: "2026-09-15 10:00:00"
+      calendar_id:
+        type: string
+        description: Calendar to add the event to. Defaults to the account's default calendar.
+        optional: true
+      datetime_end:
+        type: string
+        description: When the event ends. Defaults to one hour after the start.
+        optional: true
+        example: "2026-09-15 11:00:00"
+      all_day_event:
+        type: boolean
+        description: Treat this as an all-day event, ignoring the times and using only the dates.
+        optional: true
+      timezone:
+        type: string
+        description: >-
+          IANA timezone the times are in, so the event lands correctly for
+          attendees elsewhere. `list_timezones` returns the accepted values.
+        optional: true
+        example: Europe/Berlin
+      recurring_rule:
+        type: string
+        description: Recurrence in iCalendar RRULE form, for a repeating event.
+        optional: true
+        example: FREQ=WEEKLY;BYDAY=TU;COUNT=8
+      description:
+        type: string
+        description: >-
+          The event's description. Plain text or simplified HTML; use \n for a
+          line break. Not every calendar app renders the HTML.
+        optional: true
+      internal_name:
+        type: string
+        description: A private name for the event, never shown publicly.
+        optional: true
+      location:
+        type: string
+        description: >-
+          Where the event happens -- an address, or a meeting URL. Mutually
+          exclusive with `location_id`.
+        optional: true
+      location_id:
+        type: integer
+        description: Id of a saved location to use instead of `location`. 0 means none.
+        optional: true
+      organizer_name:
+        type: string
+        description: Organizer's name. Must be sent together with `organizer_email`.
+        optional: true
+      organizer_email:
+        type: string
+        description: Organizer's email address. Must be sent together with `organizer_name`.
+        optional: true
+        format: email
+      reminder:
+        type: integer
+        description: Minutes before the start that the attendee's calendar app should remind them.
+        optional: true
+        default: 30
+        minimum: 0
+      color:
+        type: integer
+        description: Colour index in the event palette, 1-20.
+        optional: true
+        minimum: 1
+        maximum: 20
+      free_busy:
+        type: string
+        description: Whether the event shows as free or busy once saved to a calendar.
+        optional: true
+        default: default
+        enum: [free, busy, default]
+      landing_page_template_id:
+        type: string
+        description: Id of an event landing page template, or "default".
+        optional: true
+      rsvp_enabled:
+        type: boolean
+        description: Require attendees to respond and identify themselves before saving the event.
+        optional: true
+      rsvp_form_id:
+        type: string
+        description: Id of a custom RSVP form, or "default". `list_rsvp_forms` lists them.
+        optional: true
+      custom_data:
+        type: object
+        description: Arbitrary key/value pairs to store on the event, e.g. your own record id.
+        optional: true
+    output:
+      description: The event that was created.
+      type: object
+      properties:
+        id: {type: string}
+        title: {type: string}
+        calendar_id: {type: string}
+        datetime_start: {type: string}
+
+  update_event:
+    title: Update an event
+    description: >-
+      Change an event. Only the fields you send are touched; anything omitted
+      keeps its current value. Takes the same fields as creating an event.
+    category: events
+    request:
+      method: PATCH
+      path: /calevent/v2/events/${event_id}
+      body:
+        title: "${title}"
+        datetime_start: "${datetime_start}"
+        datetime_end: "${datetime_end}"
+        all_day_event: "${all_day_event}"
+        timezone: "${timezone}"
+        recurring_rule: "${recurring_rule}"
+        description: "${description}"
+        internal_name: "${internal_name}"
+        location: "${location}"
+        location_id: "${location_id}"
+        organizer_name: "${organizer_name}"
+        organizer_email: "${organizer_email}"
+        reminder: "${reminder}"
+        color: "${color}"
+        free_busy: "${free_busy}"
+        landing_page_template_id: "${landing_page_template_id}"
+        rsvp_enabled: "${rsvp_enabled}"
+        rsvp_form_id: "${rsvp_form_id}"
+        custom_data: "${custom_data}"
+    input:
+      event_id:
+        type: string
+        description: The event's id.
+      title:
+        type: string
+        description: New title.
+        optional: true
+      datetime_start:
+        type: string
+        description: New start, as YYYY-MM-DD[ hh:mm[:ss]].
+        optional: true
+      datetime_end:
+        type: string
+        description: New end, as YYYY-MM-DD[ hh:mm[:ss]].
+        optional: true
+      all_day_event:
+        type: boolean
+        description: Treat this as an all-day event.
+        optional: true
+      timezone:
+        type: string
+        description: New IANA timezone for the event's times.
+        optional: true
+      recurring_rule:
+        type: string
+        description: New recurrence, in iCalendar RRULE form.
+        optional: true
+      description:
+        type: string
+        description: New description, as plain text or simplified HTML.
+        optional: true
+      internal_name:
+        type: string
+        description: New private name.
+        optional: true
+      location:
+        type: string
+        description: New location -- an address or a meeting URL.
+        optional: true
+      location_id:
+        type: integer
+        description: Id of a saved location to use instead of `location`.
+        optional: true
+      organizer_name:
+        type: string
+        description: New organizer name. Send with `organizer_email`.
+        optional: true
+      organizer_email:
+        type: string
+        description: New organizer email. Send with `organizer_name`.
+        optional: true
+        format: email
+      reminder:
+        type: integer
+        description: Minutes before the start to remind attendees.
+        optional: true
+        minimum: 0
+      color:
+        type: integer
+        description: Colour index in the event palette, 1-20.
+        optional: true
+        minimum: 1
+        maximum: 20
+      free_busy:
+        type: string
+        description: Whether the event shows as free or busy once saved.
+        optional: true
+        enum: [free, busy, default]
+      landing_page_template_id:
+        type: string
+        description: Id of an event landing page template, or "default".
+        optional: true
+      rsvp_enabled:
+        type: boolean
+        description: Whether attendees must respond before saving the event.
+        optional: true
+      rsvp_form_id:
+        type: string
+        description: Id of a custom RSVP form, or "default".
+        optional: true
+      custom_data:
+        type: object
+        description: Replacement key/value pairs stored on the event.
+        optional: true
+    output:
+      description: The updated event.
+      type: object
+      properties:
+        id: {type: string}
+        title: {type: string}
+
+  delete_event:
+    title: Delete an event
+    description: >-
+      Permanently delete an event. This cannot be undone, and attendees who
+      already saved it to their own calendar keep their copy.
+    category: events
+    destructive: true
+    request:
+      method: DELETE
+      path: /calevent/v2/events/${event_id}
+    input:
+      event_id:
+        type: string
+        description: The event's id.
+    output:
+      description: Confirmation that the event was deleted.
+      type: object
+      properties:
+        deleted: {type: boolean}
+
+  list_event_templates:
+    title: List event templates
+    description: >-
+      List your event landing page templates, newest first. Their ids are what
+      an event's `landing_page_template_id` takes.
+    category: templates
+    read_only: true
+    request:
+      method: GET
+      path: /calevent/v2/events/templates
+      query:
+        type: "${type}"
+    input:
+      type:
+        type: string
+        description: Which family of event template to list. Only event landing pages exist today.
+        optional: true
+        default: event-landing
+        enum: [event-landing]
+    output:
+      description: The event landing page templates.
+      type: object
+      properties:
+        templates: {type: array, description: "Each with an id and a name."}
+
+  list_rsvp_forms:
+    title: List RSVP forms
+    description: >-
+      List your custom RSVP forms, newest first. A form's id is what an event's
+      `rsvp_form_id` takes, and its fields are what `rsvp_form_data` must
+      answer when you add an attendee.
+    category: templates
+    read_only: true
+    request:
+      method: GET
+      path: /calevent/v2/events/rsvp-forms
+    input: {}
+    output:
+      description: The RSVP forms on the account.
+      type: object
+      properties:
+        rsvp_forms: {type: array, description: "Each with an id, a name and its input fields."}
+
+  # -- RSVP attendees --------------------------------------------------------
+
+  create_rsvp_attendee:
+    title: Add an RSVP attendee
+    description: >-
+      Register someone for an RSVP-enabled event. The email must be unique
+      within the event. No confirmation or organizer notification is sent
+      unless `notify` is set to "active". The default form requires a `name`
+      value inside `rsvp_form_data`; a custom form requires whatever
+      `list_rsvp_forms` says it does.
+    category: rsvps
+    request:
+      method: POST
+      path: /calevent/v2/events/${event_id}/rsvps
+      body:
+        email: "${email}"
+        attending: "${attending}"
+        notify: "${notify}"
+        rsvp_form_data: "${rsvp_form_data}"
+    input:
+      event_id:
+        type: string
+        description: The event to register the attendee for.
+      email:
+        type: string
+        description: The attendee's email address. Reminders and updates go here.
+        format: email
+        example: ada@example.com
+      attending:
+        type: string
+        description: The attendee's response.
+        optional: true
+        default: going
+        enum: [going, maybe, not-going]
+      notify:
+        type: string
+        description: >-
+          Set to "active" to send the attendee's confirmation and the
+          organizer's notification email. Omit to stay silent.
+        optional: true
+        enum: [active]
+      rsvp_form_data:
+        type: object
+        description: >-
+          Answers to the event's RSVP form, keyed by field name. The default
+          form needs {"name": "..."}.
+        optional: true
+    output:
+      description: The RSVP attendee that was created.
+      type: object
+      properties:
+        id: {type: string}
+        email: {type: string}
+        attending: {type: string}
+        event_id: {type: string}
+
+  search_rsvp_attendees:
+    title: Search RSVP attendees
+    description: >-
+      Page through RSVP attendees across events, filtered by calendar, event or
+      response. Sort by when they signed up, their email, the event or their
+      answer.
+    category: rsvps
+    read_only: true
+    request:
+      method: GET
+      path: /calevent/v2/rsvps
+      query:
+        calendar_ids: "${calendar_ids}"
+        event_ids: "${event_ids}"
+        attending: "${attending}"
+        page: "${page}"
+        page_size: "${page_size}"
+        sort_by: "${sort_by}"
+        sort_order: "${sort_order}"
+    input:
+      calendar_ids:
+        type: array
+        description: Only attendees of events on these calendars.
+        optional: true
+        items: {type: string}
+      event_ids:
+        type: array
+        description: Only attendees of these events.
+        optional: true
+        items: {type: string}
+      attending:
+        type: array
+        description: Only these responses, e.g. ["going","maybe"].
+        optional: true
+        items: {type: string, enum: [going, maybe, not-going]}
+      page:
+        type: integer
+        description: Which page of results to return. The first page is 1.
+        optional: true
+        default: 1
+        minimum: 1
+      page_size:
+        type: integer
+        description: How many attendees per page, 1-20.
+        optional: true
+        default: 10
+        minimum: 1
+        maximum: 20
+      sort_by:
+        type: string
+        description: Which attendee property to sort by.
+        optional: true
+        default: created
+        enum: [created, event_id, attending, email]
+      sort_order:
+        type: string
+        description: Sort direction for `sort_by`.
+        optional: true
+        default: desc
+        enum: [asc, desc]
+    output:
+      description: A page of RSVP attendees.
+      type: object
+      properties:
+        rsvps: {type: array, description: "Each with id, email, attending, event_id and the submitted form data."}
+        page: {type: integer}
+        page_size: {type: integer}
+        total: {type: integer}
+
+  get_rsvp_attendee:
+    title: Get an RSVP attendee
+    description: >-
+      Read one RSVP attendee by id, with their response, email, the event they
+      answered and the form data they submitted.
+    category: rsvps
+    read_only: true
+    request:
+      method: GET
+      path: /calevent/v2/rsvps/${attendee_id}
+    input:
+      attendee_id:
+        type: string
+        description: The RSVP attendee's id.
+    output:
+      description: The RSVP attendee object.
+      type: object
+      properties:
+        id: {type: string}
+        email: {type: string}
+        attending: {type: string}
+        event_id: {type: string}
+        rsvp_form_data: {type: object}
+
+  update_rsvp_attendee:
+    title: Update an RSVP attendee
+    description: >-
+      Change an attendee's response, email or submitted form data. Only the
+      fields you send are touched. Set `notify` to "active" to email them about
+      the change.
+    category: rsvps
+    request:
+      method: PATCH
+      path: /calevent/v2/rsvps/${attendee_id}
+      body:
+        email: "${email}"
+        attending: "${attending}"
+        notify: "${notify}"
+        rsvp_form_data: "${rsvp_form_data}"
+    input:
+      attendee_id:
+        type: string
+        description: The RSVP attendee's id.
+      email:
+        type: string
+        description: New email address for the attendee. Must be unique within the event.
+        optional: true
+        format: email
+      attending:
+        type: string
+        description: The attendee's response.
+        optional: true
+        enum: [going, maybe, not-going]
+      notify:
+        type: string
+        description: Set to "active" to send the change-confirmation email.
+        optional: true
+        enum: [active]
+      rsvp_form_data:
+        type: object
+        description: Replacement answers to the event's RSVP form, keyed by field name.
+        optional: true
+    output:
+      description: The updated RSVP attendee.
+      type: object
+      properties:
+        id: {type: string}
+        email: {type: string}
+        attending: {type: string}
+
+  delete_rsvp_attendee:
+    title: Delete an RSVP attendee
+    description: >-
+      Permanently remove an RSVP attendee from their event. This cannot be
+      undone; to record that someone dropped out while keeping the record, set
+      `attending` to "not-going" instead.
+    category: rsvps
+    destructive: true
+    request:
+      method: DELETE
+      path: /calevent/v2/rsvps/${attendee_id}
+    input:
+      attendee_id:
+        type: string
+        description: The RSVP attendee's id.
+    output:
+      description: Confirmation that the attendee was deleted.
+      type: object
+      properties:
+        deleted: {type: boolean}
+
+  # -- calendar subscribers --------------------------------------------------
+
+  search_calendar_subscribers:
+    title: Search calendar subscribers
+    description: >-
+      Page through the people subscribed to your calendar feeds. "Active"
+      means their feed has synced in the last 30 days, which is how AddEvent
+      distinguishes a live subscription from an abandoned one.
+    category: subscribers
+    read_only: true
+    request:
+      method: GET
+      path: /calevent/v2/subscribers
+      query:
+        calendar_ids: "${calendar_ids}"
+        status: "${status}"
+        page: "${page}"
+        page_size: "${page_size}"
+        sort_by: "${sort_by}"
+        sort_order: "${sort_order}"
+    input:
+      calendar_ids:
+        type: array
+        description: Only subscribers of these calendars.
+        optional: true
+        items: {type: string}
+      status:
+        type: array
+        description: Only subscribers in these states, e.g. ["active"].
+        optional: true
+        items: {type: string, enum: [active, inactive]}
+      page:
+        type: integer
+        description: Which page of results to return. The first page is 1.
+        optional: true
+        default: 1
+        minimum: 1
+      page_size:
+        type: integer
+        description: How many subscribers per page, 1-20.
+        optional: true
+        default: 10
+        minimum: 1
+        maximum: 20
+      sort_by:
+        type: string
+        description: Which subscriber property to sort by.
+        optional: true
+        default: created
+        enum: [created, synced, calendar_id]
+      sort_order:
+        type: string
+        description: Sort direction for `sort_by`.
+        optional: true
+        default: desc
+        enum: [asc, desc]
+    output:
+      description: A page of calendar subscribers.
+      type: object
+      properties:
+        subscribers: {type: array, description: "Each with id, calendar_id, and when they subscribed and last synced."}
+        page: {type: integer}
+        page_size: {type: integer}
+        total: {type: integer}
+
+  get_calendar_subscriber:
+    title: Get a calendar subscriber
+    description: >-
+      Read one calendar subscriber by id, with the calendar they follow and
+      when their feed last synced.
+    category: subscribers
+    read_only: true
+    request:
+      method: GET
+      path: /calevent/v2/subscribers/${subscriber_id}
+    input:
+      subscriber_id:
+        type: string
+        description: The subscriber's id.
+    output:
+      description: The calendar subscriber object.
+      type: object
+      properties:
+        id: {type: string}
+        calendar_id: {type: string}
+        status: {type: string}
+        date_created: {type: string}
+        date_synced: {type: string}
+
+  delete_calendar_subscriber:
+    title: Delete a calendar subscriber
+    description: >-
+      Permanently remove a subscriber from a calendar feed. This cannot be
+      undone; their calendar app stops receiving updates on its next sync.
+    category: subscribers
+    destructive: true
+    request:
+      method: DELETE
+      path: /calevent/v2/subscribers/${subscriber_id}
+    input:
+      subscriber_id:
+        type: string
+        description: The subscriber's id.
+    output:
+      description: Confirmation that the subscriber was deleted.
+      type: object
+      properties:
+        deleted: {type: boolean}
+
+  # -- reference data --------------------------------------------------------
+
+  list_timezones:
+    title: List timezones
+    description: >-
+      Every timezone AddEvent accepts, ordered by UTC offset from negative to
+      positive. These are the values the `timezone` field of a calendar or an
+      event takes.
+    category: reference
+    read_only: true
+    request:
+      method: GET
+      path: /calevent/v2/timezones
+    input: {}
+    output:
+      description: The supported timezones.
+      type: object
+      properties:
+        timezones: {type: array, description: "Each with its IANA name and UTC offset."}

@@ -1,0 +1,178 @@
+# Google (shared identity and discovery) tools.
+#
+# This connector is the umbrella one: it points at www.googleapis.com, the host
+# every Google API answers on, but it is not itself a product API. What lives
+# here is what is common to all of them -- who the token belongs to, what the
+# token may do, and which APIs exist.
+#
+# For a product, use its own connector: `google-drive`, `google-mail`,
+# `google-calendar`, `google-sheet`, `google-docs`, `google-slides`,
+# `google-forms`, `google-tasks`, `google-contacts`, `google-chat`,
+# `google-meet`, `google-analytics`, `google-bigquery`,
+# `google-cloud-storage`, `google-search-console`, `google-workspace-admin`,
+# `google-play` and `google-ads`. Each carries that API's own tools and, where
+# the API has them, its own scopes.
+#
+# What `check_token` returns is worth knowing about: Google's tokeninfo answers
+# 200 with the granted scopes for a live token and 400 for an expired or
+# malformed one, so read the body rather than assuming an error means a network
+# problem.
+#
+# Docs: https://developers.google.com/identity/protocols/oauth2
+
+connector_id: google
+display_name: Google
+docs_url: https://developers.google.com/identity/protocols/oauth2
+
+scope_rules:
+  strip_prefixes:
+    - https://www.googleapis.com/auth/
+  implies:
+    userinfo.profile: [profile]
+    userinfo.email: [email]
+
+scope_discovery:
+  method: GET
+  base_url_override: https://oauth2.googleapis.com
+  endpoint: /tokeninfo
+  query:
+    access_token: ${credentials.access_token}
+  scopes_path: scope
+
+tools:
+
+  get_user_info:
+    title: Get the signed-in user
+    description: >-
+      The OpenID Connect profile behind the access token -- the user's stable
+      subject id, name, email, locale and picture. Needs the `openid` scope,
+      with `profile` and `email` for those fields; without them the response
+      comes back thin rather than failing.
+    category: identity
+    scopes_any: [openid, userinfo.profile, userinfo.email]
+    read_only: true
+    request:
+      method: GET
+      path: /oauth2/v3/userinfo
+    input: {}
+    output:
+      description: The user's profile claims.
+      type: object
+      properties:
+        sub: {type: string, description: "Google's stable id for the user -- the value to key your own records on."}
+        name: {type: string}
+        given_name: {type: string}
+        family_name: {type: string}
+        email: {type: string}
+        email_verified: {type: boolean}
+        picture: {type: string}
+        locale: {type: string}
+        hd: {type: string, description: "The Workspace domain, for an account that belongs to one."}
+
+  get_user_info_v2:
+    title: Get the signed-in user (v2)
+    description: >-
+      The same profile through Google's older userinfo endpoint, which some
+      Workspace deployments and legacy integrations still expect. Prefer
+      `get_user_info` for new work.
+    category: identity
+    scopes_any: [openid, userinfo.profile, userinfo.email]
+    read_only: true
+    request:
+      method: GET
+      path: /userinfo/v2/me
+    input: {}
+    output:
+      description: The user's profile.
+      type: object
+      properties:
+        id: {type: string}
+        email: {type: string}
+        verified_email: {type: boolean}
+        name: {type: string}
+        picture: {type: string}
+
+  check_token:
+    title: Check an access token
+    description: >-
+      What a token actually grants: the scopes on it, the client id it was
+      issued to, the user it belongs to and how many seconds it has left.
+      The way to tell an expired token from a missing scope before blaming a
+      403 on permissions. Google answers 400 for a token it cannot read, so the
+      body matters more than the status.
+    category: tokens
+    read_only: true
+    request:
+      method: GET
+      path: /oauth2/v3/tokeninfo
+      query:
+        access_token: "${access_token}"
+        id_token: "${id_token}"
+    input:
+      access_token:
+        type: string
+        description: The access token to inspect. Give this or `id_token`.
+        optional: true
+        secret: true
+      id_token:
+        type: string
+        description: An ID token to inspect instead of an access token.
+        optional: true
+        secret: true
+    output:
+      description: What the token carries.
+      type: object
+      properties:
+        scope: {type: string, description: "Space-separated granted scopes."}
+        aud: {type: string, description: "The client id the token was issued to."}
+        sub: {type: string}
+        email: {type: string}
+        expires_in: {type: integer}
+
+  get_signing_certificates:
+    title: Get Google's ID token signing keys
+    description: >-
+      The public keys Google signs ID tokens with, so a token can be verified
+      locally rather than by calling the service for every request.
+      Unauthenticated and cacheable -- refetch when a token's `kid` is not among
+      them, which is how key rotation is handled.
+    category: tokens
+    read_only: true
+    request:
+      method: GET
+      path: /oauth2/v3/certs
+    input: {}
+    output:
+      description: The JSON Web Key Set.
+      type: object
+      properties:
+        keys: {type: array, description: "Each a JWK with kid, kty, n and e."}
+
+  list_apis:
+    title: List Google's APIs
+    description: >-
+      Every API Google publishes a discovery document for, with its name,
+      version and the URL of that document. Useful for finding the exact
+      endpoint shape of an API this catalogue has no dedicated connector for.
+    category: discovery
+    read_only: true
+    request:
+      method: GET
+      path: /discovery/v1/apis
+      query:
+        name: "${name}"
+        preferred: "${preferred}"
+    input:
+      name:
+        type: string
+        description: Only APIs with this name, e.g. "drive".
+        optional: true
+      preferred:
+        type: boolean
+        description: Only the preferred version of each API, rather than every version.
+        optional: true
+    output:
+      description: The available APIs.
+      type: object
+      properties:
+        items: {type: array, description: "Each with id, name, version, title and discoveryRestUrl."}

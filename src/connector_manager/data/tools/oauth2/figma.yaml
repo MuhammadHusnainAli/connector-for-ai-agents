@@ -1,0 +1,418 @@
+# Figma tools.
+#
+# A file is addressed by its key, the token in its URL
+# (https://figma.com/file/<key>/Name). Node ids look like "1:23" and come from
+# the file tree or from a selection URL's node-id parameter.
+#
+# The REST API reads files and comments; it cannot edit a document's contents.
+#
+# Docs: https://www.figma.com/developers/api
+
+connector_id: figma
+display_name: Figma
+docs_url: https://www.figma.com/developers/api
+
+scope_rules:
+  implies:
+    files:write: ["files:read"]
+    file_comments:write: ["files:read"]
+
+tools:
+
+  get_file:
+    title: Get a file's document tree
+    description: >-
+      Read a Figma file's node tree — pages, frames, components and their
+      properties. Large files are big, so bound it with depth or ask for
+      specific nodes instead.
+    category: files
+    scopes: ["files:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/files/${file_key}
+      query:
+        depth: "${depth}"
+        version: "${version}"
+        branch_data: "${branch_data}"
+        geometry: "${geometry}"
+    input:
+      file_key:
+        type: string
+        description: The file key, from its URL.
+        example: abc123XYZ
+      depth:
+        type: integer
+        description: How many levels of the tree to return. 1 is pages only, 2 adds their top-level children.
+        optional: true
+        minimum: 1
+      version:
+        type: string
+        description: A specific version id, from get_file_versions.
+        optional: true
+      branch_data:
+        type: boolean
+        description: Include the file's branch metadata.
+        optional: true
+      geometry:
+        type: string
+        description: Set to "paths" to include vector geometry.
+        optional: true
+        enum: [paths]
+    output:
+      description: The file and its node tree.
+      type: object
+      properties:
+        name: {type: string}
+        lastModified: {type: string}
+        document: {type: object, description: "The root node; children are the pages."}
+        components: {type: object}
+        styles: {type: object}
+
+  get_file_nodes:
+    title: Get specific nodes from a file
+    description: >-
+      Read just the nodes named, rather than the whole document. The efficient
+      way to inspect one frame or component.
+    category: files
+    scopes: ["files:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/files/${file_key}/nodes
+      query:
+        ids: "${node_ids}"
+        depth: "${depth}"
+        version: "${version}"
+    input:
+      file_key:
+        type: string
+        description: The file key.
+      node_ids:
+        type: array
+        description: Node ids to fetch, e.g. ["1:23","4:56"].
+        items: {type: string}
+      depth:
+        type: integer
+        description: How many levels below each node to return.
+        optional: true
+        minimum: 1
+      version:
+        type: string
+        description: A specific version id.
+        optional: true
+    output:
+      description: The requested nodes, keyed by id.
+      type: object
+      properties:
+        nodes: {type: object}
+        name: {type: string}
+
+  render_images:
+    title: Render nodes as images
+    description: >-
+      Render frames or components to PNG, JPG, SVG or PDF and return short-lived
+      download URLs. The way to show a design without opening Figma.
+    category: images
+    scopes: ["files:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/images/${file_key}
+      query:
+        ids: "${node_ids}"
+        format: "${format}"
+        scale: "${scale}"
+        svg_include_id: "${svg_include_id}"
+        use_absolute_bounds: "${use_absolute_bounds}"
+    input:
+      file_key:
+        type: string
+        description: The file key.
+      node_ids:
+        type: array
+        description: Node ids to render.
+        items: {type: string}
+      format:
+        type: string
+        description: Output format.
+        optional: true
+        default: png
+        enum: [jpg, png, svg, pdf]
+      scale:
+        type: number
+        description: Render scale, 0.01 to 4.
+        optional: true
+        minimum: 0.01
+        maximum: 4
+      svg_include_id:
+        type: boolean
+        description: Keep element ids in SVG output.
+        optional: true
+      use_absolute_bounds:
+        type: boolean
+        description: Render the node's full bounds, ignoring clipping.
+        optional: true
+    output:
+      description: Download URLs keyed by node id, valid for a short time.
+      type: object
+      properties:
+        images: {type: object}
+        err: {type: string}
+
+  get_image_fills:
+    title: Get a file's image fills
+    description: >-
+      Return download URLs for the raster images placed inside a file, keyed by
+      their image reference.
+    category: images
+    scopes: ["files:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/files/${file_key}/images
+    input:
+      file_key:
+        type: string
+        description: The file key.
+    output:
+      description: Image URLs keyed by image ref.
+      type: object
+      properties:
+        meta: {type: object}
+
+  list_comments:
+    title: List a file's comments
+    description: Read the comments left on a file, with their positions and authors.
+    category: comments
+    scopes: ["files:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/files/${file_key}/comments
+      query:
+        as_md: "${as_markdown}"
+    input:
+      file_key:
+        type: string
+        description: The file key.
+      as_markdown:
+        type: boolean
+        description: Return comment bodies as Markdown rather than plain text.
+        optional: true
+    output:
+      description: The file's comments.
+      type: array
+      response_path: comments
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          message: {type: string}
+          user: {type: object}
+          created_at: {type: string}
+          resolved_at: {type: string}
+
+  post_comment:
+    title: Comment on a file
+    description: >-
+      Leave a comment on a file, optionally pinned to a node or a canvas
+      position, or as a reply to an existing comment.
+    category: comments
+    scopes: ["file_comments:write"]
+    request:
+      method: POST
+      path: /v1/files/${file_key}/comments
+      body:
+        message: "${message}"
+        comment_id: "${reply_to_comment_id}"
+        client_meta: "${client_meta}"
+    input:
+      file_key:
+        type: string
+        description: The file key.
+      message:
+        type: string
+        description: The comment text.
+      reply_to_comment_id:
+        type: string
+        description: Comment id to reply to, making this part of that thread.
+        optional: true
+      client_meta:
+        type: object
+        description: >-
+          Where to pin it, e.g. {"node_id": "1:23", "node_offset": {"x": 0,
+          "y": 0}} or {"x": 100, "y": 200} for a canvas position.
+        optional: true
+    output:
+      description: The created comment.
+      type: object
+      properties:
+        id: {type: string}
+        message: {type: string}
+        created_at: {type: string}
+
+  delete_comment:
+    title: Delete a comment
+    description: Remove a comment the authenticated user posted. It cannot be recovered.
+    category: comments
+    scopes: ["file_comments:write"]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/files/${file_key}/comments/${comment_id}
+    input:
+      file_key:
+        type: string
+        description: The file key.
+      comment_id:
+        type: string
+        description: The comment to delete.
+    output:
+      description: The deletion result.
+      type: object
+      properties:
+        status: {type: integer}
+        error: {type: boolean}
+
+  list_project_files:
+    title: List a project's files
+    description: >-
+      List the files in a Figma project, with their keys and thumbnails. Get
+      project ids from list_team_projects.
+    category: files
+    scopes: ["files:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/projects/${project_id}/files
+      query:
+        branch_data: "${branch_data}"
+    input:
+      project_id:
+        type: string
+        description: The project id.
+      branch_data:
+        type: boolean
+        description: Include branch metadata for each file.
+        optional: true
+    output:
+      description: The project's files.
+      type: array
+      response_path: files
+      items:
+        type: object
+        properties:
+          key: {type: string, description: "File key -- what the file tools take."}
+          name: {type: string}
+          last_modified: {type: string}
+          thumbnail_url: {type: string}
+
+  list_team_projects:
+    title: List a team's projects
+    description: >-
+      List the projects in a Figma team. The team id is the token in the team's
+      URL.
+    category: files
+    scopes: ["files:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/teams/${team_id}/projects
+    input:
+      team_id:
+        type: string
+        description: The team id, from the team's URL.
+    output:
+      description: The team's projects.
+      type: array
+      response_path: projects
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          name: {type: string}
+
+  get_file_versions:
+    title: List a file's version history
+    description: >-
+      List the named versions and autosaves of a file, with the ids get_file
+      accepts to read an older state.
+    category: files
+    scopes: ["files:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/files/${file_key}/versions
+    input:
+      file_key:
+        type: string
+        description: The file key.
+    output:
+      description: The file's versions, newest first.
+      type: array
+      response_path: versions
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          created_at: {type: string}
+          label: {type: string}
+          user: {type: object}
+
+  get_team_components:
+    title: List a team's published components
+    description: >-
+      List the components a team has published to its libraries, with their keys
+      and containing files.
+    category: library
+    scopes: ["files:read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v1/teams/${team_id}/components
+      query:
+        page_size: "${page_size}"
+        after: "${after}"
+    input:
+      team_id:
+        type: string
+        description: The team id.
+      page_size:
+        type: integer
+        description: How many components per page.
+        optional: true
+        default: 30
+        minimum: 1
+        maximum: 1000
+      after:
+        type: string
+        description: Cursor from the previous response's cursor.after.
+        optional: true
+    output:
+      description: The team's published components.
+      type: object
+      response_path: meta
+      properties:
+        components: {type: array}
+        cursor: {type: object}
+
+  get_me:
+    title: Get the authenticated user
+    description: >-
+      Read the Figma account the token belongs to. The cheapest health check for
+      a Figma connection.
+    category: account
+    read_only: true
+    request:
+      method: GET
+      path: /v1/me
+    input: {}
+    output:
+      description: The authenticated user.
+      type: object
+      properties:
+        id: {type: string}
+        email: {type: string}
+        handle: {type: string}
+        img_url: {type: string}

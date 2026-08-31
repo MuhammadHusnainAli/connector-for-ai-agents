@@ -1,0 +1,531 @@
+# QuickBooks Online tools.
+#
+# Every path carries the company's realm id, which the connection records and
+# the RequestBuilder fills in as ${realmId} -- it is not a tool argument.
+#
+# QuickBooks has one scope for the whole accounting API, so tool-level scope
+# gating is coarse here: what really limits a call is the company's own
+# subscription and the object's state.
+#
+# Reads go through a SQL-like query language rather than per-object list
+# endpoints, which is what query_entities exposes.
+#
+# Docs: https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities
+
+connector_id: quickbooks
+display_name: QuickBooks Online
+docs_url: https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities
+applies_to:
+  - quickbooks-sandbox
+  - intuit
+
+scope_rules:
+  implies:
+    com.intuit.quickbooks.accounting: [openid, profile, email]
+
+tools:
+
+  query_entities:
+    title: Query records
+    description: >-
+      Run a QuickBooks query, e.g. "SELECT * FROM Customer WHERE Active = true"
+      or "SELECT * FROM Invoice WHERE TxnDate > '2026-01-01' MAXRESULTS 50".
+      This is the main way to read anything out of QuickBooks; there are no
+      per-object list endpoints.
+    category: query
+    scopes: [com.intuit.quickbooks.accounting]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/company/${realmId}/query
+      query:
+        query: "${query}"
+        minorversion: "${minor_version}"
+    input:
+      query:
+        type: string
+        description: The QuickBooks query.
+        example: SELECT * FROM Customer MAXRESULTS 20
+      minor_version:
+        type: integer
+        description: API minor version, when a newer field is needed.
+        optional: true
+    output:
+      description: The query result, wrapped in a QueryResponse.
+      type: object
+      response_path: QueryResponse
+      properties:
+        Customer: {type: array}
+        Invoice: {type: array}
+        maxResults: {type: integer}
+
+  get_customer:
+    title: Get a customer
+    description: Read one customer record by its QuickBooks id.
+    category: customers
+    scopes: [com.intuit.quickbooks.accounting]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/company/${realmId}/customer/${customer_id}
+    input:
+      customer_id:
+        type: string
+        description: The customer's QuickBooks id.
+    output:
+      description: The customer.
+      type: object
+      response_path: Customer
+      properties:
+        Id: {type: string}
+        DisplayName: {type: string}
+        PrimaryEmailAddr: {type: object}
+        Balance: {type: number}
+        SyncToken: {type: string, description: "Pass to update_customer -- QuickBooks needs it."}
+
+  create_customer:
+    title: Create a customer
+    description: >-
+      Add a customer. DisplayName must be unique across the company; email and
+      phone go in their own nested objects.
+    category: customers
+    scopes: [com.intuit.quickbooks.accounting]
+    request:
+      method: POST
+      path: /v3/company/${realmId}/customer
+      body:
+        DisplayName: "${display_name}"
+        GivenName: "${given_name}"
+        FamilyName: "${family_name}"
+        CompanyName: "${company_name}"
+        PrimaryEmailAddr:
+          $when: "${email}"
+          Address: "${email}"
+        PrimaryPhone:
+          $when: "${phone}"
+          FreeFormNumber: "${phone}"
+        BillAddr: "${billing_address}"
+        Notes: "${notes}"
+    input:
+      display_name:
+        type: string
+        description: How the customer appears in lists. Must be unique.
+      given_name:
+        type: string
+        description: First name.
+        optional: true
+      family_name:
+        type: string
+        description: Last name.
+        optional: true
+      company_name:
+        type: string
+        description: Company name.
+        optional: true
+      email:
+        type: string
+        description: Primary email address.
+        optional: true
+        format: email
+      phone:
+        type: string
+        description: Primary phone number.
+        optional: true
+      billing_address:
+        type: object
+        description: Billing address, e.g. {"Line1":"1 Main St","City":"Austin","CountrySubDivisionCode":"TX","PostalCode":"78701"}.
+        optional: true
+      notes:
+        type: string
+        description: Internal note.
+        optional: true
+    output:
+      description: The created customer.
+      type: object
+      response_path: Customer
+      properties:
+        Id: {type: string}
+        DisplayName: {type: string}
+        SyncToken: {type: string}
+
+  update_customer:
+    title: Update a customer
+    description: >-
+      Change a customer with a sparse update. QuickBooks needs the record's
+      current SyncToken, from get_customer, so a concurrent edit is not
+      overwritten.
+    category: customers
+    scopes: [com.intuit.quickbooks.accounting]
+    request:
+      method: POST
+      path: /v3/company/${realmId}/customer
+      body:
+        Id: "${customer_id}"
+        SyncToken: "${sync_token}"
+        sparse: true
+        DisplayName: "${display_name}"
+        CompanyName: "${company_name}"
+        PrimaryEmailAddr:
+          $when: "${email}"
+          Address: "${email}"
+        PrimaryPhone:
+          $when: "${phone}"
+          FreeFormNumber: "${phone}"
+        Notes: "${notes}"
+    input:
+      customer_id:
+        type: string
+        description: The customer's QuickBooks id.
+      sync_token:
+        type: string
+        description: The record's current SyncToken, from get_customer.
+      display_name:
+        type: string
+        description: New display name.
+        optional: true
+      company_name:
+        type: string
+        description: New company name.
+        optional: true
+      email:
+        type: string
+        description: New primary email address.
+        optional: true
+        format: email
+      phone:
+        type: string
+        description: New primary phone number.
+        optional: true
+      notes:
+        type: string
+        description: New internal note.
+        optional: true
+    output:
+      description: The updated customer.
+      type: object
+      response_path: Customer
+      properties:
+        Id: {type: string}
+        SyncToken: {type: string}
+
+  create_invoice:
+    title: Create an invoice
+    description: >-
+      Raise an invoice for a customer. Each line is
+      {"Amount": 100.0, "DetailType": "SalesItemLineDetail",
+      "SalesItemLineDetail": {"ItemRef": {"value": "1"}, "Qty": 2}}.
+    category: invoices
+    scopes: [com.intuit.quickbooks.accounting]
+    request:
+      method: POST
+      path: /v3/company/${realmId}/invoice
+      body:
+        CustomerRef:
+          value: "${customer_id}"
+        Line: "${lines}"
+        DueDate: "${due_date}"
+        TxnDate: "${transaction_date}"
+        DocNumber: "${doc_number}"
+        CustomerMemo:
+          $when: "${memo}"
+          value: "${memo}"
+        BillEmail:
+          $when: "${bill_email}"
+          Address: "${bill_email}"
+    input:
+      customer_id:
+        type: string
+        description: QuickBooks id of the customer being invoiced.
+      lines:
+        type: array
+        description: Invoice lines, each with Amount, DetailType and its detail object.
+        items: {type: object}
+      due_date:
+        type: string
+        description: Due date as YYYY-MM-DD.
+        optional: true
+      transaction_date:
+        type: string
+        description: Invoice date as YYYY-MM-DD. Defaults to today.
+        optional: true
+      doc_number:
+        type: string
+        description: Your own invoice number. QuickBooks generates one if omitted.
+        optional: true
+      memo:
+        type: string
+        description: Message shown to the customer on the invoice.
+        optional: true
+      bill_email:
+        type: string
+        description: Where to send the invoice, if it differs from the customer's address.
+        optional: true
+        format: email
+    output:
+      description: The created invoice.
+      type: object
+      response_path: Invoice
+      properties:
+        Id: {type: string}
+        DocNumber: {type: string}
+        TotalAmt: {type: number}
+        Balance: {type: number}
+        SyncToken: {type: string}
+
+  get_invoice:
+    title: Get an invoice
+    description: Read one invoice, including its lines, total and outstanding balance.
+    category: invoices
+    scopes: [com.intuit.quickbooks.accounting]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/company/${realmId}/invoice/${invoice_id}
+    input:
+      invoice_id:
+        type: string
+        description: The invoice's QuickBooks id.
+    output:
+      description: The invoice.
+      type: object
+      response_path: Invoice
+      properties:
+        Id: {type: string}
+        DocNumber: {type: string}
+        TotalAmt: {type: number}
+        Balance: {type: number}
+        Line: {type: array}
+
+  send_invoice:
+    title: Email an invoice
+    description: >-
+      Send an invoice to the customer by email and mark it as sent. Without an
+      address it goes to the invoice's BillEmail.
+    category: invoices
+    scopes: [com.intuit.quickbooks.accounting]
+    destructive: true
+    request:
+      method: POST
+      path: /v3/company/${realmId}/invoice/${invoice_id}/send
+      query:
+        sendTo: "${send_to}"
+    input:
+      invoice_id:
+        type: string
+        description: The invoice to send.
+      send_to:
+        type: string
+        description: Address to send it to. Defaults to the invoice's BillEmail.
+        optional: true
+        format: email
+    output:
+      description: The invoice, now marked EmailSent.
+      type: object
+      response_path: Invoice
+      properties:
+        Id: {type: string}
+        EmailStatus: {type: string}
+
+  void_invoice:
+    title: Void an invoice
+    description: >-
+      Void an invoice, zeroing its amounts while keeping the record for the
+      audit trail. This cannot be undone.
+    category: invoices
+    scopes: [com.intuit.quickbooks.accounting]
+    destructive: true
+    request:
+      method: POST
+      path: /v3/company/${realmId}/invoice
+      query:
+        operation: void
+      body:
+        Id: "${invoice_id}"
+        SyncToken: "${sync_token}"
+    input:
+      invoice_id:
+        type: string
+        description: The invoice to void.
+      sync_token:
+        type: string
+        description: The invoice's current SyncToken, from get_invoice.
+    output:
+      description: The voided invoice.
+      type: object
+      response_path: Invoice
+      properties:
+        Id: {type: string}
+        PrivateNote: {type: string}
+
+  record_payment:
+    title: Record a payment
+    description: >-
+      Record a customer payment, optionally applying it to specific invoices
+      through the Line array.
+    category: payments
+    scopes: [com.intuit.quickbooks.accounting]
+    request:
+      method: POST
+      path: /v3/company/${realmId}/payment
+      body:
+        CustomerRef:
+          value: "${customer_id}"
+        TotalAmt: "${amount}"
+        TxnDate: "${transaction_date}"
+        PaymentRefNum: "${reference}"
+        Line: "${lines}"
+    input:
+      customer_id:
+        type: string
+        description: QuickBooks id of the paying customer.
+      amount:
+        type: number
+        description: Total amount received.
+        minimum: 0
+      transaction_date:
+        type: string
+        description: Payment date as YYYY-MM-DD. Defaults to today.
+        optional: true
+      reference:
+        type: string
+        description: Cheque or reference number.
+        optional: true
+      lines:
+        type: array
+        description: >-
+          Which invoices the payment settles, each {"Amount": 100.0,
+          "LinkedTxn": [{"TxnId": "42", "TxnType": "Invoice"}]}. Omit to leave
+          it unapplied.
+        optional: true
+        items: {type: object}
+    output:
+      description: The recorded payment.
+      type: object
+      response_path: Payment
+      properties:
+        Id: {type: string}
+        TotalAmt: {type: number}
+        UnappliedAmt: {type: number}
+
+  create_item:
+    title: Create a product or service
+    description: >-
+      Add an item to the catalogue so invoice lines can refer to it. A Service
+      item needs an income account; an Inventory item needs more besides.
+    category: catalogue
+    scopes: [com.intuit.quickbooks.accounting]
+    request:
+      method: POST
+      path: /v3/company/${realmId}/item
+      body:
+        Name: "${name}"
+        Type: "${type}"
+        UnitPrice: "${unit_price}"
+        Description: "${description}"
+        IncomeAccountRef:
+          $when: "${income_account_id}"
+          value: "${income_account_id}"
+        Taxable: "${taxable}"
+    input:
+      name:
+        type: string
+        description: Item name. Must be unique.
+      income_account_id:
+        type: string
+        description: QuickBooks id of the income account sales post to.
+        optional: true
+      type:
+        type: string
+        description: What kind of item this is.
+        optional: true
+        default: Service
+        enum: [Service, Inventory, NonInventory, Category]
+      unit_price:
+        type: number
+        description: Default price per unit.
+        optional: true
+        minimum: 0
+      description:
+        type: string
+        description: Description that appears on invoice lines.
+        optional: true
+      taxable:
+        type: boolean
+        description: Whether sales tax applies.
+        optional: true
+    output:
+      description: The created item.
+      type: object
+      response_path: Item
+      properties:
+        Id: {type: string}
+        Name: {type: string}
+
+  get_report:
+    title: Run a financial report
+    description: >-
+      Run one of QuickBooks' standard reports — ProfitAndLoss, BalanceSheet,
+      AgedReceivables, CashFlow and the rest — over a date range.
+    category: reports
+    scopes: [com.intuit.quickbooks.accounting]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/company/${realmId}/reports/${report}
+      query:
+        start_date: "${start_date}"
+        end_date: "${end_date}"
+        accounting_method: "${accounting_method}"
+        summarize_column_by: "${summarize_column_by}"
+    input:
+      report:
+        type: string
+        description: Report name, e.g. ProfitAndLoss, BalanceSheet, AgedReceivables, CashFlow.
+        example: ProfitAndLoss
+      start_date:
+        type: string
+        description: First day of the period, YYYY-MM-DD.
+        optional: true
+      end_date:
+        type: string
+        description: Last day of the period, YYYY-MM-DD.
+        optional: true
+      accounting_method:
+        type: string
+        description: Cash or accrual basis.
+        optional: true
+        enum: [Cash, Accrual]
+      summarize_column_by:
+        type: string
+        description: How to break the columns down, e.g. Month, Quarter, Customers.
+        optional: true
+    output:
+      description: The report, as header, columns and rows.
+      type: object
+      properties:
+        Header: {type: object}
+        Columns: {type: object}
+        Rows: {type: object}
+
+  get_company_info:
+    title: Get the connected company
+    description: >-
+      Read the QuickBooks company the token is connected to — its name, country,
+      fiscal year start and currency. The cheapest health check for the
+      connection.
+    category: company
+    scopes: [com.intuit.quickbooks.accounting]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/company/${realmId}/companyinfo/${realmId}
+    input: {}
+    output:
+      description: The company.
+      type: object
+      response_path: CompanyInfo
+      properties:
+        CompanyName: {type: string}
+        LegalName: {type: string}
+        Country: {type: string}
+        FiscalYearStartMonth: {type: string}

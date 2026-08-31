@@ -1,0 +1,3173 @@
+# ADOXX RESTful interface tools.
+#
+# ADOXX is BOC's metamodelling platform: the products built on it (ADONIS,
+# ADOIT, ADOGRC and bespoke ADOXX applications) all expose the same REST
+# interface, which is what this pack targets. Every path here comes from BOC's
+# own published specification (github.com/BOC-Group/API, REST/spec.json,
+# version 2.1).
+#
+# The vocabulary is worth learning before calling anything:
+#
+#   * a **repository** holds everything; almost every path starts with its
+#     `repo_id`, and `list_repositories` is where to get it;
+#   * a **model** is a diagram (a process, an architecture map). Objects drawn
+#     inside it are **modelling objects**;
+#   * a **repository object** exists independently of any diagram and can be
+#     reused across models -- these are the two different `objects` families
+#     below, one under `/models/{id}/objects` and one under `/objects`;
+#   * a **class**, **relation** and **modeltype** are metamodel concepts, and
+#     attributes are addressed by their language-independent `metaName` rather
+#     than by their displayed label;
+#   * **records** are table-valued attributes on an object -- rows and cells
+#     rather than a single value.
+#
+# Three conventions the tools expose:
+#
+#   * `group_id` accepts the literal `root` for the top of a group tree;
+#   * reads take `attribute` and `relation` repeatedly to widen what comes back,
+#     and `Accept-Language` selects the language of returned labels;
+#   * several endpoints are "actions" -- a POST to `.../actions` with a `type`
+#     query parameter -- which is why some tool names read as verbs on a thing.
+#
+# The connection's base url already ends at `/rest`, so paths start at `/2.1`.
+#
+# Docs: https://developer.boc-group.com/adoxx/en/API-introduction/
+
+connector_id: adoxx-cc
+display_name: ADOXX (Client Credentials)
+docs_url: https://developer.boc-group.com/adoxx/en/API-introduction/
+
+tools:
+
+  # -- service -----------------------------------------------------------------
+
+  get_version:
+    title: Get the product version
+    description: >-
+      The version of the ADOXX-based product behind this connection. Worth
+      reading first: which endpoints and metamodel concepts exist depends on the
+      product and its release.
+    category: service
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/version
+    input: {}
+    output:
+      description: The product's version information.
+      type: object
+      properties:
+        version: {type: string}
+        build: {type: string}
+
+  get_openapi_definition:
+    title: Get the REST interface definition
+    description: >-
+      The instance's own OpenAPI document -- the authoritative list of what this
+      deployment exposes, including anything a customisation added beyond the
+      standard interface.
+    category: service
+    read_only: true
+    request:
+      method: GET
+      path: /openapi.json
+    input: {}
+    output:
+      description: The OpenAPI definition.
+      type: object
+      properties:
+        openapi: {type: string}
+        info: {type: object}
+        paths: {type: object}
+
+  get_current_user:
+    title: Get the authorised user
+    description: >-
+      Who the token is acting as, with the repositories and roles available to
+      them. The starting point for working out what this connection may see.
+    category: service
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/me
+      headers:
+        Accept-Language: "${language}"
+    input:
+      language:
+        type: string
+        description: ISO 639-1 code for the language labels come back in. Defaults to en.
+        optional: true
+        example: de
+    output:
+      description: The authorised user.
+      type: object
+      properties:
+        id: {type: string}
+        login: {type: string}
+        name: {type: string}
+        repositories: {type: array}
+
+  list_languages:
+    title: List available languages
+    description: >-
+      The languages this instance holds content in. These are the codes the
+      `language` argument of other tools takes, and multilingual repositories
+      really do return different labels per language.
+    category: service
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/languages
+    input: {}
+    output:
+      description: The available languages.
+      type: object
+      properties:
+        languages: {type: array}
+
+  list_scenarios:
+    title: List scenarios
+    description: >-
+      The scenarios configured in the product -- the packaged use cases an
+      ADOXX application offers its users.
+    category: service
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/scenarios
+    input: {}
+    output:
+      description: The configured scenarios.
+      type: object
+      properties:
+        scenarios: {type: array}
+
+  # -- metamodel ---------------------------------------------------------------
+
+  get_metamodel:
+    title: Get the metamodel
+    description: >-
+      The metamodel behind the active library: its model types, classes,
+      relations and attributes. Pass `all` to get the whole thing rather than
+      the summary -- large, but it is the map everything else is named against.
+    category: metamodel
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/metamodel
+      query:
+        all: "${all}"
+    input:
+      all:
+        type: boolean
+        description: Return the complete metamodel rather than a summary.
+        optional: true
+    output:
+      description: The metamodel.
+      type: object
+      properties:
+        classes: {type: array}
+        relations: {type: array}
+        modeltypes: {type: array}
+
+  list_metamodel_classes:
+    title: List metamodel classes
+    description: >-
+      Every class the active library defines -- the kinds of object that can be
+      drawn or stored. Their UUIDs are what the class-level reads below take.
+    category: metamodel
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/metamodel/classes
+    input: {}
+    output:
+      description: The metamodel's classes.
+      type: object
+      properties:
+        classes: {type: array}
+
+  get_metamodel_class:
+    title: Get a metamodel class
+    description: >-
+      One class by UUID, with its name, parent class and how it may be used.
+    category: metamodel
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/metamodel/classes/${class_id}
+    input:
+      class_id:
+        type: string
+        description: UUID of the class.
+    output:
+      description: The class.
+      type: object
+      properties:
+        id: {type: string}
+        metaName: {type: string}
+        name: {type: string}
+
+  list_class_attributes:
+    title: List a class's attributes
+    description: >-
+      The attributes objects of one class carry, each with its `metaName` --
+      which is the name to use when reading or writing attribute values, since
+      displayed labels vary by language.
+    category: metamodel
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/metamodel/classes/${class_id}/attributes
+    input:
+      class_id:
+        type: string
+        description: UUID of the class.
+    output:
+      description: The class's attributes.
+      type: object
+      properties:
+        attributes: {type: array}
+
+  get_class_attribute:
+    title: Get a class attribute
+    description: >-
+      One attribute of one class, with its type, facets and default -- what you
+      need before writing a value into it.
+    category: metamodel
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/metamodel/classes/${class_id}/attributes/${attribute_id}
+    input:
+      class_id:
+        type: string
+        description: UUID of the class.
+      attribute_id:
+        type: string
+        description: UUID of the attribute.
+    output:
+      description: The attribute definition.
+      type: object
+      properties:
+        id: {type: string}
+        metaName: {type: string}
+        type: {type: string}
+
+  get_class_notebook:
+    title: Get a class's notebook layout
+    description: >-
+      How a class's attributes are grouped into notebook chapters and pages --
+      the structure the ADOXX user interface shows, which is useful for
+      rendering the same layout elsewhere.
+    category: metamodel
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/metamodel/classes/${class_id}/notebook
+    input:
+      class_id:
+        type: string
+        description: UUID of the class.
+    output:
+      description: The notebook definition.
+      type: object
+      properties:
+        chapters: {type: array}
+
+  get_class_icon:
+    title: Get a class's icon
+    description: >-
+      The class's icon as an image. Ask for PNG or SVG with the `image_format`
+      argument -- SVG scales, PNG is what most document exporters want.
+    category: metamodel
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/metamodel/classes/${class_id}/icon
+      headers:
+        Accept: "${image_format}"
+    input:
+      class_id:
+        type: string
+        description: UUID of the class.
+      image_format:
+        type: string
+        description: Which image format to return.
+        optional: true
+        default: image/png
+        enum: [image/png, image/svg+xml]
+    output:
+      description: The icon image.
+      type: string
+
+  list_metamodel_relations:
+    title: List metamodel relations
+    description: >-
+      The relation classes the library defines -- the kinds of connector that
+      may join objects, and therefore what `rel_name` can be on a relation call.
+    category: metamodel
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/metamodel/relations
+    input: {}
+    output:
+      description: The metamodel's relation classes.
+      type: object
+      properties:
+        relations: {type: array}
+
+  get_metamodel_relation:
+    title: Get a metamodel relation
+    description: One relation class by UUID, with its name and the endpoints it connects.
+    category: metamodel
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/metamodel/relations/${relation_id}
+    input:
+      relation_id:
+        type: string
+        description: UUID of the relation class.
+    output:
+      description: The relation class.
+      type: object
+      properties:
+        id: {type: string}
+        metaName: {type: string}
+        name: {type: string}
+
+  list_relation_attributes:
+    title: List a relation's attributes
+    description: The attributes a relation class carries, each with its metaName and type.
+    category: metamodel
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/metamodel/relations/${relation_id}/attributes
+    input:
+      relation_id:
+        type: string
+        description: UUID of the relation class.
+    output:
+      description: The relation's attributes.
+      type: object
+      properties:
+        attributes: {type: array}
+
+  get_relation_attribute:
+    title: Get a relation attribute
+    description: One attribute of one relation class, with its type and facets.
+    category: metamodel
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/metamodel/relations/${relation_id}/attributes/${attribute_id}
+    input:
+      relation_id:
+        type: string
+        description: UUID of the relation class.
+      attribute_id:
+        type: string
+        description: UUID of the attribute.
+    output:
+      description: The attribute definition.
+      type: object
+      properties:
+        id: {type: string}
+        metaName: {type: string}
+        type: {type: string}
+
+  get_relation_notebook:
+    title: Get a relation's notebook layout
+    description: How a relation class's attributes are grouped in the user interface.
+    category: metamodel
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/metamodel/relations/${relation_id}/notebook
+    input:
+      relation_id:
+        type: string
+        description: UUID of the relation class.
+    output:
+      description: The notebook definition.
+      type: object
+      properties:
+        chapters: {type: array}
+
+  get_relation_endpoint:
+    title: Get a relation endpoint
+    description: >-
+      One end of a relation class -- which classes may sit there and under what
+      constraints. This is how you learn what a given connector is allowed to
+      join.
+    category: metamodel
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/metamodel/relations/${relation_id}/endpoints/${endpoint_id}
+    input:
+      relation_id:
+        type: string
+        description: UUID of the relation class.
+      endpoint_id:
+        type: string
+        description: Id of the endpoint.
+    output:
+      description: The endpoint definition.
+      type: object
+      properties:
+        id: {type: string}
+        metaName: {type: string}
+
+  list_relation_endpoint_attributes:
+    title: List a relation endpoint's attributes
+    description: The attributes carried by one end of a relation class.
+    category: metamodel
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/metamodel/relations/${relation_id}/endpoints/${endpoint_id}/attributes
+    input:
+      relation_id:
+        type: string
+        description: UUID of the relation class.
+      endpoint_id:
+        type: string
+        description: Id of the endpoint.
+    output:
+      description: The endpoint's attributes.
+      type: object
+      properties:
+        attributes: {type: array}
+
+  get_relation_endpoint_attribute:
+    title: Get a relation endpoint attribute
+    description: One attribute on one end of a relation class, with its type and facets.
+    category: metamodel
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/metamodel/relations/${relation_id}/endpoints/${endpoint_id}/attributes/${attribute_id}
+    input:
+      relation_id:
+        type: string
+        description: UUID of the relation class.
+      endpoint_id:
+        type: string
+        description: Id of the endpoint.
+      attribute_id:
+        type: string
+        description: UUID of the attribute.
+    output:
+      description: The attribute definition.
+      type: object
+      properties:
+        id: {type: string}
+        metaName: {type: string}
+
+  get_relation_endpoint_notebook:
+    title: Get a relation endpoint's notebook layout
+    description: How the attributes of one relation end are grouped in the user interface.
+    category: metamodel
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/metamodel/relations/${relation_id}/endpoints/${endpoint_id}/notebook
+    input:
+      relation_id:
+        type: string
+        description: UUID of the relation class.
+      endpoint_id:
+        type: string
+        description: Id of the endpoint.
+    output:
+      description: The notebook definition.
+      type: object
+      properties:
+        chapters: {type: array}
+
+  list_model_types:
+    title: List model types
+    description: >-
+      The model types the active library offers -- the kinds of diagram that can
+      be created, such as a business process or an application architecture map.
+    category: metamodel
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/metamodel/modeltypes
+    input: {}
+    output:
+      description: The library's model types.
+      type: object
+      properties:
+        modeltypes: {type: array}
+
+  get_model_type:
+    title: Get a model type
+    description: One model type by UUID, with its name and how it may be used.
+    category: metamodel
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/metamodel/modeltypes/${modeltype_id}
+    input:
+      modeltype_id:
+        type: string
+        description: UUID of the model type.
+    output:
+      description: The model type.
+      type: object
+      properties:
+        id: {type: string}
+        metaName: {type: string}
+        name: {type: string}
+
+  list_model_type_attributes:
+    title: List a model type's attributes
+    description: The attributes a model of this type carries, each with its metaName.
+    category: metamodel
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/metamodel/modeltypes/${modeltype_id}/attributes
+    input:
+      modeltype_id:
+        type: string
+        description: UUID of the model type.
+    output:
+      description: The model type's attributes.
+      type: object
+      properties:
+        attributes: {type: array}
+
+  get_model_type_attribute:
+    title: Get a model type attribute
+    description: One attribute of one model type, with its type and facets.
+    category: metamodel
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/metamodel/modeltypes/${modeltype_id}/attributes/${attribute_id}
+    input:
+      modeltype_id:
+        type: string
+        description: UUID of the model type.
+      attribute_id:
+        type: string
+        description: UUID of the attribute.
+    output:
+      description: The attribute definition.
+      type: object
+      properties:
+        id: {type: string}
+        metaName: {type: string}
+
+  list_model_type_classes:
+    title: List the classes a model type displays
+    description: >-
+      Which classes may appear on a diagram of this type -- the palette, in
+      effect. Read this before creating objects, since a class not displayed by
+      the model type cannot be placed on it.
+    category: metamodel
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/metamodel/modeltypes/${modeltype_id}/displayedClasses
+    input:
+      modeltype_id:
+        type: string
+        description: UUID of the model type.
+    output:
+      description: The classes the model type displays.
+      type: object
+      properties:
+        classes: {type: array}
+
+  get_model_type_notebook:
+    title: Get a model type's notebook layout
+    description: How a model type's own attributes are grouped in the user interface.
+    category: metamodel
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/metamodel/modeltypes/${modeltype_id}/notebook
+    input:
+      modeltype_id:
+        type: string
+        description: UUID of the model type.
+    output:
+      description: The notebook definition.
+      type: object
+      properties:
+        chapters: {type: array}
+
+  get_model_type_icon:
+    title: Get a model type's icon
+    description: The model type's icon as a PNG or SVG image.
+    category: metamodel
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/metamodel/modeltypes/${modeltype_id}/icon
+      headers:
+        Accept: "${image_format}"
+    input:
+      modeltype_id:
+        type: string
+        description: UUID of the model type.
+      image_format:
+        type: string
+        description: Which image format to return.
+        optional: true
+        default: image/png
+        enum: [image/png, image/svg+xml]
+    output:
+      description: The icon image.
+      type: string
+
+  list_attribute_types:
+    title: List attribute types
+    description: >-
+      The attribute data types the metamodel uses -- string, enumeration,
+      record, and so on -- which is what an attribute's `type` refers to.
+    category: metamodel
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/metamodel/attrtypes
+    input: {}
+    output:
+      description: The attribute types.
+      type: object
+      properties:
+        attrtypes: {type: array}
+
+  get_attribute_type:
+    title: Get an attribute type
+    description: One attribute type by UUID, with its facets and allowed values.
+    category: metamodel
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/metamodel/attrtypes/${attrtype_id}
+    input:
+      attrtype_id:
+        type: string
+        description: UUID of the attribute type.
+    output:
+      description: The attribute type.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+
+  get_active_library:
+    title: Get the active library
+    description: >-
+      The library this repository runs on -- its name, version and the
+      metamodel it brings. The answer to "which ADOXX application am I talking
+      to".
+    category: metamodel
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/metamodel/library
+    input: {}
+    output:
+      description: The active library.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        version: {type: string}
+
+  list_library_attributes:
+    title: List the active library's attributes
+    description: The library-level attributes, which apply across the whole repository.
+    category: metamodel
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/metamodel/library/attributes
+    input: {}
+    output:
+      description: The library's attributes.
+      type: object
+      properties:
+        attributes: {type: array}
+
+  get_library_attribute:
+    title: Get a library attribute
+    description: One library-level attribute by UUID, with its type and value.
+    category: metamodel
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/metamodel/library/attributes/${attribute_id}
+    input:
+      attribute_id:
+        type: string
+        description: UUID of the attribute.
+    output:
+      description: The attribute.
+      type: object
+      properties:
+        id: {type: string}
+        metaName: {type: string}
+        value: {type: string}
+
+  # -- repositories ------------------------------------------------------------
+
+  list_repositories:
+    title: List repositories
+    description: >-
+      The repositories this connection can reach, with their ids. Start here:
+      nearly every other call needs a `repo_id`.
+    category: repositories
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos
+      headers:
+        Accept-Language: "${language}"
+    input:
+      language:
+        type: string
+        description: ISO 639-1 code for the language names come back in.
+        optional: true
+    output:
+      description: The available repositories.
+      type: object
+      properties:
+        repos: {type: array}
+
+  get_repository_statistics:
+    title: Get repository statistics
+    description: >-
+      Counts for one repository -- how many models, objects and groups it holds.
+      A cheap health check, and the way to size a full extract before starting
+      one.
+    category: repositories
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/stats
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+    output:
+      description: The repository's statistics.
+      type: object
+      properties:
+        models: {type: integer}
+        objects: {type: integer}
+
+  get_model_group:
+    title: Get a model group
+    description: >-
+      One model group and its contents -- the folder structure diagrams are
+      filed in. Pass `root` for the top of the tree, and `recursive` to walk the
+      whole subtree in one call rather than one request per level.
+    category: models
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/modelgroups/${group_id}
+      query:
+        recursive: "${recursive}"
+        icon: "${icon}"
+        attribute: "${attribute}"
+      headers:
+        Accept-Language: "${language}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      group_id:
+        type: string
+        description: UUID of the model group, or the literal "root" for the top of the tree.
+        optional: true
+        default: root
+      recursive:
+        type: boolean
+        description: Return the whole subtree beneath this group.
+        optional: true
+      icon:
+        type: boolean
+        description: Include each artefact's icon.
+        optional: true
+      attribute:
+        type: string
+        description: Also return this attribute on each artefact, when it has a value.
+        optional: true
+      language:
+        type: string
+        description: ISO 639-1 code for the language labels come back in.
+        optional: true
+    output:
+      description: The model group and its contents.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        models: {type: array}
+        modelgroups: {type: array}
+
+  get_model:
+    title: Get a model
+    description: >-
+      One model by id. What comes back depends on what you ask for: JSON or XML
+      for its content, or PNG or SVG for a rendered diagram -- set
+      `response_format`, and `dpi` for a raster image. Use `attribute` and
+      `relation` to pull specific fields and links into the response.
+    category: models
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/models/${model_id}
+      query:
+        dpi: "${dpi}"
+        attribute: "${attribute}"
+        relation: "${relation}"
+      headers:
+        Accept: "${response_format}"
+        Accept-Language: "${language}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      model_id:
+        type: string
+        description: UUID of the model.
+      response_format:
+        type: string
+        description: >-
+          What to return -- the model's content as JSON or XML, or the diagram
+          as an image.
+        optional: true
+        default: application/json
+        enum: [application/json, application/xml, image/png, image/svg+xml]
+      dpi:
+        type: string
+        description: Resolution for a raster image. 300 by default; only used for image formats.
+        optional: true
+      attribute:
+        type: array
+        description: Attributes to include in the response, by metaName.
+        optional: true
+        items: {type: string}
+      relation:
+        type: array
+        description: Relations to include in the response, by metaName.
+        optional: true
+        items: {type: string}
+      language:
+        type: string
+        description: ISO 639-1 code for the language labels come back in.
+        optional: true
+    output:
+      description: The model, or its rendered image.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        modeltype: {type: string}
+        objects: {type: array}
+
+  get_model_imagemap:
+    title: Get a model's image map
+    description: >-
+      The clickable regions of a rendered model -- which pixel area belongs to
+      which object. What you need to make an exported diagram interactive.
+    category: models
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/models/${model_id}/imagemap
+      query:
+        dpi: "${dpi}"
+      headers:
+        Accept-Language: "${language}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      model_id:
+        type: string
+        description: UUID of the model.
+      dpi:
+        type: string
+        description: Resolution the map's coordinates are calculated for. 300 by default.
+        optional: true
+      language:
+        type: string
+        description: ISO 639-1 code for the language labels come back in.
+        optional: true
+    output:
+      description: The model's image map.
+      type: object
+      properties:
+        areas: {type: array}
+
+  get_model_link:
+    title: Get a link to a model
+    description: >-
+      A deep link that opens the model's graphical view in the web client --
+      how you hand a person the diagram rather than its data.
+    category: models
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/models/${model_id}/link
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      model_id:
+        type: string
+        description: UUID of the model.
+    output:
+      description: The link.
+      type: object
+      properties:
+        href: {type: string}
+
+  get_modelling_object:
+    title: Get a modelling object
+    description: >-
+      One object as it exists on a diagram, with its attributes and position.
+      This is the drawn instance -- `get_repository_object` is the reusable
+      repository record it may point at.
+    category: models
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/models/${model_id}/objects/${object_id}
+      query:
+        attribute: "${attribute}"
+        relation: "${relation}"
+      headers:
+        Accept-Language: "${language}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      model_id:
+        type: string
+        description: UUID of the model.
+      object_id:
+        type: string
+        description: UUID of the object.
+      attribute:
+        type: array
+        description: Attributes to include, by metaName.
+        optional: true
+        items: {type: string}
+      relation:
+        type: array
+        description: Relations to include, by metaName.
+        optional: true
+        items: {type: string}
+      language:
+        type: string
+        description: ISO 639-1 code for the language labels come back in.
+        optional: true
+    output:
+      description: The modelling object.
+      type: object
+      properties:
+        id: {type: string}
+        class: {type: string}
+        attributes: {type: array}
+
+  get_modelling_object_link:
+    title: Get a link to a modelling object
+    description: >-
+      A deep link that opens this object's notebook in the web client, at the
+      right place in the right diagram.
+    category: models
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/models/${model_id}/objects/${object_id}/link
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      model_id:
+        type: string
+        description: UUID of the model.
+      object_id:
+        type: string
+        description: UUID of the object.
+    output:
+      description: The link.
+      type: object
+      properties:
+        href: {type: string}
+
+  list_modelling_object_relations:
+    title: List a modelling object's relations
+    description: >-
+      What one drawn object is connected to, in a given direction -- `incoming`
+      or `outgoing`. This is how a process graph is walked: follow the outgoing
+      relations of each object in turn.
+    category: models
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/models/${model_id}/objects/${object_id}/relations/${direction}
+      headers:
+        Accept-Language: "${language}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      model_id:
+        type: string
+        description: UUID of the model.
+      object_id:
+        type: string
+        description: UUID of the object.
+      direction:
+        type: string
+        description: Which way the relations point.
+        enum: [incoming, outgoing]
+      language:
+        type: string
+        description: ISO 639-1 code for the language labels come back in.
+        optional: true
+    output:
+      description: The object's relations in that direction.
+      type: object
+      properties:
+        relations: {type: array}
+
+  list_modelling_object_relations_by_name:
+    title: List a modelling object's relations of one kind
+    description: >-
+      The same walk narrowed to one relation class, by its `metaName` --
+      cheaper than fetching every connector when you only care about one kind
+      of link.
+    category: models
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/models/${model_id}/objects/${object_id}/relations/${direction}/${rel_name}
+      headers:
+        Accept-Language: "${language}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      model_id:
+        type: string
+        description: UUID of the model.
+      object_id:
+        type: string
+        description: UUID of the object.
+      direction:
+        type: string
+        description: Which way the relations point.
+        enum: [incoming, outgoing]
+      rel_name:
+        type: string
+        description: The relation class's metaName.
+      language:
+        type: string
+        description: ISO 639-1 code for the language labels come back in.
+        optional: true
+    output:
+      description: The matching relations.
+      type: object
+      properties:
+        relations: {type: array}
+
+  get_modelling_object_relation:
+    title: Get one relation of a modelling object
+    description: >-
+      One specific connector on a diagram, with its own attributes -- relations
+      in ADOXX carry data of their own, not just endpoints.
+    category: models
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/models/${model_id}/objects/${object_id}/relations/${direction}/${rel_name}/${artefact_id}
+      headers:
+        Accept-Language: "${language}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      model_id:
+        type: string
+        description: UUID of the model.
+      object_id:
+        type: string
+        description: UUID of the object.
+      direction:
+        type: string
+        description: Which way the relation points.
+        enum: [incoming, outgoing]
+      rel_name:
+        type: string
+        description: The relation class's metaName.
+      artefact_id:
+        type: string
+        description: Id of the relation instance.
+      language:
+        type: string
+        description: ISO 639-1 code for the language labels come back in.
+        optional: true
+    output:
+      description: The relation instance.
+      type: object
+      properties:
+        id: {type: string}
+        attributes: {type: array}
+
+  set_model_as_favourite:
+    title: Mark a model as a favourite
+    description: >-
+      Add a model to the current user's favourites, so it appears in their
+      quick-access list in the web client.
+    category: models
+    request:
+      method: POST
+      path: /2.1/repos/${repo_id}/models/${model_id}/actions
+      query:
+        type: setFavourite
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      model_id:
+        type: string
+        description: UUID of the model.
+    output:
+      description: The result of the action.
+      type: object
+
+  # -- repository objects ------------------------------------------------------
+
+  get_object_group:
+    title: Get an object group
+    description: >-
+      One repository object group and its contents -- the folder tree reusable
+      objects are filed in. `root` is the top; `recursive` walks the subtree.
+    category: objects
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/objectgroups/${group_id}
+      query:
+        recursive: "${recursive}"
+        icon: "${icon}"
+        attribute: "${attribute}"
+      headers:
+        Accept-Language: "${language}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      group_id:
+        type: string
+        description: UUID of the object group, or the literal "root".
+        optional: true
+        default: root
+      recursive:
+        type: boolean
+        description: Return the whole subtree beneath this group.
+        optional: true
+      icon:
+        type: boolean
+        description: Include each artefact's icon.
+        optional: true
+      attribute:
+        type: string
+        description: Also return this attribute on each artefact, when it has a value.
+        optional: true
+      language:
+        type: string
+        description: ISO 639-1 code for the language labels come back in.
+        optional: true
+    output:
+      description: The object group and its contents.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        objects: {type: array}
+        objectgroups: {type: array}
+
+  create_object_group:
+    title: Create an object group
+    description: >-
+      Create a folder for repository objects. Omit `parent_group_id` and it is
+      created at the root.
+    category: objects
+    request:
+      method: POST
+      path: /2.1/repos/${repo_id}/objectgroups
+      headers:
+        Content-type: application/json
+        Content-Language: "${language}"
+      body:
+        name: "${name}"
+        parentGroupId: "${parent_group_id}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      name:
+        type: string
+        description: Name of the new group.
+        example: Applications
+      parent_group_id:
+        type: string
+        description: UUID of the group to create it under. Defaults to the root.
+        optional: true
+      language:
+        type: string
+        description: ISO 639-1 code the supplied name is in.
+        optional: true
+    output:
+      description: The group that was created.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+
+  update_object_group:
+    title: Rename an object group
+    description: Change an object group's name. Its contents are untouched.
+    category: objects
+    request:
+      method: PATCH
+      path: /2.1/repos/${repo_id}/objectgroups/${group_id}
+      headers:
+        Content-type: application/json
+        Content-Language: "${language}"
+      body:
+        name: "${name}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      group_id:
+        type: string
+        description: UUID of the object group.
+      name:
+        type: string
+        description: New name for the group.
+      language:
+        type: string
+        description: ISO 639-1 code the supplied name is in.
+        optional: true
+    output:
+      description: The updated group.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+
+  delete_object_group:
+    title: Delete an object group
+    description: >-
+      Delete an object group. With `recursive` true the whole subtree goes with
+      it, objects included -- so check the contents with `get_object_group`
+      first.
+    category: objects
+    destructive: true
+    request:
+      method: DELETE
+      path: /2.1/repos/${repo_id}/objectgroups/${group_id}
+      query:
+        recursive: "${recursive}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      group_id:
+        type: string
+        description: UUID of the object group.
+      recursive:
+        type: boolean
+        description: Delete the whole subtree beneath the group as well.
+        optional: true
+    output:
+      description: Empty on success.
+      type: object
+
+  move_object_group:
+    title: Move an object group
+    description: >-
+      Relocate an object group, and everything in it, under another group.
+    category: objects
+    request:
+      method: POST
+      path: /2.1/repos/${repo_id}/objectgroups/${group_id}/actions
+      query:
+        type: move
+      headers:
+        Content-type: application/json
+      body:
+        targetGroupId: "${target_group_id}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      group_id:
+        type: string
+        description: UUID of the group being moved.
+      target_group_id:
+        type: string
+        description: UUID of the group it moves under.
+    output:
+      description: The result of the move.
+      type: object
+
+  move_objects_between_groups:
+    title: Move objects out of a group
+    description: >-
+      Relocate named objects from one group to another, leaving the group itself
+      where it is -- the tool for reorganising contents rather than folders.
+    category: objects
+    request:
+      method: POST
+      path: /2.1/repos/${repo_id}/objectgroups/${group_id}/actions
+      query:
+        type: moveContainedElements
+      headers:
+        Content-type: application/json
+      body:
+        elementIds: "${element_ids}"
+        targetGroupId: "${target_group_id}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      group_id:
+        type: string
+        description: UUID of the group the objects are in.
+      element_ids:
+        type: array
+        description: Ids of the objects to move.
+        items: {type: string}
+      target_group_id:
+        type: string
+        description: UUID of the group they move into.
+        optional: true
+    output:
+      description: The result of the move.
+      type: object
+
+  create_repository_objects:
+    title: Create repository objects
+    description: >-
+      Create one or more reusable repository objects. Each needs its class and
+      its attribute values, given by attribute `metaName` -- `list_class_attributes`
+      is how you learn those names. Objects created here exist independently of
+      any diagram.
+    category: objects
+    request:
+      method: POST
+      path: /2.1/repos/${repo_id}/objects
+      headers:
+        Content-type: application/json
+        Content-Language: "${language}"
+      body: "${objects}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      objects:
+        type: array
+        description: >-
+          The objects to create, each with its class, target group and an
+          `attributes` array of {metaName, value} entries.
+        items: {type: object}
+      language:
+        type: string
+        description: ISO 639-1 code the supplied values are in.
+        optional: true
+    output:
+      description: The objects that were created.
+      type: object
+      properties:
+        objects: {type: array}
+
+  get_repository_object:
+    title: Get a repository object
+    description: >-
+      One reusable repository object with its attributes. Widen the response
+      with `attribute` and `relation`, both taking metaNames.
+    category: objects
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/objects/${object_id}
+      query:
+        attribute: "${attribute}"
+        relation: "${relation}"
+      headers:
+        Accept-Language: "${language}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      object_id:
+        type: string
+        description: UUID of the object.
+      attribute:
+        type: array
+        description: Attributes to include, by metaName.
+        optional: true
+        items: {type: string}
+      relation:
+        type: array
+        description: Relations to include, by metaName.
+        optional: true
+        items: {type: string}
+      language:
+        type: string
+        description: ISO 639-1 code for the language labels come back in.
+        optional: true
+    output:
+      description: The repository object.
+      type: object
+      properties:
+        id: {type: string}
+        class: {type: string}
+        attributes: {type: array}
+
+  update_repository_object:
+    title: Update a repository object's attributes
+    description: >-
+      Change attribute values on a repository object. Attributes are addressed
+      by `metaName`, and only the ones you send change.
+    category: objects
+    request:
+      method: PATCH
+      path: /2.1/repos/${repo_id}/objects/${object_id}
+      headers:
+        Content-type: application/json
+        Content-Language: "${language}"
+      body:
+        attributes: "${attributes}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      object_id:
+        type: string
+        description: UUID of the object.
+      attributes:
+        type: array
+        description: The attribute values to set, each {metaName, value}.
+        items:
+          type: object
+          properties:
+            metaName: {type: string}
+            value: {type: string}
+      language:
+        type: string
+        description: ISO 639-1 code the supplied values are in.
+        optional: true
+    output:
+      description: The updated object.
+      type: object
+      properties:
+        id: {type: string}
+        attributes: {type: array}
+
+  delete_repository_object:
+    title: Delete a repository object
+    description: >-
+      Delete a repository object. Diagrams that referenced it lose that
+      reference, so check `get_repository_object_usage` first -- a reused object
+      may be on many models.
+    category: objects
+    destructive: true
+    request:
+      method: DELETE
+      path: /2.1/repos/${repo_id}/objects/${object_id}
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      object_id:
+        type: string
+        description: UUID of the object.
+    output:
+      description: Empty on success.
+      type: object
+
+  get_repository_object_usage:
+    title: Get where a repository object is used
+    description: >-
+      Which models and objects reference this one. The check to run before
+      deleting or renaming anything reusable.
+    category: objects
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/objects/${object_id}/usage
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      object_id:
+        type: string
+        description: UUID of the object.
+    output:
+      description: Where the object is used.
+      type: object
+      properties:
+        usage: {type: array}
+
+  get_repository_object_link:
+    title: Get a link to a repository object
+    description: A deep link that opens this object's notebook in the web client.
+    category: objects
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/objects/${object_id}/link
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      object_id:
+        type: string
+        description: UUID of the object.
+    output:
+      description: The link.
+      type: object
+      properties:
+        href: {type: string}
+
+  move_repository_object:
+    title: Move a repository object
+    description: Change which group a repository object is filed under.
+    category: objects
+    request:
+      method: POST
+      path: /2.1/repos/${repo_id}/objects/${object_id}/actions
+      query:
+        type: move
+      headers:
+        Content-type: application/json
+      body:
+        targetGroupId: "${target_group_id}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      object_id:
+        type: string
+        description: UUID of the object.
+      target_group_id:
+        type: string
+        description: UUID of the group it moves into.
+    output:
+      description: The result of the move.
+      type: object
+
+  set_object_as_favourite:
+    title: Mark a repository object as a favourite
+    description: Add a repository object to the current user's favourites.
+    category: objects
+    request:
+      method: POST
+      path: /2.1/repos/${repo_id}/objects/${object_id}/actions
+      query:
+        type: setFavourite
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      object_id:
+        type: string
+        description: UUID of the object.
+    output:
+      description: The result of the action.
+      type: object
+
+  get_object_document:
+    title: Get a document stored on an object attribute
+    description: >-
+      Download the file held in a document-type (DMS) attribute of an object --
+      an attached specification, drawing or policy document.
+    category: objects
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/objects/${object_id}/attributes/${attribute_name}
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      object_id:
+        type: string
+        description: UUID of the object.
+      attribute_name:
+        type: string
+        description: metaName of the document attribute.
+    output:
+      description: The stored document.
+      type: string
+
+  put_object_document:
+    title: Store a document on an object attribute
+    description: >-
+      Upload a file into a document-type (DMS) attribute, replacing whatever it
+      held. Send the file's bytes as `content`.
+    category: objects
+    request:
+      method: PUT
+      path: /2.1/repos/${repo_id}/objects/${object_id}/attributes/${attribute_name}
+      content: "${content}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      object_id:
+        type: string
+        description: UUID of the object.
+      attribute_name:
+        type: string
+        description: metaName of the document attribute.
+      content:
+        type: string
+        description: The document's contents.
+    output:
+      description: The result of the upload.
+      type: object
+
+  list_object_records:
+    title: List an object's record attributes
+    description: >-
+      Which table-valued (record) attributes an object has. A record attribute
+      holds rows and cells rather than one value, which is why it has its own
+      family of calls.
+    category: records
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/objects/${object_id}/records
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      object_id:
+        type: string
+        description: UUID of the object.
+    output:
+      description: The object's record attributes.
+      type: object
+      properties:
+        records: {type: array}
+
+  get_object_record:
+    title: Get a record attribute's rows
+    description: The rows currently held in one record attribute of an object.
+    category: records
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/objects/${object_id}/records/${record_name}
+      headers:
+        Accept-Language: "${language}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      object_id:
+        type: string
+        description: UUID of the object.
+      record_name:
+        type: string
+        description: metaName of the record attribute.
+      language:
+        type: string
+        description: ISO 639-1 code for the language values come back in.
+        optional: true
+    output:
+      description: The record's rows.
+      type: object
+      properties:
+        rows: {type: array}
+
+  create_record_row:
+    title: Add a row to a record attribute
+    description: >-
+      Append a row to a record attribute, with its cell values. Cells are given
+      in the record's own column order.
+    category: records
+    request:
+      method: POST
+      path: /2.1/repos/${repo_id}/objects/${object_id}/records/${record_name}
+      headers:
+        Content-type: application/json
+        Content-Language: "${language}"
+      body: "${row}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      object_id:
+        type: string
+        description: UUID of the object.
+      record_name:
+        type: string
+        description: metaName of the record attribute.
+      row:
+        type: object
+        description: The row to add, with its cell values.
+      language:
+        type: string
+        description: ISO 639-1 code the supplied values are in.
+        optional: true
+    output:
+      description: The row that was added.
+      type: object
+      properties:
+        id: {type: string}
+
+  update_record_row:
+    title: Update a row in a record attribute
+    description: Replace one row of a record attribute, addressed by its row id.
+    category: records
+    request:
+      method: PUT
+      path: /2.1/repos/${repo_id}/objects/${object_id}/records/${record_name}/${row_id}
+      headers:
+        Content-type: application/json
+        Content-Language: "${language}"
+      body: "${row}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      object_id:
+        type: string
+        description: UUID of the object.
+      record_name:
+        type: string
+        description: metaName of the record attribute.
+      row_id:
+        type: string
+        description: Id of the row.
+      row:
+        type: object
+        description: The row's new cell values.
+      language:
+        type: string
+        description: ISO 639-1 code the supplied values are in.
+        optional: true
+    output:
+      description: The updated row.
+      type: object
+      properties:
+        id: {type: string}
+
+  delete_record_row:
+    title: Delete a row from a record attribute
+    description: Remove one row of a record attribute by its row id.
+    category: records
+    destructive: true
+    request:
+      method: DELETE
+      path: /2.1/repos/${repo_id}/objects/${object_id}/records/${record_name}/${row_id}
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      object_id:
+        type: string
+        description: UUID of the object.
+      record_name:
+        type: string
+        description: metaName of the record attribute.
+      row_id:
+        type: string
+        description: Id of the row.
+    output:
+      description: Empty on success.
+      type: object
+
+  delete_all_record_rows:
+    title: Clear a record attribute
+    description: >-
+      Delete every row of a record attribute in one action -- the way to reset
+      a table before reloading it from another system.
+    category: records
+    destructive: true
+    request:
+      method: POST
+      path: /2.1/repos/${repo_id}/objects/${object_id}/records/${record_name}/actions
+      query:
+        type: deleteAll
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      object_id:
+        type: string
+        description: UUID of the object.
+      record_name:
+        type: string
+        description: metaName of the record attribute.
+    output:
+      description: The result of the action.
+      type: object
+
+  get_record_cell:
+    title: Get a document from a record cell
+    description: >-
+      Download the file held in one cell of a record attribute, for records
+      whose columns are document-typed.
+    category: records
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/objects/${object_id}/records/${record_name}/${row_id}/${cell_index}
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      object_id:
+        type: string
+        description: UUID of the object.
+      record_name:
+        type: string
+        description: metaName of the record attribute.
+      row_id:
+        type: string
+        description: Id of the row.
+      cell_index:
+        type: string
+        description: Index of the cell within the row.
+    output:
+      description: The cell's document.
+      type: string
+
+  set_record_cell:
+    title: Set a record cell's value
+    description: Write one cell of one row of a record attribute.
+    category: records
+    request:
+      method: PUT
+      path: /2.1/repos/${repo_id}/objects/${object_id}/records/${record_name}/${row_id}/${cell_index}
+      content: "${content}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      object_id:
+        type: string
+        description: UUID of the object.
+      record_name:
+        type: string
+        description: metaName of the record attribute.
+      row_id:
+        type: string
+        description: Id of the row.
+      cell_index:
+        type: string
+        description: Index of the cell within the row.
+      content:
+        type: string
+        description: The value to write into the cell.
+    output:
+      description: The result of the write.
+      type: object
+
+  list_object_relations:
+    title: List a repository object's relations
+    description: >-
+      What a repository object is connected to, in one direction. Repository
+      objects can be linked to each other independently of any diagram, and this
+      is how that graph is read.
+    category: objects
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/objects/${object_id}/relations/${direction}
+      headers:
+        Accept-Language: "${language}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      object_id:
+        type: string
+        description: UUID of the object.
+      direction:
+        type: string
+        description: Which way the relations point.
+        enum: [incoming, outgoing]
+      language:
+        type: string
+        description: ISO 639-1 code for the language labels come back in.
+        optional: true
+    output:
+      description: The object's relations.
+      type: object
+      properties:
+        relations: {type: array}
+
+  list_object_relations_by_name:
+    title: List a repository object's relations of one kind
+    description: >-
+      The same read narrowed to one relation class by its metaName.
+    category: objects
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/objects/${object_id}/relations/${direction}/${rel_name}
+      headers:
+        Accept-Language: "${language}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      object_id:
+        type: string
+        description: UUID of the object.
+      direction:
+        type: string
+        description: Which way the relations point.
+        enum: [incoming, outgoing]
+      rel_name:
+        type: string
+        description: The relation class's metaName.
+      language:
+        type: string
+        description: ISO 639-1 code for the language labels come back in.
+        optional: true
+    output:
+      description: The matching relations.
+      type: object
+      properties:
+        relations: {type: array}
+
+  get_object_relation:
+    title: Get one relation of a repository object
+    description: One relation endpoint by id, with the attributes it carries.
+    category: objects
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/objects/${object_id}/relations/${direction}/${rel_name}/${artefact_id}
+      headers:
+        Accept-Language: "${language}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      object_id:
+        type: string
+        description: UUID of the object.
+      direction:
+        type: string
+        description: Which way the relation points.
+        enum: [incoming, outgoing]
+      rel_name:
+        type: string
+        description: The relation class's metaName.
+      artefact_id:
+        type: string
+        description: Id of the relation instance.
+      language:
+        type: string
+        description: ISO 639-1 code for the language labels come back in.
+        optional: true
+    output:
+      description: The relation endpoint.
+      type: object
+      properties:
+        id: {type: string}
+        attributes: {type: array}
+
+  create_object_relation:
+    title: Connect a repository object
+    description: >-
+      Create a relation endpoint from or to this object, of the named relation
+      class. `list_metamodel_relations` says which classes exist and
+      `get_relation_endpoint` what each end permits -- a relation the metamodel
+      forbids is rejected.
+    category: objects
+    request:
+      method: POST
+      path: /2.1/repos/${repo_id}/objects/${object_id}/relations/${direction}/${rel_name}
+      headers:
+        Content-type: application/json
+        Content-Language: "${language}"
+      body: "${relation}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      object_id:
+        type: string
+        description: UUID of the object.
+      direction:
+        type: string
+        description: Whether the new endpoint is incoming or outgoing.
+        enum: [incoming, outgoing]
+      rel_name:
+        type: string
+        description: The relation class's metaName.
+      relation:
+        type: object
+        description: >-
+          The endpoint to create -- the object at the other end and any
+          attributes the relation carries.
+      language:
+        type: string
+        description: ISO 639-1 code the supplied values are in.
+        optional: true
+    output:
+      description: The relation that was created.
+      type: object
+      properties:
+        id: {type: string}
+
+  update_object_relation:
+    title: Update a relation's attributes
+    description: >-
+      Change the attribute values carried by one relation endpoint. The
+      endpoints themselves are fixed once created.
+    category: objects
+    request:
+      method: PATCH
+      path: /2.1/repos/${repo_id}/objects/${object_id}/relations/${direction}/${rel_name}/${artefact_id}
+      headers:
+        Content-type: application/json
+        Content-Language: "${language}"
+      body:
+        attributes: "${attributes}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      object_id:
+        type: string
+        description: UUID of the object.
+      direction:
+        type: string
+        description: Which way the relation points.
+        enum: [incoming, outgoing]
+      rel_name:
+        type: string
+        description: The relation class's metaName.
+      artefact_id:
+        type: string
+        description: Id of the relation instance.
+      attributes:
+        type: array
+        description: Attribute values to set, each {metaName, value}.
+        items:
+          type: object
+          properties:
+            metaName: {type: string}
+            value: {type: string}
+      language:
+        type: string
+        description: ISO 639-1 code the supplied values are in.
+        optional: true
+    output:
+      description: The updated relation.
+      type: object
+      properties:
+        id: {type: string}
+
+  delete_object_relation:
+    title: Disconnect a repository object
+    description: >-
+      Delete one relation endpoint. The objects at either end survive; the link
+      between them does not.
+    category: objects
+    destructive: true
+    request:
+      method: DELETE
+      path: /2.1/repos/${repo_id}/objects/${object_id}/relations/${direction}/${rel_name}/${artefact_id}
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      object_id:
+        type: string
+        description: UUID of the object.
+      direction:
+        type: string
+        description: Which way the relation points.
+        enum: [incoming, outgoing]
+      rel_name:
+        type: string
+        description: The relation class's metaName.
+      artefact_id:
+        type: string
+        description: Id of the relation instance.
+    output:
+      description: Empty on success.
+      type: object
+
+  # -- search ------------------------------------------------------------------
+
+  search_repository:
+    title: Search a repository
+    description: >-
+      Run a search over one repository. `query` carries the filter rules as
+      JSON, and results are windowed with `range_start` and `range_end` rather
+      than page numbers -- there is no default upper bound, so set the range
+      when a query might match a lot.
+    category: search
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/search
+      query:
+        query: "${query}"
+        attribute: "${attribute}"
+        range-start: "${range_start}"
+        range-end: "${range_end}"
+      headers:
+        Accept-Language: "${language}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      query:
+        type: array
+        description: The search filters, as JSON filter objects.
+        optional: true
+        items: {type: string}
+      attribute:
+        type: array
+        description: Attributes to return on each hit, by metaName.
+        optional: true
+        items: {type: string}
+      range_start:
+        type: integer
+        description: First result to return. 0 by default.
+        optional: true
+        minimum: 0
+      range_end:
+        type: integer
+        description: Last result to return. No default -- set it to bound the response.
+        optional: true
+        minimum: 0
+      language:
+        type: string
+        description: ISO 639-1 code for the language labels come back in.
+        optional: true
+    output:
+      description: The search results.
+      type: object
+      properties:
+        results: {type: array}
+
+  create_search_job:
+    title: Create a search job
+    description: >-
+      Register a search as a reusable job. The response's `Location` header
+      carries the job key, which `run_search_job` then executes -- and which
+      lets two jobs be combined with a difference, union or intersection.
+    category: search
+    request:
+      method: POST
+      path: /2.1/repos/${repo_id}/search/jobs
+      headers:
+        Content-type: application/json
+      body:
+        filters: "${filters}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      filters:
+        type: array
+        description: The filter rules the job applies.
+        items: {type: object}
+    output:
+      description: The job that was created; its key is in the Location header.
+      type: object
+      properties:
+        key: {type: string}
+
+  run_search_job:
+    title: Run a search job
+    description: >-
+      Execute a stored search job by key. `input_key` plus `combine_type`
+      merges it with another job's filters -- the way ADOXX expresses "in A but
+      not B" style queries.
+    category: search
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/search/jobs/${key}
+      query:
+        attribute: "${attribute}"
+        range-start: "${range_start}"
+        range-end: "${range_end}"
+        input-key: "${input_key}"
+        combine-type: "${combine_type}"
+      headers:
+        Accept-Language: "${language}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      key:
+        type: string
+        description: The job's key, from the Location header when it was created.
+      attribute:
+        type: array
+        description: Attributes to return on each hit, by metaName.
+        optional: true
+        items: {type: string}
+      range_start:
+        type: integer
+        description: First result to return.
+        optional: true
+        minimum: 0
+      range_end:
+        type: integer
+        description: Last result to return.
+        optional: true
+        minimum: 0
+      input_key:
+        type: string
+        description: Key of another job to combine this one with.
+        optional: true
+      combine_type:
+        type: string
+        description: How to combine the two jobs' filters.
+        optional: true
+        enum: [diff, union, intersect]
+      language:
+        type: string
+        description: ISO 639-1 code for the language labels come back in.
+        optional: true
+    output:
+      description: The job's results.
+      type: object
+      properties:
+        results: {type: array}
+
+  delete_search_job:
+    title: Delete a search job
+    description: Remove a stored search job by key. Its results are not cached elsewhere.
+    category: search
+    destructive: true
+    request:
+      method: DELETE
+      path: /2.1/repos/${repo_id}/search/jobs/${key}
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      key:
+        type: string
+        description: The job's key.
+    output:
+      description: Empty on success.
+      type: object
+
+  list_saved_queries:
+    title: List saved search queries
+    description: >-
+      The queries users have saved in this repository. `scope` chooses between
+      all of them, only your own, or only the published ones.
+    category: search
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/search/saved-queries
+      query:
+        scope: "${scope}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      scope:
+        type: string
+        description: Which saved queries to list.
+        optional: true
+        default: ALL
+        enum: [ALL, OWN, PUBLISHED]
+    output:
+      description: The saved queries.
+      type: object
+      properties:
+        queries: {type: array}
+
+  run_saved_query:
+    title: Run a saved search query
+    description: >-
+      Execute a query someone saved in the web client. With
+      `saved_attributes` true the response carries only the attributes the query
+      itself defines, which is usually what its author intended.
+    category: search
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/search/saved-queries/${query_id}
+      query:
+        attribute: "${attribute}"
+        range-start: "${range_start}"
+        range-end: "${range_end}"
+        saved-attributes: "${saved_attributes}"
+      headers:
+        Accept-Language: "${language}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      query_id:
+        type: string
+        description: Id of the saved query.
+      attribute:
+        type: array
+        description: Attributes to return on each hit, by metaName.
+        optional: true
+        items: {type: string}
+      range_start:
+        type: integer
+        description: First result to return.
+        optional: true
+        minimum: 0
+      range_end:
+        type: integer
+        description: Last result to return.
+        optional: true
+        minimum: 0
+      saved_attributes:
+        type: boolean
+        description: Return only the attributes the saved query defines.
+        optional: true
+      language:
+        type: string
+        description: ISO 639-1 code for the language labels come back in.
+        optional: true
+    output:
+      description: The query's results.
+      type: object
+      properties:
+        results: {type: array}
+
+  # -- views, favourites, history ---------------------------------------------
+
+  list_view_types:
+    title: List view types and templates
+    description: >-
+      The view types and templates available in this repository -- the
+      pre-built visualisations a query or workbench can be rendered through.
+    category: views
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/views/types
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+    output:
+      description: The view types and their templates.
+      type: object
+      properties:
+        types: {type: array}
+
+  get_query_view:
+    title: Render a saved query as a view
+    description: >-
+      Render a saved query through a view template -- how a query becomes a
+      diagram rather than a list. `add_bounding_box_info` adds geometry to the
+      SVG, which you need to make the result clickable.
+    category: views
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/views/queries/${query_id}/${type_id}/${template_id}
+      query:
+        addBoundingBoxInfo: "${add_bounding_box_info}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      query_id:
+        type: string
+        description: Id of the saved query.
+      type_id:
+        type: string
+        description: Id of the view type.
+      template_id:
+        type: string
+        description: Id of the view template.
+      add_bounding_box_info:
+        type: boolean
+        description: Include bounding-box geometry in the SVG output.
+        optional: true
+    output:
+      description: The rendered view.
+      type: object
+
+  list_workbenches:
+    title: List workbenches
+    description: >-
+      The workbenches configured in the repository -- curated collections of
+      models and objects that an ADOXX application presents as a working set.
+    category: views
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/views/workbenches
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+    output:
+      description: The available workbenches.
+      type: object
+      properties:
+        workbenches: {type: array}
+
+  get_workbench:
+    title: Get a workbench
+    description: One workbench by model id, with its contents and available views.
+    category: views
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/views/workbenches/${model_id}
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      model_id:
+        type: string
+        description: UUID of the workbench's model.
+    output:
+      description: The workbench.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+
+  get_workbench_view:
+    title: Render a workbench view
+    description: >-
+      Render one workbench through a view type and template. As with a query
+      view, ask for bounding-box info when the output needs to be interactive.
+    category: views
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/views/workbenches/${model_id}/${type_id}
+      query:
+        template_id: "${template_id}"
+        addBoundingBoxInfo: "${add_bounding_box_info}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      model_id:
+        type: string
+        description: UUID of the workbench's model.
+      type_id:
+        type: string
+        description: Id of the view type.
+      template_id:
+        type: string
+        description: Id of the view template.
+      add_bounding_box_info:
+        type: boolean
+        description: Include bounding-box geometry in the SVG output.
+        optional: true
+    output:
+      description: The rendered workbench view.
+      type: object
+
+  list_favourites:
+    title: List favourites
+    description: >-
+      The current user's favourite artefacts in this repository, optionally
+      narrowed to diagrams or to repository objects.
+    category: favourites
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/favourites
+      query:
+        type: "${type}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      type:
+        type: string
+        description: Only favourites of this artefact kind.
+        optional: true
+        enum: [DIAGRAM, REPOSITORY_OBJECT]
+    output:
+      description: The user's favourites.
+      type: object
+      properties:
+        favourites: {type: array}
+
+  add_favourite:
+    title: Add a favourite
+    description: >-
+      Add one artefact to the current user's favourites. ADOXX works out
+      whether the id is a model or an object.
+    category: favourites
+    request:
+      method: POST
+      path: /2.1/repos/${repo_id}/favourites
+      headers:
+        Content-type: application/json
+      body:
+        id: "${artefact_id}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      artefact_id:
+        type: string
+        description: Id of the model or object to favourite.
+    output:
+      description: The favourite that was added.
+      type: object
+      properties:
+        id: {type: string}
+
+  add_many_favourites:
+    title: Add several favourites
+    description: Add several artefacts to the current user's favourites in one call.
+    category: favourites
+    request:
+      method: POST
+      path: /2.1/repos/${repo_id}/favourites/actions
+      query:
+        type: addMany
+      headers:
+        Content-type: application/json
+      body:
+        ids: "${artefact_ids}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      artefact_ids:
+        type: array
+        description: Ids of the models or objects to favourite.
+        items: {type: string}
+    output:
+      description: The result of the action.
+      type: object
+
+  delete_favourite:
+    title: Remove a favourite
+    description: >-
+      Remove one artefact from the current user's favourites. The artefact
+      itself is untouched.
+    category: favourites
+    destructive: true
+    request:
+      method: DELETE
+      path: /2.1/repos/${repo_id}/favourites/${artefact_id}
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      artefact_id:
+        type: string
+        description: Id of the favourited artefact.
+    output:
+      description: Empty on success.
+      type: object
+
+  delete_all_favourites:
+    title: Clear all favourites
+    description: >-
+      Remove every favourite for the current user in this repository. The
+      artefacts themselves are untouched.
+    category: favourites
+    destructive: true
+    request:
+      method: POST
+      path: /2.1/repos/${repo_id}/favourites/actions
+      query:
+        type: deleteAll
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+    output:
+      description: The result of the action.
+      type: object
+
+  list_recently_opened:
+    title: List recently opened artefacts
+    description: >-
+      What the current user last opened in this repository, optionally narrowed
+      to diagrams or repository objects.
+    category: favourites
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/repos/${repo_id}/recently-opened
+      query:
+        type: "${type}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      type:
+        type: string
+        description: Only artefacts of this kind.
+        optional: true
+        enum: [DIAGRAM, REPOSITORY_OBJECT]
+    output:
+      description: The recently opened artefacts.
+      type: object
+      properties:
+        artefacts: {type: array}
+
+  add_recently_opened:
+    title: Record an artefact as recently opened
+    description: >-
+      Push one artefact onto the current user's recently-opened list, with the
+      timestamp it was opened at -- for a custom client keeping ADOXX's history
+      in step.
+    category: favourites
+    request:
+      method: POST
+      path: /2.1/repos/${repo_id}/recently-opened
+      headers:
+        Content-type: application/json
+      body:
+        id: "${artefact_id}"
+        timestamp: "${timestamp}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      artefact_id:
+        type: string
+        description: Id of the artefact that was opened.
+      timestamp:
+        type: number
+        description: When it was opened, as an epoch timestamp.
+    output:
+      description: The entry that was recorded.
+      type: object
+
+  add_many_recently_opened:
+    title: Record several artefacts as recently opened
+    description: >-
+      Push several entries onto the recently-opened list at once, each with its
+      own timestamp.
+    category: favourites
+    request:
+      method: POST
+      path: /2.1/repos/${repo_id}/recently-opened/actions
+      query:
+        type: addMany
+      headers:
+        Content-type: application/json
+      body:
+        artefacts: "${artefacts}"
+    input:
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      artefacts:
+        type: array
+        description: The entries to record, each with an artefact id and a timestamp.
+        items:
+          type: object
+          properties:
+            id: {type: string}
+            timestamp: {type: number}
+    output:
+      description: The result of the action.
+      type: object
+
+  # -- users, groups and roles -------------------------------------------------
+
+  list_users:
+    title: List users
+    description: >-
+      The users configured in the ADOXX instance, with their logins and ids.
+      Either identifier can address a user in the calls below.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/users
+    input: {}
+    output:
+      description: The instance's users.
+      type: object
+      properties:
+        users: {type: array}
+
+  get_user:
+    title: Get a user
+    description: >-
+      One user, found either by id or by login -- `identification_method` says
+      which kind of value `user_identifier` is.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/users/${identification_method}/${user_identifier}
+      query:
+        attribute: "${attribute}"
+    input:
+      user_identifier:
+        type: string
+        description: The user's id or login, matching `identification_method`.
+      identification_method:
+        type: string
+        description: Whether `user_identifier` is an id or a login.
+        optional: true
+        default: login
+        enum: [id, login]
+      attribute:
+        type: array
+        description: Attributes to include in the response, by metaName.
+        optional: true
+        items: {type: string}
+    output:
+      description: The user.
+      type: object
+      properties:
+        id: {type: string}
+        login: {type: string}
+        attributes: {type: array}
+
+  create_user:
+    title: Create a user
+    description: >-
+      Create a user in the ADOXX instance. The attributes it accepts come from
+      the instance's own user definition, so read an existing user with
+      `get_user` first to see the shape.
+    category: users
+    request:
+      method: POST
+      path: /2.1/users
+      headers:
+        Content-type: application/json
+      body: "${user}"
+    input:
+      user:
+        type: object
+        description: >-
+          The user to create -- its login, name and attribute values as the
+          instance defines them.
+    output:
+      description: The user that was created.
+      type: object
+      properties:
+        id: {type: string}
+        login: {type: string}
+
+  update_user:
+    title: Update a user
+    description: >-
+      Change a user's attributes. Only the attributes you send change, and they
+      are addressed by metaName.
+    category: users
+    request:
+      method: PATCH
+      path: /2.1/users/${identification_method}/${user_identifier}
+      headers:
+        Content-type: application/json
+      body:
+        attributes: "${attributes}"
+    input:
+      user_identifier:
+        type: string
+        description: The user's id or login.
+      attributes:
+        type: array
+        description: Attribute values to set, each {metaName, value}.
+        items:
+          type: object
+          properties:
+            metaName: {type: string}
+            value: {type: string}
+      identification_method:
+        type: string
+        description: Whether `user_identifier` is an id or a login.
+        optional: true
+        default: login
+        enum: [id, login]
+    output:
+      description: The updated user.
+      type: object
+      properties:
+        id: {type: string}
+        attributes: {type: array}
+
+  delete_user:
+    title: Delete a user
+    description: >-
+      Delete a user from the instance. Their access ends immediately; content
+      they created stays in the repository.
+    category: users
+    destructive: true
+    request:
+      method: DELETE
+      path: /2.1/users/${identification_method}/${user_identifier}
+    input:
+      user_identifier:
+        type: string
+        description: The user's id or login.
+      identification_method:
+        type: string
+        description: Whether `user_identifier` is an id or a login.
+        optional: true
+        default: login
+        enum: [id, login]
+    output:
+      description: Empty on success.
+      type: object
+
+  assign_user_to_repository:
+    title: Give a user access to a repository
+    description: >-
+      Assign a user to a repository, which is what lets them see its models and
+      objects at all.
+    category: users
+    request:
+      method: POST
+      path: /2.1/users/${identification_method}/${user_identifier}/repos
+      headers:
+        Content-type: application/json
+      body:
+        id: "${repo_id}"
+    input:
+      user_identifier:
+        type: string
+        description: The user's id or login.
+      repo_id:
+        type: string
+        description: UUID of the repository to grant.
+      identification_method:
+        type: string
+        description: Whether `user_identifier` is an id or a login.
+        optional: true
+        default: login
+        enum: [id, login]
+    output:
+      description: The result of the assignment.
+      type: object
+
+  remove_user_from_repository:
+    title: Remove a user's access to a repository
+    description: >-
+      Unassign a user from a repository. They lose sight of its contents at
+      once.
+    category: users
+    destructive: true
+    request:
+      method: DELETE
+      path: /2.1/users/${identification_method}/${user_identifier}/repos/${repo_id}
+    input:
+      user_identifier:
+        type: string
+        description: The user's id or login.
+      repo_id:
+        type: string
+        description: UUID of the repository to revoke.
+      identification_method:
+        type: string
+        description: Whether `user_identifier` is an id or a login.
+        optional: true
+        default: login
+        enum: [id, login]
+    output:
+      description: Empty on success.
+      type: object
+
+  share_user_in_repository:
+    title: Share a user into a repository
+    description: >-
+      Share an existing user into another repository, as distinct from
+      assigning them: sharing reuses the same account across repositories.
+    category: users
+    request:
+      method: POST
+      path: /2.1/users/${identification_method}/${user_identifier}/shared-repos
+      headers:
+        Content-type: application/json
+      body:
+        id: "${repo_id}"
+    input:
+      user_identifier:
+        type: string
+        description: The user's id or login.
+      repo_id:
+        type: string
+        description: UUID of the repository to share them into.
+      identification_method:
+        type: string
+        description: Whether `user_identifier` is an id or a login.
+        optional: true
+        default: login
+        enum: [id, login]
+    output:
+      description: The result of the share.
+      type: object
+
+  unshare_user_in_repository:
+    title: Unshare a user from a repository
+    description: Withdraw a shared user from a repository.
+    category: users
+    destructive: true
+    request:
+      method: DELETE
+      path: /2.1/users/${identification_method}/${user_identifier}/shared-repos/${repo_id}
+    input:
+      user_identifier:
+        type: string
+        description: The user's id or login.
+      repo_id:
+        type: string
+        description: UUID of the repository.
+      identification_method:
+        type: string
+        description: Whether `user_identifier` is an id or a login.
+        optional: true
+        default: login
+        enum: [id, login]
+    output:
+      description: Empty on success.
+      type: object
+
+  assign_user_to_role:
+    title: Assign a user to a role
+    description: >-
+      Give a user a role, which is how permissions are granted in ADOXX. Roles
+      are named by `metaName` and live under a parent grouping item --
+      `list_roles` and `list_roles_in_group` give both.
+    category: users
+    request:
+      method: POST
+      path: /2.1/users/${identification_method}/${user_identifier}/roles
+      headers:
+        Content-type: application/json
+      body:
+        metaName: "${role_meta_name}"
+        name: "${role_name}"
+        parentId: "${parent_id}"
+    input:
+      user_identifier:
+        type: string
+        description: The user's id or login.
+      role_meta_name:
+        type: string
+        description: Language-independent name of the role.
+      role_name:
+        type: string
+        description: Display name of the role, in the current language.
+        optional: true
+      parent_id:
+        type: string
+        description: UUID of the role's parent grouping item.
+        optional: true
+      identification_method:
+        type: string
+        description: Whether `user_identifier` is an id or a login.
+        optional: true
+        default: login
+        enum: [id, login]
+    output:
+      description: The result of the assignment.
+      type: object
+
+  remove_user_from_role:
+    title: Remove a role from a user
+    description: >-
+      Take a role away from a user, revoking the permissions it carried.
+    category: users
+    destructive: true
+    request:
+      method: DELETE
+      path: /2.1/users/${identification_method}/${user_identifier}/roles/${role_id}/${role_name}
+    input:
+      user_identifier:
+        type: string
+        description: The user's id or login.
+      role_id:
+        type: string
+        description: UUID of the role's parent group.
+      role_name:
+        type: string
+        description: metaName of the role.
+      identification_method:
+        type: string
+        description: Whether `user_identifier` is an id or a login.
+        optional: true
+        default: login
+        enum: [id, login]
+    output:
+      description: Empty on success.
+      type: object
+
+  assign_user_to_usergroup:
+    title: Add a user to a user group
+    description: >-
+      Put a user into a user group, inheriting whatever access the group
+      carries.
+    category: users
+    request:
+      method: POST
+      path: /2.1/users/${identification_method}/${user_identifier}/usergroups
+      headers:
+        Content-type: application/json
+      body:
+        id: "${group_id}"
+    input:
+      user_identifier:
+        type: string
+        description: The user's id or login.
+      group_id:
+        type: string
+        description: UUID of the user group.
+      identification_method:
+        type: string
+        description: Whether `user_identifier` is an id or a login.
+        optional: true
+        default: login
+        enum: [id, login]
+    output:
+      description: The result of the assignment.
+      type: object
+
+  remove_user_from_usergroup:
+    title: Remove a user from a user group
+    description: Take a user out of a user group, dropping the access it granted.
+    category: users
+    destructive: true
+    request:
+      method: DELETE
+      path: /2.1/users/${identification_method}/${user_identifier}/usergroups/${group_id}
+    input:
+      user_identifier:
+        type: string
+        description: The user's id or login.
+      group_id:
+        type: string
+        description: UUID of the user group.
+      identification_method:
+        type: string
+        description: Whether `user_identifier` is an id or a login.
+        optional: true
+        default: login
+        enum: [id, login]
+    output:
+      description: Empty on success.
+      type: object
+
+  get_usergroup:
+    title: Get a user group
+    description: >-
+      One user group and its members. `recursive` walks nested groups rather
+      than returning only the immediate level.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/usergroups/${group_id}
+      query:
+        recursive: "${recursive}"
+    input:
+      group_id:
+        type: string
+        description: UUID of the user group.
+      recursive:
+        type: boolean
+        description: Include nested groups and their members.
+        optional: true
+    output:
+      description: The user group.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        users: {type: array}
+
+  list_roles:
+    title: List role groups
+    description: >-
+      The grouping items that contain roles. Pass `none` to
+      `list_roles_in_group` for the technical grouping that holds ungrouped
+      roles.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/roles
+    input: {}
+    output:
+      description: The role grouping items.
+      type: object
+      properties:
+        roles: {type: array}
+
+  list_roles_in_group:
+    title: List roles in a group
+    description: >-
+      The roles inside one grouping item. `none` is the technical grouping for
+      roles that belong to no group.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/roles/${group_id}
+    input:
+      group_id:
+        type: string
+        description: UUID of the role grouping item, or the literal "none".
+    output:
+      description: The roles in that group.
+      type: object
+      properties:
+        roles: {type: array}
+
+  get_role:
+    title: Get a role
+    description: >-
+      One role in detail, with the permissions it grants. The role's name is a
+      metaName and must be URL-encoded -- spaces become %20.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /2.1/roles/${group_id}/${role_name}
+    input:
+      group_id:
+        type: string
+        description: UUID of the role grouping item, or "none".
+      role_name:
+        type: string
+        description: metaName of the role, URL-encoded.
+    output:
+      description: The role.
+      type: object
+      properties:
+        metaName: {type: string}
+        name: {type: string}
+        permissions: {type: array}

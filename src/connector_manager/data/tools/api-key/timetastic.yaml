@@ -1,0 +1,448 @@
+# Timetastic tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://app.timetastic.co.uk/swagger/v1/swagger.json
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: timetastic
+display_name: Timetastic
+docs_url: https://app.timetastic.co.uk/swagger/v1/swagger.json
+generated: true
+generated_from: https://app.timetastic.co.uk/swagger/v1/swagger.json
+tools:
+  get_api_absences:
+    title: Get a chronological list of absences
+    description: Get a chronological list of absences Find out "who is off" on a certain day or range
+      of days - whether thats public holidays, bookings, non working days or other events. Bookings are
+      returned with times matching the user's work schedule so a multiple day booking will show start
+      and end times for that day even if the booking covers mult Calls GET /api/absences on the provider's
+      API.
+    category: api
+    request:
+      method: GET
+      path: /api/absences
+      query:
+        Start: ${start}
+        End: ${end}
+        AbsenceQueryType: ${absence_query_type}
+    input:
+      start:
+        type: string
+        description: The Start parameter.
+        optional: true
+      end:
+        type: string
+        description: The End parameter.
+        optional: true
+      absence_query_type:
+        type: integer
+        description: 'AllEvents: Returns Bookings, Non working days, Public Holidays, Locked Dates, Birthdays
+          and Work anniversaries. AllAbsences: Returns everything we consider an absence: Bookings, Public
+          Holidays and Non working days Bookings: Returns Bookings only PublicHolidays: returns Public
+          Holidays only - 0 — AllEvents: Locked dates, birthdays, work anniversaries, absences, non working
+          days, public holidays, e'
+        optional: true
+        enum:
+        - 0
+        - 1
+        - 2
+        - 3
+    output:
+      description: Whatever GET /api/absences returns, as described by the provider's specification.
+      type: object
+    read_only: true
+  get_api_departments:
+    title: List all Departments
+    description: List all Departments Get a collection of departments for your organisation. Calls GET
+      /api/departments on the provider's API.
+    category: api
+    request:
+      method: GET
+      path: /api/departments
+    input: {}
+    output:
+      description: The departments for your organisation.
+      type: object
+    read_only: true
+  get_api_holidays:
+    title: Get a List of Holidays.
+    description: Get a List of Holidays. Query the holidays for your organisation. There are many ways
+      to filter the results, all of which are optional. Results are limited to 100 per request. Results
+      are scoped to your organisation, so a filter that matches nothing — including an id belonging to
+      another organisation — returns an empty lis Calls GET /api/holidays on the provider's API.
+    category: api
+    request:
+      method: GET
+      path: /api/holidays
+      query:
+        DepartmentId: ${department_id}
+        LeaveTypeId: ${leave_type_id}
+        DepartmentManagersOnly: ${department_managers_only}
+        MyTeamOnly: ${my_team_only}
+        MyFavouritesOnly: ${my_favourites_only}
+        UserIds: ${user_ids}
+        ExclusionUserIds: ${exclusion_user_ids}
+        NonArchivedUsersOnly: ${non_archived_users_only}
+        Start: ${start}
+        TransactionYear: ${transaction_year}
+        End: ${end}
+        Status: ${status}
+        ApproverId: ${approver_id}
+        PageNumber: ${page_number}
+    input:
+      department_id:
+        type: integer
+        description: Filter holidays by a department
+        optional: true
+      leave_type_id:
+        type: integer
+        description: Filter holidays by a leave type
+        optional: true
+      department_managers_only:
+        type: boolean
+        description: Filter holidays for those for department managers only
+        optional: true
+      my_team_only:
+        type: integer
+        description: Filter holidays for those for my team only, based on the user ID you set here.
+        optional: true
+      my_favourites_only:
+        type: integer
+        description: Filter holidays for those for my favourite users only, based on the User Id you set
+          here.
+        optional: true
+      user_ids:
+        type: string
+        description: Filter holidays to include only these user(s)
+        optional: true
+      exclusion_user_ids:
+        type: string
+        description: Filter holidays to exclude these user(s)
+        optional: true
+      non_archived_users_only:
+        type: boolean
+        description: Only return holidays for users that haven't been archived
+        optional: true
+      start:
+        type: string
+        description: Filter all holidays on or after this date
+        optional: true
+      transaction_year:
+        type: integer
+        description: Filter all holidays in this transaction year. Don't use this if you're not including
+          the transactions in your query.
+        optional: true
+      end:
+        type: string
+        description: Filter all holidays before and including this date
+        optional: true
+      status:
+        type: string
+        description: 'Filter all holidays for the given status. If none given then all pending and approved
+          holidays are included. Values are: Pending = 1, Approved = 2, Cancelled = 4, Declined = 8 This
+          is a bitwise enum, so for example if you want all declined and cancelled you can pass 12 as
+          the status.'
+        optional: true
+        enum:
+        - PendingOrApproved
+        - Pending
+        - Approved
+        - Cancelled
+        - Declined
+        - Any
+      approver_id:
+        type: integer
+        description: Filter holidays by the approver
+        optional: true
+      page_number:
+        type: integer
+        description: Current page number, if required. Will default to 1 if not supplied
+        optional: true
+    output:
+      description: The matching holidays. An empty list if nothing matched the filter.
+      type: object
+    read_only: true
+  create_api_holidays:
+    title: Request a Holiday.
+    description: 'Request a Holiday. Use this to submit a leave request to Timetastic. Depending on your
+      authorisation, you can book for yourself, any other user at your organisation, your department,
+      or the entire organisation. Note: This will raise a Webhook event if you have Webhooks configured.
+      Important: a booking that is refused Calls POST /api/holidays on the provider''s API.'
+    category: api
+    request:
+      method: POST
+      path: /api/holidays
+      body:
+        from: ${from}
+        to: ${to}
+        fromTime: ${from_time}
+        toTime: ${to_time}
+        leaveTypeId: ${leave_type_id}
+        reason: ${reason}
+        userOrDepartmentId: ${user_or_department_id}
+        bookFor: ${book_for}
+        suppressEmails: ${suppress_emails}
+        override: ${override}
+        bookAsRequestee: ${book_as_requestee}
+        overrideLockedDays: ${override_locked_days}
+    input:
+      from:
+        type: string
+        description: The start date of the request. Don't include any time information.
+        optional: true
+      to:
+        type: string
+        description: The end date of the requeset. Don't include any time information.
+        optional: true
+      from_time:
+        type: string
+        description: 'Use in conjuction with the From to denote the part of day that the leave request
+          starts. AM: Starts in the morning of the day. PM: Starts at lunchtime of the day. Number: Alternatively,
+          for hourly bookings, you can specify a time, expressed as minutes since midnight.'
+        optional: true
+      to_time:
+        type: string
+        description: 'Use in conjuction with the To to denote the part of day that the leave request ends.
+          AM: Ends at the end of the the morning (lunchtime). PM: Ends at the end of the day. Number:
+          Alternatively, for hourly bookings, you can specify a time, expressed as minutes since midnight.'
+        optional: true
+      leave_type_id:
+        type: integer
+        description: The leave type for the request
+        optional: true
+      reason:
+        type: string
+        description: An optional reason for the request.
+        optional: true
+      user_or_department_id:
+        type: integer
+        description: The ID of the user or department you are making the request for. Use in conjunction
+          with BookFor.
+        optional: true
+      book_for:
+        type: string
+        description: Flag to set if you are booking for a user, department, or everyone. - User - Department
+          - Everyone
+        optional: true
+        enum:
+        - User
+        - Department
+        - Everyone
+      suppress_emails:
+        type: boolean
+        description: If you are an admin, you can request that emails are suppressed for this request.
+          This will prevent any leave request emails from being sent when the request is processed.
+        optional: true
+      override:
+        type: boolean
+        description: If you are an admin, and the booking would be rejected because it exceeds the max-off
+          limit for this department, setting override allows you to make the booking despite that limit.
+        optional: true
+      book_as_requestee:
+        type: boolean
+        description: If you are an admin, set this to true to make the leave request as though it were
+          being made by the requestee (the person you are booking for). This ensures the normal approval
+          flow will happen. The default is false - leave requests will be booked by the admin user account
+          making the API call.
+        optional: true
+      override_locked_days:
+        type: boolean
+        description: If you are an admin, and the booking would be rejected because it covers locked dates
+          setting OverrideLockedDays allows you to make the booking ignoring existing locks.
+        optional: true
+    output:
+      description: The request was processed. Check success in the body — this is also returned when the
+        booking was refused.
+      type: object
+  get_api_leavetypes:
+    title: Get a Collection of Leave Types
+    description: Get a Collection of Leave Types Get a Collection of Leave Types for Your Organisation.
+      Calls GET /api/leavetypes on the provider's API.
+    category: api
+    request:
+      method: GET
+      path: /api/leavetypes
+      query:
+        includeInactive: ${include_inactive}
+    input:
+      include_inactive:
+        type: boolean
+        description: Optional. Set to true to also return inactive (deleted) leave types. Defaults to
+          false (active only).
+        optional: true
+        default: false
+    output:
+      description: The leave types for your organisation.
+      type: object
+    read_only: true
+  create_api_leavetypes:
+    title: Create a new leave type
+    description: Create a new leave type Creates a new leave type for your organisation. Only admins can
+      create leave types. Calls POST /api/leavetypes on the provider's API.
+    category: api
+    request:
+      method: POST
+      path: /api/leavetypes
+      body:
+        name: ${name}
+        deducted: ${deducted}
+        requiresApproval: ${requires_approval}
+        includeMaxOff: ${include_max_off}
+        isPrivate: ${is_private}
+        color: ${color}
+        icon: ${icon}
+        calendarVisibility: ${calendar_visibility}
+        limitHours: ${limit_hours}
+        limitDays: ${limit_days}
+    input:
+      name:
+        type: string
+        description: The name field of the request body.
+      deducted:
+        type: boolean
+        description: The deducted field of the request body.
+        optional: true
+      requires_approval:
+        type: boolean
+        description: The requiresApproval field of the request body.
+        optional: true
+      include_max_off:
+        type: boolean
+        description: The includeMaxOff field of the request body.
+        optional: true
+      is_private:
+        type: boolean
+        description: The isPrivate field of the request body.
+        optional: true
+      color:
+        type: string
+        description: The color field of the request body.
+        optional: true
+      icon:
+        type: string
+        description: The icon field of the request body.
+        optional: true
+      calendar_visibility:
+        type: integer
+        description: '- 1 — Busy - 2 — Available - 3 — OutOfOffice'
+        optional: true
+        enum:
+        - 1
+        - 2
+        - 3
+      limit_hours:
+        type: number
+        description: The limitHours field of the request body.
+        optional: true
+      limit_days:
+        type: number
+        description: The limitDays field of the request body.
+        optional: true
+    output:
+      description: The leave type was successfully created. Returns the ID of the new leave type.
+      type: object
+  get_api_lockeddates:
+    title: List all Locked Dates
+    description: List all Locked Dates Get a collection of all locked dates for your organisation. Calls
+      GET /api/lockeddates on the provider's API.
+    category: api
+    request:
+      method: GET
+      path: /api/lockeddates
+    input: {}
+    output:
+      description: Returns the list of locked dates. An empty list if there are none.
+      type: object
+    read_only: true
+  create_api_lockeddates:
+    title: Add a Locked Date
+    description: Add a Locked Date Creates a new locked date period. Locked dates prevent employees from
+      booking time off during the specified period. You can lock dates at organisation level (all employees),
+      department level, or individual user level. Higher-level locks supersede lower-level locks (e.g.,
+      an organisation lock will su Calls POST /api/lockeddates on the provider's API.
+    category: api
+    request:
+      method: POST
+      path: /api/lockeddates
+      body:
+        from: ${from}
+        to: ${to}
+        reason: ${reason}
+        recordId: ${record_id}
+        recordType: ${record_type}
+    input:
+      from:
+        type: string
+        description: The from field of the request body.
+      to:
+        type: string
+        description: The to field of the request body.
+      reason:
+        type: string
+        description: The reason field of the request body.
+      record_id:
+        type: integer
+        description: The recordId field of the request body.
+      record_type:
+        type: integer
+        description: '- 1 — Organisation - 2 — Department - 3 — User'
+        enum:
+        - 1
+        - 2
+        - 3
+    output:
+      description: The locked date was successfully created
+      type: object
+  get_api_publicholidays:
+    title: Get a List of Public Holidays
+    description: Get a List of Public Holidays Get a collection of public holidays for your organisation.
+      Results are always scoped to your organisation, so a filter that matches nothing — an unknown country
+      code, user or public holiday set, or a user in another organisation — returns an empty list rather
+      than an error. Calls GET /api/publicholidays on the provider's API.
+    category: api
+    request:
+      method: GET
+      path: /api/publicholidays
+      query:
+        countryCode: ${country_code}
+        year: ${year}
+        userId: ${user_id}
+        bankHolidaySetId: ${bank_holiday_set_id}
+        useOrgLeaveYear: ${use_org_leave_year}
+    input:
+      country_code:
+        type: string
+        description: An optional country code to filter the public holidays to.
+        optional: true
+        default: ''
+      year:
+        type: integer
+        description: An optional year to filter the public holidays to.
+        optional: true
+        default: 0
+      user_id:
+        type: integer
+        description: An optional user id to filter the public holidays to.
+        optional: true
+        default: 0
+      bank_holiday_set_id:
+        type: integer
+        description: An optional bank holiday set to filter the public holidays to.
+        optional: true
+        default: 0
+      use_org_leave_year:
+        type: boolean
+        description: An optional param to specify if we want public holidays for the user's leave year.
+        optional: true
+        default: false
+    output:
+      description: The matching public holidays. An empty list if nothing matched the filter.
+      type: object
+    read_only: true

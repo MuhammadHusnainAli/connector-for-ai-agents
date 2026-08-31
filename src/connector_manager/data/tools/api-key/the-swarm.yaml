@@ -1,0 +1,403 @@
+# The Swarm tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://docs.theswarm.com/openapi.json
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: the-swarm
+display_name: The Swarm
+docs_url: https://docs.theswarm.com/openapi.json
+generated: true
+generated_from: https://docs.theswarm.com/openapi.json
+tools:
+  fetch_companies:
+    title: Fetch companies with corresponding data
+    description: Fetch companies with corresponding data Fetch companies with corresponding data (e.g.
+      tags) Calls POST /companies/fetch on the provider's API.
+    category: companies
+    request:
+      method: POST
+      path: /companies/fetch
+      body:
+        ids: ${ids}
+        linkedinNames: ${linkedin_names}
+        linkedinIds: ${linkedin_ids}
+        fields: ${fields}
+    input:
+      ids:
+        type: array
+        description: The Swarm company IDs
+        optional: true
+        items:
+          type: string
+      linkedin_names:
+        type: array
+        description: LinkedIn company URL slugs
+        optional: true
+        items:
+          type: string
+      linkedin_ids:
+        type: array
+        description: LinkedIn numeric company IDs
+        optional: true
+        items:
+          type: integer
+      fields:
+        type: array
+        description: The fields field of the request body.
+        optional: true
+        items:
+          type: string
+    output:
+      description: A list of companies with corresponding data
+      type: object
+  search_companies:
+    title: Search for companies ids
+    description: Search for companies ids Search for companies ids using the ElasticSearch Query DSL format
+      Calls POST /companies/search on the provider's API.
+    category: companies
+    request:
+      method: POST
+      path: /companies/search
+      body:
+        query: ${query}
+        limit: ${limit}
+        paginationToken: ${pagination_token}
+        stable_pagination: ${stable_pagination}
+    input:
+      query:
+        type: object
+        description: Search query in the ElasticSearch Query DSL format. Find mapping here
+      limit:
+        type: integer
+        description: Limit the number of results. If you want to use stablepagination this parameter must
+          be set to 1000
+        optional: true
+      pagination_token:
+        type: string
+        description: Pagination token received in the previous response
+        optional: true
+      stable_pagination:
+        type: boolean
+        description: When set to true, ensures that pagination results remain consistent, even if the
+          underlying data changes during retrieval. This is useful for retrieving large result sets reliably
+          across multiple requests
+        optional: true
+    output:
+      description: A list of profile ids matching provided query
+      type: object
+  get_credits_usage:
+    title: Get credits usage
+    description: Get credits usage Retrieve your team's current billing period credit usage. The API identifies
+      your team from the API key, fetches the meter usage for the active billing period, and returns the
+      number of credits already consumed. Calls GET /credits/usage on the provider's API.
+    category: credits
+    request:
+      method: GET
+      path: /credits/usage
+    input: {}
+    output:
+      description: Current credit usage for the billing period
+      type: object
+    read_only: true
+  add_connector:
+    title: Add connector(s) to the team
+    description: Add connector(s) to the team Add one or more LinkedIn users as connectors to the team
+      Calls POST /team/add-connector on the provider's API.
+    category: team
+    request:
+      method: POST
+      path: /team/add-connector
+      body:
+        linkedin_usernames: ${linkedin_usernames}
+        group: ${group}
+    input:
+      linkedin_usernames:
+        type: array
+        description: LinkedIn URL slugs of the users to add as connectors. Accepts both username-only
+          slugs (e.g. john-doe) and full profile URLs (e.g. https://linkedin.com/in/john-doe).
+        items:
+          type: string
+      group:
+        type: string
+        description: Member group to assign to the connector
+        optional: true
+        enum:
+        - others
+        - employees
+        - investors
+        - customers
+        - portfolio
+        - advisors
+    output:
+      description: Request processed; no connectors were queued (all slugs resolved to existing members
+        or none found)
+      type: object
+  create_team:
+    title: Create a child team
+    description: Create a child team Create a new child team under the authenticated team Calls POST /team/create-team
+      on the provider's API.
+    category: team
+    request:
+      method: POST
+      path: /team/create-team
+      body:
+        team_name: ${team_name}
+        owner_email: ${owner_email}
+        company_website: ${company_website}
+        company_linkedin_url: ${company_linkedin_url}
+    input:
+      team_name:
+        type: string
+        description: Name of the new team
+      owner_email:
+        type: string
+        description: Email of the team owner. If omitted, the current team's owner is used.
+        optional: true
+      company_website:
+        type: string
+        description: Company website to use for automatic network mapping. Cannot be combined with companylinkedinurl.
+        optional: true
+      company_linkedin_url:
+        type: string
+        description: Company LinkedIn URL to use for automatic network mapping. Cannot be combined with
+          companywebsite.
+        optional: true
+    output:
+      description: Team created successfully
+      type: object
+  post_partner_network_v3:
+    title: Network Mapper (Partner) — v3
+    description: Network Mapper (Partner) — v3 Partner-permission endpoint for mapping connections across
+      the partner network. Calls from API keys not tied to a team with the partner permission in Stripe
+      return 403 Forbidden. Costs 1 credit per non-empty response. Calls POST /v3/network-mapper on the
+      provider's API.
+    category: network_mapper
+    request:
+      method: POST
+      path: /v3/network-mapper
+      body:
+        query: ${query}
+        mapping_company_website: ${mapping_company_website}
+        callback_url: ${callback_url}
+    input:
+      query:
+        type: object
+        description: Search query in the ElasticSearch Query DSL format. Find mapping here
+      mapping_company_website:
+        type: string
+        description: Website of the company to map network for
+      callback_url:
+        type: string
+        description: URL to call when async mapping completes
+        optional: true
+    output:
+      description: Mapping data returned immediately
+      type: object
+  relationships_v3:
+    title: Relationships
+    description: Relationships Find connected profiles with their connection details. Renamed from Network
+      Mapper in v3. Calls POST /v3/relationships on the provider's API.
+    category: relationships
+    request:
+      method: POST
+      path: /v3/relationships
+      body:
+        query: ${query}
+        limit: ${limit}
+        pagination_token: ${pagination_token}
+    input:
+      query:
+        type: object
+        description: Search query in the ElasticSearch Query DSL format. Find mapping here
+      limit:
+        type: integer
+        description: Limit the number of results
+        optional: true
+      pagination_token:
+        type: string
+        description: Pagination token received in the previous response
+        optional: true
+    output:
+      description: list of found profiles that are connected to your team, and match your query
+      type: object
+  get_company_posts:
+    title: Get company posts
+    description: Get company posts Fetch LinkedIn posts published by a company Calls GET /social/company/posts
+      on the provider's API.
+    category: social
+    request:
+      method: GET
+      path: /social/company/posts
+      query:
+        linkedinID: ${linkedin_id}
+        linkedinName: ${linkedin_name}
+        perPage: ${per_page}
+        page: ${page}
+    input:
+      linkedin_id:
+        type: string
+        description: LinkedIn company URL slug
+        optional: true
+      linkedin_name:
+        type: string
+        description: LinkedIn company URL slug
+        optional: true
+      per_page:
+        type: integer
+        description: Number of posts per page
+        optional: true
+      page:
+        type: integer
+        description: Page number (1-based)
+        optional: true
+    output:
+      description: List of company posts
+      type: object
+    read_only: true
+  get_profile_posts:
+    title: Get profile posts
+    description: Get profile posts Fetch LinkedIn posts published by a person Calls GET /social/profile/posts
+      on the provider's API.
+    category: social
+    request:
+      method: GET
+      path: /social/profile/posts
+      query:
+        linkedinID: ${linkedin_id}
+        linkedinName: ${linkedin_name}
+        linkedinEntityID: ${linkedin_entity_id}
+        perPage: ${per_page}
+        paginationToken: ${pagination_token}
+    input:
+      linkedin_id:
+        type: string
+        description: LinkedIn URL slug of the person
+        optional: true
+      linkedin_name:
+        type: string
+        description: LinkedIn URL slug of the person
+        optional: true
+      linkedin_entity_id:
+        type: string
+        description: LinkedIn alphanumeric entity ID of the person
+        optional: true
+      per_page:
+        type: integer
+        description: Number of posts to return (max 100)
+        optional: true
+      pagination_token:
+        type: string
+        description: Pagination token from the previous response
+        optional: true
+    output:
+      description: List of posts
+      type: object
+    read_only: true
+  aggregate_profiles:
+    title: Aggregate profile field values
+    description: Aggregate profile field values Return distinct values for a single profile field matching
+      a text query (e.g. autocomplete for locations or current job titles). Calls POST /v2/profiles/aggregate
+      on the provider's API.
+    category: profiles
+    request:
+      method: POST
+      path: /v2/profiles/aggregate
+      body:
+        query: ${query}
+        field: ${field}
+    input:
+      query:
+        type: string
+        description: Text to match (minimum 3 characters)
+      field:
+        type: string
+        description: Field to aggregate
+        enum:
+        - location
+        - currentJobTitle
+    output:
+      description: Aggregated values
+      type: object
+  fetch_profiles:
+    title: Fetch profiles with corresponding data
+    description: Fetch profiles with corresponding data Fetch profiles with corresponding data (e.g. connections,
+      lists, tags) Calls POST /v2/profiles/fetch on the provider's API.
+    category: profiles
+    request:
+      method: POST
+      path: /v2/profiles/fetch
+      body:
+        ids: ${ids}
+        linkedinNames: ${linkedin_names}
+        linkedinIds: ${linkedin_ids}
+        linkedinEntityIds: ${linkedin_entity_ids}
+        fields: ${fields}
+    input:
+      ids:
+        type: array
+        description: The Swarm profile IDs
+        optional: true
+        items:
+          type: string
+      linkedin_names:
+        type: array
+        description: LinkedIn profile URL slugs
+        optional: true
+        items:
+          type: string
+      linkedin_ids:
+        type: array
+        description: LinkedIn numeric profile IDs
+        optional: true
+        items:
+          type: integer
+      linkedin_entity_ids:
+        type: array
+        description: LinkedIn alphanumeric entity IDs
+        optional: true
+        items:
+          type: string
+      fields:
+        type: array
+        description: The fields field of the request body.
+        optional: true
+        items:
+          type: string
+    output:
+      description: A list of profiles with corresponding data
+      type: object
+  network_mapper:
+    title: Find connected profiles (network mapper)
+    description: Find connected profiles (network mapper) Find connected profiles, with it's connection
+      details Calls POST /v2/profiles/network-mapper on the provider's API.
+    category: profiles
+    request:
+      method: POST
+      path: /v2/profiles/network-mapper
+      body:
+        query: ${query}
+        mapping_company_website: ${mapping_company_website}
+        callback_url: ${callback_url}
+    input:
+      query:
+        type: object
+        description: Search query in the ElasticSearch Query DSL format. Find mapping here
+      mapping_company_website:
+        type: string
+        description: Website of the company to map network for (optional)
+        optional: true
+      callback_url:
+        type: string
+        description: URL to call when async mapping completes (optional)
+        optional: true
+    output:
+      description: list of found profiles that are connected to your team, and match your query
+      type: object

@@ -1,0 +1,625 @@
+# Abyssale REST API tools.
+#
+# Abyssale renders designs -- images, animated video and GIF, HTML5 banner ads
+# and print-ready PDFs -- from templates whose layers you override per call.
+#
+# The split that matters when picking a tool: `generate_image` is synchronous
+# and answers with the file, but only for static designs and only within about
+# ten seconds. Everything else -- several formats at once, video, GIF, HTML5,
+# print -- goes through the async pair: start a generation request, then either
+# poll get_generation_request or let Abyssale call your callback_url.
+#
+# Only successful renders spend credits.
+#
+# Docs: https://developers.abyssale.com/rest-api/endpoint-catalog
+
+connector_id: abyssale
+display_name: Abyssale
+docs_url: https://developers.abyssale.com/rest-api/endpoint-catalog
+
+tools:
+
+  verify_api_key:
+    title: Verify the API key
+    description: >-
+      Check that the key works and see which workspace it belongs to. The
+      cheapest way to confirm a connection before rendering anything.
+    category: account
+    read_only: true
+    request:
+      method: POST
+      path: /auth
+    input: {}
+    output:
+      description: The key's workspace.
+      type: object
+
+  list_designs:
+    title: List designs
+    description: >-
+      List every design in the workspace, with its type -- static, animated,
+      printer or printer_multipage -- which decides whether it can be rendered
+      synchronously.
+    category: designs
+    read_only: true
+    request:
+      method: GET
+      path: /designs
+    input: {}
+    output:
+      description: The workspace's designs.
+      type: array
+      items: {type: object}
+
+  get_design:
+    title: Get a design
+    description: >-
+      Read one design in full -- its formats, its layers and each layer's
+      default value. This is how you find the layer names to override when
+      generating.
+    category: designs
+    read_only: true
+    request:
+      method: GET
+      path: /designs/${design_id}
+    input:
+      design_id:
+        type: string
+        description: The design's id, from list_designs.
+    output:
+      description: The design, with per-format layer detail.
+      type: object
+
+  get_design_format:
+    title: Get one format of a design
+    description: >-
+      Read a single format of a design -- its dimensions and the layers it
+      carries -- rather than every format the design defines.
+    category: designs
+    read_only: true
+    request:
+      method: GET
+      path: /designs/${design_id}/formats/${format}
+    input:
+      design_id:
+        type: string
+        description: The design's id.
+      format:
+        type: string
+        description: The format specifier, e.g. its name or its dimensions.
+        example: facebook-post
+    output:
+      description: The format and its layers.
+      type: object
+
+  export_design_as_import:
+    title: Export a design as import JSON
+    description: >-
+      Export a live design back into the Design Import JSON schema, which is
+      how you copy a design between workspaces or keep it in version control.
+    category: designs
+    read_only: true
+    request:
+      method: GET
+      path: /designs/${design_id}/as-import
+    input:
+      design_id:
+        type: string
+        description: The design's id.
+    output:
+      description: The design in Design Import JSON form.
+      type: object
+
+  generate_image:
+    title: Generate an image
+    description: >-
+      Render one image from a static design and get the file back in the same
+      call. Override any layer by name through `elements`; layers you leave out
+      keep the design's own defaults. Fails for animated, video or print
+      designs -- use generate_async for those.
+    category: generation
+    request:
+      method: POST
+      path: /banner-builder/${design_id}/generate
+      body:
+        elements: "${elements}"
+        template_format_name: "${template_format_name}"
+        image_file_type: "${image_file_type}"
+        file_compression_level: "${file_compression_level}"
+        original_visual_id: "${original_visual_id}"
+    input:
+      design_id:
+        type: string
+        description: The design to render, from list_designs.
+      elements:
+        type: object
+        description: >-
+          Layer overrides keyed by layer name, e.g.
+          {"title": {"payload": "Hello", "color": "#FF0000"}}. Get the layer
+          names from get_design.
+        optional: true
+      template_format_name:
+        type: string
+        description: Which format to render. Defaults to the design's first format.
+        optional: true
+      image_file_type:
+        type: string
+        description: The output file type. Defaults to jpeg, or png where the design is transparent.
+        optional: true
+        enum: [jpeg, png, webp, avif, pdf]
+      file_compression_level:
+        type: integer
+        description: Output quality from 1 to 100, where 100 is best.
+        optional: true
+        minimum: 1
+        maximum: 100
+      original_visual_id:
+        type: string
+        description: >-
+          Regenerate an existing visual in place, so its share url keeps
+          working and points at the new file.
+        optional: true
+    output:
+      description: The rendered file, with its storage and CDN urls.
+      type: object
+      properties:
+        url: {type: string}
+        cdn_url: {type: string}
+        type: {type: string}
+        filename: {type: string}
+        id: {type: string}
+        sharing_id: {type: string}
+
+  generate_async:
+    title: Generate images, video, GIF, HTML5 or print asynchronously
+    description: >-
+      Start a render that returns a request id rather than a file. This is the
+      tool for anything the synchronous one cannot do -- several formats in one
+      call, animated video or GIF, HTML5 banner ads, print PDFs. Poll
+      get_generation_request, or give a callback_url and be told.
+    category: generation
+    request:
+      method: POST
+      path: /async/banner-builder/${design_id}/generate
+      body:
+        elements: "${elements}"
+        template_format_names: "${template_format_names}"
+        image_file_type: "${image_file_type}"
+        file_compression_level: "${file_compression_level}"
+        callback_url: "${callback_url}"
+        html5: "${html5}"
+        gif: "${gif}"
+        video: "${video}"
+        print: "${print}"
+        original_visual_id: "${original_visual_id}"
+    input:
+      design_id:
+        type: string
+        description: The design to render.
+      elements:
+        type: object
+        description: Layer overrides keyed by layer name, as in generate_image.
+        optional: true
+      template_format_names:
+        type: array
+        description: Which formats to render. Omit to render every format the design defines.
+        optional: true
+        items: {type: string}
+      image_file_type:
+        type: string
+        description: >-
+          The output file type. Defaults to mp4 for an animated design and pdf
+          for a print one.
+        optional: true
+      file_compression_level:
+        type: integer
+        description: Output quality from 1 to 100, where 100 is best.
+        optional: true
+        minimum: 1
+        maximum: 100
+      callback_url:
+        type: string
+        description: >-
+          A webhook Abyssale calls when the render finishes, which is preferred
+          over polling.
+        optional: true
+      html5:
+        type: object
+        description: HTML5 banner options, for designs rendered as ad units.
+        optional: true
+      gif:
+        type: object
+        description: GIF options, such as loop and frame rate.
+        optional: true
+      video:
+        type: object
+        description: Video options, such as codec and duration.
+        optional: true
+      print:
+        type: object
+        description: Print options, such as bleed and colour profile.
+        optional: true
+      original_visual_id:
+        type: string
+        description: Regenerate an existing visual in place, keeping its share url.
+        optional: true
+    output:
+      description: The id to poll with get_generation_request.
+      type: object
+      properties:
+        generation_request_id: {type: string}
+
+  generate_multipage_pdf:
+    title: Generate a multi-page print PDF
+    description: >-
+      Start an asynchronous render of a printer_multipage design into a single
+      print-ready PDF. Answers with a request id to poll, like generate_async.
+    category: generation
+    request:
+      method: POST
+      path: /async/banner-builder/${design_id}/generate-multipage-pdf
+      body:
+        elements: "${elements}"
+        file_compression_level: "${file_compression_level}"
+        callback_url: "${callback_url}"
+        print: "${print}"
+    input:
+      design_id:
+        type: string
+        description: The printer_multipage design to render.
+      elements:
+        type: object
+        description: Layer overrides keyed by layer name, as in generate_image.
+        optional: true
+      file_compression_level:
+        type: integer
+        description: Output quality from 1 to 100, where 100 is best.
+        optional: true
+        minimum: 1
+        maximum: 100
+      callback_url:
+        type: string
+        description: A webhook Abyssale calls when the render finishes.
+        optional: true
+      print:
+        type: object
+        description: Print options, such as bleed and colour profile.
+        optional: true
+    output:
+      description: The id to poll with get_generation_request.
+      type: object
+      properties:
+        generation_request_id: {type: string}
+
+  get_generation_request:
+    title: Check an asynchronous render
+    description: >-
+      Poll a generation request. While it is still running Abyssale answers 202
+      with is_finalized false; when it is done the banners array holds the
+      files. Requests expire after seven days.
+    category: generation
+    read_only: true
+    request:
+      method: GET
+      path: /generation-request/${generation_request_id}
+    input:
+      generation_request_id:
+        type: string
+        description: The id returned by generate_async or generate_multipage_pdf.
+    output:
+      description: The render's state, and its files once finished.
+      type: object
+      properties:
+        is_finalized: {type: boolean}
+        banners: {type: array}
+        errors: {type: array}
+
+  get_banner:
+    title: Get a generated file
+    description: >-
+      Read back a file Abyssale rendered earlier -- its metadata plus its
+      storage and CDN urls -- without generating it again.
+    category: generation
+    read_only: true
+    request:
+      method: GET
+      path: /banners/${banner_id}
+    input:
+      banner_id:
+        type: string
+        description: The generated file's id.
+    output:
+      description: The file and its urls.
+      type: object
+
+  export_banners:
+    title: Export generated files as a ZIP
+    description: >-
+      Start an asynchronous export that packs previously generated files into a
+      single ZIP archive, for handing a batch of renders to someone else.
+    category: generation
+    request:
+      method: POST
+      path: /async/banners/export
+      body: "${fields}"
+    input:
+      fields:
+        type: object
+        description: >-
+          The export request, naming which generated files to pack. See the
+          endpoint catalog for the exact shape.
+    output:
+      description: The export request, to poll for the archive.
+      type: object
+
+  create_dynamic_image_url:
+    title: Create a dynamic image url
+    description: >-
+      Build a base url for a design that renders on request from parameters in
+      the url itself, rather than through a generate call. Useful for images
+      embedded in an email that must be personalised at open time.
+    category: generation
+    request:
+      method: POST
+      path: /designs/${design_id}/dynamic-image-url
+      body: "${fields}"
+    input:
+      design_id:
+        type: string
+        description: The design the url renders.
+      fields:
+        type: object
+        description: >-
+          The url's configuration -- format and which layers are addressable.
+          See the endpoint catalog for the exact shape.
+    output:
+      description: The base dynamic image url.
+      type: object
+
+  list_workspace_templates:
+    title: List workspace templates
+    description: >-
+      List the organisation-level master templates, the ones a workspace copies
+      from rather than edits in place.
+    category: templates
+    read_only: true
+    request:
+      method: GET
+      path: /workspace-templates
+    input: {}
+    output:
+      description: The organisation's templates.
+      type: array
+      items: {type: object}
+
+  list_workspace_template_categories:
+    title: List workspace template categories
+    description: >-
+      List the categories the organisation's templates are filed under, for
+      narrowing a long template list.
+    category: templates
+    read_only: true
+    request:
+      method: GET
+      path: /workspace-template-categories
+    input: {}
+    output:
+      description: The template categories.
+      type: array
+      items: {type: object}
+
+  use_workspace_template:
+    title: Copy a workspace template into a design
+    description: >-
+      Duplicate an organisation template as a new design in the workspace, so
+      it can be edited and rendered. Duplication runs asynchronously -- follow
+      it with get_template_duplication_request.
+    category: templates
+    request:
+      method: POST
+      path: /workspace-templates/${company_template_id}/use
+      body: "${fields}"
+    input:
+      company_template_id:
+        type: string
+        description: The template's id, from list_workspace_templates.
+      fields:
+        type: object
+        description: >-
+          Options for the copy, such as which project to put it in. See the
+          endpoint catalog for the exact shape.
+        optional: true
+    output:
+      description: The duplication request.
+      type: object
+
+  get_template_duplication_request:
+    title: Check a template duplication
+    description: >-
+      Poll a template duplication started by use_workspace_template, to find
+      out whether the new design is ready and what its id is.
+    category: templates
+    read_only: true
+    request:
+      method: GET
+      path: /design-duplication-requests/${duplicate_request_id}
+    input:
+      duplicate_request_id:
+        type: string
+        description: The duplication request's id.
+    output:
+      description: The duplication's state.
+      type: object
+
+  import_design:
+    title: Import a design from JSON
+    description: >-
+      Create a design from a Design Import JSON structure -- the counterpart of
+      export_design_as_import, and the way to move a design between workspaces
+      or restore one from source control.
+    category: import
+    request:
+      method: POST
+      path: /designs/import/json
+      body: "${design}"
+    input:
+      design:
+        type: object
+        description: >-
+          The design in Design Import JSON form, as produced by
+          export_design_as_import.
+    output:
+      description: The import, including its id and any assets still to upload.
+      type: object
+
+  validate_design_import:
+    title: Validate a design import
+    description: >-
+      Tell Abyssale an import's assets have finished uploading, so it can
+      validate the import and turn it into a design.
+    category: import
+    request:
+      method: PUT
+      path: /designs/import/json/${import_id}
+      body: "${fields}"
+    input:
+      import_id:
+        type: string
+        description: The import's id, from import_design.
+      fields:
+        type: object
+        description: >-
+          The validation payload. See the endpoint catalog for the exact shape.
+        optional: true
+    output:
+      description: The import's state after validation.
+      type: object
+
+  get_design_import:
+    title: Check a design import
+    description: >-
+      Poll one import to see whether it has been accepted, and what went wrong
+      if it has not.
+    category: import
+    read_only: true
+    request:
+      method: GET
+      path: /designs/import/json/${import_id}
+    input:
+      import_id:
+        type: string
+        description: The import's id.
+    output:
+      description: The import's state.
+      type: object
+
+  list_design_imports:
+    title: List design imports
+    description: >-
+      List the workspace's JSON imports, newest first, with the state each
+      one reached.
+    category: import
+    read_only: true
+    request:
+      method: GET
+      path: /designs/import/json
+    input: {}
+    output:
+      description: The workspace's imports.
+      type: array
+      items: {type: object}
+
+  list_fonts:
+    title: List fonts
+    description: >-
+      List the fonts available to text and button layers, which is what limits
+      the font names you can set through `elements`.
+    category: workspace
+    read_only: true
+    request:
+      method: GET
+      path: /fonts
+    input: {}
+    output:
+      description: The available fonts.
+      type: array
+      items: {type: object}
+
+  list_projects:
+    title: List projects
+    description: >-
+      List the workspace's projects -- the folders designs are grouped into.
+    category: workspace
+    read_only: true
+    request:
+      method: GET
+      path: /projects
+    input: {}
+    output:
+      description: The workspace's projects.
+      type: array
+      items: {type: object}
+
+  create_project:
+    title: Create a project
+    description: >-
+      Add a project to the workspace, to group designs under a client, a
+      campaign or a brand.
+    category: workspace
+    request:
+      method: POST
+      path: /projects
+      body: "${fields}"
+    input:
+      fields:
+        type: object
+        description: >-
+          The project, e.g. {"name": "Spring campaign"}. See the endpoint
+          catalog for the full shape.
+    output:
+      description: The created project.
+      type: object
+
+  get_signing_secret:
+    title: Get the webhook signing secret
+    description: >-
+      Read the secret Abyssale signs webhook deliveries with, so your callback
+      endpoint can verify that a delivery really came from Abyssale.
+    category: webhooks
+    read_only: true
+    request:
+      method: GET
+      path: /signing-secret
+    input: {}
+    output:
+      description: The current signing secret.
+      type: object
+
+  rotate_signing_secret:
+    title: Rotate the webhook signing secret
+    description: >-
+      Issue a new signing secret while the old one keeps working for a grace
+      period, so deliveries in flight still verify during a rollout.
+    category: webhooks
+    request:
+      method: POST
+      path: /signing-secret/rotate
+    input: {}
+    output:
+      description: The new signing secret.
+      type: object
+
+  revoke_signing_secret:
+    title: Revoke the previous signing secret
+    description: >-
+      End the grace period immediately and invalidate the previous signing
+      secret. Deliveries still signed with it will stop verifying.
+    category: webhooks
+    destructive: true
+    request:
+      method: POST
+      path: /signing-secret/revoke
+    input: {}
+    output:
+      description: Empty on success.
+      type: object

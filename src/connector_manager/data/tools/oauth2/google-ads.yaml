@@ -1,0 +1,3780 @@
+# Google Ads API tools.
+#
+# Every path here comes from Google's own REST client configuration for
+# v25 (googleads/google-ads-php, `*_rest_client_config.php`), so the URI
+# templates are the ones Google's libraries themselves send.
+#
+# Four things shape this API, and therefore these tools:
+#
+#   * **reads go through GAQL, not REST paths.** There is no
+#     `GET /campaigns`. You ask `search` for
+#     `SELECT campaign.id, campaign.name, metrics.clicks FROM campaign
+#      WHERE segments.date DURING LAST_30_DAYS`, and Google returns rows. The
+#     per-resource tools below are all *writes*;
+#   * **writes are batched mutations.** Each `mutate_*` tool takes an
+#     `operations` list where every entry is a `create`, `update` or `remove`,
+#     an update carries an `update_mask` naming the fields it touches, and
+#     `partial_failure` decides whether one bad operation fails the batch.
+#     `validate_only` runs the whole thing without applying it -- worth using
+#     before any large change, since this API spends real advertising budget;
+#   * **the customer id is digits only**, no dashes, and a manager (MCC)
+#     account reaches its clients through the `login-customer-id` header, which
+#     the connection sets;
+#   * **a developer token is required** on every call and is also set by the
+#     connection. A token still in test status only reaches test accounts.
+#
+# `list_accessible_customers` is where to start: it returns the accounts this
+# token can act on at all.
+#
+# Version note: the paths pin v25. Google supports each major version for about
+# a year, so this pack is expected to be re-pinned as versions retire.
+#
+# Docs: https://developers.google.com/google-ads/api/rest/overview
+
+connector_id: google-ads
+display_name: Google Ads
+docs_url: https://developers.google.com/google-ads/api/rest/overview
+scope_rules:
+  strip_prefixes:
+  - https://www.googleapis.com/auth/
+tools:
+  list_insights_eligible_dates:
+    title: List insights eligible dates
+    description: Call the Google Ads API's ListInsightsEligibleDates method for insights eligible dates.
+    category: planning
+    request:
+      method: POST
+      path: /v25/audienceInsights:listInsightsEligibleDates
+      body: ${body}
+    input:
+      body:
+        type: object
+        description: The ListInsightsEligibleDatesRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The ListInsightsEligibleDatesResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_ad_group_criterion_customizers:
+    title: Mutate ad group criterion customizers
+    description: 'Create, update or remove ad group criterion customizers in one call. Google Ads writes
+      are always batched: `operations` carries a list, each entry a create, update or remove, and an update
+      needs its `update_mask`. Set `partial_failure` to let the good operations through when one fails,
+      and `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/AdGroupCriterionCustomizers:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateAdGroupCriterionCustomizersRequest body, as the Google Ads API reference
+          defines it.
+    output:
+      description: The MutateAdGroupCriterionCustomizersResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_campaign_goal_configs:
+    title: Mutate campaign goal configs
+    description: 'Create, update or remove campaign goal configs in one call. Google Ads writes are always
+      batched: `operations` carries a list, each entry a create, update or remove, and an update needs
+      its `update_mask`. Set `partial_failure` to let the good operations through when one fails, and
+      `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/CampaignGoalConfigs:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateCampaignGoalConfigsRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateCampaignGoalConfigsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_customer_customizers:
+    title: Mutate customer customizers
+    description: 'Create, update or remove customer customizers in one call. Google Ads writes are always
+      batched: `operations` carries a list, each entry a create, update or remove, and an update needs
+      its `update_mask`. Set `partial_failure` to let the good operations through when one fails, and
+      `validate_only` to check a batch without applying it.'
+    category: accounts
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/CustomerCustomizers:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateCustomerCustomizersRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateCustomerCustomizersResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_goals:
+    title: Mutate goals
+    description: 'Create, update or remove goals in one call. Google Ads writes are always batched: `operations`
+      carries a list, each entry a create, update or remove, and an update needs its `update_mask`. Set
+      `partial_failure` to let the good operations through when one fails, and `validate_only` to check
+      a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/Goals:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateGoalsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateGoalsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_account_budget_proposal:
+    title: Mutate account budget proposal
+    description: 'Create, update or remove account budget proposal in one call. Google Ads writes are
+      always batched: `operations` carries a list, each entry a create, update or remove, and an update
+      needs its `update_mask`. Set `partial_failure` to let the good operations through when one fails,
+      and `validate_only` to check a batch without applying it.'
+    category: accounts
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/accountBudgetProposals:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateAccountBudgetProposalRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateAccountBudgetProposalResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  create_account_link:
+    title: Create account link
+    description: Call the Google Ads API's CreateAccountLink method for account link.
+    category: accounts
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/accountLinks:create
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The CreateAccountLinkRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The CreateAccountLinkResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_account_link:
+    title: Mutate account link
+    description: 'Create, update or remove account link in one call. Google Ads writes are always batched:
+      `operations` carries a list, each entry a create, update or remove, and an update needs its `update_mask`.
+      Set `partial_failure` to let the good operations through when one fails, and `validate_only` to
+      check a batch without applying it.'
+    category: accounts
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/accountLinks:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateAccountLinkRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateAccountLinkResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_ad_group_ad_labels:
+    title: Mutate ad group ad labels
+    description: 'Create, update or remove ad group ad labels in one call. Google Ads writes are always
+      batched: `operations` carries a list, each entry a create, update or remove, and an update needs
+      its `update_mask`. Set `partial_failure` to let the good operations through when one fails, and
+      `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/adGroupAdLabels:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateAdGroupAdLabelsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateAdGroupAdLabelsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_ad_group_ads:
+    title: Mutate ad group ads
+    description: 'Create, update or remove ad group ads in one call. Google Ads writes are always batched:
+      `operations` carries a list, each entry a create, update or remove, and an update needs its `update_mask`.
+      Set `partial_failure` to let the good operations through when one fails, and `validate_only` to
+      check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/adGroupAds:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateAdGroupAdsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateAdGroupAdsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_ad_group_asset_sets:
+    title: Mutate ad group asset sets
+    description: 'Create, update or remove ad group asset sets in one call. Google Ads writes are always
+      batched: `operations` carries a list, each entry a create, update or remove, and an update needs
+      its `update_mask`. Set `partial_failure` to let the good operations through when one fails, and
+      `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/adGroupAssetSets:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateAdGroupAssetSetsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateAdGroupAssetSetsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_ad_group_assets:
+    title: Mutate ad group assets
+    description: 'Create, update or remove ad group assets in one call. Google Ads writes are always batched:
+      `operations` carries a list, each entry a create, update or remove, and an update needs its `update_mask`.
+      Set `partial_failure` to let the good operations through when one fails, and `validate_only` to
+      check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/adGroupAssets:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateAdGroupAssetsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateAdGroupAssetsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_ad_group_bid_modifiers:
+    title: Mutate ad group bid modifiers
+    description: 'Create, update or remove ad group bid modifiers in one call. Google Ads writes are always
+      batched: `operations` carries a list, each entry a create, update or remove, and an update needs
+      its `update_mask`. Set `partial_failure` to let the good operations through when one fails, and
+      `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/adGroupBidModifiers:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateAdGroupBidModifiersRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateAdGroupBidModifiersResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_ad_group_criteria:
+    title: Mutate ad group criteria
+    description: 'Create, update or remove ad group criteria in one call. Google Ads writes are always
+      batched: `operations` carries a list, each entry a create, update or remove, and an update needs
+      its `update_mask`. Set `partial_failure` to let the good operations through when one fails, and
+      `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/adGroupCriteria:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateAdGroupCriteriaRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateAdGroupCriteriaResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_ad_group_criterion_labels:
+    title: Mutate ad group criterion labels
+    description: 'Create, update or remove ad group criterion labels in one call. Google Ads writes are
+      always batched: `operations` carries a list, each entry a create, update or remove, and an update
+      needs its `update_mask`. Set `partial_failure` to let the good operations through when one fails,
+      and `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/adGroupCriterionLabels:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateAdGroupCriterionLabelsRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateAdGroupCriterionLabelsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_ad_group_customizers:
+    title: Mutate ad group customizers
+    description: 'Create, update or remove ad group customizers in one call. Google Ads writes are always
+      batched: `operations` carries a list, each entry a create, update or remove, and an update needs
+      its `update_mask`. Set `partial_failure` to let the good operations through when one fails, and
+      `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/adGroupCustomizers:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateAdGroupCustomizersRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateAdGroupCustomizersResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_ad_group_labels:
+    title: Mutate ad group labels
+    description: 'Create, update or remove ad group labels in one call. Google Ads writes are always batched:
+      `operations` carries a list, each entry a create, update or remove, and an update needs its `update_mask`.
+      Set `partial_failure` to let the good operations through when one fails, and `validate_only` to
+      check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/adGroupLabels:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateAdGroupLabelsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateAdGroupLabelsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_ad_groups:
+    title: Mutate ad groups
+    description: 'Create, update or remove ad groups in one call. Google Ads writes are always batched:
+      `operations` carries a list, each entry a create, update or remove, and an update needs its `update_mask`.
+      Set `partial_failure` to let the good operations through when one fails, and `validate_only` to
+      check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/adGroups:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateAdGroupsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateAdGroupsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_ad_parameters:
+    title: Mutate ad parameters
+    description: 'Create, update or remove ad parameters in one call. Google Ads writes are always batched:
+      `operations` carries a list, each entry a create, update or remove, and an update needs its `update_mask`.
+      Set `partial_failure` to let the good operations through when one fails, and `validate_only` to
+      check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/adParameters:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateAdParametersRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateAdParametersResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_ads:
+    title: Mutate ads
+    description: 'Create, update or remove ads in one call. Google Ads writes are always batched: `operations`
+      carries a list, each entry a create, update or remove, and an update needs its `update_mask`. Set
+      `partial_failure` to let the good operations through when one fails, and `validate_only` to check
+      a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/ads:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateAdsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateAdsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  generate_images:
+    title: Generate images
+    description: Call the Google Ads API's GenerateImages method for images.
+    category: planning
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/assetGenerations:generateImages
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The GenerateImagesRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The GenerateImagesResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  generate_text:
+    title: Generate text
+    description: Call the Google Ads API's GenerateText method for text.
+    category: planning
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/assetGenerations:generateText
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The GenerateTextRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The GenerateTextResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_asset_group_assets:
+    title: Mutate asset group assets
+    description: 'Create, update or remove asset group assets in one call. Google Ads writes are always
+      batched: `operations` carries a list, each entry a create, update or remove, and an update needs
+      its `update_mask`. Set `partial_failure` to let the good operations through when one fails, and
+      `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/assetGroupAssets:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateAssetGroupAssetsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateAssetGroupAssetsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_asset_group_listing_group_filters:
+    title: Mutate asset group listing group filters
+    description: 'Create, update or remove asset group listing group filters in one call. Google Ads writes
+      are always batched: `operations` carries a list, each entry a create, update or remove, and an update
+      needs its `update_mask`. Set `partial_failure` to let the good operations through when one fails,
+      and `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/assetGroupListingGroupFilters:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateAssetGroupListingGroupFiltersRequest body, as the Google Ads API reference
+          defines it.
+    output:
+      description: The MutateAssetGroupListingGroupFiltersResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_asset_group_signals:
+    title: Mutate asset group signals
+    description: 'Create, update or remove asset group signals in one call. Google Ads writes are always
+      batched: `operations` carries a list, each entry a create, update or remove, and an update needs
+      its `update_mask`. Set `partial_failure` to let the good operations through when one fails, and
+      `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/assetGroupSignals:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateAssetGroupSignalsRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateAssetGroupSignalsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_asset_groups:
+    title: Mutate asset groups
+    description: 'Create, update or remove asset groups in one call. Google Ads writes are always batched:
+      `operations` carries a list, each entry a create, update or remove, and an update needs its `update_mask`.
+      Set `partial_failure` to let the good operations through when one fails, and `validate_only` to
+      check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/assetGroups:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateAssetGroupsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateAssetGroupsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_asset_set_assets:
+    title: Mutate asset set assets
+    description: 'Create, update or remove asset set assets in one call. Google Ads writes are always
+      batched: `operations` carries a list, each entry a create, update or remove, and an update needs
+      its `update_mask`. Set `partial_failure` to let the good operations through when one fails, and
+      `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/assetSetAssets:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateAssetSetAssetsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateAssetSetAssetsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_asset_sets:
+    title: Mutate asset sets
+    description: 'Create, update or remove asset sets in one call. Google Ads writes are always batched:
+      `operations` carries a list, each entry a create, update or remove, and an update needs its `update_mask`.
+      Set `partial_failure` to let the good operations through when one fails, and `validate_only` to
+      check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/assetSets:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateAssetSetsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateAssetSetsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_assets:
+    title: Mutate assets
+    description: 'Create, update or remove assets in one call. Google Ads writes are always batched: `operations`
+      carries a list, each entry a create, update or remove, and an update needs its `update_mask`. Set
+      `partial_failure` to let the good operations through when one fails, and `validate_only` to check
+      a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/assets:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateAssetsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateAssetsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_audiences:
+    title: Mutate audiences
+    description: 'Create, update or remove audiences in one call. Google Ads writes are always batched:
+      `operations` carries a list, each entry a create, update or remove, and an update needs its `update_mask`.
+      Set `partial_failure` to let the good operations through when one fails, and `validate_only` to
+      check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/audiences:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateAudiencesRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateAudiencesResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_batch_job:
+    title: Mutate batch job
+    description: 'Create, update or remove batch job in one call. Google Ads writes are always batched:
+      `operations` carries a list, each entry a create, update or remove, and an update needs its `update_mask`.
+      Set `partial_failure` to let the good operations through when one fails, and `validate_only` to
+      check a batch without applying it.'
+    category: batch
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/batchJobs:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateBatchJobRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateBatchJobResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_bidding_data_exclusions:
+    title: Mutate bidding data exclusions
+    description: 'Create, update or remove bidding data exclusions in one call. Google Ads writes are
+      always batched: `operations` carries a list, each entry a create, update or remove, and an update
+      needs its `update_mask`. Set `partial_failure` to let the good operations through when one fails,
+      and `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/biddingDataExclusions:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateBiddingDataExclusionsRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateBiddingDataExclusionsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_bidding_seasonality_adjustments:
+    title: Mutate bidding seasonality adjustments
+    description: 'Create, update or remove bidding seasonality adjustments in one call. Google Ads writes
+      are always batched: `operations` carries a list, each entry a create, update or remove, and an update
+      needs its `update_mask`. Set `partial_failure` to let the good operations through when one fails,
+      and `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/biddingSeasonalityAdjustments:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateBiddingSeasonalityAdjustmentsRequest body, as the Google Ads API reference
+          defines it.
+    output:
+      description: The MutateBiddingSeasonalityAdjustmentsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_bidding_strategies:
+    title: Mutate bidding strategies
+    description: 'Create, update or remove bidding strategies in one call. Google Ads writes are always
+      batched: `operations` carries a list, each entry a create, update or remove, and an update needs
+      its `update_mask`. Set `partial_failure` to let the good operations through when one fails, and
+      `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/biddingStrategies:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateBiddingStrategiesRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateBiddingStrategiesResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_billing_setup:
+    title: Mutate billing setup
+    description: 'Create, update or remove billing setup in one call. Google Ads writes are always batched:
+      `operations` carries a list, each entry a create, update or remove, and an update needs its `update_mask`.
+      Set `partial_failure` to let the good operations through when one fails, and `validate_only` to
+      check a batch without applying it.'
+    category: accounts
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/billingSetups:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateBillingSetupRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateBillingSetupResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_campaign_asset_sets:
+    title: Mutate campaign asset sets
+    description: 'Create, update or remove campaign asset sets in one call. Google Ads writes are always
+      batched: `operations` carries a list, each entry a create, update or remove, and an update needs
+      its `update_mask`. Set `partial_failure` to let the good operations through when one fails, and
+      `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/campaignAssetSets:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateCampaignAssetSetsRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateCampaignAssetSetsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_campaign_assets:
+    title: Mutate campaign assets
+    description: 'Create, update or remove campaign assets in one call. Google Ads writes are always batched:
+      `operations` carries a list, each entry a create, update or remove, and an update needs its `update_mask`.
+      Set `partial_failure` to let the good operations through when one fails, and `validate_only` to
+      check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/campaignAssets:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateCampaignAssetsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateCampaignAssetsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_campaign_bid_modifiers:
+    title: Mutate campaign bid modifiers
+    description: 'Create, update or remove campaign bid modifiers in one call. Google Ads writes are always
+      batched: `operations` carries a list, each entry a create, update or remove, and an update needs
+      its `update_mask`. Set `partial_failure` to let the good operations through when one fails, and
+      `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/campaignBidModifiers:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateCampaignBidModifiersRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateCampaignBidModifiersResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_campaign_budgets:
+    title: Mutate campaign budgets
+    description: 'Create, update or remove campaign budgets in one call. Google Ads writes are always
+      batched: `operations` carries a list, each entry a create, update or remove, and an update needs
+      its `update_mask`. Set `partial_failure` to let the good operations through when one fails, and
+      `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/campaignBudgets:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateCampaignBudgetsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateCampaignBudgetsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_campaign_conversion_goals:
+    title: Mutate campaign conversion goals
+    description: 'Create, update or remove campaign conversion goals in one call. Google Ads writes are
+      always batched: `operations` carries a list, each entry a create, update or remove, and an update
+      needs its `update_mask`. Set `partial_failure` to let the good operations through when one fails,
+      and `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/campaignConversionGoals:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateCampaignConversionGoalsRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateCampaignConversionGoalsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_campaign_criteria:
+    title: Mutate campaign criteria
+    description: 'Create, update or remove campaign criteria in one call. Google Ads writes are always
+      batched: `operations` carries a list, each entry a create, update or remove, and an update needs
+      its `update_mask`. Set `partial_failure` to let the good operations through when one fails, and
+      `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/campaignCriteria:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateCampaignCriteriaRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateCampaignCriteriaResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_campaign_customizers:
+    title: Mutate campaign customizers
+    description: 'Create, update or remove campaign customizers in one call. Google Ads writes are always
+      batched: `operations` carries a list, each entry a create, update or remove, and an update needs
+      its `update_mask`. Set `partial_failure` to let the good operations through when one fails, and
+      `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/campaignCustomizers:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateCampaignCustomizersRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateCampaignCustomizersResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_campaign_drafts:
+    title: Mutate campaign drafts
+    description: 'Create, update or remove campaign drafts in one call. Google Ads writes are always batched:
+      `operations` carries a list, each entry a create, update or remove, and an update needs its `update_mask`.
+      Set `partial_failure` to let the good operations through when one fails, and `validate_only` to
+      check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/campaignDrafts:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateCampaignDraftsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateCampaignDraftsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_campaign_groups:
+    title: Mutate campaign groups
+    description: 'Create, update or remove campaign groups in one call. Google Ads writes are always batched:
+      `operations` carries a list, each entry a create, update or remove, and an update needs its `update_mask`.
+      Set `partial_failure` to let the good operations through when one fails, and `validate_only` to
+      check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/campaignGroups:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateCampaignGroupsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateCampaignGroupsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_campaign_labels:
+    title: Mutate campaign labels
+    description: 'Create, update or remove campaign labels in one call. Google Ads writes are always batched:
+      `operations` carries a list, each entry a create, update or remove, and an update needs its `update_mask`.
+      Set `partial_failure` to let the good operations through when one fails, and `validate_only` to
+      check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/campaignLabels:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateCampaignLabelsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateCampaignLabelsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_campaign_shared_sets:
+    title: Mutate campaign shared sets
+    description: 'Create, update or remove campaign shared sets in one call. Google Ads writes are always
+      batched: `operations` carries a list, each entry a create, update or remove, and an update needs
+      its `update_mask`. Set `partial_failure` to let the good operations through when one fails, and
+      `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/campaignSharedSets:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateCampaignSharedSetsRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateCampaignSharedSetsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  enable_pmax_brand_guidelines:
+    title: Enable pmax brand guidelines
+    description: Call the Google Ads API's EnablePMaxBrandGuidelines method for pmax brand guidelines.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/campaigns:enablePMaxBrandGuidelines
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The EnablePMaxBrandGuidelinesRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The EnablePMaxBrandGuidelinesResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_campaigns:
+    title: Mutate campaigns
+    description: 'Create, update or remove campaigns in one call. Google Ads writes are always batched:
+      `operations` carries a list, each entry a create, update or remove, and an update needs its `update_mask`.
+      Set `partial_failure` to let the good operations through when one fails, and `validate_only` to
+      check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/campaigns:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateCampaignsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateCampaignsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_conversion_actions:
+    title: Mutate conversion actions
+    description: 'Create, update or remove conversion actions in one call. Google Ads writes are always
+      batched: `operations` carries a list, each entry a create, update or remove, and an update needs
+      its `update_mask`. Set `partial_failure` to let the good operations through when one fails, and
+      `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/conversionActions:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateConversionActionsRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateConversionActionsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_conversion_custom_variables:
+    title: Mutate conversion custom variables
+    description: 'Create, update or remove conversion custom variables in one call. Google Ads writes
+      are always batched: `operations` carries a list, each entry a create, update or remove, and an update
+      needs its `update_mask`. Set `partial_failure` to let the good operations through when one fails,
+      and `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/conversionCustomVariables:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateConversionCustomVariablesRequest body, as the Google Ads API reference
+          defines it.
+    output:
+      description: The MutateConversionCustomVariablesResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_conversion_goal_campaign_configs:
+    title: Mutate conversion goal campaign configs
+    description: 'Create, update or remove conversion goal campaign configs in one call. Google Ads writes
+      are always batched: `operations` carries a list, each entry a create, update or remove, and an update
+      needs its `update_mask`. Set `partial_failure` to let the good operations through when one fails,
+      and `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/conversionGoalCampaignConfigs:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateConversionGoalCampaignConfigsRequest body, as the Google Ads API reference
+          defines it.
+    output:
+      description: The MutateConversionGoalCampaignConfigsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_conversion_value_rule_sets:
+    title: Mutate conversion value rule sets
+    description: 'Create, update or remove conversion value rule sets in one call. Google Ads writes are
+      always batched: `operations` carries a list, each entry a create, update or remove, and an update
+      needs its `update_mask`. Set `partial_failure` to let the good operations through when one fails,
+      and `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/conversionValueRuleSets:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateConversionValueRuleSetsRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateConversionValueRuleSetsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_conversion_value_rules:
+    title: Mutate conversion value rules
+    description: 'Create, update or remove conversion value rules in one call. Google Ads writes are always
+      batched: `operations` carries a list, each entry a create, update or remove, and an update needs
+      its `update_mask`. Set `partial_failure` to let the good operations through when one fails, and
+      `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/conversionValueRules:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateConversionValueRulesRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateConversionValueRulesResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_custom_audiences:
+    title: Mutate custom audiences
+    description: 'Create, update or remove custom audiences in one call. Google Ads writes are always
+      batched: `operations` carries a list, each entry a create, update or remove, and an update needs
+      its `update_mask`. Set `partial_failure` to let the good operations through when one fails, and
+      `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/customAudiences:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateCustomAudiencesRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateCustomAudiencesResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_custom_conversion_goals:
+    title: Mutate custom conversion goals
+    description: 'Create, update or remove custom conversion goals in one call. Google Ads writes are
+      always batched: `operations` carries a list, each entry a create, update or remove, and an update
+      needs its `update_mask`. Set `partial_failure` to let the good operations through when one fails,
+      and `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/customConversionGoals:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateCustomConversionGoalsRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateCustomConversionGoalsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_custom_interests:
+    title: Mutate custom interests
+    description: 'Create, update or remove custom interests in one call. Google Ads writes are always
+      batched: `operations` carries a list, each entry a create, update or remove, and an update needs
+      its `update_mask`. Set `partial_failure` to let the good operations through when one fails, and
+      `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/customInterests:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateCustomInterestsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateCustomInterestsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_customer_asset_sets:
+    title: Mutate customer asset sets
+    description: 'Create, update or remove customer asset sets in one call. Google Ads writes are always
+      batched: `operations` carries a list, each entry a create, update or remove, and an update needs
+      its `update_mask`. Set `partial_failure` to let the good operations through when one fails, and
+      `validate_only` to check a batch without applying it.'
+    category: accounts
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/customerAssetSets:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateCustomerAssetSetsRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateCustomerAssetSetsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_customer_assets:
+    title: Mutate customer assets
+    description: 'Create, update or remove customer assets in one call. Google Ads writes are always batched:
+      `operations` carries a list, each entry a create, update or remove, and an update needs its `update_mask`.
+      Set `partial_failure` to let the good operations through when one fails, and `validate_only` to
+      check a batch without applying it.'
+    category: accounts
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/customerAssets:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateCustomerAssetsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateCustomerAssetsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_customer_client_link:
+    title: Mutate customer client link
+    description: 'Create, update or remove customer client link in one call. Google Ads writes are always
+      batched: `operations` carries a list, each entry a create, update or remove, and an update needs
+      its `update_mask`. Set `partial_failure` to let the good operations through when one fails, and
+      `validate_only` to check a batch without applying it.'
+    category: accounts
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/customerClientLinks:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateCustomerClientLinkRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateCustomerClientLinkResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_customer_conversion_goals:
+    title: Mutate customer conversion goals
+    description: 'Create, update or remove customer conversion goals in one call. Google Ads writes are
+      always batched: `operations` carries a list, each entry a create, update or remove, and an update
+      needs its `update_mask`. Set `partial_failure` to let the good operations through when one fails,
+      and `validate_only` to check a batch without applying it.'
+    category: accounts
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/customerConversionGoals:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateCustomerConversionGoalsRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateCustomerConversionGoalsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_customer_labels:
+    title: Mutate customer labels
+    description: 'Create, update or remove customer labels in one call. Google Ads writes are always batched:
+      `operations` carries a list, each entry a create, update or remove, and an update needs its `update_mask`.
+      Set `partial_failure` to let the good operations through when one fails, and `validate_only` to
+      check a batch without applying it.'
+    category: accounts
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/customerLabels:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateCustomerLabelsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateCustomerLabelsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  move_manager_link:
+    title: Move manager link
+    description: Call the Google Ads API's MoveManagerLink method for move manager link.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/customerManagerLinks:moveManagerLink
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MoveManagerLinkRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MoveManagerLinkResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_customer_manager_link:
+    title: Mutate customer manager link
+    description: 'Create, update or remove customer manager link in one call. Google Ads writes are always
+      batched: `operations` carries a list, each entry a create, update or remove, and an update needs
+      its `update_mask`. Set `partial_failure` to let the good operations through when one fails, and
+      `validate_only` to check a batch without applying it.'
+    category: accounts
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/customerManagerLinks:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateCustomerManagerLinkRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateCustomerManagerLinkResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_customer_negative_criteria:
+    title: Mutate customer negative criteria
+    description: 'Create, update or remove customer negative criteria in one call. Google Ads writes are
+      always batched: `operations` carries a list, each entry a create, update or remove, and an update
+      needs its `update_mask`. Set `partial_failure` to let the good operations through when one fails,
+      and `validate_only` to check a batch without applying it.'
+    category: accounts
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/customerNegativeCriteria:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateCustomerNegativeCriteriaRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateCustomerNegativeCriteriaResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_customer_sk_ad_network_conversion_value_schema:
+    title: Mutate customer sk ad network conversion value schema
+    description: 'Create, update or remove customer sk ad network conversion value schema in one call.
+      Google Ads writes are always batched: `operations` carries a list, each entry a create, update or
+      remove, and an update needs its `update_mask`. Set `partial_failure` to let the good operations
+      through when one fails, and `validate_only` to check a batch without applying it.'
+    category: accounts
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/customerSkAdNetworkConversionValueSchemas:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateCustomerSkAdNetworkConversionValueSchemaRequest body, as the Google Ads
+          API reference defines it.
+    output:
+      description: The MutateCustomerSkAdNetworkConversionValueSchemaResponse, as the Google Ads API defines
+        it.
+      type: object
+    scopes:
+    - adwords
+  mutate_customer_user_access_invitation:
+    title: Mutate customer user access invitation
+    description: 'Create, update or remove customer user access invitation in one call. Google Ads writes
+      are always batched: `operations` carries a list, each entry a create, update or remove, and an update
+      needs its `update_mask`. Set `partial_failure` to let the good operations through when one fails,
+      and `validate_only` to check a batch without applying it.'
+    category: accounts
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/customerUserAccessInvitations:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateCustomerUserAccessInvitationRequest body, as the Google Ads API reference
+          defines it.
+    output:
+      description: The MutateCustomerUserAccessInvitationResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_customer_user_access:
+    title: Mutate customer user access
+    description: 'Create, update or remove customer user access in one call. Google Ads writes are always
+      batched: `operations` carries a list, each entry a create, update or remove, and an update needs
+      its `update_mask`. Set `partial_failure` to let the good operations through when one fails, and
+      `validate_only` to check a batch without applying it.'
+    category: accounts
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/customerUserAccesses:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateCustomerUserAccessRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateCustomerUserAccessResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_customizer_attributes:
+    title: Mutate customizer attributes
+    description: 'Create, update or remove customizer attributes in one call. Google Ads writes are always
+      batched: `operations` carries a list, each entry a create, update or remove, and an update needs
+      its `update_mask`. Set `partial_failure` to let the good operations through when one fails, and
+      `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/customizerAttributes:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateCustomizerAttributesRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateCustomizerAttributesResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  create_data_link:
+    title: Create data link
+    description: Call the Google Ads API's CreateDataLink method for data link.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/dataLinks:create
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The CreateDataLinkRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The CreateDataLinkResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  remove_data_link:
+    title: Remove data link
+    description: Call the Google Ads API's RemoveDataLink method for remove data link.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/dataLinks:remove
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The RemoveDataLinkRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The RemoveDataLinkResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  update_data_link:
+    title: Update data link
+    description: Call the Google Ads API's UpdateDataLink method for update data link.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/dataLinks:update
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The UpdateDataLinkRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The UpdateDataLinkResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_experiment_arms:
+    title: Mutate experiment arms
+    description: 'Create, update or remove experiment arms in one call. Google Ads writes are always batched:
+      `operations` carries a list, each entry a create, update or remove, and an update needs its `update_mask`.
+      Set `partial_failure` to let the good operations through when one fails, and `validate_only` to
+      check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/experimentArms:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateExperimentArmsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateExperimentArmsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_experiments:
+    title: Mutate experiments
+    description: 'Create, update or remove experiments in one call. Google Ads writes are always batched:
+      `operations` carries a list, each entry a create, update or remove, and an update needs its `update_mask`.
+      Set `partial_failure` to let the good operations through when one fails, and `validate_only` to
+      check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/experiments:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateExperimentsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateExperimentsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  get_identity_verification:
+    title: Get identity verification
+    description: Read identity verification. Calls the Google Ads API's GetIdentityVerification method.
+    category: campaign_management
+    request:
+      method: GET
+      path: /v25/customers/${customer_id}/getIdentityVerification
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+    output:
+      description: The GetIdentityVerificationResponse, as the Google Ads API defines it.
+      type: object
+    read_only: true
+    scopes:
+    - adwords
+  mutate_resources:
+    title: Mutate several resource types at once
+    description: 'Create, update or remove mutate in one call. Google Ads writes are always batched: `operations`
+      carries a list, each entry a create, update or remove, and an update needs its `update_mask`. Set
+      `partial_failure` to let the good operations through when one fails, and `validate_only` to check
+      a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/googleAds:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  search:
+    title: Run a GAQL query
+    description: Run a Google Ads Query Language query and page through the rows. GAQL selects fields
+      from one resource with its metrics and segments -- `SELECT campaign.name, metrics.clicks FROM campaign
+      WHERE segments.date DURING LAST_30_DAYS`. This is how nearly all reporting data leaves Google Ads.
+    category: reporting
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/googleAds:search
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The SearchRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The SearchResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  search_stream:
+    title: Run a GAQL query as a stream
+    description: Run a GAQL query and stream every row back in one response rather than paging. Faster
+      for a large export, but the whole result must be consumed at once -- `search` is the better choice
+      when you want to page.
+    category: reporting
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/googleAds:searchStream
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The SearchStreamRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The SearchStreamResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  apply_incentive:
+    title: Apply incentive
+    description: Call the Google Ads API's ApplyIncentive method for apply incentive.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/incentives/${selected_incentive_id}:applyIncentive
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      selected_incentive_id:
+        type: string
+        description: The selected incentive id.
+      body:
+        type: object
+        description: The ApplyIncentiveRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The ApplyIncentiveResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  list_invoices:
+    title: List invoices
+    description: Read invoices. Calls the Google Ads API's ListInvoices method.
+    category: accounts
+    request:
+      method: GET
+      path: /v25/customers/${customer_id}/invoices
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+    output:
+      description: The ListInvoicesResponse, as the Google Ads API defines it.
+      type: object
+    read_only: true
+    scopes:
+    - adwords
+  mutate_keyword_plan_ad_group_keywords:
+    title: Mutate keyword plan ad group keywords
+    description: 'Create, update or remove keyword plan ad group keywords in one call. Google Ads writes
+      are always batched: `operations` carries a list, each entry a create, update or remove, and an update
+      needs its `update_mask`. Set `partial_failure` to let the good operations through when one fails,
+      and `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/keywordPlanAdGroupKeywords:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateKeywordPlanAdGroupKeywordsRequest body, as the Google Ads API reference
+          defines it.
+    output:
+      description: The MutateKeywordPlanAdGroupKeywordsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_keyword_plan_ad_groups:
+    title: Mutate keyword plan ad groups
+    description: 'Create, update or remove keyword plan ad groups in one call. Google Ads writes are always
+      batched: `operations` carries a list, each entry a create, update or remove, and an update needs
+      its `update_mask`. Set `partial_failure` to let the good operations through when one fails, and
+      `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/keywordPlanAdGroups:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateKeywordPlanAdGroupsRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateKeywordPlanAdGroupsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_keyword_plan_campaign_keywords:
+    title: Mutate keyword plan campaign keywords
+    description: 'Create, update or remove keyword plan campaign keywords in one call. Google Ads writes
+      are always batched: `operations` carries a list, each entry a create, update or remove, and an update
+      needs its `update_mask`. Set `partial_failure` to let the good operations through when one fails,
+      and `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/keywordPlanCampaignKeywords:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateKeywordPlanCampaignKeywordsRequest body, as the Google Ads API reference
+          defines it.
+    output:
+      description: The MutateKeywordPlanCampaignKeywordsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_keyword_plan_campaigns:
+    title: Mutate keyword plan campaigns
+    description: 'Create, update or remove keyword plan campaigns in one call. Google Ads writes are always
+      batched: `operations` carries a list, each entry a create, update or remove, and an update needs
+      its `update_mask`. Set `partial_failure` to let the good operations through when one fails, and
+      `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/keywordPlanCampaigns:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateKeywordPlanCampaignsRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateKeywordPlanCampaignsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_keyword_plans:
+    title: Mutate keyword plans
+    description: 'Create, update or remove keyword plans in one call. Google Ads writes are always batched:
+      `operations` carries a list, each entry a create, update or remove, and an update needs its `update_mask`.
+      Set `partial_failure` to let the good operations through when one fails, and `validate_only` to
+      check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/keywordPlans:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateKeywordPlansRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateKeywordPlansResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_labels:
+    title: Mutate labels
+    description: 'Create, update or remove labels in one call. Google Ads writes are always batched: `operations`
+      carries a list, each entry a create, update or remove, and an update needs its `update_mask`. Set
+      `partial_failure` to let the good operations through when one fails, and `validate_only` to check
+      a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/labels:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateLabelsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateLabelsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  append_lead_conversation:
+    title: Append lead conversation
+    description: Call the Google Ads API's AppendLeadConversation method for append lead conversation.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/localServices:appendLeadConversation
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The AppendLeadConversationRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The AppendLeadConversationResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  resolve_multi_party_auth_review:
+    title: Resolve multi party auth review
+    description: Call the Google Ads API's ResolveMultiPartyAuthReview method for resolve multi party
+      auth review.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/multiPartyAuthReview:resolve
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The ResolveMultiPartyAuthReviewRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The ResolveMultiPartyAuthReviewResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  create_offline_user_data_job:
+    title: Create offline user data job
+    description: Call the Google Ads API's CreateOfflineUserDataJob method for offline user data job.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/offlineUserDataJobs:create
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The CreateOfflineUserDataJobRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The CreateOfflineUserDataJobResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  list_payments_accounts:
+    title: List payments accounts
+    description: Read payments accounts. Calls the Google Ads API's ListPaymentsAccounts method.
+    category: accounts
+    request:
+      method: GET
+      path: /v25/customers/${customer_id}/paymentsAccounts
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+    output:
+      description: The ListPaymentsAccountsResponse, as the Google Ads API defines it.
+      type: object
+    read_only: true
+    scopes:
+    - adwords
+  create_product_link_invitation:
+    title: Create product link invitation
+    description: Call the Google Ads API's CreateProductLinkInvitation method for product link invitation.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/productLinkInvitations:create
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The CreateProductLinkInvitationRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The CreateProductLinkInvitationResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  remove_product_link_invitation:
+    title: Remove product link invitation
+    description: Call the Google Ads API's RemoveProductLinkInvitation method for remove product link
+      invitation.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/productLinkInvitations:remove
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The RemoveProductLinkInvitationRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The RemoveProductLinkInvitationResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  update_product_link_invitation:
+    title: Update product link invitation
+    description: Call the Google Ads API's UpdateProductLinkInvitation method for update product link
+      invitation.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/productLinkInvitations:update
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The UpdateProductLinkInvitationRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The UpdateProductLinkInvitationResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  create_product_link:
+    title: Create product link
+    description: Call the Google Ads API's CreateProductLink method for product link.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/productLinks:create
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The CreateProductLinkRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The CreateProductLinkResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  remove_product_link:
+    title: Remove product link
+    description: Call the Google Ads API's RemoveProductLink method for remove product link.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/productLinks:remove
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The RemoveProductLinkRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The RemoveProductLinkResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_recommendation_subscription:
+    title: Mutate recommendation subscription
+    description: 'Create, update or remove recommendation subscription in one call. Google Ads writes
+      are always batched: `operations` carries a list, each entry a create, update or remove, and an update
+      needs its `update_mask`. Set `partial_failure` to let the good operations through when one fails,
+      and `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/recommendationSubscriptions:mutateRecommendationSubscription
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateRecommendationSubscriptionRequest body, as the Google Ads API reference
+          defines it.
+    output:
+      description: The MutateRecommendationSubscriptionResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  apply_recommendation:
+    title: Apply recommendation
+    description: Call the Google Ads API's ApplyRecommendation method for apply recommendation.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/recommendations:apply
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The ApplyRecommendationRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The ApplyRecommendationResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  dismiss_recommendation:
+    title: Dismiss recommendation
+    description: Call the Google Ads API's DismissRecommendation method for dismiss recommendation.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/recommendations:dismiss
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The DismissRecommendationRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The DismissRecommendationResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  generate_recommendations:
+    title: Generate recommendations
+    description: Call the Google Ads API's GenerateRecommendations method for recommendations.
+    category: planning
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/recommendations:generate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The GenerateRecommendationsRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The GenerateRecommendationsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_remarketing_actions:
+    title: Mutate remarketing actions
+    description: 'Create, update or remove remarketing actions in one call. Google Ads writes are always
+      batched: `operations` carries a list, each entry a create, update or remove, and an update needs
+      its `update_mask`. Set `partial_failure` to let the good operations through when one fails, and
+      `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/remarketingActions:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateRemarketingActionsRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateRemarketingActionsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  book_campaigns:
+    title: Book campaigns
+    description: Call the Google Ads API's BookCampaigns method for book campaigns.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/reservations:bookCampaigns
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The BookCampaignsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The BookCampaignsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  quote_campaigns:
+    title: Quote campaigns
+    description: Call the Google Ads API's QuoteCampaigns method for quote campaigns.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/reservations:quoteCampaigns
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The QuoteCampaignsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The QuoteCampaignsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_shared_criteria:
+    title: Mutate shared criteria
+    description: 'Create, update or remove shared criteria in one call. Google Ads writes are always batched:
+      `operations` carries a list, each entry a create, update or remove, and an update needs its `update_mask`.
+      Set `partial_failure` to let the good operations through when one fails, and `validate_only` to
+      check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/sharedCriteria:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateSharedCriteriaRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateSharedCriteriaResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_shared_sets:
+    title: Mutate shared sets
+    description: 'Create, update or remove shared sets in one call. Google Ads writes are always batched:
+      `operations` carries a list, each entry a create, update or remove, and an update needs its `update_mask`.
+      Set `partial_failure` to let the good operations through when one fails, and `validate_only` to
+      check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/sharedSets:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateSharedSetsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateSharedSetsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_smart_campaign_settings:
+    title: Mutate smart campaign settings
+    description: 'Create, update or remove smart campaign settings in one call. Google Ads writes are
+      always batched: `operations` carries a list, each entry a create, update or remove, and an update
+      needs its `update_mask`. Set `partial_failure` to let the good operations through when one fails,
+      and `validate_only` to check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/smartCampaignSettings:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateSmartCampaignSettingsRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateSmartCampaignSettingsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_user_list_customer_types:
+    title: Mutate user list customer types
+    description: 'Create, update or remove user list customer types in one call. Google Ads writes are
+      always batched: `operations` carries a list, each entry a create, update or remove, and an update
+      needs its `update_mask`. Set `partial_failure` to let the good operations through when one fails,
+      and `validate_only` to check a batch without applying it.'
+    category: accounts
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/userListCustomerTypes:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateUserListCustomerTypesRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The MutateUserListCustomerTypesResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_user_lists:
+    title: Mutate user lists
+    description: 'Create, update or remove user lists in one call. Google Ads writes are always batched:
+      `operations` carries a list, each entry a create, update or remove, and an update needs its `update_mask`.
+      Set `partial_failure` to let the good operations through when one fails, and `validate_only` to
+      check a batch without applying it.'
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/userLists:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateUserListsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateUserListsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  create_you_tube_video_upload:
+    title: Create you tube video upload
+    description: Call the Google Ads API's CreateYouTubeVideoUpload method for you tube video upload.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/youTubeVideoUploads:create
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The CreateYouTubeVideoUploadRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The CreateYouTubeVideoUploadResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  remove_you_tube_video_upload:
+    title: Remove you tube video upload
+    description: Call the Google Ads API's RemoveYouTubeVideoUpload method for remove you tube video upload.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/youTubeVideoUploads:remove
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The RemoveYouTubeVideoUploadRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The RemoveYouTubeVideoUploadResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  update_you_tube_video_upload:
+    title: Update you tube video upload
+    description: Call the Google Ads API's UpdateYouTubeVideoUpload method for update you tube video upload.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}/youTubeVideoUploads:update
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The UpdateYouTubeVideoUploadRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The UpdateYouTubeVideoUploadResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  create_customer_client:
+    title: Create a client account under a manager
+    description: Create a new client account under a manager account -- how an agency provisions an advertiser
+      without them signing up separately.
+    category: accounts
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}:createCustomerClient
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The CreateCustomerClientRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The CreateCustomerClientResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  generate_ad_group_themes:
+    title: Generate ad group themes
+    description: Call the Google Ads API's GenerateAdGroupThemes method for ad group themes.
+    category: planning
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}:generateAdGroupThemes
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The GenerateAdGroupThemesRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The GenerateAdGroupThemesResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  generate_audience_composition_insights:
+    title: Generate audience composition insights
+    description: Call the Google Ads API's GenerateAudienceCompositionInsights method for audience composition
+      insights.
+    category: planning
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}:generateAudienceCompositionInsights
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The GenerateAudienceCompositionInsightsRequest body, as the Google Ads API reference
+          defines it.
+    output:
+      description: The GenerateAudienceCompositionInsightsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  generate_audience_definition:
+    title: Generate audience definition
+    description: Call the Google Ads API's GenerateAudienceDefinition method for audience definition.
+    category: planning
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}:generateAudienceDefinition
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The GenerateAudienceDefinitionRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The GenerateAudienceDefinitionResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  generate_audience_overlap_insights:
+    title: Generate audience overlap insights
+    description: Call the Google Ads API's GenerateAudienceOverlapInsights method for audience overlap
+      insights.
+    category: planning
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}:generateAudienceOverlapInsights
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The GenerateAudienceOverlapInsightsRequest body, as the Google Ads API reference
+          defines it.
+    output:
+      description: The GenerateAudienceOverlapInsightsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  generate_benchmarks_metrics:
+    title: Generate benchmarks metrics
+    description: Call the Google Ads API's GenerateBenchmarksMetrics method for benchmarks metrics.
+    category: planning
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}:generateBenchmarksMetrics
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The GenerateBenchmarksMetricsRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The GenerateBenchmarksMetricsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  generate_creator_insights:
+    title: Generate creator insights
+    description: Call the Google Ads API's GenerateCreatorInsights method for creator insights.
+    category: planning
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}:generateCreatorInsights
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The GenerateCreatorInsightsRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The GenerateCreatorInsightsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  generate_insights_finder_report:
+    title: Generate insights finder report
+    description: Call the Google Ads API's GenerateInsightsFinderReport method for insights finder report.
+    category: planning
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}:generateInsightsFinderReport
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The GenerateInsightsFinderReportRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The GenerateInsightsFinderReportResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  generate_keyword_forecast_metrics:
+    title: Generate keyword forecast metrics
+    description: Call the Google Ads API's GenerateKeywordForecastMetrics method for keyword forecast
+      metrics.
+    category: planning
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}:generateKeywordForecastMetrics
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The GenerateKeywordForecastMetricsRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The GenerateKeywordForecastMetricsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  generate_keyword_historical_metrics:
+    title: Generate keyword historical metrics
+    description: Call the Google Ads API's GenerateKeywordHistoricalMetrics method for keyword historical
+      metrics.
+    category: planning
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}:generateKeywordHistoricalMetrics
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The GenerateKeywordHistoricalMetricsRequest body, as the Google Ads API reference
+          defines it.
+    output:
+      description: The GenerateKeywordHistoricalMetricsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  generate_keyword_ideas:
+    title: Generate keyword ideas
+    description: Keyword ideas with their search volume and competition, from seed keywords, a URL, or
+      both. The Keyword Planner's data, for research before a campaign is built.
+    category: planning
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}:generateKeywordIdeas
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The GenerateKeywordIdeasRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The GenerateKeywordIdeasResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  generate_reach_forecast:
+    title: Generate reach forecast
+    description: Call the Google Ads API's GenerateReachForecast method for reach forecast.
+    category: planning
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}:generateReachForecast
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The GenerateReachForecastRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The GenerateReachForecastResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  generate_shareable_previews:
+    title: Generate shareable previews
+    description: Call the Google Ads API's GenerateShareablePreviews method for shareable previews.
+    category: planning
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}:generateShareablePreviews
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The GenerateShareablePreviewsRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The GenerateShareablePreviewsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  generate_suggested_targeting_insights:
+    title: Generate suggested targeting insights
+    description: Call the Google Ads API's GenerateSuggestedTargetingInsights method for suggested targeting
+      insights.
+    category: planning
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}:generateSuggestedTargetingInsights
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The GenerateSuggestedTargetingInsightsRequest body, as the Google Ads API reference
+          defines it.
+    output:
+      description: The GenerateSuggestedTargetingInsightsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  generate_targeting_suggestion_metrics:
+    title: Generate targeting suggestion metrics
+    description: Call the Google Ads API's GenerateTargetingSuggestionMetrics method for targeting suggestion
+      metrics.
+    category: planning
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}:generateTargetingSuggestionMetrics
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The GenerateTargetingSuggestionMetricsRequest body, as the Google Ads API reference
+          defines it.
+    output:
+      description: The GenerateTargetingSuggestionMetricsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  generate_trending_insights:
+    title: Generate trending insights
+    description: Call the Google Ads API's GenerateTrendingInsights method for trending insights.
+    category: planning
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}:generateTrendingInsights
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The GenerateTrendingInsightsRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The GenerateTrendingInsightsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  mutate_customer:
+    title: Mutate customer
+    description: 'Create, update or remove customer in one call. Google Ads writes are always batched:
+      `operations` carries a list, each entry a create, update or remove, and an update needs its `update_mask`.
+      Set `partial_failure` to let the good operations through when one fails, and `validate_only` to
+      check a batch without applying it.'
+    category: accounts
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}:mutate
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The MutateCustomerRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The MutateCustomerResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  remove_campaign_automatically_created_asset:
+    title: Remove campaign automatically created asset
+    description: Call the Google Ads API's RemoveCampaignAutomaticallyCreatedAsset method for remove campaign
+      automatically created asset.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}:removeCampaignAutomaticallyCreatedAsset
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The RemoveCampaignAutomaticallyCreatedAssetRequest body, as the Google Ads API reference
+          defines it.
+    output:
+      description: The RemoveCampaignAutomaticallyCreatedAssetResponse, as the Google Ads API defines
+        it.
+      type: object
+    scopes:
+    - adwords
+  list_audience_insights_attributes:
+    title: List audience insights attributes
+    description: Call the Google Ads API's ListAudienceInsightsAttributes method for audience insights
+      attributes.
+    category: planning
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}:searchAudienceInsightsAttributes
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The ListAudienceInsightsAttributesRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The ListAudienceInsightsAttributesResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  start_identity_verification:
+    title: Start identity verification
+    description: Call the Google Ads API's StartIdentityVerification method for start identity verification.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}:startIdentityVerification
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The StartIdentityVerificationRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The StartIdentityVerificationResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  suggest_brands:
+    title: Suggest brands
+    description: Call the Google Ads API's SuggestBrands method for brands.
+    category: planning
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}:suggestBrands
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The SuggestBrandsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The SuggestBrandsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  suggest_keyword_themes:
+    title: Suggest keyword themes
+    description: Call the Google Ads API's SuggestKeywordThemes method for keyword themes.
+    category: planning
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}:suggestKeywordThemes
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The SuggestKeywordThemesRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The SuggestKeywordThemesResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  suggest_smart_campaign_ad:
+    title: Suggest smart campaign ad
+    description: Call the Google Ads API's SuggestSmartCampaignAd method for smart campaign ad.
+    category: planning
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}:suggestSmartCampaignAd
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The SuggestSmartCampaignAdRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The SuggestSmartCampaignAdResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  suggest_smart_campaign_budget_options:
+    title: Suggest smart campaign budget options
+    description: Call the Google Ads API's SuggestSmartCampaignBudgetOptions method for smart campaign
+      budget options.
+    category: planning
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}:suggestSmartCampaignBudgetOptions
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The SuggestSmartCampaignBudgetOptionsRequest body, as the Google Ads API reference
+          defines it.
+    output:
+      description: The SuggestSmartCampaignBudgetOptionsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  suggest_travel_assets:
+    title: Suggest travel assets
+    description: Call the Google Ads API's SuggestTravelAssets method for travel assets.
+    category: planning
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}:suggestTravelAssets
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The SuggestTravelAssetsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The SuggestTravelAssetsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  upload_call_conversions:
+    title: Upload call conversions
+    description: Call the Google Ads API's UploadCallConversions method for upload call conversions.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}:uploadCallConversions
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The UploadCallConversionsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The UploadCallConversionsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  upload_click_conversions:
+    title: Upload click conversions
+    description: Call the Google Ads API's UploadClickConversions method for upload click conversions.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}:uploadClickConversions
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The UploadClickConversionsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The UploadClickConversionsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  upload_conversion_adjustments:
+    title: Upload conversion adjustments
+    description: Call the Google Ads API's UploadConversionAdjustments method for upload conversion adjustments.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}:uploadConversionAdjustments
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The UploadConversionAdjustmentsRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The UploadConversionAdjustmentsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  upload_user_data:
+    title: Upload user data
+    description: Call the Google Ads API's UploadUserData method for upload user data.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/customers/${customer_id}:uploadUserData
+      body: ${body}
+    input:
+      customer_id:
+        type: string
+        description: The Google Ads customer id the call acts on, digits only and without dashes.
+      body:
+        type: object
+        description: The UploadUserDataRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The UploadUserDataResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  list_accessible_customers:
+    title: List the accounts this token can reach
+    description: 'The customer accounts this OAuth token can reach, as resource names. The starting point
+      for any integration: every other call needs one of these ids, and a manager account reaches its
+      clients through the login-customer-id header.'
+    category: accounts
+    request:
+      method: GET
+      path: /v25/customers:listAccessibleCustomers
+    input: {}
+    output:
+      description: The ListAccessibleCustomersResponse, as the Google Ads API defines it.
+      type: object
+    read_only: true
+    scopes:
+    - adwords
+  suggest_geo_target_constants:
+    title: Suggest geo target constants
+    description: Call the Google Ads API's SuggestGeoTargetConstants method for geo target constants.
+    category: planning
+    request:
+      method: POST
+      path: /v25/geoTargetConstants:suggest
+      body: ${body}
+    input:
+      body:
+        type: object
+        description: The SuggestGeoTargetConstantsRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The SuggestGeoTargetConstantsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  search_google_ads_fields:
+    title: Search google ads fields
+    description: Call the Google Ads API's SearchGoogleAdsFields method for search google ads fields.
+    category: reporting
+    request:
+      method: POST
+      path: /v25/googleAdsFields:search
+      body: ${body}
+    input:
+      body:
+        type: object
+        description: The SearchGoogleAdsFieldsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The SearchGoogleAdsFieldsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  fetch_incentive:
+    title: Fetch incentive
+    description: Read incentive. Calls the Google Ads API's FetchIncentive method.
+    category: campaign_management
+    request:
+      method: GET
+      path: /v25/incentives:fetchIncentive
+    input: {}
+    output:
+      description: The FetchIncentiveResponse, as the Google Ads API defines it.
+      type: object
+    read_only: true
+    scopes:
+    - adwords
+  suggest_keyword_theme_constants:
+    title: Suggest keyword theme constants
+    description: Call the Google Ads API's SuggestKeywordThemeConstants method for keyword theme constants.
+    category: planning
+    request:
+      method: POST
+      path: /v25/keywordThemeConstants:suggest
+      body: ${body}
+    input:
+      body:
+        type: object
+        description: The SuggestKeywordThemeConstantsRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The SuggestKeywordThemeConstantsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  remove_automatically_created_assets:
+    title: Remove automatically created assets
+    description: Call the Google Ads API's RemoveAutomaticallyCreatedAssets method for remove automatically
+      created assets.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/${ad_group_ad}:removeAutomaticallyCreatedAssets
+      body: ${body}
+    input:
+      ad_group_ad:
+        type: string
+        description: Resource name, in the form customers/*/adGroupAds/*.
+      body:
+        type: object
+        description: The RemoveAutomaticallyCreatedAssetsRequest body, as the Google Ads API reference
+          defines it.
+    output:
+      description: The RemoveAutomaticallyCreatedAssetsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  promote_campaign_draft:
+    title: Promote campaign draft
+    description: Call the Google Ads API's PromoteCampaignDraft method for promote campaign draft.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/${campaign_draft}:promote
+      body: ${body}
+    input:
+      campaign_draft:
+        type: string
+        description: Resource name, in the form customers/*/campaignDrafts/*.
+      body:
+        type: object
+        description: The PromoteCampaignDraftRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The PromoteCampaignDraftResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  end_experiment:
+    title: End experiment
+    description: Call the Google Ads API's EndExperiment method for end experiment.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/${experiment}:endExperiment
+      body: ${body}
+    input:
+      experiment:
+        type: string
+        description: Resource name, in the form customers/*/experiments/*.
+      body:
+        type: object
+        description: The EndExperimentRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The EndExperimentResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  graduate_experiment:
+    title: Graduate experiment
+    description: Call the Google Ads API's GraduateExperiment method for graduate experiment.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/${experiment}:graduateExperiment
+      body: ${body}
+    input:
+      experiment:
+        type: string
+        description: Resource name, in the form customers/*/experiments/*.
+      body:
+        type: object
+        description: The GraduateExperimentRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The GraduateExperimentResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  delete_operation:
+    title: Delete operation
+    description: Call the Google Ads API's DeleteOperation method for delete operation.
+    category: batch
+    request:
+      method: DELETE
+      path: /v25/${name}
+    input:
+      name:
+        type: string
+        description: Resource name, in the form customers/*/operations/*.
+    output:
+      description: The DeleteOperationResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+    destructive: true
+  get_operation:
+    title: Get operation
+    description: Read operation. Calls the Google Ads API's GetOperation method.
+    category: batch
+    request:
+      method: GET
+      path: /v25/${name}
+    input:
+      name:
+        type: string
+        description: Resource name, in the form customers/*/operations/*.
+    output:
+      description: The GetOperationResponse, as the Google Ads API defines it.
+      type: object
+    read_only: true
+    scopes:
+    - adwords
+  cancel_operation:
+    title: Cancel operation
+    description: Call the Google Ads API's CancelOperation method for cancel operation.
+    category: batch
+    request:
+      method: POST
+      path: /v25/${name}:cancel
+      body: ${body}
+    input:
+      name:
+        type: string
+        description: Resource name, in the form customers/*/operations/*.
+      body:
+        type: object
+        description: The CancelOperationRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The CancelOperationResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  wait_operation:
+    title: Wait operation
+    description: Call the Google Ads API's WaitOperation method for wait operation.
+    category: batch
+    request:
+      method: POST
+      path: /v25/${name}:wait
+      body: ${body}
+    input:
+      name:
+        type: string
+        description: Resource name, in the form customers/*/operations/*.
+      body:
+        type: object
+        description: The WaitOperationRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The WaitOperationResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  list_operations:
+    title: List operations
+    description: Read operations. Calls the Google Ads API's ListOperations method.
+    category: batch
+    request:
+      method: GET
+      path: /v25/${name}
+    input:
+      name:
+        type: string
+        description: Resource name, in the form customers/*/operations.
+    output:
+      description: The ListOperationsResponse, as the Google Ads API defines it.
+      type: object
+    read_only: true
+    scopes:
+    - adwords
+  add_batch_job_operations:
+    title: Add batch job operations
+    description: Call the Google Ads API's AddBatchJobOperations method for add batch job operations.
+    category: batch
+    request:
+      method: POST
+      path: /v25/${resource_name}:addOperations
+      body: ${body}
+    input:
+      resource_name:
+        type: string
+        description: Resource name, in the form customers/*/batchJobs/*.
+      body:
+        type: object
+        description: The AddBatchJobOperationsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The AddBatchJobOperationsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  list_batch_job_results:
+    title: List batch job results
+    description: Read batch job results. Calls the Google Ads API's ListBatchJobResults method.
+    category: batch
+    request:
+      method: GET
+      path: /v25/${resource_name}:listResults
+    input:
+      resource_name:
+        type: string
+        description: Resource name, in the form customers/*/batchJobs/*.
+    output:
+      description: The ListBatchJobResultsResponse, as the Google Ads API defines it.
+      type: object
+    read_only: true
+    scopes:
+    - adwords
+  run_batch_job:
+    title: Run batch job
+    description: Call the Google Ads API's RunBatchJob method for run batch job.
+    category: batch
+    request:
+      method: POST
+      path: /v25/${resource_name}:run
+      body: ${body}
+    input:
+      resource_name:
+        type: string
+        description: Resource name, in the form customers/*/batchJobs/*.
+      body:
+        type: object
+        description: The RunBatchJobRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The RunBatchJobResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  list_campaign_draft_async_errors:
+    title: List campaign draft async errors
+    description: Read campaign draft async errors. Calls the Google Ads API's ListCampaignDraftAsyncErrors
+      method.
+    category: campaign_management
+    request:
+      method: GET
+      path: /v25/${resource_name}:listAsyncErrors
+    input:
+      resource_name:
+        type: string
+        description: Resource name, in the form customers/*/campaignDrafts/*.
+    output:
+      description: The ListCampaignDraftAsyncErrorsResponse, as the Google Ads API defines it.
+      type: object
+    read_only: true
+    scopes:
+    - adwords
+  list_experiment_async_errors:
+    title: List experiment async errors
+    description: Read experiment async errors. Calls the Google Ads API's ListExperimentAsyncErrors method.
+    category: campaign_management
+    request:
+      method: GET
+      path: /v25/${resource_name}:listExperimentAsyncErrors
+    input:
+      resource_name:
+        type: string
+        description: Resource name, in the form customers/*/experiments/*.
+    output:
+      description: The ListExperimentAsyncErrorsResponse, as the Google Ads API defines it.
+      type: object
+    read_only: true
+    scopes:
+    - adwords
+  promote_experiment:
+    title: Promote experiment
+    description: Call the Google Ads API's PromoteExperiment method for promote experiment.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/${resource_name}:promoteExperiment
+      body: ${body}
+    input:
+      resource_name:
+        type: string
+        description: Resource name, in the form customers/*/experiments/*.
+      body:
+        type: object
+        description: The PromoteExperimentRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The PromoteExperimentResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  schedule_experiment:
+    title: Schedule experiment
+    description: Call the Google Ads API's ScheduleExperiment method for schedule experiment.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/${resource_name}:scheduleExperiment
+      body: ${body}
+    input:
+      resource_name:
+        type: string
+        description: Resource name, in the form customers/*/experiments/*.
+      body:
+        type: object
+        description: The ScheduleExperimentRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The ScheduleExperimentResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  provide_lead_feedback:
+    title: Provide lead feedback
+    description: Call the Google Ads API's ProvideLeadFeedback method for provide lead feedback.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/${resource_name}:provideLeadFeedback
+      body: ${body}
+    input:
+      resource_name:
+        type: string
+        description: Resource name, in the form customers/*/localServicesLeads/*.
+      body:
+        type: object
+        description: The ProvideLeadFeedbackRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The ProvideLeadFeedbackResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  add_offline_user_data_job_operations:
+    title: Add offline user data job operations
+    description: Call the Google Ads API's AddOfflineUserDataJobOperations method for add offline user
+      data job operations.
+    category: batch
+    request:
+      method: POST
+      path: /v25/${resource_name}:addOperations
+      body: ${body}
+    input:
+      resource_name:
+        type: string
+        description: Resource name, in the form customers/*/offlineUserDataJobs/*.
+      body:
+        type: object
+        description: The AddOfflineUserDataJobOperationsRequest body, as the Google Ads API reference
+          defines it.
+    output:
+      description: The AddOfflineUserDataJobOperationsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  run_offline_user_data_job:
+    title: Run offline user data job
+    description: Call the Google Ads API's RunOfflineUserDataJob method for run offline user data job.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/${resource_name}:run
+      body: ${body}
+    input:
+      resource_name:
+        type: string
+        description: Resource name, in the form customers/*/offlineUserDataJobs/*.
+      body:
+        type: object
+        description: The RunOfflineUserDataJobRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The RunOfflineUserDataJobResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  get_smart_campaign_status:
+    title: Get smart campaign status
+    description: Read smart campaign status. Calls the Google Ads API's GetSmartCampaignStatus method.
+    category: campaign_management
+    request:
+      method: GET
+      path: /v25/${resource_name}:getSmartCampaignStatus
+    input:
+      resource_name:
+        type: string
+        description: Resource name, in the form customers/*/smartCampaignSettings/*.
+    output:
+      description: The GetSmartCampaignStatusResponse, as the Google Ads API defines it.
+      type: object
+    read_only: true
+    scopes:
+    - adwords
+  regenerate_shareable_link_id:
+    title: Regenerate shareable link id
+    description: Call the Google Ads API's RegenerateShareableLinkId method for regenerate shareable link
+      id.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25/${resource_name}:regenerateShareableLinkId
+      body: ${body}
+    input:
+      resource_name:
+        type: string
+        description: Resource name, in the form customers/*/thirdPartyAppAnalyticsLinks/*.
+      body:
+        type: object
+        description: The RegenerateShareableLinkIdRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The RegenerateShareableLinkIdResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  get_google_ads_field:
+    title: Get google ads field
+    description: Read google ads field. Calls the Google Ads API's GetGoogleAdsField method.
+    category: reporting
+    request:
+      method: GET
+      path: /v25/${resource_name}
+    input:
+      resource_name:
+        type: string
+        description: Resource name, in the form googleAdsFields/*.
+    output:
+      description: The GetGoogleAdsFieldResponse, as the Google Ads API defines it.
+      type: object
+    read_only: true
+    scopes:
+    - adwords
+  generate_conversion_rates:
+    title: Generate conversion rates
+    description: Call the Google Ads API's GenerateConversionRates method for conversion rates.
+    category: planning
+    request:
+      method: POST
+      path: /v25:generateConversionRates
+      body: ${body}
+    input:
+      body:
+        type: object
+        description: The GenerateConversionRatesRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The GenerateConversionRatesResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  list_benchmarks_available_dates:
+    title: List benchmarks available dates
+    description: Call the Google Ads API's ListBenchmarksAvailableDates method for benchmarks available
+      dates.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25:listBenchmarksAvailableDates
+      body: ${body}
+    input:
+      body:
+        type: object
+        description: The ListBenchmarksAvailableDatesRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The ListBenchmarksAvailableDatesResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  list_benchmarks_locations:
+    title: List benchmarks locations
+    description: Call the Google Ads API's ListBenchmarksLocations method for benchmarks locations.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25:listBenchmarksLocations
+      body: ${body}
+    input:
+      body:
+        type: object
+        description: The ListBenchmarksLocationsRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The ListBenchmarksLocationsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  list_benchmarks_products:
+    title: List benchmarks products
+    description: Call the Google Ads API's ListBenchmarksProducts method for benchmarks products.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25:listBenchmarksProducts
+      body: ${body}
+    input:
+      body:
+        type: object
+        description: The ListBenchmarksProductsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The ListBenchmarksProductsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  list_benchmarks_sources:
+    title: List benchmarks sources
+    description: Call the Google Ads API's ListBenchmarksSources method for benchmarks sources.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25:listBenchmarksSources
+      body: ${body}
+    input:
+      body:
+        type: object
+        description: The ListBenchmarksSourcesRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The ListBenchmarksSourcesResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  list_plannable_locations:
+    title: List plannable locations
+    description: Call the Google Ads API's ListPlannableLocations method for plannable locations.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25:listPlannableLocations
+      body: ${body}
+    input:
+      body:
+        type: object
+        description: The ListPlannableLocationsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The ListPlannableLocationsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  list_plannable_products:
+    title: List plannable products
+    description: Call the Google Ads API's ListPlannableProducts method for plannable products.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25:listPlannableProducts
+      body: ${body}
+    input:
+      body:
+        type: object
+        description: The ListPlannableProductsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The ListPlannableProductsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  list_plannable_user_interests:
+    title: List plannable user interests
+    description: Call the Google Ads API's ListPlannableUserInterests method for plannable user interests.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25:listPlannableUserInterests
+      body: ${body}
+    input:
+      body:
+        type: object
+        description: The ListPlannableUserInterestsRequest body, as the Google Ads API reference defines
+          it.
+    output:
+      description: The ListPlannableUserInterestsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords
+  list_plannable_user_lists:
+    title: List plannable user lists
+    description: Call the Google Ads API's ListPlannableUserLists method for plannable user lists.
+    category: campaign_management
+    request:
+      method: POST
+      path: /v25:listPlannableUserLists
+      body: ${body}
+    input:
+      body:
+        type: object
+        description: The ListPlannableUserListsRequest body, as the Google Ads API reference defines it.
+    output:
+      description: The ListPlannableUserListsResponse, as the Google Ads API defines it.
+      type: object
+    scopes:
+    - adwords

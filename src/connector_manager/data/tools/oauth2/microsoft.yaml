@@ -1,0 +1,2292 @@
+# Microsoft 365 / Microsoft Graph tools.
+#
+# One pack serves both `microsoft` and its alias `outlook`, since they are the
+# same API surface behind the same token. Scopes are the delegated (`/me`)
+# permissions Graph documents per endpoint; an application token carries the
+# equivalent `.All` role instead, which `scope_rules.implies` accounts for.
+#
+# Docs: https://learn.microsoft.com/graph/api/overview
+
+connector_id: microsoft
+display_name: Microsoft 365 (Graph)
+docs_url: https://learn.microsoft.com/graph/api/overview
+applies_to:
+  - outlook
+  - microsoft-tenant-specific
+
+scope_rules:
+  # Graph scope names are documented in PascalCase but issued case-insensitively.
+  case_insensitive: true
+  implies:
+    Mail.ReadWrite: [Mail.Read, Mail.ReadBasic]
+    Mail.ReadWrite.Shared: [Mail.ReadWrite, Mail.Read, Mail.Send]
+    Mail.Read.Shared: [Mail.Read]
+    Mail.Send.Shared: [Mail.Send]
+    Calendars.ReadWrite: [Calendars.Read, Calendars.ReadBasic]
+    Calendars.ReadWrite.Shared: [Calendars.ReadWrite, Calendars.Read]
+    Calendars.Read.Shared: [Calendars.Read]
+    Contacts.ReadWrite: [Contacts.Read]
+    Contacts.ReadWrite.Shared: [Contacts.ReadWrite, Contacts.Read]
+    Files.ReadWrite: [Files.Read]
+    Files.ReadWrite.All: [Files.ReadWrite, Files.Read.All, Files.Read]
+    Files.Read.All: [Files.Read]
+    Tasks.ReadWrite: [Tasks.Read]
+    User.ReadWrite: [User.Read]
+    User.ReadWrite.All: [User.ReadWrite, User.Read.All, User.Read]
+    User.Read.All: [User.Read]
+
+scope_discovery:
+  # A Graph access token is a JWT: `scp` holds the delegated grant and `roles`
+  # the application one, so the real permission set is readable without a call.
+  jwt_claim: scp
+
+tools:
+
+  # -- mail: reading ---------------------------------------------------------
+
+  list_messages:
+    title: List mailbox messages
+    description: >-
+      List messages in the signed-in user's mailbox, newest first by default.
+      Returns message metadata plus a preview; use get_message for the full
+      body. To read one folder only, use list_folder_messages.
+    category: mail.read
+    scopes: [Mail.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/messages
+      query:
+        $top: "${limit}"
+        $skip: "${skip}"
+        $select: "${select}"
+        $filter: "${filter}"
+        $orderby: "${order_by}"
+    input:
+      limit:
+        type: integer
+        description: How many messages to return (1-999).
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 999
+      skip:
+        type: integer
+        description: Number of messages to skip, for paging past the first page.
+        optional: true
+        minimum: 0
+      select:
+        type: array
+        description: Message fields to return, e.g. ["subject","from","receivedDateTime"]. Omit for the default set.
+        optional: true
+        items: {type: string}
+      filter:
+        type: string
+        description: OData $filter expression, e.g. "isRead eq false" or "receivedDateTime ge 2026-01-01T00:00:00Z".
+        optional: true
+        example: isRead eq false
+      order_by:
+        type: string
+        description: OData $orderby expression.
+        optional: true
+        default: receivedDateTime desc
+    output:
+      description: The matching messages.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string, description: "Message id, used by every other mail tool."}
+          subject: {type: string}
+          bodyPreview: {type: string}
+          from: {type: object}
+          receivedDateTime: {type: string}
+          isRead: {type: boolean}
+          hasAttachments: {type: boolean}
+
+  search_messages:
+    title: Search messages
+    description: >-
+      Full-text search across the mailbox using Graph's $search, which matches
+      subject, body, sender and recipients. Use this rather than a $filter when
+      the caller has words to look for rather than a precise field condition.
+    category: mail.read
+    scopes: [Mail.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/messages
+      query:
+        $search: '"${query}"'
+        $top: "${limit}"
+        $select: "${select}"
+    input:
+      query:
+        type: string
+        description: Words to search for, e.g. "invoice March" or "from:ada@example.com".
+        example: quarterly report
+      limit:
+        type: integer
+        description: How many messages to return (1-999).
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 999
+      select:
+        type: array
+        description: Message fields to return.
+        optional: true
+        items: {type: string}
+    output:
+      description: Messages matching the search terms, by relevance.
+      type: array
+      response_path: value
+      items: {type: object}
+
+  get_message:
+    title: Get a message
+    description: >-
+      Fetch one message in full, including its body. Pass the id returned by
+      list_messages or search_messages.
+    category: mail.read
+    scopes: [Mail.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/messages/${message_id}
+      query:
+        $select: "${select}"
+    input:
+      message_id:
+        type: string
+        description: The message id.
+      select:
+        type: array
+        description: Fields to return; omit for the whole message.
+        optional: true
+        items: {type: string}
+    output:
+      description: The full message, body included.
+      type: object
+      properties:
+        id: {type: string}
+        subject: {type: string}
+        body: {type: object, description: "contentType (HTML or text) and content."}
+        from: {type: object}
+        toRecipients: {type: array}
+        hasAttachments: {type: boolean}
+
+  list_mail_folders:
+    title: List mail folders
+    description: >-
+      List the mailbox's folders (Inbox, Archive, custom folders and so on) with
+      their ids, so messages can be listed from or moved into a named folder.
+    category: mail.read
+    scopes: [Mail.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/mailFolders
+      query:
+        $top: "${limit}"
+        includeHiddenFolders: "${include_hidden}"
+    input:
+      limit:
+        type: integer
+        description: How many folders to return.
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 999
+      include_hidden:
+        type: boolean
+        description: Include folders Outlook hides from the user.
+        optional: true
+    output:
+      description: The mailbox's folders.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          displayName: {type: string}
+          unreadItemCount: {type: integer}
+          totalItemCount: {type: integer}
+
+  list_folder_messages:
+    title: List messages in a folder
+    description: >-
+      List messages inside one mail folder. Accepts either a folder id from
+      list_mail_folders or a well-known name such as inbox, archive, drafts,
+      sentitems, deleteditems or junkemail.
+    category: mail.read
+    scopes: [Mail.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/mailFolders/${folder_id}/messages
+      query:
+        $top: "${limit}"
+        $filter: "${filter}"
+        $orderby: "${order_by}"
+    input:
+      folder_id:
+        type: string
+        description: Folder id, or a well-known name like "inbox" or "sentitems".
+        example: inbox
+      limit:
+        type: integer
+        description: How many messages to return.
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 999
+      filter:
+        type: string
+        description: OData $filter expression.
+        optional: true
+      order_by:
+        type: string
+        description: OData $orderby expression.
+        optional: true
+        default: receivedDateTime desc
+    output:
+      description: Messages in the folder.
+      type: array
+      response_path: value
+      items: {type: object}
+
+  # -- mail: sending ---------------------------------------------------------
+
+  send_email:
+    title: Send an email
+    description: >-
+      Compose and send a plain message immediately, with no attachments. A copy
+      lands in Sent Items unless save_to_sent_items is false. Use
+      send_email_with_file_attachments to attach files, or
+      send_email_with_link_attachments to attach cloud links.
+    category: mail.send
+    scopes: [Mail.Send]
+    destructive: true
+    request:
+      method: POST
+      path: /v1.0/me/sendMail
+      body:
+        message:
+          subject: "${subject}"
+          body:
+            contentType: "${body_type}"
+            content: "${body}"
+          toRecipients:
+            $map:
+              source: "${to}"
+              template: {emailAddress: {address: "${item}"}}
+          ccRecipients:
+            $map:
+              source: "${cc}"
+              template: {emailAddress: {address: "${item}"}}
+          bccRecipients:
+            $map:
+              source: "${bcc}"
+              template: {emailAddress: {address: "${item}"}}
+          importance: "${importance}"
+        saveToSentItems: "${save_to_sent_items}"
+    input:
+      to:
+        type: array
+        description: Recipient email addresses.
+        items: {type: string, format: email}
+        example: "[\"ada@example.com\"]"
+      subject:
+        type: string
+        description: Subject line.
+      body:
+        type: string
+        description: Message body. HTML markup is allowed when body_type is HTML.
+      body_type:
+        type: string
+        description: Whether body is HTML markup or plain text.
+        optional: true
+        default: HTML
+        enum: [HTML, Text]
+      cc:
+        type: array
+        description: Addresses to copy.
+        optional: true
+        items: {type: string, format: email}
+      bcc:
+        type: array
+        description: Addresses to blind-copy.
+        optional: true
+        items: {type: string, format: email}
+      importance:
+        type: string
+        description: Message importance.
+        optional: true
+        enum: [low, normal, high]
+      save_to_sent_items:
+        type: boolean
+        description: Keep a copy in Sent Items.
+        optional: true
+        default: true
+    output:
+      description: Empty on success -- Graph answers 202 Accepted with no body.
+      type: object
+
+  send_email_with_file_attachments:
+    title: Send an email with file attachments
+    description: >-
+      Send a message with one or more files attached inline as content. Each
+      attachment carries its bytes base64-encoded, so the total message must
+      stay under about 3 MB; for anything larger, share the file from OneDrive
+      and use send_email_with_link_attachments instead.
+    category: mail.send
+    scopes: [Mail.Send]
+    destructive: true
+    request:
+      method: POST
+      path: /v1.0/me/sendMail
+      body:
+        message:
+          subject: "${subject}"
+          body:
+            contentType: "${body_type}"
+            content: "${body}"
+          toRecipients:
+            $map:
+              source: "${to}"
+              template: {emailAddress: {address: "${item}"}}
+          ccRecipients:
+            $map:
+              source: "${cc}"
+              template: {emailAddress: {address: "${item}"}}
+          bccRecipients:
+            $map:
+              source: "${bcc}"
+              template: {emailAddress: {address: "${item}"}}
+          attachments:
+            $map:
+              source: "${attachments}"
+              template:
+                "@odata.type": "#microsoft.graph.fileAttachment"
+                name: "${item.name}"
+                contentType: "${item.content_type}"
+                contentBytes: "${item.content_bytes}"
+        saveToSentItems: "${save_to_sent_items}"
+    input:
+      to:
+        type: array
+        description: Recipient email addresses.
+        items: {type: string, format: email}
+      subject:
+        type: string
+        description: Subject line.
+      body:
+        type: string
+        description: Message body.
+      attachments:
+        type: array
+        description: >-
+          Files to attach. Each item is {"name": "report.pdf", "content_bytes":
+          "<base64 of the file>", "content_type": "application/pdf"};
+          content_type is optional.
+        items:
+          type: object
+          properties:
+            name: {type: string}
+            content_bytes: {type: string, description: "The file's bytes, base64-encoded."}
+            content_type: {type: string}
+      body_type:
+        type: string
+        description: Whether body is HTML markup or plain text.
+        optional: true
+        default: HTML
+        enum: [HTML, Text]
+      cc:
+        type: array
+        description: Addresses to copy.
+        optional: true
+        items: {type: string, format: email}
+      bcc:
+        type: array
+        description: Addresses to blind-copy.
+        optional: true
+        items: {type: string, format: email}
+      save_to_sent_items:
+        type: boolean
+        description: Keep a copy in Sent Items.
+        optional: true
+        default: true
+    output:
+      description: Empty on success -- Graph answers 202 Accepted with no body.
+      type: object
+
+  send_email_with_link_attachments:
+    title: Send an email with cloud link attachments
+    description: >-
+      Send a message attaching links to files that already live in OneDrive or
+      SharePoint, rather than copies of their bytes. This is the way to "attach"
+      a large file, and it keeps the recipient pointed at the live document.
+    category: mail.send
+    scopes: [Mail.Send]
+    destructive: true
+    request:
+      method: POST
+      path: /v1.0/me/sendMail
+      body:
+        message:
+          subject: "${subject}"
+          body:
+            contentType: "${body_type}"
+            content: "${body}"
+          toRecipients:
+            $map:
+              source: "${to}"
+              template: {emailAddress: {address: "${item}"}}
+          ccRecipients:
+            $map:
+              source: "${cc}"
+              template: {emailAddress: {address: "${item}"}}
+          attachments:
+            $map:
+              source: "${links}"
+              template:
+                "@odata.type": "#microsoft.graph.referenceAttachment"
+                name: "${item.name}"
+                sourceUrl: "${item.url}"
+                permission: "${item.permission}"
+                isFolder: false
+        saveToSentItems: "${save_to_sent_items}"
+    input:
+      to:
+        type: array
+        description: Recipient email addresses.
+        items: {type: string, format: email}
+      subject:
+        type: string
+        description: Subject line.
+      body:
+        type: string
+        description: Message body.
+      links:
+        type: array
+        description: >-
+          Cloud files to link. Each item is {"name": "Q3 plan.docx", "url":
+          "<sharing url from create_share_link>", "permission": "edit"};
+          permission is optional and one of view, edit, anonymousView,
+          anonymousEdit, organizationView, organizationEdit.
+        items:
+          type: object
+          properties:
+            name: {type: string}
+            url: {type: string, description: "The file's sharing URL."}
+            permission: {type: string}
+      body_type:
+        type: string
+        description: Whether body is HTML markup or plain text.
+        optional: true
+        default: HTML
+        enum: [HTML, Text]
+      cc:
+        type: array
+        description: Addresses to copy.
+        optional: true
+        items: {type: string, format: email}
+      save_to_sent_items:
+        type: boolean
+        description: Keep a copy in Sent Items.
+        optional: true
+        default: true
+    output:
+      description: Empty on success -- Graph answers 202 Accepted with no body.
+      type: object
+
+  reply_to_message:
+    title: Reply to a message
+    description: >-
+      Send a reply to the message's sender, quoting the original thread. Only
+      the sender is replied to; use reply_all_to_message to include everyone.
+    category: mail.send
+    scopes: [Mail.Send]
+    destructive: true
+    request:
+      method: POST
+      path: /v1.0/me/messages/${message_id}/reply
+      body:
+        comment: "${comment}"
+    input:
+      message_id:
+        type: string
+        description: The message being replied to.
+      comment:
+        type: string
+        description: The reply text, added above the quoted original.
+    output:
+      description: Empty on success -- Graph answers 202 Accepted with no body.
+      type: object
+
+  reply_all_to_message:
+    title: Reply to everyone on a message
+    description: Send a reply to the sender and every other recipient of a message.
+    category: mail.send
+    scopes: [Mail.Send]
+    destructive: true
+    request:
+      method: POST
+      path: /v1.0/me/messages/${message_id}/replyAll
+      body:
+        comment: "${comment}"
+    input:
+      message_id:
+        type: string
+        description: The message being replied to.
+      comment:
+        type: string
+        description: The reply text, added above the quoted original.
+    output:
+      description: Empty on success -- Graph answers 202 Accepted with no body.
+      type: object
+
+  forward_message:
+    title: Forward a message
+    description: >-
+      Forward a message, with its attachments, to new recipients and an optional
+      note.
+    category: mail.send
+    scopes: [Mail.Send]
+    destructive: true
+    request:
+      method: POST
+      path: /v1.0/me/messages/${message_id}/forward
+      body:
+        comment: "${comment}"
+        toRecipients:
+          $map:
+            source: "${to}"
+            template: {emailAddress: {address: "${item}"}}
+    input:
+      message_id:
+        type: string
+        description: The message to forward.
+      to:
+        type: array
+        description: Addresses to forward it to.
+        items: {type: string, format: email}
+      comment:
+        type: string
+        description: A note added above the forwarded message.
+        optional: true
+    output:
+      description: Empty on success -- Graph answers 202 Accepted with no body.
+      type: object
+
+  # -- mail: drafts ----------------------------------------------------------
+
+  create_draft:
+    title: Create a draft email
+    description: >-
+      Create an unsent draft in the mailbox and return it with its id. Nothing
+      is sent until send_draft is called, which makes this the safe way to
+      compose something a human should approve first.
+    category: mail.draft
+    scopes: [Mail.ReadWrite]
+    request:
+      method: POST
+      path: /v1.0/me/messages
+      body:
+        subject: "${subject}"
+        body:
+          $when: "${body}"
+          contentType: "${body_type}"
+          content: "${body}"
+        toRecipients:
+          $map:
+            source: "${to}"
+            template: {emailAddress: {address: "${item}"}}
+        ccRecipients:
+          $map:
+            source: "${cc}"
+            template: {emailAddress: {address: "${item}"}}
+        bccRecipients:
+          $map:
+            source: "${bcc}"
+            template: {emailAddress: {address: "${item}"}}
+        importance: "${importance}"
+    input:
+      subject:
+        type: string
+        description: Subject line.
+      body:
+        type: string
+        description: Message body.
+      to:
+        type: array
+        description: Recipient email addresses. May be left empty and filled in later with update_draft.
+        optional: true
+        items: {type: string, format: email}
+      body_type:
+        type: string
+        description: Whether body is HTML markup or plain text.
+        optional: true
+        default: HTML
+        enum: [HTML, Text]
+      cc:
+        type: array
+        description: Addresses to copy.
+        optional: true
+        items: {type: string, format: email}
+      bcc:
+        type: array
+        description: Addresses to blind-copy.
+        optional: true
+        items: {type: string, format: email}
+      importance:
+        type: string
+        description: Message importance.
+        optional: true
+        enum: [low, normal, high]
+    output:
+      description: The created draft.
+      type: object
+      properties:
+        id: {type: string, description: "Draft id -- pass to update_draft, add_draft_file_attachment or send_draft."}
+        subject: {type: string}
+        isDraft: {type: boolean}
+        webLink: {type: string}
+
+  create_draft_with_file_attachments:
+    title: Create a draft email with file attachments
+    description: >-
+      Create an unsent draft with files already attached, in one call. Each
+      attachment's bytes travel base64-encoded, so keep the total under about
+      3 MB; attach larger files to an existing draft with
+      add_draft_link_attachment.
+    category: mail.draft
+    scopes: [Mail.ReadWrite]
+    request:
+      method: POST
+      path: /v1.0/me/messages
+      body:
+        subject: "${subject}"
+        body:
+          $when: "${body}"
+          contentType: "${body_type}"
+          content: "${body}"
+        toRecipients:
+          $map:
+            source: "${to}"
+            template: {emailAddress: {address: "${item}"}}
+        ccRecipients:
+          $map:
+            source: "${cc}"
+            template: {emailAddress: {address: "${item}"}}
+        attachments:
+          $map:
+            source: "${attachments}"
+            template:
+              "@odata.type": "#microsoft.graph.fileAttachment"
+              name: "${item.name}"
+              contentType: "${item.content_type}"
+              contentBytes: "${item.content_bytes}"
+    input:
+      subject:
+        type: string
+        description: Subject line.
+      body:
+        type: string
+        description: Message body.
+      attachments:
+        type: array
+        description: >-
+          Files to attach. Each item is {"name": "report.pdf", "content_bytes":
+          "<base64 of the file>", "content_type": "application/pdf"}.
+        items:
+          type: object
+          properties:
+            name: {type: string}
+            content_bytes: {type: string}
+            content_type: {type: string}
+      to:
+        type: array
+        description: Recipient email addresses.
+        optional: true
+        items: {type: string, format: email}
+      body_type:
+        type: string
+        description: Whether body is HTML markup or plain text.
+        optional: true
+        default: HTML
+        enum: [HTML, Text]
+      cc:
+        type: array
+        description: Addresses to copy.
+        optional: true
+        items: {type: string, format: email}
+    output:
+      description: The created draft, with its attachments.
+      type: object
+      properties:
+        id: {type: string}
+        hasAttachments: {type: boolean}
+        webLink: {type: string}
+
+  update_draft:
+    title: Update a draft email
+    description: >-
+      Change an existing draft: any of subject, body, recipients or importance.
+      Only the fields supplied are touched; the rest are left as they were.
+      Recipient lists replace the previous ones wholesale.
+    category: mail.draft
+    scopes: [Mail.ReadWrite]
+    request:
+      method: PATCH
+      path: /v1.0/me/messages/${message_id}
+      body:
+        subject: "${subject}"
+        body:
+          $when: "${body}"
+          contentType: "${body_type}"
+          content: "${body}"
+        toRecipients:
+          $map:
+            source: "${to}"
+            template: {emailAddress: {address: "${item}"}}
+        ccRecipients:
+          $map:
+            source: "${cc}"
+            template: {emailAddress: {address: "${item}"}}
+        bccRecipients:
+          $map:
+            source: "${bcc}"
+            template: {emailAddress: {address: "${item}"}}
+        importance: "${importance}"
+    input:
+      message_id:
+        type: string
+        description: The draft's id.
+      subject:
+        type: string
+        description: New subject line.
+        optional: true
+      body:
+        type: string
+        description: New message body. Supply body_type alongside it.
+        optional: true
+      body_type:
+        type: string
+        description: Whether body is HTML markup or plain text.
+        optional: true
+        default: HTML
+        enum: [HTML, Text]
+      to:
+        type: array
+        description: Replaces the recipient list entirely.
+        optional: true
+        items: {type: string, format: email}
+      cc:
+        type: array
+        description: Replaces the cc list entirely.
+        optional: true
+        items: {type: string, format: email}
+      bcc:
+        type: array
+        description: Replaces the bcc list entirely.
+        optional: true
+        items: {type: string, format: email}
+      importance:
+        type: string
+        description: Message importance.
+        optional: true
+        enum: [low, normal, high]
+    output:
+      description: The updated draft.
+      type: object
+      properties:
+        id: {type: string}
+        subject: {type: string}
+        isDraft: {type: boolean}
+
+  add_draft_file_attachment:
+    title: Attach a file to a draft
+    description: >-
+      Add one file to an existing draft, sending its bytes base64-encoded. Good
+      for files up to about 3 MB; above that Graph requires an upload session,
+      so link the file with add_draft_link_attachment instead.
+    category: mail.draft
+    scopes: [Mail.ReadWrite]
+    request:
+      method: POST
+      path: /v1.0/me/messages/${message_id}/attachments
+      body:
+        "@odata.type": "#microsoft.graph.fileAttachment"
+        name: "${name}"
+        contentType: "${content_type}"
+        contentBytes: "${content_bytes}"
+        isInline: "${is_inline}"
+        contentId: "${content_id}"
+    input:
+      message_id:
+        type: string
+        description: The draft's id.
+      name:
+        type: string
+        description: File name as the recipient will see it.
+        example: report.pdf
+      content_bytes:
+        type: string
+        description: The file's bytes, base64-encoded.
+      content_type:
+        type: string
+        description: MIME type, e.g. application/pdf.
+        optional: true
+      is_inline:
+        type: boolean
+        description: "Embed in the body rather than listing as an attachment. Pair with content_id and a cid: reference in the HTML."
+        optional: true
+      content_id:
+        type: string
+        description: "Content id an inline HTML body refers to as cid:<content_id>."
+        optional: true
+    output:
+      description: The created attachment.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        size: {type: integer}
+        contentType: {type: string}
+
+  add_draft_link_attachment:
+    title: Attach a cloud link to a draft
+    description: >-
+      Add a link to a OneDrive or SharePoint file to an existing draft, instead
+      of a copy of its bytes. This is how a large file gets "attached", and the
+      recipient sees the live document.
+    category: mail.draft
+    scopes: [Mail.ReadWrite]
+    request:
+      method: POST
+      path: /v1.0/me/messages/${message_id}/attachments
+      body:
+        "@odata.type": "#microsoft.graph.referenceAttachment"
+        name: "${name}"
+        sourceUrl: "${url}"
+        permission: "${permission}"
+        isFolder: "${is_folder}"
+    input:
+      message_id:
+        type: string
+        description: The draft's id.
+      name:
+        type: string
+        description: Name shown for the linked item.
+      url:
+        type: string
+        description: Sharing URL of the file or folder, e.g. from create_share_link.
+      permission:
+        type: string
+        description: What the recipient may do with it.
+        optional: true
+        enum: [view, edit, anonymousView, anonymousEdit, organizationView, organizationEdit]
+      is_folder:
+        type: boolean
+        description: True when the link points at a folder rather than a file.
+        optional: true
+        default: false
+    output:
+      description: The created reference attachment.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+
+  list_attachments:
+    title: List a message's attachments
+    description: >-
+      List what is attached to a message or draft, with each attachment's id,
+      name and size. Fetch one attachment's content with get_attachment.
+    category: mail.read
+    scopes: [Mail.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/messages/${message_id}/attachments
+      query:
+        $select: "${select}"
+    input:
+      message_id:
+        type: string
+        description: The message or draft id.
+      select:
+        type: array
+        description: Attachment fields to return. Omit contentBytes to keep the response small.
+        optional: true
+        items: {type: string}
+    output:
+      description: The message's attachments.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          name: {type: string}
+          size: {type: integer}
+          contentType: {type: string}
+          isInline: {type: boolean}
+
+  get_attachment:
+    title: Get an attachment
+    description: >-
+      Fetch one attachment in full, including contentBytes -- the file's bytes,
+      base64-encoded -- for a file attachment.
+    category: mail.read
+    scopes: [Mail.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/messages/${message_id}/attachments/${attachment_id}
+    input:
+      message_id:
+        type: string
+        description: The message id.
+      attachment_id:
+        type: string
+        description: The attachment id, from list_attachments.
+    output:
+      description: The attachment, with its content.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        contentType: {type: string}
+        contentBytes: {type: string, description: "The file's bytes, base64-encoded."}
+
+  delete_attachment:
+    title: Remove an attachment from a draft
+    description: Detach one attachment from a draft. Permanent.
+    category: mail.draft
+    scopes: [Mail.ReadWrite]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1.0/me/messages/${message_id}/attachments/${attachment_id}
+    input:
+      message_id:
+        type: string
+        description: The draft's id.
+      attachment_id:
+        type: string
+        description: The attachment id to remove.
+    output:
+      description: Empty on success -- Graph answers 204 No Content.
+      type: object
+
+  send_draft:
+    title: Send a draft
+    description: >-
+      Send a draft that was built with create_draft and its attachment tools.
+      Once sent the message can no longer be edited.
+    category: mail.send
+    scopes: [Mail.Send]
+    destructive: true
+    request:
+      method: POST
+      path: /v1.0/me/messages/${message_id}/send
+    input:
+      message_id:
+        type: string
+        description: The draft's id.
+    output:
+      description: Empty on success -- Graph answers 202 Accepted with no body.
+      type: object
+
+  # -- mail: organising ------------------------------------------------------
+
+  move_message:
+    title: Move a message to a folder
+    description: >-
+      Move a message into another mail folder. The message keeps its content but
+      gets a new id, which is returned.
+    category: mail.organise
+    scopes: [Mail.ReadWrite]
+    request:
+      method: POST
+      path: /v1.0/me/messages/${message_id}/move
+      body:
+        destinationId: "${destination_folder_id}"
+    input:
+      message_id:
+        type: string
+        description: The message to move.
+      destination_folder_id:
+        type: string
+        description: Target folder id, or a well-known name like "archive" or "deleteditems".
+        example: archive
+    output:
+      description: The message in its new folder, with its new id.
+      type: object
+      properties:
+        id: {type: string, description: "The new message id."}
+        parentFolderId: {type: string}
+
+  copy_message:
+    title: Copy a message to a folder
+    description: Copy a message into another folder, leaving the original where it is.
+    category: mail.organise
+    scopes: [Mail.ReadWrite]
+    request:
+      method: POST
+      path: /v1.0/me/messages/${message_id}/copy
+      body:
+        destinationId: "${destination_folder_id}"
+    input:
+      message_id:
+        type: string
+        description: The message to copy.
+      destination_folder_id:
+        type: string
+        description: Target folder id, or a well-known name.
+    output:
+      description: The new copy.
+      type: object
+      properties:
+        id: {type: string}
+        parentFolderId: {type: string}
+
+  mark_message_read:
+    title: Mark a message read or unread
+    description: Set a message's read state without changing anything else about it.
+    category: mail.organise
+    scopes: [Mail.ReadWrite]
+    request:
+      method: PATCH
+      path: /v1.0/me/messages/${message_id}
+      body:
+        isRead: "${is_read}"
+    input:
+      message_id:
+        type: string
+        description: The message id.
+      is_read:
+        type: boolean
+        description: True to mark read, false to mark unread.
+        optional: true
+        default: true
+    output:
+      description: The updated message.
+      type: object
+      properties:
+        id: {type: string}
+        isRead: {type: boolean}
+
+  flag_message:
+    title: Flag a message for follow-up
+    description: >-
+      Set a message's follow-up flag to flagged, complete or notFlagged -- the
+      Outlook "follow up" marker.
+    category: mail.organise
+    scopes: [Mail.ReadWrite]
+    request:
+      method: PATCH
+      path: /v1.0/me/messages/${message_id}
+      body:
+        flag:
+          flagStatus: "${flag_status}"
+    input:
+      message_id:
+        type: string
+        description: The message id.
+      flag_status:
+        type: string
+        description: The flag state to set.
+        optional: true
+        default: flagged
+        enum: [notFlagged, complete, flagged]
+    output:
+      description: The updated message.
+      type: object
+      properties:
+        id: {type: string}
+        flag: {type: object}
+
+  delete_message:
+    title: Delete a message
+    description: >-
+      Move a message to Deleted Items. Recoverable from there by the user, but
+      not by this tool.
+    category: mail.organise
+    scopes: [Mail.ReadWrite]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1.0/me/messages/${message_id}
+    input:
+      message_id:
+        type: string
+        description: The message to delete.
+    output:
+      description: Empty on success -- Graph answers 204 No Content.
+      type: object
+
+  create_mail_folder:
+    title: Create a mail folder
+    description: >-
+      Create a folder in the mailbox, optionally nested inside another folder.
+    category: mail.organise
+    scopes: [Mail.ReadWrite]
+    request:
+      method: POST
+      path: /v1.0/me/mailFolders
+      body:
+        displayName: "${name}"
+        isHidden: "${is_hidden}"
+    input:
+      name:
+        type: string
+        description: Folder name.
+      is_hidden:
+        type: boolean
+        description: Hide the folder from Outlook's folder list.
+        optional: true
+    output:
+      description: The created folder.
+      type: object
+      properties:
+        id: {type: string}
+        displayName: {type: string}
+
+  # -- calendar --------------------------------------------------------------
+
+  list_calendars:
+    title: List calendars
+    description: >-
+      List the calendars the signed-in user can see, with their ids. Events tools
+      default to the primary calendar unless a calendar_id is given.
+    category: calendar.read
+    scopes: [Calendars.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/calendars
+      query:
+        $top: "${limit}"
+    input:
+      limit:
+        type: integer
+        description: How many calendars to return.
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 999
+    output:
+      description: The user's calendars.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          name: {type: string}
+          owner: {type: object}
+          canEdit: {type: boolean}
+          isDefaultCalendar: {type: boolean}
+
+  list_events:
+    title: List calendar events
+    description: >-
+      List events on the primary calendar. For "what is on my calendar between
+      these two dates", prefer list_calendar_view, which expands recurring
+      series into their individual occurrences.
+    category: calendar.read
+    scopes: [Calendars.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/events
+      query:
+        $top: "${limit}"
+        $filter: "${filter}"
+        $orderby: "${order_by}"
+        $select: "${select}"
+    input:
+      limit:
+        type: integer
+        description: How many events to return.
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 999
+      filter:
+        type: string
+        description: OData $filter expression.
+        optional: true
+      order_by:
+        type: string
+        description: OData $orderby expression.
+        optional: true
+        default: start/dateTime
+      select:
+        type: array
+        description: Event fields to return.
+        optional: true
+        items: {type: string}
+    output:
+      description: The calendar's events.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          subject: {type: string}
+          start: {type: object}
+          end: {type: object}
+          location: {type: object}
+          organizer: {type: object}
+          onlineMeeting: {type: object}
+
+  list_calendar_view:
+    title: List events in a date range
+    description: >-
+      List every event occurring between two instants, with recurring series
+      expanded into individual occurrences. This is the right tool for "what
+      does my week look like".
+    category: calendar.read
+    scopes: [Calendars.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/calendarView
+      query:
+        startDateTime: "${start}"
+        endDateTime: "${end}"
+        $top: "${limit}"
+        $orderby: "${order_by}"
+      headers:
+        Prefer: 'outlook.timezone="${timezone}"'
+    input:
+      start:
+        type: string
+        description: Start of the range, ISO 8601, e.g. 2026-09-01T00:00:00Z.
+        example: "2026-09-01T00:00:00Z"
+      end:
+        type: string
+        description: End of the range, ISO 8601.
+        example: "2026-09-08T00:00:00Z"
+      limit:
+        type: integer
+        description: How many occurrences to return.
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 999
+      order_by:
+        type: string
+        description: OData $orderby expression.
+        optional: true
+        default: start/dateTime
+      timezone:
+        type: string
+        description: Time zone the times come back in, e.g. "Pacific Standard Time". Defaults to UTC.
+        optional: true
+    output:
+      description: Event occurrences in the range.
+      type: array
+      response_path: value
+      items: {type: object}
+
+  get_event:
+    title: Get a calendar event
+    description: Fetch one event in full, including attendees and the meeting body.
+    category: calendar.read
+    scopes: [Calendars.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/events/${event_id}
+    input:
+      event_id:
+        type: string
+        description: The event id.
+    output:
+      description: The event.
+      type: object
+      properties:
+        id: {type: string}
+        subject: {type: string}
+        body: {type: object}
+        start: {type: object}
+        end: {type: object}
+        attendees: {type: array}
+        onlineMeeting: {type: object}
+
+  create_event:
+    title: Create a calendar event
+    description: >-
+      Create an event on the primary calendar, optionally inviting attendees --
+      who each receive a meeting request. Set is_online_meeting to have Teams
+      generate a join link.
+    category: calendar.write
+    scopes: [Calendars.ReadWrite]
+    request:
+      method: POST
+      path: /v1.0/me/events
+      body:
+        subject: "${subject}"
+        body:
+          $when: "${body}"
+          contentType: "${body_type}"
+          content: "${body}"
+        start:
+          $when: "${start}"
+          dateTime: "${start}"
+          timeZone: "${timezone}"
+        end:
+          $when: "${end}"
+          dateTime: "${end}"
+          timeZone: "${timezone}"
+        location:
+          displayName: "${location}"
+        attendees:
+          $map:
+            source: "${attendees}"
+            template:
+              emailAddress: {address: "${item}"}
+              type: required
+        isOnlineMeeting: "${is_online_meeting}"
+        onlineMeetingProvider: "${online_meeting_provider}"
+        isAllDay: "${is_all_day}"
+        reminderMinutesBeforeStart: "${reminder_minutes_before_start}"
+    input:
+      subject:
+        type: string
+        description: Event title.
+      start:
+        type: string
+        description: Start time, ISO 8601 without a zone suffix, e.g. 2026-09-01T14:00:00.
+        example: "2026-09-01T14:00:00"
+      end:
+        type: string
+        description: End time, ISO 8601 without a zone suffix.
+        example: "2026-09-01T15:00:00"
+      timezone:
+        type: string
+        description: Windows time zone name the start and end are expressed in.
+        optional: true
+        default: UTC
+      body:
+        type: string
+        description: Description shown in the invitation.
+        optional: true
+      body_type:
+        type: string
+        description: Whether body is HTML markup or plain text.
+        optional: true
+        default: HTML
+        enum: [HTML, Text]
+      location:
+        type: string
+        description: Where the event happens.
+        optional: true
+      attendees:
+        type: array
+        description: Email addresses to invite. Each receives a meeting request.
+        optional: true
+        items: {type: string, format: email}
+      is_online_meeting:
+        type: boolean
+        description: Attach a Teams meeting with a join link.
+        optional: true
+      online_meeting_provider:
+        type: string
+        description: Which online meeting service to use.
+        optional: true
+        enum: [teamsForBusiness, skypeForBusiness, skypeForConsumer]
+      is_all_day:
+        type: boolean
+        description: An all-day event. Start and end must then be midnight on consecutive days.
+        optional: true
+      reminder_minutes_before_start:
+        type: integer
+        description: Minutes before the start to remind.
+        optional: true
+        minimum: 0
+    output:
+      description: The created event.
+      type: object
+      properties:
+        id: {type: string}
+        subject: {type: string}
+        webLink: {type: string}
+        onlineMeeting: {type: object, description: "Present with a joinUrl when is_online_meeting was set."}
+
+  update_event:
+    title: Update a calendar event
+    description: >-
+      Change an existing event. Only the fields supplied are touched. Changing
+      the time or the attendee list re-sends the meeting request.
+    category: calendar.write
+    scopes: [Calendars.ReadWrite]
+    request:
+      method: PATCH
+      path: /v1.0/me/events/${event_id}
+      body:
+        subject: "${subject}"
+        body:
+          $when: "${body}"
+          contentType: "${body_type}"
+          content: "${body}"
+        start:
+          $when: "${start}"
+          dateTime: "${start}"
+          timeZone: "${timezone}"
+        end:
+          $when: "${end}"
+          dateTime: "${end}"
+          timeZone: "${timezone}"
+        location:
+          displayName: "${location}"
+        attendees:
+          $map:
+            source: "${attendees}"
+            template:
+              emailAddress: {address: "${item}"}
+              type: required
+    input:
+      event_id:
+        type: string
+        description: The event to change.
+      subject:
+        type: string
+        description: New title.
+        optional: true
+      start:
+        type: string
+        description: New start time, ISO 8601. Supply end and timezone with it.
+        optional: true
+      end:
+        type: string
+        description: New end time, ISO 8601.
+        optional: true
+      timezone:
+        type: string
+        description: Windows time zone name for the new times.
+        optional: true
+        default: UTC
+      body:
+        type: string
+        description: New description.
+        optional: true
+      body_type:
+        type: string
+        description: Whether body is HTML markup or plain text.
+        optional: true
+        default: HTML
+        enum: [HTML, Text]
+      location:
+        type: string
+        description: New location.
+        optional: true
+      attendees:
+        type: array
+        description: Replaces the attendee list entirely.
+        optional: true
+        items: {type: string, format: email}
+    output:
+      description: The updated event.
+      type: object
+      properties:
+        id: {type: string}
+        subject: {type: string}
+
+  delete_event:
+    title: Delete a calendar event
+    description: >-
+      Delete an event. If it had attendees they are sent a cancellation. Use
+      cancel_event to include a note explaining why.
+    category: calendar.write
+    scopes: [Calendars.ReadWrite]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1.0/me/events/${event_id}
+    input:
+      event_id:
+        type: string
+        description: The event to delete.
+    output:
+      description: Empty on success -- Graph answers 204 No Content.
+      type: object
+
+  cancel_event:
+    title: Cancel a meeting
+    description: >-
+      Cancel a meeting the user organises, sending every attendee a cancellation
+      with an optional explanation. Only the organiser may do this.
+    category: calendar.write
+    scopes: [Calendars.ReadWrite]
+    destructive: true
+    request:
+      method: POST
+      path: /v1.0/me/events/${event_id}/cancel
+      body:
+        comment: "${comment}"
+    input:
+      event_id:
+        type: string
+        description: The meeting to cancel.
+      comment:
+        type: string
+        description: Note sent to the attendees.
+        optional: true
+    output:
+      description: Empty on success -- Graph answers 202 Accepted with no body.
+      type: object
+
+  respond_to_event:
+    title: Accept, decline or tentatively accept an invitation
+    description: >-
+      Answer a meeting request on the user's behalf, optionally with a note and
+      optionally proposing a different time.
+    category: calendar.write
+    scopes: [Calendars.ReadWrite]
+    request:
+      method: POST
+      path: /v1.0/me/events/${event_id}/${response}
+      body:
+        comment: "${comment}"
+        sendResponse: "${send_response}"
+    input:
+      event_id:
+        type: string
+        description: The invitation to answer.
+      response:
+        type: string
+        description: How to answer.
+        enum: [accept, decline, tentativelyAccept]
+      comment:
+        type: string
+        description: Note sent back to the organiser.
+        optional: true
+      send_response:
+        type: boolean
+        description: Whether the organiser is told.
+        optional: true
+        default: true
+    output:
+      description: Empty on success -- Graph answers 202 Accepted with no body.
+      type: object
+
+  find_meeting_times:
+    title: Find a time everyone is free
+    description: >-
+      Ask Graph to suggest meeting times that work for a set of attendees,
+      given a duration and a window to look in. Returns ranked suggestions with
+      each attendee's availability.
+    category: calendar.read
+    scopes: [Calendars.Read.Shared]
+    read_only: true
+    request:
+      method: POST
+      path: /v1.0/me/findMeetingTimes
+      body:
+        attendees:
+          $map:
+            source: "${attendees}"
+            template:
+              type: required
+              emailAddress: {address: "${item}"}
+        timeConstraint:
+          timeSlots:
+            - start: {dateTime: "${start}", timeZone: "${timezone}"}
+              end: {dateTime: "${end}", timeZone: "${timezone}"}
+        meetingDuration: "${duration}"
+        maxCandidates: "${max_candidates}"
+        minimumAttendeePercentage: "${minimum_attendee_percentage}"
+    input:
+      attendees:
+        type: array
+        description: Email addresses who need to attend.
+        items: {type: string, format: email}
+      start:
+        type: string
+        description: Earliest acceptable start, ISO 8601.
+      end:
+        type: string
+        description: Latest acceptable end, ISO 8601.
+      duration:
+        type: string
+        description: Meeting length as an ISO 8601 duration, e.g. PT30M or PT1H.
+        optional: true
+        default: PT30M
+        example: PT1H
+      timezone:
+        type: string
+        description: Time zone the window is expressed in.
+        optional: true
+        default: UTC
+      max_candidates:
+        type: integer
+        description: How many suggestions to return.
+        optional: true
+        minimum: 1
+      minimum_attendee_percentage:
+        type: number
+        description: Minimum share of attendees that must be free, 0-100.
+        optional: true
+        minimum: 0
+        maximum: 100
+    output:
+      description: Ranked meeting time suggestions.
+      type: object
+      properties:
+        meetingTimeSuggestions: {type: array}
+        emptySuggestionsReason: {type: string}
+
+  get_schedule:
+    title: Get free/busy for people or rooms
+    description: >-
+      Read the free/busy blocks for a set of mailboxes -- people or meeting
+      rooms -- over a window, without seeing what the events are.
+    category: calendar.read
+    scopes: [Calendars.Read.Shared]
+    read_only: true
+    request:
+      method: POST
+      path: /v1.0/me/calendar/getSchedule
+      body:
+        schedules: "${schedules}"
+        startTime: {dateTime: "${start}", timeZone: "${timezone}"}
+        endTime: {dateTime: "${end}", timeZone: "${timezone}"}
+        availabilityViewInterval: "${interval_minutes}"
+    input:
+      schedules:
+        type: array
+        description: Mailbox addresses to check, people or rooms.
+        items: {type: string, format: email}
+      start:
+        type: string
+        description: Start of the window, ISO 8601.
+      end:
+        type: string
+        description: End of the window, ISO 8601.
+      timezone:
+        type: string
+        description: Time zone the window is expressed in.
+        optional: true
+        default: UTC
+      interval_minutes:
+        type: integer
+        description: Granularity of the availability string, in minutes.
+        optional: true
+        default: 30
+        minimum: 5
+        maximum: 1440
+    output:
+      description: One schedule per requested mailbox.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          scheduleId: {type: string}
+          availabilityView: {type: string, description: "One character per interval, 0 free through 4 out of office."}
+          scheduleItems: {type: array}
+
+  # -- contacts --------------------------------------------------------------
+
+  list_contacts:
+    title: List contacts
+    description: List the signed-in user's personal Outlook contacts.
+    category: contacts.read
+    scopes: [Contacts.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/contacts
+      query:
+        $top: "${limit}"
+        $filter: "${filter}"
+        $orderby: "${order_by}"
+    input:
+      limit:
+        type: integer
+        description: How many contacts to return.
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 999
+      filter:
+        type: string
+        description: OData $filter expression, e.g. "startswith(displayName,'A')".
+        optional: true
+      order_by:
+        type: string
+        description: OData $orderby expression.
+        optional: true
+    output:
+      description: The user's contacts.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          displayName: {type: string}
+          emailAddresses: {type: array}
+          companyName: {type: string}
+
+  get_contact:
+    title: Get a contact
+    description: >-
+      Fetch one contact in full, with every phone number, address and note the
+      record carries -- more than list_contacts returns.
+    category: contacts.read
+    scopes: [Contacts.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/contacts/${contact_id}
+    input:
+      contact_id:
+        type: string
+        description: The contact id.
+    output:
+      description: The contact.
+      type: object
+
+  create_contact:
+    title: Create a contact
+    description: Add a contact to the user's personal Outlook contacts.
+    category: contacts.write
+    scopes: [Contacts.ReadWrite]
+    request:
+      method: POST
+      path: /v1.0/me/contacts
+      body:
+        givenName: "${given_name}"
+        surname: "${surname}"
+        companyName: "${company}"
+        jobTitle: "${job_title}"
+        emailAddresses:
+          $map:
+            source: "${emails}"
+            template: {address: "${item}", name: "${given_name}"}
+        businessPhones: "${business_phones}"
+        mobilePhone: "${mobile_phone}"
+        personalNotes: "${notes}"
+    input:
+      given_name:
+        type: string
+        description: First name.
+      surname:
+        type: string
+        description: Last name.
+        optional: true
+      emails:
+        type: array
+        description: Email addresses for the contact.
+        optional: true
+        items: {type: string, format: email}
+      company:
+        type: string
+        description: Company name.
+        optional: true
+      job_title:
+        type: string
+        description: Job title.
+        optional: true
+      business_phones:
+        type: array
+        description: Work phone numbers.
+        optional: true
+        items: {type: string}
+      mobile_phone:
+        type: string
+        description: Mobile number.
+        optional: true
+      notes:
+        type: string
+        description: Free-text notes.
+        optional: true
+    output:
+      description: The created contact.
+      type: object
+      properties:
+        id: {type: string}
+        displayName: {type: string}
+
+  update_contact:
+    title: Update a contact
+    description: Change fields on an existing contact. Only what is supplied is touched.
+    category: contacts.write
+    scopes: [Contacts.ReadWrite]
+    request:
+      method: PATCH
+      path: /v1.0/me/contacts/${contact_id}
+      body:
+        givenName: "${given_name}"
+        surname: "${surname}"
+        companyName: "${company}"
+        jobTitle: "${job_title}"
+        mobilePhone: "${mobile_phone}"
+        personalNotes: "${notes}"
+    input:
+      contact_id:
+        type: string
+        description: The contact to change.
+      given_name:
+        type: string
+        description: New first name.
+        optional: true
+      surname:
+        type: string
+        description: New last name.
+        optional: true
+      company:
+        type: string
+        description: New company name.
+        optional: true
+      job_title:
+        type: string
+        description: New job title.
+        optional: true
+      mobile_phone:
+        type: string
+        description: New mobile number.
+        optional: true
+      notes:
+        type: string
+        description: New notes.
+        optional: true
+    output:
+      description: The updated contact.
+      type: object
+      properties:
+        id: {type: string}
+
+  delete_contact:
+    title: Delete a contact
+    description: Permanently remove a contact from the user's contacts.
+    category: contacts.write
+    scopes: [Contacts.ReadWrite]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1.0/me/contacts/${contact_id}
+    input:
+      contact_id:
+        type: string
+        description: The contact to delete.
+    output:
+      description: Empty on success -- Graph answers 204 No Content.
+      type: object
+
+  # -- OneDrive files --------------------------------------------------------
+
+  list_drive_items:
+    title: List files in a OneDrive folder
+    description: >-
+      List the children of a OneDrive folder. Omit folder_id for the drive root.
+      Folders are distinguished from files by the presence of a "folder" facet.
+    category: files.read
+    scopes: [Files.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/drive/items/${folder_id}/children
+      query:
+        $top: "${limit}"
+        $orderby: "${order_by}"
+    input:
+      folder_id:
+        type: string
+        description: Folder id. Use "root" for the top of the drive.
+        optional: true
+        default: root
+      limit:
+        type: integer
+        description: How many items to return.
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 999
+      order_by:
+        type: string
+        description: OData $orderby expression, e.g. "lastModifiedDateTime desc".
+        optional: true
+    output:
+      description: The folder's contents.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          name: {type: string}
+          size: {type: integer}
+          webUrl: {type: string}
+          folder: {type: object, description: "Present when the item is a folder."}
+          file: {type: object, description: "Present when the item is a file."}
+
+  search_drive:
+    title: Search OneDrive
+    description: >-
+      Search the user's whole drive by file name and content. Returns matching
+      items with their ids, for use with get_drive_item or create_share_link.
+    category: files.read
+    scopes: [Files.Read]
+    read_only: true
+    request:
+      method: GET
+      path: "/v1.0/me/drive/root/search(q='${query}')"
+      query:
+        $top: "${limit}"
+    input:
+      query:
+        type: string
+        description: Words to search for.
+        example: quarterly budget
+      limit:
+        type: integer
+        description: How many items to return.
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 999
+    output:
+      description: Matching drive items.
+      type: array
+      response_path: value
+      items: {type: object}
+
+  get_drive_item:
+    title: Get a OneDrive file or folder
+    description: >-
+      Fetch one drive item's metadata, including its size, web URL and a
+      short-lived direct download URL under "@microsoft.graph.downloadUrl".
+    category: files.read
+    scopes: [Files.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/drive/items/${item_id}
+    input:
+      item_id:
+        type: string
+        description: The drive item id.
+    output:
+      description: The drive item.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        size: {type: integer}
+        webUrl: {type: string}
+        "@microsoft.graph.downloadUrl": {type: string, description: "Pre-authenticated download URL, valid for a short time."}
+
+  upload_file:
+    title: Upload a file to OneDrive
+    description: >-
+      Create or replace a file at a path in the user's drive, sending its
+      content directly. Graph accepts up to 4 MB this way; larger files need an
+      upload session, which this tool does not cover.
+    category: files.write
+    scopes: [Files.ReadWrite]
+    request:
+      method: PUT
+      path: "/v1.0/me/drive/root:/${path}:/content"
+      content: "${content}"
+      headers:
+        content-type: "${content_type}"
+    input:
+      path:
+        type: string
+        description: Destination path inside the drive, e.g. "Reports/q3.txt".
+        example: Reports/q3.txt
+      content:
+        type: string
+        description: The file's contents, as text.
+      content_type:
+        type: string
+        description: MIME type of the content.
+        optional: true
+        default: text/plain
+    output:
+      description: The created or updated file.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        size: {type: integer}
+        webUrl: {type: string}
+
+  create_folder:
+    title: Create a OneDrive folder
+    description: Create a folder inside another folder, or at the drive root.
+    category: files.write
+    scopes: [Files.ReadWrite]
+    request:
+      method: POST
+      path: /v1.0/me/drive/items/${parent_id}/children
+      body:
+        name: "${name}"
+        folder: {}
+        "@microsoft.graph.conflictBehavior": "${conflict_behavior}"
+    input:
+      name:
+        type: string
+        description: Folder name.
+      parent_id:
+        type: string
+        description: Parent folder id. Use "root" for the top of the drive.
+        optional: true
+        default: root
+      conflict_behavior:
+        type: string
+        description: What to do when a folder of that name already exists.
+        optional: true
+        default: rename
+        enum: [rename, replace, fail]
+    output:
+      description: The created folder.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+
+  create_share_link:
+    title: Create a sharing link for a file
+    description: >-
+      Mint a sharing URL for a drive item. The resulting link is what
+      send_email_with_link_attachments and add_draft_link_attachment want, and
+      is how a file too large to attach gets shared.
+    category: files.write
+    scopes: [Files.ReadWrite]
+    request:
+      method: POST
+      path: /v1.0/me/drive/items/${item_id}/createLink
+      body:
+        type: "${link_type}"
+        scope: "${link_scope}"
+        expirationDateTime: "${expires_at}"
+    input:
+      item_id:
+        type: string
+        description: The drive item to share.
+      link_type:
+        type: string
+        description: What the link allows.
+        optional: true
+        default: view
+        enum: [view, edit, embed]
+      link_scope:
+        type: string
+        description: Who the link works for. "anonymous" may be blocked by tenant policy.
+        optional: true
+        default: organization
+        enum: [anonymous, organization, users]
+      expires_at:
+        type: string
+        description: When the link stops working, ISO 8601.
+        optional: true
+    output:
+      description: The sharing permission, with the link itself.
+      type: object
+      properties:
+        id: {type: string}
+        link: {type: object, description: "Holds webUrl -- the sharing URL."}
+
+  delete_drive_item:
+    title: Delete a OneDrive file or folder
+    description: Move a drive item to the recycle bin. Deleting a folder takes its contents with it.
+    category: files.write
+    scopes: [Files.ReadWrite]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1.0/me/drive/items/${item_id}
+    input:
+      item_id:
+        type: string
+        description: The item to delete.
+    output:
+      description: Empty on success -- Graph answers 204 No Content.
+      type: object
+
+  # -- profile and tasks -----------------------------------------------------
+
+  get_my_profile:
+    title: Get the signed-in user's profile
+    description: >-
+      Read the account the token belongs to -- display name, email, job title,
+      time zone. The cheapest way to confirm which mailbox the tools act on.
+    category: user.read
+    scopes: [User.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me
+    input: {}
+    output:
+      description: The signed-in user.
+      type: object
+      properties:
+        id: {type: string}
+        displayName: {type: string}
+        mail: {type: string}
+        userPrincipalName: {type: string}
+        jobTitle: {type: string}
+
+  list_todo_lists:
+    title: List To Do lists
+    description: List the user's Microsoft To Do task lists, with their ids.
+    category: tasks.read
+    scopes: [Tasks.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/todo/lists
+    input: {}
+    output:
+      description: The user's task lists.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          displayName: {type: string}
+          wellknownListName: {type: string}
+
+  list_todo_tasks:
+    title: List tasks in a To Do list
+    description: List the tasks in one Microsoft To Do list.
+    category: tasks.read
+    scopes: [Tasks.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/todo/lists/${list_id}/tasks
+      query:
+        $top: "${limit}"
+        $filter: "${filter}"
+    input:
+      list_id:
+        type: string
+        description: The task list id, from list_todo_lists.
+      limit:
+        type: integer
+        description: How many tasks to return.
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 999
+      filter:
+        type: string
+        description: OData $filter expression, e.g. "status ne 'completed'".
+        optional: true
+    output:
+      description: The list's tasks.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          title: "{type: string}"
+          status: {type: string}
+          dueDateTime: {type: object}
+
+  create_todo_task:
+    title: Create a To Do task
+    description: Add a task to a Microsoft To Do list, optionally with a due date and reminder.
+    category: tasks.write
+    scopes: [Tasks.ReadWrite]
+    request:
+      method: POST
+      path: /v1.0/me/todo/lists/${list_id}/tasks
+      body:
+        title: "${title}"
+        body:
+          $when: "${notes}"
+          contentType: text
+          content: "${notes}"
+        dueDateTime:
+          $when: "${due}"
+          dateTime: "${due}"
+          timeZone: "${timezone}"
+        importance: "${importance}"
+        reminderDateTime:
+          $when: "${remind_at}"
+          dateTime: "${remind_at}"
+          timeZone: "${timezone}"
+    input:
+      list_id:
+        type: string
+        description: The task list to add to.
+      title:
+        type: string
+        description: What the task is.
+      notes:
+        type: string
+        description: Longer description.
+        optional: true
+      due:
+        type: string
+        description: Due date and time, ISO 8601 without a zone suffix.
+        optional: true
+      remind_at:
+        type: string
+        description: When to remind, ISO 8601 without a zone suffix.
+        optional: true
+      timezone:
+        type: string
+        description: Time zone the due and reminder times are expressed in.
+        optional: true
+        default: UTC
+      importance:
+        type: string
+        description: Task importance.
+        optional: true
+        enum: [low, normal, high]
+    output:
+      description: The created task.
+      type: object
+      properties:
+        id: {type: string}
+        title: "{type: string}"
+        status: {type: string}
+
+  complete_todo_task:
+    title: Mark a To Do task complete
+    description: Set a task's status, normally to completed.
+    category: tasks.write
+    scopes: [Tasks.ReadWrite]
+    request:
+      method: PATCH
+      path: /v1.0/me/todo/lists/${list_id}/tasks/${task_id}
+      body:
+        status: "${status}"
+    input:
+      list_id:
+        type: string
+        description: The task list id.
+      task_id:
+        type: string
+        description: The task id.
+      status:
+        type: string
+        description: New status.
+        optional: true
+        default: completed
+        enum: [notStarted, inProgress, completed, waitingOnOthers, deferred]
+    output:
+      description: The updated task.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string}

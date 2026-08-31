@@ -1,0 +1,387 @@
+# Excel tools (Microsoft Graph workbook API).
+#
+# A workbook is a file in OneDrive, so every path starts with the drive item id
+# of the .xlsx. Ranges use A1 notation within a named worksheet.
+#
+# Docs: https://learn.microsoft.com/graph/api/resources/excel
+
+connector_id: microsoft-excel
+display_name: Microsoft Excel
+docs_url: https://learn.microsoft.com/graph/api/resources/excel
+
+scope_rules:
+  case_insensitive: true
+  implies:
+    Files.ReadWrite.All: [Files.ReadWrite, Files.Read.All, Files.Read]
+    Files.ReadWrite: [Files.Read]
+
+scope_discovery:
+  jwt_claim: scp
+
+tools:
+
+  find_workbooks:
+    title: Find Excel workbooks
+    description: >-
+      Search OneDrive for .xlsx files and return their drive item ids, which
+      every other tool here takes.
+    category: workbooks
+    scopes: [Files.Read]
+    read_only: true
+    request:
+      method: GET
+      path: "/v1.0/me/drive/root/search(q='${query}')"
+      query:
+        $top: "${limit}"
+    input:
+      query:
+        type: string
+        description: Words to match against file names, e.g. "budget.xlsx".
+        example: budget
+      limit:
+        type: integer
+        description: How many files to return.
+        optional: true
+        default: 25
+        minimum: 1
+        maximum: 999
+    output:
+      description: Matching files.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string, description: "Drive item id -- the workbook id."}
+          name: {type: string}
+          webUrl: {type: string}
+
+  list_worksheets:
+    title: List a workbook's worksheets
+    description: List the sheets in a workbook with their names, ids and visibility.
+    category: worksheets
+    scopes: [Files.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/drive/items/${workbook_id}/workbook/worksheets
+    input:
+      workbook_id:
+        type: string
+        description: Drive item id of the .xlsx file.
+    output:
+      description: The workbook's worksheets.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          name: {type: string, description: "Sheet name -- what the range tools take."}
+          position: {type: integer}
+          visibility: {type: string}
+
+  read_range:
+    title: Read cells from a range
+    description: >-
+      Read the values, formulas and formatted text of an A1 range on a
+      worksheet, e.g. "A1:D20".
+    category: values
+    scopes: [Files.Read]
+    read_only: true
+    request:
+      method: GET
+      path: "/v1.0/me/drive/items/${workbook_id}/workbook/worksheets/${worksheet}/range(address='${range}')"
+      query:
+        $select: "${select}"
+    input:
+      workbook_id:
+        type: string
+        description: Drive item id of the workbook.
+      worksheet:
+        type: string
+        description: Worksheet name or id.
+        example: Sheet1
+      range:
+        type: string
+        description: A1 range within the worksheet, e.g. A1:D20.
+        example: A1:D20
+      select:
+        type: array
+        description: Fields to return, e.g. ["values","text","formulas"].
+        optional: true
+        items: {type: string}
+    output:
+      description: The range.
+      type: object
+      properties:
+        address: {type: string}
+        values: {type: array, description: "Rows of raw cell values."}
+        text: {type: array, description: "Rows of displayed text."}
+        formulas: {type: array}
+
+  read_used_range:
+    title: Read everything on a worksheet
+    description: >-
+      Read the worksheet's used range — the rectangle that actually holds data —
+      without having to know how far it extends.
+    category: values
+    scopes: [Files.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/drive/items/${workbook_id}/workbook/worksheets/${worksheet}/usedRange
+      query:
+        $select: "${select}"
+        valuesOnly: "${values_only}"
+    input:
+      workbook_id:
+        type: string
+        description: Drive item id of the workbook.
+      worksheet:
+        type: string
+        description: Worksheet name or id.
+      select:
+        type: array
+        description: Fields to return, e.g. ["address","values"].
+        optional: true
+        items: {type: string}
+      values_only:
+        type: boolean
+        description: Ignore cells that only carry formatting.
+        optional: true
+    output:
+      description: The used range.
+      type: object
+      properties:
+        address: {type: string}
+        rowCount: {type: integer}
+        columnCount: {type: integer}
+        values: {type: array}
+
+  write_range:
+    title: Write cells to a range
+    description: >-
+      Overwrite an A1 range with the values given. `values` is an array of rows;
+      its shape must match the range exactly, so A1:B2 needs two rows of two.
+    category: values
+    scopes: [Files.ReadWrite]
+    request:
+      method: PATCH
+      path: "/v1.0/me/drive/items/${workbook_id}/workbook/worksheets/${worksheet}/range(address='${range}')"
+      body:
+        values: "${values}"
+        numberFormat: "${number_format}"
+    input:
+      workbook_id:
+        type: string
+        description: Drive item id of the workbook.
+      worksheet:
+        type: string
+        description: Worksheet name or id.
+      range:
+        type: string
+        description: A1 range to write into. Its size must match `values`.
+      values:
+        type: array
+        description: Rows of cell values, e.g. [["Name","Email"],["Ada","ada@example.com"]].
+        items: {type: array}
+      number_format:
+        type: array
+        description: Rows of number-format strings matching the same shape, e.g. [["General","0.00"]].
+        optional: true
+        items: {type: array}
+    output:
+      description: The range after the write.
+      type: object
+      properties:
+        address: {type: string}
+        values: {type: array}
+
+  list_tables:
+    title: List a workbook's tables
+    description: >-
+      List the Excel tables in a workbook. Tables are the reliable way to append
+      rows, since they grow on their own.
+    category: tables
+    scopes: [Files.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/drive/items/${workbook_id}/workbook/tables
+    input:
+      workbook_id:
+        type: string
+        description: Drive item id of the workbook.
+    output:
+      description: The workbook's tables.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          name: {type: string}
+          showHeaders: {type: boolean}
+
+  add_table_rows:
+    title: Append rows to a table
+    description: >-
+      Add rows to the end of an Excel table, which expands to fit them. The
+      right tool for logging or accumulating records.
+    category: tables
+    scopes: [Files.ReadWrite]
+    request:
+      method: POST
+      path: /v1.0/me/drive/items/${workbook_id}/workbook/tables/${table}/rows/add
+      body:
+        values: "${values}"
+        index: "${index}"
+    input:
+      workbook_id:
+        type: string
+        description: Drive item id of the workbook.
+      table:
+        type: string
+        description: Table name or id.
+      values:
+        type: array
+        description: Rows to append, each an array of cell values.
+        items: {type: array}
+      index:
+        type: integer
+        description: Zero-based position to insert at. Omit to append at the end.
+        optional: true
+        minimum: 0
+    output:
+      description: The rows that were added.
+      type: object
+      properties:
+        index: {type: integer}
+        values: {type: array}
+
+  get_table_rows:
+    title: Read a table's rows
+    description: Read the data rows of an Excel table, without its header row.
+    category: tables
+    scopes: [Files.Read]
+    read_only: true
+    request:
+      method: GET
+      path: /v1.0/me/drive/items/${workbook_id}/workbook/tables/${table}/rows
+      query:
+        $top: "${limit}"
+        $skip: "${skip}"
+    input:
+      workbook_id:
+        type: string
+        description: Drive item id of the workbook.
+      table:
+        type: string
+        description: Table name or id.
+      limit:
+        type: integer
+        description: How many rows to return.
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 999
+      skip:
+        type: integer
+        description: How many rows to skip.
+        optional: true
+        minimum: 0
+    output:
+      description: The table's rows.
+      type: array
+      response_path: value
+      items:
+        type: object
+        properties:
+          index: {type: integer}
+          values: {type: array}
+
+  add_worksheet:
+    title: Add a worksheet
+    description: Add a sheet to a workbook, optionally with a name.
+    category: worksheets
+    scopes: [Files.ReadWrite]
+    request:
+      method: POST
+      path: /v1.0/me/drive/items/${workbook_id}/workbook/worksheets/add
+      body:
+        name: "${name}"
+    input:
+      workbook_id:
+        type: string
+        description: Drive item id of the workbook.
+      name:
+        type: string
+        description: Name for the new sheet. Excel picks one if omitted.
+        optional: true
+    output:
+      description: The created worksheet.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        position: {type: integer}
+
+  clear_range:
+    title: Clear a range
+    description: >-
+      Empty a range's contents, its formatting, or both. This cannot be undone
+      through the API.
+    category: values
+    scopes: [Files.ReadWrite]
+    destructive: true
+    request:
+      method: POST
+      path: "/v1.0/me/drive/items/${workbook_id}/workbook/worksheets/${worksheet}/range(address='${range}')/clear"
+      body:
+        applyTo: "${apply_to}"
+    input:
+      workbook_id:
+        type: string
+        description: Drive item id of the workbook.
+      worksheet:
+        type: string
+        description: Worksheet name or id.
+      range:
+        type: string
+        description: A1 range to clear.
+      apply_to:
+        type: string
+        description: What to clear.
+        optional: true
+        default: Contents
+        enum: [All, Formats, Contents]
+    output:
+      description: Empty on success -- Graph answers 204 No Content.
+      type: object
+
+  create_workbook:
+    title: Create a workbook
+    description: >-
+      Create an empty .xlsx in OneDrive at a path, and return the drive item id
+      the other tools take.
+    category: workbooks
+    scopes: [Files.ReadWrite]
+    request:
+      method: PUT
+      path: "/v1.0/me/drive/root:/${path}:/content"
+      content: ""
+      headers:
+        content-type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+    input:
+      path:
+        type: string
+        description: Destination path, ending in .xlsx, e.g. "Reports/q3.xlsx".
+        example: Reports/q3.xlsx
+    output:
+      description: The created workbook.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        webUrl: {type: string}

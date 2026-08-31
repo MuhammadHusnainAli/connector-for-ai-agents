@@ -1,0 +1,540 @@
+# Lumos tools -- GENERATED from the provider's OpenAPI specification.
+#
+#   source: https://api.lumos.com/openapi.json
+#
+# Every path, method, parameter and description below comes from that spec.
+# Nothing here is inferred: operations the spec did not describe well enough to
+# build a usable tool from were skipped rather than guessed at.
+#
+# This is a starting point, not a hand-authored pack. It has no scope
+# annotations, and it covers a representative slice of the API rather than the
+# whole surface. Replacing it with a researched pack is an improvement -- delete
+# the `generated` flag once you do.
+
+connector_id: lumos
+display_name: Lumos
+docs_url: https://api.lumos.com/openapi.json
+generated: true
+generated_from: https://api.lumos.com/openapi.json
+tools:
+  get_access_policies:
+    title: Get Access Policies
+    description: Get Access Policies Get all access policies. Results are sorted by created time descending
+      by default. Calls GET /access_policies on the provider's API.
+    category: access_policies
+    request:
+      method: GET
+      path: /access_policies
+      query:
+        page: ${page}
+        size: ${size}
+        name: ${name}
+    input:
+      page:
+        type: integer
+        description: Page number
+        optional: true
+        default: 1
+      size:
+        type: integer
+        description: Page size
+        optional: true
+        default: 50
+      name:
+        type: string
+        description: Filter by policy name (case insensitive)
+        optional: true
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  create_access_policy:
+    title: Create Access Policy
+    description: Create Access Policy Create a new access policy. Calls POST /access_policies on the provider's
+      API.
+    category: access_policies
+    request:
+      method: POST
+      path: /access_policies
+      body:
+        name: ${name}
+        business_justification: ${business_justification}
+        status: ${status}
+        is_enabled: ${is_enabled}
+        apps: ${apps}
+        access_condition: ${access_condition}
+        is_everyone_condition: ${is_everyone_condition}
+    input:
+      name:
+        type: string
+        description: The name of the access policy.
+      business_justification:
+        type: string
+        description: Explanation for why this policy exists.
+      status:
+        type: string
+        description: The status of the access policy. Defaults to DRAFT when supported.
+        optional: true
+      is_enabled:
+        type: string
+        description: Whether the access policy is enabled. Defaults to false when supported.
+        optional: true
+      apps:
+        type: array
+        description: List of apps granted by this access policy.
+        items:
+          type: object
+      access_condition:
+        type: string
+        description: The Lumos Condition object determining which identities qualify for this policy.
+          Required unless iseveryonecondition is true. This is a recursive JSON structure that allows
+          you to define complex rules for filtering and matching identities using operators like equals,
+          in, and, or, and not. For more information, see the Lumos Conditions documentation.
+        optional: true
+      is_everyone_condition:
+        type: boolean
+        description: Whether the access policy applies to everyone. If true, accesscondition is ignored.
+          Otherwise, accesscondition must be provided.
+        optional: true
+    output:
+      description: Successful Response
+      type: object
+  list_access_reviews:
+    title: List Access Reviews
+    description: List Access Reviews List access reviews for your organization. Paginated via standard
+      page + size query params — size is capped at 100; requests over the cap return 422. Calls GET /access_reviews
+      on the provider's API.
+    category: access_reviews
+    request:
+      method: GET
+      path: /access_reviews
+      query:
+        page: ${page}
+        size: ${size}
+    input:
+      page:
+        type: integer
+        description: Page number
+        optional: true
+        default: 1
+      size:
+        type: integer
+        description: Page size
+        optional: true
+        default: 50
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  create_access_review:
+    title: Create Access Review
+    description: 'Create Access Review Create a new access review campaign. The review''s initial status
+      depends on whether apps are provided: - With apps: the review starts in INPREPARATION while account
+      and entitlement snapshots are taken. Status automatically transitions to INPROGRESS once snapshotting
+      completes. - Without apps: the re Calls POST /access_reviews on the provider''s API.'
+    category: access_reviews
+    request:
+      method: POST
+      path: /access_reviews
+      body:
+        name: ${name}
+        deadline_at: ${deadline_at}
+        owner_id: ${owner_id}
+        target_launch_date: ${target_launch_date}
+        recurrence_config: ${recurrence_config}
+        recurrence_days_frequency: ${recurrence_days_frequency}
+        apps: ${apps}
+    input:
+      name:
+        type: string
+        description: Name of the access review campaign.
+      deadline_at:
+        type: string
+        description: Deadline by which reviewers must complete their reviews. ISO 8601 datetime (e.g.
+          '2026-05-01T00:00:00Z').
+      owner_id:
+        type: string
+        description: UUID of the user to set as the review owner. Defaults to the authenticated user if
+          not provided.
+        optional: true
+      target_launch_date:
+        type: string
+        description: Scheduled launch date for the review. ISO 8601 datetime.
+        optional: true
+      recurrence_config:
+        type: string
+        description: Recurrence configuration. Mutually exclusive with recurrencedaysfrequency.
+        optional: true
+      recurrence_days_frequency:
+        type: string
+        description: Recurrence frequency in days. Mutually exclusive with recurrenceconfig.
+        optional: true
+      apps:
+        type: array
+        description: List of domain apps to include in this review. Capped at 200 entries per the Access
+          Review scale limits (technically-supported tier).
+        optional: true
+        items:
+          type: object
+    output:
+      description: Successful Response
+      type: object
+  get_accounts:
+    title: Get Accounts
+    description: Get Accounts Get all accounts associated with apps at your company. Calls GET /accounts
+      on the provider's API.
+    category: accounts
+    request:
+      method: GET
+      path: /accounts
+      query:
+        app_id: ${app_id}
+        discovered_before: ${discovered_before}
+        discovered_after: ${discovered_after}
+        sources: ${sources}
+        status: ${status}
+        expand: ${expand}
+        page: ${page}
+        size: ${size}
+    input:
+      app_id:
+        type: string
+        description: The app_id parameter.
+        optional: true
+      discovered_before:
+        type: string
+        description: The discovered_before parameter.
+        optional: true
+      discovered_after:
+        type: string
+        description: The discovered_after parameter.
+        optional: true
+      sources:
+        type: string
+        description: The sources parameter.
+        optional: true
+      status:
+        type: string
+        description: The status parameter.
+        optional: true
+      expand:
+        type: string
+        description: 'Fields to expand. Supported fields: app.'
+        optional: true
+      page:
+        type: integer
+        description: The page parameter.
+        optional: true
+        default: 1
+      size:
+        type: integer
+        description: The size parameter.
+        optional: true
+        default: 50
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  get_activity_logs:
+    title: Get Activity Logs
+    description: Get Activity Logs Get activity logs. Calls GET /activity_logs on the provider's API.
+    category: activity_logs
+    request:
+      method: GET
+      path: /activity_logs
+      query:
+        since: ${since}
+        until: ${until}
+        limit: ${limit}
+        offset: ${offset}
+    input:
+      since:
+        type: string
+        description: The since parameter.
+        optional: true
+      until:
+        type: string
+        description: The until parameter.
+        optional: true
+      limit:
+        type: integer
+        description: Page size limit
+        optional: true
+        default: 50
+      offset:
+        type: integer
+        description: Page offset
+        optional: true
+        default: 0
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  activity_records:
+    title: Update Activity Records
+    description: Update Activity Records Update the lastlogin or lastactivity for a given account. Calls
+      POST /activity_records on the provider's API.
+    category: activity_records
+    request:
+      method: POST
+      path: /activity_records
+      body:
+        records: ${records}
+    input:
+      records:
+        type: array
+        description: The activity records to upload.
+        items:
+          type: object
+    output:
+      description: Successful Response
+      type: object
+  list_apps:
+    title: Get Apps
+    description: Get Apps List all of your company's apps. Calls GET /apps on the provider's API.
+    category: apps
+    request:
+      method: GET
+      path: /apps
+      query:
+        name_search: ${name_search}
+        exact_match: ${exact_match}
+        connection_source: ${connection_source}
+        disconnected: ${disconnected}
+        expand: ${expand}
+        page: ${page}
+        size: ${size}
+    input:
+      name_search:
+        type: string
+        description: Search against name, app instance identifier, and app class ID.
+        optional: true
+      exact_match:
+        type: boolean
+        description: Search filter should be an exact match.
+        optional: true
+        default: false
+      connection_source:
+        type: string
+        description: Filter to integration apps connected via this source (API or UI).
+        optional: true
+      disconnected:
+        type: string
+        description: Filter on whether the app has been disconnected. false excludes disconnected apps,
+          true returns only disconnected apps whose record Lumos still holds, and omitting it lists every
+          app. Pair false with connectionsource=API to reconcile the integrations you manage from automation
+          such as Terraform.
+        optional: true
+      expand:
+        type: string
+        description: 'Fields to expand. Supported fields: customattributes.'
+        optional: true
+      page:
+        type: integer
+        description: Page number
+        optional: true
+        default: 1
+      size:
+        type: integer
+        description: Page size
+        optional: true
+        default: 50
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  create_app:
+    title: Create App
+    description: Create App Create a new custom app, or connect an integration app. With a name/category/description
+      body this creates a custom app. With an appclassid body it connects the integration identified by
+      appclassid using the credentials in auth — integrations that validate in-band connect immediately
+      and trigger an Calls POST /apps on the provider's API.
+    category: apps
+    request:
+      method: POST
+      path: /apps
+      body:
+        name: ${name}
+        category: ${category}
+        description: ${description}
+        logo_url: ${logo_url}
+        website_url: ${website_url}
+        request_instructions: ${request_instructions}
+        app_class_id: ${app_class_id}
+        auth: ${auth}
+        settings: ${settings}
+        version: ${version}
+    input:
+      name:
+        type: string
+        description: The name of the app you're creating. Required when creating a custom app.
+        optional: true
+      category:
+        type: string
+        description: 'The category of the app you''re creating; required when creating a custom app. Possible
+          values: ''Accounting & Finance'', ''Marketing & Analytics'', ''Content & Social Media'', ''Sales
+          & Support'', ''Design & Creativity'', ''IT & Security'', ''Developers'', ''HR & Learning'',
+          ''Office & Legal'', ''Communication'', ''Collaboration'', ''Commerce & Marketplaces'', ''Other'',
+          ''Internal'''
+        optional: true
+      description:
+        type: string
+        description: The description of the app you're creating. Required when creating a custom app.
+        optional: true
+      logo_url:
+        type: string
+        description: The URL of the logo of the app you're creating.
+        optional: true
+      website_url:
+        type: string
+        description: The URL of the website of the app you're creating.
+        optional: true
+      request_instructions:
+        type: string
+        description: The request instructions.
+        optional: true
+      app_class_id:
+        type: string
+        description: Canonical identifier of an integration to connect, e.g. okta.com. Providing it switches
+          this request from creating a custom app to connecting that integration using auth/settings.
+          Must be an integration Lumos supports for your domain; an unknown value is rejected with 400.
+        optional: true
+      auth:
+        type: string
+        description: Credentials for the integration being connected, as a JSON object — all secrets go
+          here. The accepted keys depend on the integration and are validated server-side. Some integrations
+          connect in-band from these credentials (e.g. an apikey, or an OAuth clientid/clientsecret);
+          others require browser consent and are finished in the Lumos UI — for those, send {}. Missing
+          or wrong-shaped credentials are
+        optional: true
+      settings:
+        type: string
+        description: Non-secret configuration for the integration being connected, as a JSON object —
+          e.g. host, port, region, or tenant / instance URL. The accepted keys vary by integration and
+          some integrations need none. Only used with appclassid.
+        optional: true
+      version:
+        type: string
+        description: Optional integration version override. Pins the connection to a specific integration
+          implementation/version instead of the current default; leave unset (null) unless directed otherwise.
+          Only used with appclassid.
+        optional: true
+    output:
+      description: Successful Response
+      type: object
+  lumos_art:
+    title: Get Art
+    description: Get Art Return Lumos ASCII art. Can be used to verify the API is working. Calls GET /art
+      on the provider's API.
+    category: art
+    request:
+      method: GET
+      path: /art
+    input: {}
+    output:
+      description: Successful Response
+      type: object
+    read_only: true
+  create_found_document:
+    title: Upload Found Documents
+    description: Upload Found Documents Upload a newly discovered document (e.g. Order Form, Quote) to
+      Lumos for review Calls POST /found_documents on the provider's API.
+    category: found_documents
+    request:
+      method: POST
+      path: /found_documents
+      body:
+        unique_identifier: ${unique_identifier}
+        files: ${files}
+        vendor_name: ${vendor_name}
+        start_date: ${start_date}
+        end_date: ${end_date}
+        source_app_id: ${source_app_id}
+        total_cost: ${total_cost}
+        line_items: ${line_items}
+    input:
+      unique_identifier:
+        type: string
+        description: A value that can be used to uniquely identify this contract (e.g. PO number, file
+          name, etc)
+      files:
+        type: array
+        description: A list of URLs that resolve to files that should be attached to the Found Document
+        items:
+          type: object
+      vendor_name:
+        type: string
+        description: The name of the vendor that this document is for
+        optional: true
+      start_date:
+        type: string
+        description: The start of the vendor agreement
+        optional: true
+      end_date:
+        type: string
+        description: The end of the vendor agreement
+        optional: true
+      source_app_id:
+        type: string
+        description: By passing the ID of an application within Lumos, it will appear as if this Found
+          Document was sourced from that app
+        optional: true
+      total_cost:
+        type: string
+        description: The total cost of the contract. If this is a multi-year contract, this should include
+          the cost for future years
+        optional: true
+      line_items:
+        type: string
+        description: The line items on the contract
+        optional: true
+    output:
+      description: Successful Response
+      type: object
+  get_groups:
+    title: Get Groups
+    description: Get Groups Get groups synced from connected integrations Calls GET /groups on the provider's
+      API.
+    category: groups
+    request:
+      method: GET
+      path: /groups
+      query:
+        integration_specific_id: ${integration_specific_id}
+        name: ${name}
+        exact_match: ${exact_match}
+        app_id: ${app_id}
+        page: ${page}
+        size: ${size}
+    input:
+      integration_specific_id:
+        type: string
+        description: Filters groups by integration specific ID, e.g. the group's Okta ID.
+        optional: true
+      name:
+        type: string
+        description: Filters groups by name.
+        optional: true
+      exact_match:
+        type: boolean
+        description: Search filter should be an exact match.
+        optional: true
+        default: false
+      app_id:
+        type: string
+        description: Filters groups by the ID of the app to which they belong.
+        optional: true
+      page:
+        type: integer
+        description: Page number
+        optional: true
+        default: 1
+      size:
+        type: integer
+        description: Page size
+        optional: true
+        default: 50
+    output:
+      description: Successful Response
+      type: object
+    read_only: true

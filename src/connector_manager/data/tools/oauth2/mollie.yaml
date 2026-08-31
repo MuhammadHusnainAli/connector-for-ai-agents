@@ -1,0 +1,464 @@
+# Mollie tools.
+#
+# Amounts are objects of a currency code plus a decimal *string* with the exact
+# number of decimals the currency needs: {"currency": "EUR", "value": "10.00"}.
+#
+# Paged endpoints return an _embedded block plus _links.next.
+#
+# Docs: https://docs.mollie.com/reference/v2/payments-api/overview
+
+connector_id: mollie
+display_name: Mollie
+docs_url: https://docs.mollie.com/reference/v2/payments-api/overview
+
+scope_rules:
+  implies:
+    "payments.write": ["payments.read"]
+    "customers.write": ["customers.read"]
+    "refunds.write": ["refunds.read"]
+    "subscriptions.write": ["subscriptions.read"]
+    "orders.write": ["orders.read"]
+
+tools:
+
+  create_payment:
+    title: Create a payment
+    description: >-
+      Start a payment and get back a checkout URL to send the customer to.
+      Amount is {"currency": "EUR", "value": "10.00"} — the value must be a
+      string with the currency's exact decimals.
+    category: payments
+    scopes: ["payments.write"]
+    destructive: true
+    request:
+      method: POST
+      path: /v2/payments
+      body:
+        amount: "${amount}"
+        description: "${description}"
+        redirectUrl: "${redirect_url}"
+        webhookUrl: "${webhook_url}"
+        method: "${method}"
+        customerId: "${customer_id}"
+        metadata: "${metadata}"
+        locale: "${locale}"
+    input:
+      amount:
+        type: object
+        description: "What to charge, e.g. {\"currency\": \"EUR\", \"value\": \"10.00\"}."
+      description:
+        type: string
+        description: What the payment is for. Shown on the customer's statement.
+      redirect_url:
+        type: string
+        description: Where Mollie sends the customer once they have paid.
+        optional: true
+        format: uri
+      webhook_url:
+        type: string
+        description: URL Mollie calls when the payment's status changes.
+        optional: true
+        format: uri
+      method:
+        type: string
+        description: Force one payment method, e.g. ideal, creditcard, bancontact.
+        optional: true
+      customer_id:
+        type: string
+        description: Mollie customer id to attach the payment to.
+        optional: true
+      metadata:
+        type: object
+        description: Your own data, returned with the payment and on the webhook.
+        optional: true
+      locale:
+        type: string
+        description: Checkout language, e.g. en_GB or nl_NL.
+        optional: true
+    output:
+      description: The created payment.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string}
+        amount: {type: object}
+        _links: {type: object, description: "Holds checkout.href -- the URL to send the customer to."}
+
+  get_payment:
+    title: Get a payment
+    description: >-
+      Read a payment's status, amount, method and how much has been refunded —
+      the call a webhook handler makes to confirm what happened.
+    category: payments
+    scopes: ["payments.read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/payments/${payment_id}
+      query:
+        embed: "${embed}"
+    input:
+      payment_id:
+        type: string
+        description: The payment id, starting tr_.
+        example: tr_WDqYK6vllg
+      embed:
+        type: string
+        description: Related records to inline, e.g. "refunds,chargebacks".
+        optional: true
+    output:
+      description: The payment.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string}
+        amount: {type: object}
+        amountRefunded: {type: object}
+        method: {type: string}
+        paidAt: {type: string}
+
+  list_payments:
+    title: List payments
+    description: Page through the account's payments, newest first.
+    category: payments
+    scopes: ["payments.read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/payments
+      query:
+        limit: "${limit}"
+        from: "${from_id}"
+        profileId: "${profile_id}"
+    input:
+      limit:
+        type: integer
+        description: How many payments per page (1-250).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 250
+      from_id:
+        type: string
+        description: Payment id to start the page from, for paging.
+        optional: true
+      profile_id:
+        type: string
+        description: Only payments on this profile.
+        optional: true
+    output:
+      description: A page of payments.
+      type: object
+      properties:
+        count: {type: integer}
+        _embedded: {type: object, description: "Holds the payments array."}
+        _links: {type: object}
+
+  cancel_payment:
+    title: Cancel a payment
+    description: >-
+      Cancel a payment that has not been completed. Only works while the
+      payment's isCancelable flag is true.
+    category: payments
+    scopes: ["payments.write"]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/payments/${payment_id}
+    input:
+      payment_id:
+        type: string
+        description: The payment to cancel.
+    output:
+      description: The cancelled payment.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string}
+
+  create_refund:
+    title: Refund a payment
+    description: >-
+      Refund a payment in full or in part. Refunds cannot be reversed, and the
+      amount may not exceed what remains unrefunded.
+    category: refunds
+    scopes: ["refunds.write"]
+    destructive: true
+    request:
+      method: POST
+      path: /v2/payments/${payment_id}/refunds
+      body:
+        amount: "${amount}"
+        description: "${description}"
+        metadata: "${metadata}"
+    input:
+      payment_id:
+        type: string
+        description: The payment to refund.
+      amount:
+        type: object
+        description: "How much to refund, e.g. {\"currency\": \"EUR\", \"value\": \"5.00\"}."
+      description:
+        type: string
+        description: Why it is being refunded. May appear on the customer's statement.
+        optional: true
+      metadata:
+        type: object
+        description: Your own data to attach to the refund.
+        optional: true
+    output:
+      description: The refund.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string}
+        amount: {type: object}
+
+  list_refunds:
+    title: List refunds
+    description: Read the refunds issued across the account, newest first.
+    category: refunds
+    scopes: ["refunds.read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/refunds
+      query:
+        limit: "${limit}"
+        from: "${from_id}"
+    input:
+      limit:
+        type: integer
+        description: How many refunds per page (1-250).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 250
+      from_id:
+        type: string
+        description: Refund id to start the page from.
+        optional: true
+    output:
+      description: A page of refunds.
+      type: object
+      properties:
+        count: {type: integer}
+        _embedded: {type: object}
+
+  create_customer:
+    title: Create a customer
+    description: >-
+      Create a customer so payments, mandates and subscriptions can be attached
+      to them.
+    category: customers
+    scopes: ["customers.write"]
+    request:
+      method: POST
+      path: /v2/customers
+      body:
+        name: "${name}"
+        email: "${email}"
+        locale: "${locale}"
+        metadata: "${metadata}"
+    input:
+      name:
+        type: string
+        description: The customer's name.
+        optional: true
+      email:
+        type: string
+        description: The customer's email address.
+        optional: true
+        format: email
+      locale:
+        type: string
+        description: Preferred checkout language, e.g. en_GB.
+        optional: true
+      metadata:
+        type: object
+        description: Your own data to attach.
+        optional: true
+    output:
+      description: The created customer.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        email: {type: string}
+
+  list_customers:
+    title: List customers
+    description: Page through the account's customers, newest first.
+    category: customers
+    scopes: ["customers.read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/customers
+      query:
+        limit: "${limit}"
+        from: "${from_id}"
+    input:
+      limit:
+        type: integer
+        description: How many customers per page (1-250).
+        optional: true
+        default: 50
+        minimum: 1
+        maximum: 250
+      from_id:
+        type: string
+        description: Customer id to start the page from.
+        optional: true
+    output:
+      description: A page of customers.
+      type: object
+      properties:
+        count: {type: integer}
+        _embedded: {type: object}
+
+  create_subscription:
+    title: Create a subscription
+    description: >-
+      Start a recurring charge on a customer who already has a valid mandate.
+      Interval is a phrase like "1 month" or "12 weeks".
+    category: subscriptions
+    scopes: ["subscriptions.write"]
+    destructive: true
+    request:
+      method: POST
+      path: /v2/customers/${customer_id}/subscriptions
+      body:
+        amount: "${amount}"
+        interval: "${interval}"
+        description: "${description}"
+        startDate: "${start_date}"
+        times: "${times}"
+        webhookUrl: "${webhook_url}"
+        metadata: "${metadata}"
+    input:
+      customer_id:
+        type: string
+        description: Customer to charge. They must already have a mandate.
+      amount:
+        type: object
+        description: "What to charge each time, e.g. {\"currency\": \"EUR\", \"value\": \"25.00\"}."
+      interval:
+        type: string
+        description: How often to charge, e.g. "1 month" or "12 weeks".
+        example: 1 month
+      description:
+        type: string
+        description: What the subscription is for. Must be unique per customer.
+      start_date:
+        type: string
+        description: First charge date as YYYY-MM-DD. Defaults to today.
+        optional: true
+      times:
+        type: integer
+        description: How many times to charge before stopping. Omit for indefinite.
+        optional: true
+        minimum: 1
+      webhook_url:
+        type: string
+        description: URL Mollie calls for each recurring payment.
+        optional: true
+        format: uri
+      metadata:
+        type: object
+        description: Your own data to attach.
+        optional: true
+    output:
+      description: The created subscription.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string}
+        nextPaymentDate: {type: string}
+
+  cancel_subscription:
+    title: Cancel a subscription
+    description: >-
+      Stop a subscription from charging again. Payments already taken are not
+      affected.
+    category: subscriptions
+    scopes: ["subscriptions.write"]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/customers/${customer_id}/subscriptions/${subscription_id}
+    input:
+      customer_id:
+        type: string
+        description: The customer the subscription belongs to.
+      subscription_id:
+        type: string
+        description: The subscription to cancel.
+    output:
+      description: The cancelled subscription.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string}
+        canceledAt: {type: string}
+
+  list_payment_methods:
+    title: List available payment methods
+    description: >-
+      List the methods enabled on the account, optionally only those valid for a
+      given amount and locale.
+    category: methods
+    read_only: true
+    request:
+      method: GET
+      path: /v2/methods
+      query:
+        locale: "${locale}"
+        amount[currency]: "${amount_currency}"
+        amount[value]: "${amount_value}"
+        sequenceType: "${sequence_type}"
+    input:
+      locale:
+        type: string
+        description: Locale to check availability for, e.g. nl_NL.
+        optional: true
+      amount_currency:
+        type: string
+        description: Currency code to check availability for.
+        optional: true
+      amount_value:
+        type: string
+        description: Amount as a decimal string, paired with amount_currency.
+        optional: true
+      sequence_type:
+        type: string
+        description: Restrict to methods usable for this kind of payment.
+        optional: true
+        enum: [oneoff, first, recurring]
+    output:
+      description: The enabled payment methods.
+      type: object
+      properties:
+        count: {type: integer}
+        _embedded: {type: object}
+
+  get_balance:
+    title: Get the account balance
+    description: >-
+      Read the primary balance — available, pending and the currency. The
+      cheapest health check for a Mollie connection.
+    category: balances
+    scopes: ["balances.read"]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/balances/primary
+    input: {}
+    output:
+      description: The primary balance.
+      type: object
+      properties:
+        id: {type: string}
+        currency: {type: string}
+        availableAmount: {type: object}
+        pendingAmount: {type: object}

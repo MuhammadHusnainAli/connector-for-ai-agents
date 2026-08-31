@@ -1,0 +1,760 @@
+# GitLab tools.
+#
+# A project is addressed either by its numeric id or by its URL-encoded path
+# ("group%2Fproject"). Path arguments are percent-encoded for you, so pass
+# "group/project" plainly.
+#
+# Docs: https://docs.gitlab.com/ee/api/rest/
+
+connector_id: gitlab
+display_name: GitLab
+docs_url: https://docs.gitlab.com/ee/api/rest/
+
+scope_rules:
+  implies:
+    api: [read_api, read_repository, write_repository, read_user, read_registry]
+    read_api: [read_user]
+    write_repository: [read_repository]
+
+tools:
+
+  list_projects:
+    title: List projects
+    description: >-
+      List the projects the token can see. membership limits it to the ones the
+      user belongs to, which is usually what is wanted.
+    category: projects
+    scopes: [read_api]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v4/projects
+      query:
+        membership: "${membership}"
+        owned: "${owned}"
+        search: "${search}"
+        per_page: "${per_page}"
+        page: "${page}"
+        order_by: "${order_by}"
+        archived: "${archived}"
+    input:
+      membership:
+        type: boolean
+        description: Only projects the user is a member of.
+        optional: true
+        default: true
+      owned:
+        type: boolean
+        description: Only projects the user owns.
+        optional: true
+      search:
+        type: string
+        description: Match against project name and path.
+        optional: true
+      per_page:
+        type: integer
+        description: How many projects per page (1-100).
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      order_by:
+        type: string
+        description: Field to order by.
+        optional: true
+        enum: [id, name, path, created_at, updated_at, last_activity_at]
+      archived:
+        type: boolean
+        description: Include archived projects.
+        optional: true
+    output:
+      description: A page of projects.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          path_with_namespace: {type: string, description: "group/project -- what the other tools take."}
+          name: {type: string}
+          default_branch: {type: string}
+          web_url: {type: string}
+
+  get_project:
+    title: Get a project
+    description: >-
+      Read one project's details — description, default branch, visibility and
+      counts.
+    category: projects
+    scopes: [read_api]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v4/projects/${project}
+    input:
+      project:
+        type: string
+        description: Numeric project id, or its path like "group/project".
+        example: group/project
+    output:
+      description: The project.
+      type: object
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        default_branch: {type: string}
+        open_issues_count: {type: integer}
+        web_url: {type: string}
+
+  list_issues:
+    title: List a project's issues
+    description: >-
+      List issues in a project, filtered by state, labels, assignee or
+      milestone.
+    category: issues
+    scopes: [read_api]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v4/projects/${project}/issues
+      query:
+        state: "${state}"
+        labels: "${labels}"
+        assignee_username: "${assignee}"
+        milestone: "${milestone}"
+        search: "${search}"
+        per_page: "${per_page}"
+        page: "${page}"
+        order_by: "${order_by}"
+    input:
+      project:
+        type: string
+        description: Numeric project id, or its path.
+      state:
+        type: string
+        description: Which issues to include.
+        optional: true
+        default: opened
+        enum: [opened, closed, all]
+      labels:
+        type: array
+        description: Only issues carrying all of these labels.
+        optional: true
+        items: {type: string}
+      assignee:
+        type: string
+        description: Username of the assignee.
+        optional: true
+      milestone:
+        type: string
+        description: Milestone title.
+        optional: true
+      search:
+        type: string
+        description: Match against title and description.
+        optional: true
+      per_page:
+        type: integer
+        description: How many issues per page (1-100).
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      order_by:
+        type: string
+        description: Field to order by.
+        optional: true
+        enum: [created_at, updated_at, priority, due_date, relative_position, title]
+    output:
+      description: A page of issues.
+      type: array
+      items:
+        type: object
+        properties:
+          iid: {type: integer, description: "Project-scoped issue number -- what the other issue tools take."}
+          title: "{type: string}"
+          state: {type: string}
+          labels: {type: array}
+          web_url: {type: string}
+
+  create_issue:
+    title: Create an issue
+    description: Open an issue on a project, with an optional description, labels and assignees.
+    category: issues
+    scopes: [api]
+    request:
+      method: POST
+      path: /api/v4/projects/${project}/issues
+      body:
+        title: "${title}"
+        description: "${description}"
+        labels: "${labels}"
+        assignee_ids: "${assignee_ids}"
+        milestone_id: "${milestone_id}"
+        due_date: "${due_date}"
+        confidential: "${confidential}"
+    input:
+      project:
+        type: string
+        description: Numeric project id, or its path.
+      title:
+        type: string
+        description: Issue title.
+      description:
+        type: string
+        description: Issue body, in GitLab-flavoured Markdown.
+        optional: true
+      labels:
+        type: array
+        description: Label names to apply.
+        optional: true
+        items: {type: string}
+      assignee_ids:
+        type: array
+        description: Numeric user ids to assign it to.
+        optional: true
+        items: {type: integer}
+      milestone_id:
+        type: integer
+        description: Milestone id to file it under.
+        optional: true
+      due_date:
+        type: string
+        description: Due date as YYYY-MM-DD.
+        optional: true
+      confidential:
+        type: boolean
+        description: Hide the issue from non-members.
+        optional: true
+    output:
+      description: The created issue.
+      type: object
+      properties:
+        iid: {type: integer}
+        title: "{type: string}"
+        web_url: {type: string}
+
+  update_issue:
+    title: Update an issue
+    description: >-
+      Change an issue's title, description, labels or state. state_event
+      "close" closes it and "reopen" reopens it.
+    category: issues
+    scopes: [api]
+    request:
+      method: PUT
+      path: /api/v4/projects/${project}/issues/${issue_iid}
+      body:
+        title: "${title}"
+        description: "${description}"
+        labels: "${labels}"
+        state_event: "${state_event}"
+        assignee_ids: "${assignee_ids}"
+        due_date: "${due_date}"
+    input:
+      project:
+        type: string
+        description: Numeric project id, or its path.
+      issue_iid:
+        type: integer
+        description: The project-scoped issue number.
+      title:
+        type: string
+        description: New title.
+        optional: true
+      description:
+        type: string
+        description: New description.
+        optional: true
+      labels:
+        type: array
+        description: Replaces the label set entirely.
+        optional: true
+        items: {type: string}
+      state_event:
+        type: string
+        description: Close or reopen the issue.
+        optional: true
+        enum: [close, reopen]
+      assignee_ids:
+        type: array
+        description: Replaces the assignee set entirely.
+        optional: true
+        items: {type: integer}
+      due_date:
+        type: string
+        description: New due date as YYYY-MM-DD.
+        optional: true
+    output:
+      description: The updated issue.
+      type: object
+      properties:
+        iid: {type: integer}
+        state: {type: string}
+
+  comment_on_issue:
+    title: Comment on an issue
+    description: Add a note to an issue's discussion thread, in Markdown.
+    category: issues
+    scopes: [api]
+    request:
+      method: POST
+      path: /api/v4/projects/${project}/issues/${issue_iid}/notes
+      body:
+        body: "${body}"
+    input:
+      project:
+        type: string
+        description: Numeric project id, or its path.
+      issue_iid:
+        type: integer
+        description: The project-scoped issue number.
+      body:
+        type: string
+        description: The comment, in Markdown.
+    output:
+      description: The created note.
+      type: object
+      properties:
+        id: {type: integer}
+        body: {type: string}
+        created_at: {type: string}
+
+  list_merge_requests:
+    title: List merge requests
+    description: >-
+      List a project's merge requests, filtered by state, target branch or
+      author.
+    category: merge_requests
+    scopes: [read_api]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v4/projects/${project}/merge_requests
+      query:
+        state: "${state}"
+        target_branch: "${target_branch}"
+        source_branch: "${source_branch}"
+        author_username: "${author}"
+        per_page: "${per_page}"
+        page: "${page}"
+        order_by: "${order_by}"
+    input:
+      project:
+        type: string
+        description: Numeric project id, or its path.
+      state:
+        type: string
+        description: Which merge requests to include.
+        optional: true
+        default: opened
+        enum: [opened, closed, locked, merged, all]
+      target_branch:
+        type: string
+        description: Only requests targeting this branch.
+        optional: true
+      source_branch:
+        type: string
+        description: Only requests from this branch.
+        optional: true
+      author:
+        type: string
+        description: Username of the author.
+        optional: true
+      per_page:
+        type: integer
+        description: How many per page (1-100).
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      order_by:
+        type: string
+        description: Field to order by.
+        optional: true
+        enum: [created_at, updated_at, title]
+    output:
+      description: A page of merge requests.
+      type: array
+      items:
+        type: object
+        properties:
+          iid: {type: integer}
+          title: "{type: string}"
+          state: {type: string}
+          source_branch: {type: string}
+          target_branch: {type: string}
+          web_url: {type: string}
+
+  create_merge_request:
+    title: Open a merge request
+    description: >-
+      Open a merge request from a source branch into a target branch, optionally
+      as a draft.
+    category: merge_requests
+    scopes: [api]
+    request:
+      method: POST
+      path: /api/v4/projects/${project}/merge_requests
+      body:
+        source_branch: "${source_branch}"
+        target_branch: "${target_branch}"
+        title: "${title}"
+        description: "${description}"
+        assignee_ids: "${assignee_ids}"
+        reviewer_ids: "${reviewer_ids}"
+        remove_source_branch: "${remove_source_branch}"
+        squash: "${squash}"
+    input:
+      project:
+        type: string
+        description: Numeric project id, or its path.
+      source_branch:
+        type: string
+        description: Branch the changes are on.
+      target_branch:
+        type: string
+        description: Branch to merge into, e.g. main.
+      title:
+        type: string
+        description: "Merge request title. Prefix with \"Draft: \" to open it as a draft."
+      description:
+        type: string
+        description: Description, in Markdown.
+        optional: true
+      assignee_ids:
+        type: array
+        description: Numeric user ids to assign it to.
+        optional: true
+        items: {type: integer}
+      reviewer_ids:
+        type: array
+        description: Numeric user ids to request review from.
+        optional: true
+        items: {type: integer}
+      remove_source_branch:
+        type: boolean
+        description: Delete the source branch once merged.
+        optional: true
+      squash:
+        type: boolean
+        description: Squash the commits when merging.
+        optional: true
+    output:
+      description: The created merge request.
+      type: object
+      properties:
+        iid: {type: integer}
+        web_url: {type: string}
+        state: {type: string}
+
+  merge_merge_request:
+    title: Merge a merge request
+    description: >-
+      Merge a merge request into its target branch. Fails when the pipeline has
+      not passed, approvals are missing, or there are conflicts.
+    category: merge_requests
+    scopes: [api]
+    destructive: true
+    request:
+      method: PUT
+      path: /api/v4/projects/${project}/merge_requests/${merge_request_iid}/merge
+      body:
+        merge_commit_message: "${merge_commit_message}"
+        squash: "${squash}"
+        should_remove_source_branch: "${remove_source_branch}"
+        merge_when_pipeline_succeeds: "${merge_when_pipeline_succeeds}"
+    input:
+      project:
+        type: string
+        description: Numeric project id, or its path.
+      merge_request_iid:
+        type: integer
+        description: The project-scoped merge request number.
+      merge_commit_message:
+        type: string
+        description: Message for the merge commit.
+        optional: true
+      squash:
+        type: boolean
+        description: Squash the commits when merging.
+        optional: true
+      remove_source_branch:
+        type: boolean
+        description: Delete the source branch after merging.
+        optional: true
+      merge_when_pipeline_succeeds:
+        type: boolean
+        description: Queue the merge until the pipeline goes green.
+        optional: true
+    output:
+      description: The merged request.
+      type: object
+      properties:
+        iid: {type: integer}
+        state: {type: string}
+        merge_commit_sha: {type: string}
+
+  get_file:
+    title: Read a file from a repository
+    description: >-
+      Read one file at a branch, tag or commit. The content comes back
+      base64-encoded, with the blob sha update_file needs.
+    category: repository
+    scopes: [read_repository]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v4/projects/${project}/repository/files/${file_path}
+      query:
+        ref: "${ref}"
+    input:
+      project:
+        type: string
+        description: Numeric project id, or its path.
+      file_path:
+        type: string
+        description: Path to the file in the repository, e.g. "src/main.py".
+        example: src/main.py
+      ref:
+        type: string
+        description: Branch, tag or commit sha.
+        optional: true
+        default: main
+    output:
+      description: The file.
+      type: object
+      properties:
+        file_path: {type: string}
+        content: {type: string, description: "The file's bytes, base64-encoded."}
+        blob_id: {type: string}
+        last_commit_id: {type: string}
+
+  create_or_update_file:
+    title: Commit a file
+    description: >-
+      Create or replace a file on a branch. Use action "create" for a new file
+      and "update" for an existing one.
+    category: repository
+    scopes: [api]
+    request:
+      method: POST
+      path: /api/v4/projects/${project}/repository/commits
+      body:
+        branch: "${branch}"
+        commit_message: "${commit_message}"
+        actions:
+          - action: "${action}"
+            file_path: "${file_path}"
+            content: "${content}"
+            encoding: "${encoding}"
+        start_branch: "${start_branch}"
+    input:
+      project:
+        type: string
+        description: Numeric project id, or its path.
+      branch:
+        type: string
+        description: Branch to commit to.
+      commit_message:
+        type: string
+        description: Commit message.
+      file_path:
+        type: string
+        description: Path to the file in the repository.
+      content:
+        type: string
+        description: The file's contents.
+      action:
+        type: string
+        description: Whether the file is being created, updated or deleted.
+        optional: true
+        default: update
+        enum: [create, update, delete, move, chmod]
+      encoding:
+        type: string
+        description: How `content` is encoded.
+        optional: true
+        default: text
+        enum: [text, base64]
+      start_branch:
+        type: string
+        description: Branch to create `branch` from, when it does not exist yet.
+        optional: true
+    output:
+      description: The resulting commit.
+      type: object
+      properties:
+        id: {type: string}
+        short_id: {type: string}
+        web_url: {type: string}
+
+  list_pipelines:
+    title: List CI pipelines
+    description: >-
+      List a project's CI pipelines, filtered by status or branch — how to check
+      whether the build is green.
+    category: ci
+    scopes: [read_api]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v4/projects/${project}/pipelines
+      query:
+        status: "${status}"
+        ref: "${ref}"
+        per_page: "${per_page}"
+        page: "${page}"
+        order_by: "${order_by}"
+    input:
+      project:
+        type: string
+        description: Numeric project id, or its path.
+      status:
+        type: string
+        description: Only pipelines in this state.
+        optional: true
+        enum: [created, waiting_for_resource, preparing, pending, running, success, failed, canceled, skipped, manual, scheduled]
+      ref:
+        type: string
+        description: Only pipelines for this branch or tag.
+        optional: true
+      per_page:
+        type: integer
+        description: How many pipelines per page (1-100).
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      order_by:
+        type: string
+        description: Field to order by.
+        optional: true
+        enum: [id, status, ref, updated_at, user_id]
+    output:
+      description: A page of pipelines.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          status: {type: string}
+          ref: {type: string}
+          web_url: {type: string}
+
+  trigger_pipeline:
+    title: Run a pipeline
+    description: >-
+      Start a CI pipeline on a branch or tag, passing variables the .gitlab-ci
+      configuration reads.
+    category: ci
+    scopes: [api]
+    destructive: true
+    request:
+      method: POST
+      path: /api/v4/projects/${project}/pipeline
+      query:
+        ref: "${ref}"
+      body:
+        variables: "${variables}"
+    input:
+      project:
+        type: string
+        description: Numeric project id, or its path.
+      ref:
+        type: string
+        description: Branch or tag to run against.
+        example: main
+      variables:
+        type: array
+        description: "CI variables, each {\"key\": \"DEPLOY_ENV\", \"value\": \"staging\"}."
+        optional: true
+        items: {type: object}
+    output:
+      description: The started pipeline.
+      type: object
+      properties:
+        id: {type: integer}
+        status: {type: string}
+        web_url: {type: string}
+
+  search:
+    title: Search across GitLab
+    description: >-
+      Search globally by scope — projects, issues, merge_requests, milestones,
+      users, blobs or commits.
+    category: search
+    scopes: [read_api]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v4/search
+      query:
+        scope: "${scope}"
+        search: "${query}"
+        per_page: "${per_page}"
+        page: "${page}"
+    input:
+      scope:
+        type: string
+        description: What kind of thing to search for.
+        enum: [projects, issues, merge_requests, milestones, snippet_titles, users, blobs, commits, wiki_blobs]
+      query:
+        type: string
+        description: Words to search for.
+      per_page:
+        type: integer
+        description: How many results per page (1-100).
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 100
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+    output:
+      description: The matches, shaped by the scope requested.
+      type: array
+      items: {type: object}
+
+  get_current_user:
+    title: Get the authenticated user
+    description: >-
+      Read the GitLab account the token belongs to. The cheapest health check
+      for a GitLab connection.
+    category: users
+    scopes_any: [read_user, read_api, api]
+    read_only: true
+    request:
+      method: GET
+      path: /api/v4/user
+    input: {}
+    output:
+      description: The authenticated user.
+      type: object
+      properties:
+        id: {type: integer}
+        username: {type: string}
+        name: {type: string}
+        email: {type: string}

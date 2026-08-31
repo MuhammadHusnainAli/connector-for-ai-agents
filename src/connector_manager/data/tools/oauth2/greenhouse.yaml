@@ -1,0 +1,585 @@
+# Greenhouse Harvest tools.
+#
+# The connection's `resource` config picks the host, so it must be "harvest" for
+# these paths to resolve.
+#
+# Every write wants an On-Behalf-Of header naming the Greenhouse user the action
+# is attributed to -- that is the `on_behalf_of` argument, and list_users
+# returns the ids.
+#
+# Docs: https://developers.greenhouse.io/harvest.html
+
+connector_id: greenhouse
+display_name: Greenhouse
+docs_url: https://developers.greenhouse.io/harvest.html
+
+tools:
+
+  list_candidates:
+    title: List candidates
+    description: >-
+      Page through candidates, optionally only those created or updated since a
+      given time. Greenhouse pages with `page` and `per_page`.
+    category: candidates
+    read_only: true
+    request:
+      method: GET
+      path: /v1/candidates
+      query:
+        per_page: "${per_page}"
+        page: "${page}"
+        created_after: "${created_after}"
+        updated_after: "${updated_after}"
+        email: "${email}"
+        job_id: "${job_id}"
+    input:
+      per_page:
+        type: integer
+        description: How many candidates per page (1-500).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 500
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      created_after:
+        type: string
+        description: Only candidates created at or after this ISO 8601 instant.
+        optional: true
+      updated_after:
+        type: string
+        description: Only candidates changed at or after this ISO 8601 instant.
+        optional: true
+      email:
+        type: string
+        description: Only the candidate with this email address.
+        optional: true
+        format: email
+      job_id:
+        type: integer
+        description: Only candidates who applied to this job.
+        optional: true
+    output:
+      description: A page of candidates.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          first_name: {type: string}
+          last_name: {type: string}
+          email_addresses: {type: array}
+          applications: {type: array}
+
+  get_candidate:
+    title: Get a candidate
+    description: >-
+      Read one candidate in full — contact details, tags, applications and the
+      stage each is at.
+    category: candidates
+    read_only: true
+    request:
+      method: GET
+      path: /v1/candidates/${candidate_id}
+    input:
+      candidate_id:
+        type: integer
+        description: The candidate's numeric id.
+    output:
+      description: The candidate.
+      type: object
+      properties:
+        id: {type: integer}
+        first_name: {type: string}
+        last_name: {type: string}
+        applications: {type: array}
+        tags: {type: array}
+
+  create_candidate:
+    title: Create a candidate
+    description: >-
+      Add a candidate, optionally applying them to a job in the same call.
+      Emails and phones are typed entries, e.g. [{"value": "ada@example.com",
+      "type": "personal"}].
+    category: candidates
+    request:
+      method: POST
+      path: /v1/candidates
+      headers:
+        On-Behalf-Of: "${on_behalf_of}"
+      body:
+        first_name: "${first_name}"
+        last_name: "${last_name}"
+        company: "${company}"
+        title: "${title}"
+        email_addresses: "${email_addresses}"
+        phone_numbers: "${phone_numbers}"
+        social_media_addresses: "${social_media_addresses}"
+        tags: "${tags}"
+        applications: "${applications}"
+        recruiter:
+          $when: "${recruiter_id}"
+          id: "${recruiter_id}"
+    input:
+      first_name:
+        type: string
+        description: The candidate's first name.
+      last_name:
+        type: string
+        description: The candidate's last name.
+      on_behalf_of:
+        type: integer
+        description: Greenhouse user id the action is attributed to.
+      email_addresses:
+        type: array
+        description: Typed email entries, e.g. [{"value":"ada@example.com","type":"personal"}].
+        optional: true
+        items: {type: object}
+      phone_numbers:
+        type: array
+        description: Typed phone entries, e.g. [{"value":"555 0100","type":"mobile"}].
+        optional: true
+        items: {type: object}
+      company:
+        type: string
+        description: Their current employer.
+        optional: true
+      title:
+        type: string
+        description: Their current job title.
+        optional: true
+      social_media_addresses:
+        type: array
+        description: "Profile links, each {\"value\": \"https://linkedin.com/in/...\"}."
+        optional: true
+        items: {type: object}
+      tags:
+        type: array
+        description: Tags to apply.
+        optional: true
+        items: {type: string}
+      applications:
+        type: array
+        description: "Applications to create, each {\"job_id\": 123, \"source_id\": 456}."
+        optional: true
+        items: {type: object}
+      recruiter_id:
+        type: integer
+        description: Greenhouse user id of the recruiter who owns the candidate.
+        optional: true
+    output:
+      description: The created candidate.
+      type: object
+      properties:
+        id: {type: integer}
+        first_name: {type: string}
+        applications: {type: array}
+
+  add_candidate_note:
+    title: Add a note to a candidate
+    description: >-
+      Record a note on a candidate's activity feed. Visibility decides who can
+      read it.
+    category: candidates
+    request:
+      method: POST
+      path: /v1/candidates/${candidate_id}/activity_feed/notes
+      headers:
+        On-Behalf-Of: "${on_behalf_of}"
+      body:
+        user_id: "${user_id}"
+        body: "${body}"
+        visibility: "${visibility}"
+    input:
+      candidate_id:
+        type: integer
+        description: The candidate's numeric id.
+      body:
+        type: string
+        description: The note text.
+      user_id:
+        type: integer
+        description: Greenhouse user id the note is written by.
+      on_behalf_of:
+        type: integer
+        description: Greenhouse user id the action is attributed to.
+      visibility:
+        type: string
+        description: Who can read the note.
+        optional: true
+        default: public
+        enum: [admin_only, private, public]
+    output:
+      description: The created note.
+      type: object
+      properties:
+        id: {type: integer}
+        body: {type: string}
+        created_at: {type: string}
+
+  list_jobs:
+    title: List jobs
+    description: >-
+      List the organisation's jobs with their ids, status and departments.
+    category: jobs
+    read_only: true
+    request:
+      method: GET
+      path: /v1/jobs
+      query:
+        per_page: "${per_page}"
+        page: "${page}"
+        status: "${status}"
+        department_id: "${department_id}"
+        updated_after: "${updated_after}"
+    input:
+      per_page:
+        type: integer
+        description: How many jobs per page (1-500).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 500
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      status:
+        type: string
+        description: Only jobs in this state.
+        optional: true
+        enum: [open, closed, draft]
+      department_id:
+        type: integer
+        description: Only jobs in this department.
+        optional: true
+      updated_after:
+        type: string
+        description: Only jobs changed at or after this ISO 8601 instant.
+        optional: true
+    output:
+      description: A page of jobs.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          name: {type: string}
+          status: {type: string}
+          departments: {type: array}
+
+  list_applications:
+    title: List applications
+    description: >-
+      List applications, optionally for one job or in one status — the way to
+      see a pipeline.
+    category: applications
+    read_only: true
+    request:
+      method: GET
+      path: /v1/applications
+      query:
+        per_page: "${per_page}"
+        page: "${page}"
+        job_id: "${job_id}"
+        status: "${status}"
+        created_after: "${created_after}"
+        last_activity_after: "${last_activity_after}"
+    input:
+      per_page:
+        type: integer
+        description: How many applications per page (1-500).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 500
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      job_id:
+        type: integer
+        description: Only applications to this job.
+        optional: true
+      status:
+        type: string
+        description: Only applications in this state.
+        optional: true
+        enum: [active, rejected, hired]
+      created_after:
+        type: string
+        description: Only applications created at or after this ISO 8601 instant.
+        optional: true
+      last_activity_after:
+        type: string
+        description: Only applications with activity since this ISO 8601 instant.
+        optional: true
+    output:
+      description: A page of applications.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          candidate_id: {type: integer}
+          status: {type: string}
+          current_stage: {type: object}
+
+  advance_application:
+    title: Move an application to the next stage
+    description: >-
+      Advance an application from its current stage to the next one in the
+      job's interview plan.
+    category: applications
+    request:
+      method: POST
+      path: /v1/applications/${application_id}/advance
+      headers:
+        On-Behalf-Of: "${on_behalf_of}"
+      body:
+        from_stage_id: "${from_stage_id}"
+    input:
+      application_id:
+        type: integer
+        description: The application's numeric id.
+      on_behalf_of:
+        type: integer
+        description: Greenhouse user id the action is attributed to.
+      from_stage_id:
+        type: integer
+        description: The stage the application is currently in, as a safety check.
+        optional: true
+    output:
+      description: The application at its new stage.
+      type: object
+      properties:
+        id: {type: integer}
+        current_stage: {type: object}
+
+  reject_application:
+    title: Reject an application
+    description: >-
+      Reject an application, optionally recording a reason and a note. This
+      moves the candidate out of the active pipeline.
+    category: applications
+    destructive: true
+    request:
+      method: POST
+      path: /v1/applications/${application_id}/reject
+      headers:
+        On-Behalf-Of: "${on_behalf_of}"
+      body:
+        rejection_reason_id: "${rejection_reason_id}"
+        notes: "${notes}"
+        rejection_email:
+          $when: "${send_email_at}"
+          send_email_at: "${send_email_at}"
+          email_template_id: "${email_template_id}"
+    input:
+      application_id:
+        type: integer
+        description: The application's numeric id.
+      on_behalf_of:
+        type: integer
+        description: Greenhouse user id the action is attributed to.
+      rejection_reason_id:
+        type: integer
+        description: Rejection reason id, from the organisation's configured list.
+        optional: true
+      notes:
+        type: string
+        description: Internal note explaining the rejection.
+        optional: true
+      send_email_at:
+        type: string
+        description: When to send the rejection email, ISO 8601. Omit to send none.
+        optional: true
+      email_template_id:
+        type: integer
+        description: Which rejection email template to use.
+        optional: true
+    output:
+      description: The rejected application.
+      type: object
+      properties:
+        id: {type: integer}
+        status: {type: string}
+        rejected_at: {type: string}
+
+  list_scheduled_interviews:
+    title: List scheduled interviews
+    description: >-
+      List upcoming and past interviews, optionally for one application or
+      within a date range.
+    category: interviews
+    read_only: true
+    request:
+      method: GET
+      path: /v1/scheduled_interviews
+      query:
+        per_page: "${per_page}"
+        page: "${page}"
+        application_id: "${application_id}"
+        starts_after: "${starts_after}"
+        ends_before: "${ends_before}"
+    input:
+      per_page:
+        type: integer
+        description: How many interviews per page (1-500).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 500
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      application_id:
+        type: integer
+        description: Only interviews for this application.
+        optional: true
+      starts_after:
+        type: string
+        description: Only interviews starting at or after this ISO 8601 instant.
+        optional: true
+      ends_before:
+        type: string
+        description: Only interviews ending at or before this ISO 8601 instant.
+        optional: true
+    output:
+      description: A page of scheduled interviews.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          start: {type: object}
+          end: {type: object}
+          interviewers: {type: array}
+          status: {type: string}
+
+  list_users:
+    title: List Greenhouse users
+    description: >-
+      List the organisation's users with the ids the On-Behalf-Of header and the
+      assignment arguments take.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /v1/users
+      query:
+        per_page: "${per_page}"
+        page: "${page}"
+        email: "${email}"
+        updated_after: "${updated_after}"
+    input:
+      per_page:
+        type: integer
+        description: How many users per page (1-500).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 500
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+      email:
+        type: string
+        description: Only the user with this email address.
+        optional: true
+        format: email
+      updated_after:
+        type: string
+        description: Only users changed at or after this ISO 8601 instant.
+        optional: true
+    output:
+      description: A page of users.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          name: {type: string}
+          primary_email_address: {type: string}
+          disabled: {type: boolean}
+
+  list_departments:
+    title: List departments
+    description: List the organisation's departments, which jobs are filed under.
+    category: organisation
+    read_only: true
+    request:
+      method: GET
+      path: /v1/departments
+      query:
+        per_page: "${per_page}"
+        page: "${page}"
+    input:
+      per_page:
+        type: integer
+        description: How many departments per page (1-500).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 500
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of departments.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          name: {type: string}
+
+  list_job_stages:
+    title: List a job's interview stages
+    description: >-
+      Read the stages an application moves through for a job, with the ids
+      advance_application takes.
+    category: jobs
+    read_only: true
+    request:
+      method: GET
+      path: /v1/jobs/${job_id}/stages
+      query:
+        per_page: "${per_page}"
+        page: "${page}"
+    input:
+      job_id:
+        type: integer
+        description: The job's numeric id.
+      per_page:
+        type: integer
+        description: How many stages per page (1-500).
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 500
+      page:
+        type: integer
+        description: 1-based page number.
+        optional: true
+        minimum: 1
+    output:
+      description: The job's interview stages, in order.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          name: {type: string}
+          priority: {type: integer}
