@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] — 2026-08-27
+## [0.2.0] — 2026-09-01
 
 The catalogue told you how to *connect* to 1,586 APIs. This release adds the
 next layer: what each connector can actually **do**, and which of those things a
@@ -232,6 +232,7 @@ particular credential is allowed to do.
   `TBA` and `OAUTH1`, request proxying with interpolation, pagination and retry
   metadata, and a `connectors` CLI.
 
+[0.2.0]: https://github.com/MuhammadHusnainAli/connector-for-ai-agents/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/MuhammadHusnainAli/connector-for-ai-agents/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/MuhammadHusnainAli/connector-for-ai-agents/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/MuhammadHusnainAli/connector-for-ai-agents/compare/v0.1.0...v0.1.1
