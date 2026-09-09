@@ -1,0 +1,914 @@
+# Azure OpenAI Service tools -- inference against your own deployments.
+#
+# The connection's base url already carries `/openai` on the resource's
+# openai.azure.com host, and the key goes in the `api-key` header, so paths
+# start at `/deployments`. Every call needs `api-version`; `2024-10-21` is the
+# GA data-plane version these tools default to.
+#
+# ## Deployments, not model names
+#
+# This is the difference from the OpenAI API and the thing that trips up every
+# port of OpenAI code. You do not name a model -- you name a DEPLOYMENT, which
+# is a name you (or whoever set the resource up) chose when deploying a model
+# into it. A deployment called `gpt-4o-prod` might serve any model, and there
+# is no relationship between the deployment name and the model beyond
+# convention.
+#
+# The path is `/deployments/{deployment}/chat/completions`, and a deployment
+# that does not exist returns 404 with a `DeploymentNotFound` code. list_models
+# tells you which models the resource could serve; only the resource's own
+# configuration says which are actually deployed.
+#
+# ## Content filtering is on by default, and it shows up in the response
+#
+# Azure runs a content filter over prompts and completions independently of the
+# model. A blocked prompt returns 400 with a `content_filter` code, and a
+# blocked completion comes back with `finish_reason` of `content_filter`
+# rather than `stop`. Successful responses carry
+# `prompt_filter_results` and per-choice `content_filter_results` grading each
+# category. A response that looks truncated for no reason is usually this.
+#
+# ## Streaming is not available here
+#
+# Passing `stream: true` would return a server-sent event stream, which this
+# package cannot consume. All the tools here are non-streaming, so a long
+# completion arrives in one response after the full generation time.
+#
+# ## What is not here
+#
+# Audio transcription, translation and speech take `multipart/form-data` or
+# return binary audio, which this request format cannot express. File upload is
+# multipart for the same reason -- files can be listed, read and deleted here,
+# but must be uploaded by another client.
+#
+# Docs: https://learn.microsoft.com/azure/ai-foundry/openai/reference
+
+connector_id: azure-openai-service
+display_name: Azure OpenAI Service
+docs_url: https://learn.microsoft.com/azure/ai-foundry/openai/reference
+
+tools:
+
+  # -- inference -------------------------------------------------------------
+
+  create_chat_completion:
+    title: Generate a chat completion
+    description: >-
+      The main inference call. Send a list of messages and get the model's reply.
+
+      `deployment_id` is the name of a DEPLOYMENT on this resource, not a model
+      name -- see the pack notes. A 404 with `DeploymentNotFound` means the name
+      is wrong, not that the model does not exist.
+
+      `messages` is the usual shape:
+      `[{"role": "system", "content": "..."}, {"role": "user", "content":
+      "..."}]`. Pass `tools` to let the model call functions, and
+      `response_format` of `{"type": "json_object"}` to force valid JSON --
+      which only works if the prompt also asks for JSON.
+
+      Streaming is not supported here, so a long completion takes as long as it
+      takes and arrives in one piece. Check `choices[0].finish_reason`: `stop`
+      is a complete answer, `length` means max_tokens cut it off, and
+      `content_filter` means Azure blocked it.
+    category: inference
+    notes: deployment_id is a deployment name, not a model name. Streaming is not supported.
+    request:
+      method: POST
+      path: /deployments/${deployment_id}/chat/completions
+      query:
+        api-version: "${api_version}"
+      body:
+        messages: "${messages}"
+        max_tokens: "${max_tokens}"
+        temperature: "${temperature}"
+        top_p: "${top_p}"
+        stop: "${stop}"
+        frequency_penalty: "${frequency_penalty}"
+        presence_penalty: "${presence_penalty}"
+        seed: "${seed}"
+        tools: "${tools}"
+        tool_choice: "${tool_choice}"
+        response_format: "${response_format}"
+        user: "${user}"
+    input:
+      deployment_id:
+        type: string
+        description: >-
+          The deployment name on this Azure OpenAI resource -- what someone
+          chose when deploying the model, not the model's own name.
+        example: gpt-4o
+      messages:
+        type: array
+        description: >-
+          The conversation, each {"role": "system"|"user"|"assistant"|"tool",
+          "content": "..."}. A system message first sets the behaviour.
+        items: {type: object}
+      max_tokens:
+        type: integer
+        description: >-
+          Cap on the tokens generated. A completion that stops with
+          finish_reason "length" hit this.
+        optional: true
+        minimum: 1
+      temperature:
+        type: number
+        description: >-
+          Randomness, 0 to 2. Around 0 for extraction and classification, 0.7
+          for open-ended writing. Adjust this or top_p, not both.
+        optional: true
+        minimum: 0
+        maximum: 2
+      top_p:
+        type: number
+        description: Nucleus sampling threshold, 0 to 1. An alternative to temperature.
+        optional: true
+        minimum: 0
+        maximum: 1
+      stop:
+        type: array
+        description: Up to four strings that end generation when produced.
+        optional: true
+        items: {type: string}
+      frequency_penalty:
+        type: number
+        description: Penalise tokens by how often they have appeared, -2 to 2.
+        optional: true
+        minimum: -2
+        maximum: 2
+      presence_penalty:
+        type: number
+        description: Penalise tokens that have appeared at all, -2 to 2.
+        optional: true
+        minimum: -2
+        maximum: 2
+      seed:
+        type: integer
+        description: Ask for repeatable sampling. Best-effort, not a guarantee.
+        optional: true
+      tools:
+        type: array
+        description: >-
+          Function definitions the model may call, each
+          {"type": "function", "function": {"name": ..., "parameters": ...}}.
+        optional: true
+        items: {type: object}
+      tool_choice:
+        type: string
+        description: >-
+          none forbids tool calls, auto lets the model decide, required forces
+          one.
+        optional: true
+        enum: [none, auto, required]
+      response_format:
+        type: object
+        description: >-
+          Set to {"type": "json_object"} to force syntactically valid JSON. The
+          prompt must also ask for JSON, or the model may produce an endless
+          run of whitespace.
+        optional: true
+      user:
+        type: string
+        description: A stable end-user identifier, for abuse monitoring.
+        optional: true
+      api_version:
+        type: string
+        description: Azure OpenAI data-plane API version.
+        optional: true
+        default: "2024-10-21"
+    output:
+      description: The completion, with usage and content-filter results.
+      type: object
+      properties:
+        choices: {type: array, description: "Each with message (role, content, tool_calls), finish_reason and content_filter_results."}
+        usage: {type: object, description: "prompt_tokens, completion_tokens and total_tokens -- what the call cost."}
+        prompt_filter_results: {type: array, description: "How Azure's content filter graded the prompt."}
+        model: {type: string, description: "The model the deployment actually served."}
+
+  create_completion:
+    title: Generate a text completion (legacy)
+    description: >-
+      The older prompt-in, text-out endpoint, for deployments of legacy
+      completion models such as gpt-35-turbo-instruct. Chat models are not
+      reachable this way -- use create_chat_completion for those, which is what
+      almost everything should use.
+
+      Kept for deployments that predate the chat format.
+    category: inference
+    notes: Only works for deployments of legacy completion models. Chat models need create_chat_completion.
+    request:
+      method: POST
+      path: /deployments/${deployment_id}/completions
+      query:
+        api-version: "${api_version}"
+      body:
+        prompt: "${prompt}"
+        max_tokens: "${max_tokens}"
+        temperature: "${temperature}"
+        top_p: "${top_p}"
+        stop: "${stop}"
+        n: "${n}"
+        user: "${user}"
+    input:
+      deployment_id:
+        type: string
+        description: The deployment name of a legacy completion model.
+        example: gpt-35-turbo-instruct
+      prompt:
+        type: string
+        description: The prompt to complete.
+      max_tokens:
+        type: integer
+        description: Cap on the tokens generated.
+        optional: true
+        minimum: 1
+      temperature:
+        type: number
+        description: Randomness, 0 to 2.
+        optional: true
+        minimum: 0
+        maximum: 2
+      top_p:
+        type: number
+        description: Nucleus sampling threshold, 0 to 1.
+        optional: true
+        minimum: 0
+        maximum: 1
+      stop:
+        type: array
+        description: Up to four strings that end generation.
+        optional: true
+        items: {type: string}
+      n:
+        type: integer
+        description: How many completions to generate. Each is billed.
+        optional: true
+        minimum: 1
+      user:
+        type: string
+        description: A stable end-user identifier, for abuse monitoring.
+        optional: true
+      api_version:
+        type: string
+        description: Azure OpenAI data-plane API version.
+        optional: true
+        default: "2024-10-21"
+    output:
+      description: The completion or completions.
+      type: object
+      properties:
+        choices: {type: array, description: "Each with text, index, finish_reason and content_filter_results."}
+        usage: {type: object, description: "prompt_tokens, completion_tokens and total_tokens."}
+
+  create_embeddings:
+    title: Turn text into embedding vectors
+    description: >-
+      Produce embedding vectors for one or more pieces of text, for semantic
+      search, clustering or a vector index.
+
+      `deployment_id` must be a deployment of an embedding model --
+      text-embedding-3-small, -3-large or ada-002. Pointing it at a chat
+      deployment returns an error.
+
+      Batch: `input` takes a list, and embedding many strings in one call is far
+      cheaper in round trips than one at a time. The vectors come back in
+      `data`, in the same order as the input.
+
+      Every vector in an index must come from the SAME model -- dimensions
+      differ between models, and even where they match the spaces are not
+      comparable. Mixing them produces confident nonsense.
+    category: inference
+    notes: All vectors in one index must come from the same embedding model. Dimensions and spaces are not interchangeable.
+    request:
+      method: POST
+      path: /deployments/${deployment_id}/embeddings
+      query:
+        api-version: "${api_version}"
+      body:
+        input: "${input_texts}"
+        dimensions: "${dimensions}"
+        user: "${user}"
+    input:
+      deployment_id:
+        type: string
+        description: The deployment name of an embedding model.
+        example: text-embedding-3-small
+      input_texts:
+        type: array
+        description: >-
+          The texts to embed. Batch as many as fit rather than calling once per
+          string.
+        items: {type: string}
+      dimensions:
+        type: integer
+        description: >-
+          Shorten the vectors to this many dimensions. Supported by the
+          text-embedding-3 models only, and the index must be built at the same
+          size.
+        optional: true
+        minimum: 1
+      user:
+        type: string
+        description: A stable end-user identifier, for abuse monitoring.
+        optional: true
+      api_version:
+        type: string
+        description: Azure OpenAI data-plane API version.
+        optional: true
+        default: "2024-10-21"
+    output:
+      description: One vector per input, in the same order.
+      type: object
+      properties:
+        data: {type: array, description: "Each with index and embedding, the float vector."}
+        usage: {type: object, description: "prompt_tokens and total_tokens."}
+        model: {type: string, description: "The embedding model the deployment served."}
+
+  create_image:
+    title: Generate an image from a prompt
+    description: >-
+      Generate images with a DALL-E deployment. Returns URLs by default --
+      which expire after about an hour, so download anything worth keeping
+      promptly -- or base64 with `response_format` of `b64_json`.
+
+      Azure rewrites prompts for safety and returns the rewritten version as
+      `revised_prompt` on each result. That is the prompt that was actually
+      used, and it is worth reading when the output is not what you asked for.
+
+      A prompt the content filter rejects returns 400 with a
+      `ResponsibleAIPolicyViolation` code rather than an image.
+    category: inference
+    notes: Returned URLs expire after about an hour. Prompts are rewritten for safety; check revised_prompt.
+    request:
+      method: POST
+      path: /deployments/${deployment_id}/images/generations
+      query:
+        api-version: "${api_version}"
+      body:
+        prompt: "${prompt}"
+        n: "${n}"
+        size: "${size}"
+        quality: "${quality}"
+        style: "${style}"
+        response_format: "${response_format}"
+        user: "${user}"
+    input:
+      deployment_id:
+        type: string
+        description: The deployment name of a DALL-E model.
+        example: dall-e-3
+      prompt:
+        type: string
+        description: What to draw. Up to 4000 characters.
+        max_length: 4000
+        example: A watercolour of a lighthouse in a storm
+      n:
+        type: integer
+        description: How many images to generate. DALL-E 3 supports only 1.
+        optional: true
+        minimum: 1
+      size:
+        type: string
+        description: Image dimensions. The non-square sizes cost more.
+        optional: true
+        enum: ["1024x1024", "1792x1024", "1024x1792"]
+      quality:
+        type: string
+        description: hd produces finer detail and costs more than standard.
+        optional: true
+        enum: [standard, hd]
+      style:
+        type: string
+        description: vivid is dramatic and hyper-real; natural is more restrained.
+        optional: true
+        enum: [vivid, natural]
+      response_format:
+        type: string
+        description: url returns expiring links; b64_json returns the image inline.
+        optional: true
+        enum: [url, b64_json]
+      user:
+        type: string
+        description: A stable end-user identifier, for abuse monitoring.
+        optional: true
+      api_version:
+        type: string
+        description: Azure OpenAI data-plane API version.
+        optional: true
+        default: "2024-10-21"
+    output:
+      description: The generated images.
+      type: object
+      properties:
+        created: {type: integer, description: "Unix timestamp of the generation."}
+        data: {type: array, description: "Each with url or b64_json, revised_prompt and content_filter_results."}
+
+  list_models:
+    title: List the models available on this resource
+    description: >-
+      Every model this Azure OpenAI resource can serve, with its capabilities,
+      lifecycle status and deprecation dates. `capabilities` says whether a
+      model supports chat completion, embeddings, fine-tuning and inference,
+      which is how you find out whether a model can do what you want before
+      deploying it.
+
+      This is not the list of DEPLOYMENTS. A model appearing here can be
+      deployed; whether it currently is, and under what name, is the resource's
+      own configuration.
+    category: models
+    read_only: true
+    notes: Lists deployable models, not the deployments that exist. Inference needs a deployment name.
+    request:
+      method: GET
+      path: /models
+      query:
+        api-version: "${api_version}"
+    input:
+      api_version:
+        type: string
+        description: Azure OpenAI data-plane API version.
+        optional: true
+        default: "2024-10-21"
+    output:
+      description: The models the resource can serve.
+      type: array
+      response_path: data
+      items: {type: object, description: "id, status, capabilities (chat_completion, embeddings, fine_tune, inference), lifecycle_status and deprecation."}
+
+  # -- batch jobs ------------------------------------------------------------
+
+  create_batch_job:
+    title: Submit a batch of requests for offline processing
+    description: >-
+      Run a large set of chat or embedding requests offline at roughly half the
+      cost of calling them one at a time. The trade-off is latency: a batch has
+      a 24-hour completion window and may take most of it.
+
+      `input_file_id` is a file already uploaded to the resource containing one
+      JSON request per line -- upload it with another client, since this API
+      takes multipart form data that this connector cannot send, then find its
+      id with list_files.
+
+      Poll get_batch_job until `status` is `completed`, then read
+      `output_file_id` with get_file_content.
+    category: batch
+    notes: Requests are processed within 24 hours, not immediately. The input file must be uploaded by another client.
+    request:
+      method: POST
+      path: /batches
+      query:
+        api-version: "${api_version}"
+      body:
+        input_file_id: "${input_file_id}"
+        endpoint: "${endpoint}"
+        completion_window: "${completion_window}"
+        metadata: "${metadata}"
+    input:
+      input_file_id:
+        type: string
+        description: >-
+          Id of an uploaded JSONL file with one request per line, from
+          list_files.
+      endpoint:
+        type: string
+        description: Which API the batched requests target.
+        optional: true
+        default: /chat/completions
+        enum: ["/chat/completions", "/embeddings", "/completions"]
+      completion_window:
+        type: string
+        description: How long the service has to finish. Only 24h is supported.
+        optional: true
+        default: 24h
+      metadata:
+        type: object
+        description: Arbitrary key-value metadata to attach to the job.
+        optional: true
+      api_version:
+        type: string
+        description: Azure OpenAI data-plane API version.
+        optional: true
+        default: "2024-10-21"
+    output:
+      description: The batch job as created.
+      type: object
+      properties:
+        id: {type: string, description: "The batch id; poll get_batch_job with it."}
+        status: {type: string, description: "validating at this point."}
+        input_file_id: {type: string, description: "The input file."}
+
+  list_batch_jobs:
+    title: List batch jobs
+    description: >-
+      The batch jobs on this resource, newest first, each with its status and
+      request counts. `status` moves through validating, in_progress,
+      finalizing and completed -- or failed, expired or cancelled.
+    category: batch
+    read_only: true
+    request:
+      method: GET
+      path: /batches
+      query:
+        api-version: "${api_version}"
+        limit: "${limit}"
+        after: "${after}"
+    input:
+      limit:
+        type: integer
+        description: How many jobs to return.
+        optional: true
+        minimum: 1
+      after:
+        type: string
+        description: Continue after this batch id, for paging.
+        optional: true
+      api_version:
+        type: string
+        description: Azure OpenAI data-plane API version.
+        optional: true
+        default: "2024-10-21"
+    output:
+      description: The resource's batch jobs.
+      type: array
+      response_path: data
+      items: {type: object, description: "id, status, input_file_id, output_file_id, error_file_id, request_counts and created_at."}
+
+  get_batch_job:
+    title: Get a batch job's status
+    description: >-
+      Follow a batch job. `request_counts` shows total, completed and failed,
+      which is how you tell partial success from total failure -- a batch
+      reaching `completed` with failures still produces an `error_file_id`
+      alongside the output.
+
+      Once `status` is `completed`, read `output_file_id` with get_file_content
+      for the results and `error_file_id` for the requests that did not work.
+    category: batch
+    read_only: true
+    request:
+      method: GET
+      path: /batches/${batch_id}
+      query:
+        api-version: "${api_version}"
+    input:
+      batch_id:
+        type: string
+        description: The batch id, from create_batch_job or list_batch_jobs.
+      api_version:
+        type: string
+        description: Azure OpenAI data-plane API version.
+        optional: true
+        default: "2024-10-21"
+    output:
+      description: The batch job and its progress.
+      type: object
+      properties:
+        id: {type: string, description: "The batch id."}
+        status: {type: string, description: "validating, in_progress, finalizing, completed, failed, expired or cancelled."}
+        output_file_id: {type: string, description: "File holding the results, once completed."}
+        error_file_id: {type: string, description: "File holding the requests that failed."}
+        request_counts: {type: object, description: "total, completed and failed."}
+
+  cancel_batch_job:
+    title: Cancel a batch job
+    description: >-
+      Stop a batch that is still validating or in progress. Requests already
+      completed stay completed and are still billed, and their results remain
+      available in the output file -- cancelling stops further work rather than
+      undoing what has been done.
+    category: batch
+    destructive: true
+    notes: Requests already processed are still billed and their results are kept.
+    request:
+      method: POST
+      path: /batches/${batch_id}/cancel
+      query:
+        api-version: "${api_version}"
+      body: {}
+    input:
+      batch_id:
+        type: string
+        description: The batch job to cancel.
+      api_version:
+        type: string
+        description: Azure OpenAI data-plane API version.
+        optional: true
+        default: "2024-10-21"
+    output:
+      description: The batch job, now cancelling.
+      type: object
+      properties:
+        id: {type: string, description: "The batch id."}
+        status: {type: string, description: "cancelling, then cancelled."}
+
+  # -- files -----------------------------------------------------------------
+
+  list_files:
+    title: List files uploaded to the resource
+    description: >-
+      The files stored on this Azure OpenAI resource -- batch inputs and
+      outputs, fine-tuning training sets, and the error files jobs produce.
+      Each has an id, a purpose and a size.
+
+      Uploading is not possible through this connector (it needs multipart form
+      data), so this is how you find the id of a file another client uploaded.
+    category: files
+    read_only: true
+    request:
+      method: GET
+      path: /files
+      query:
+        api-version: "${api_version}"
+        purpose: "${purpose}"
+    input:
+      purpose:
+        type: string
+        description: Only files with this purpose -- fine-tune, batch, batch_output, assistants.
+        optional: true
+      api_version:
+        type: string
+        description: Azure OpenAI data-plane API version.
+        optional: true
+        default: "2024-10-21"
+    output:
+      description: The resource's files.
+      type: array
+      response_path: data
+      items: {type: object, description: "id, filename, bytes, purpose, status and created_at."}
+
+  get_file_content:
+    title: Download a file's contents
+    description: >-
+      Read a stored file. This is how batch results come back: the
+      `output_file_id` from a completed batch job holds one JSON response per
+      line, matching the requests in the input file by their `custom_id`.
+
+      Also how to read an `error_file_id` and find out which requests failed and
+      why. The content is returned as text.
+    category: files
+    read_only: true
+    request:
+      method: GET
+      path: /files/${file_id}/content
+      query:
+        api-version: "${api_version}"
+    input:
+      file_id:
+        type: string
+        description: The file id, from list_files or a batch job's output_file_id.
+      api_version:
+        type: string
+        description: Azure OpenAI data-plane API version.
+        optional: true
+        default: "2024-10-21"
+    output:
+      description: The file's contents, normally JSONL.
+      type: string
+
+  delete_file:
+    title: Delete a file
+    description: >-
+      Remove a stored file. Irreversible. A file still referenced by a running
+      batch or fine-tuning job should be left alone until the job finishes --
+      deleting a batch's output file loses the results permanently, since they
+      are not stored anywhere else.
+    category: files
+    destructive: true
+    notes: Deleting a batch's output file destroys the only copy of the results.
+    request:
+      method: DELETE
+      path: /files/${file_id}
+      query:
+        api-version: "${api_version}"
+    input:
+      file_id:
+        type: string
+        description: The file to delete.
+      api_version:
+        type: string
+        description: Azure OpenAI data-plane API version.
+        optional: true
+        default: "2024-10-21"
+    output:
+      description: Confirmation of the deletion.
+      type: object
+      properties:
+        id: {type: string, description: "The deleted file id."}
+        deleted: {type: boolean, description: "True on success."}
+
+  # -- fine-tuning -----------------------------------------------------------
+
+  list_fine_tuning_jobs:
+    title: List fine-tuning jobs
+    description: >-
+      Fine-tuning jobs on this resource, each with its status, base model and --
+      once finished -- the `fine_tuned_model` name. That name still has to be
+      DEPLOYED before it can be used for inference; a completed fine-tune is not
+      yet callable.
+    category: fine-tuning
+    read_only: true
+    notes: A completed fine-tuned model must be deployed before create_chat_completion can use it.
+    request:
+      method: GET
+      path: /fine_tuning/jobs
+      query:
+        api-version: "${api_version}"
+        limit: "${limit}"
+        after: "${after}"
+    input:
+      limit:
+        type: integer
+        description: How many jobs to return.
+        optional: true
+        minimum: 1
+      after:
+        type: string
+        description: Continue after this job id, for paging.
+        optional: true
+      api_version:
+        type: string
+        description: Azure OpenAI data-plane API version.
+        optional: true
+        default: "2024-10-21"
+    output:
+      description: The resource's fine-tuning jobs.
+      type: array
+      response_path: data
+      items: {type: object, description: "id, status, model, fine_tuned_model, training_file, hyperparameters and created_at."}
+
+  create_fine_tuning_job:
+    title: Start a fine-tuning job
+    description: >-
+      Fine-tune a base model on a JSONL training file already uploaded to the
+      resource. Training takes hours and is billed by token, so this is not a
+      call to make casually.
+
+      `training_file` is a file id from list_files whose purpose is `fine-tune`.
+      A `validation_file` is strongly worth supplying: without one there is no
+      honest way to tell whether the model learned or memorised.
+
+      Leave `hyperparameters` alone unless you have a reason -- the defaults
+      Azure picks from the dataset size are usually better than a guess.
+      Poll get_fine_tuning_job for progress.
+    category: fine-tuning
+    notes: Training takes hours and is billed by token. The resulting model still needs deploying before use.
+    request:
+      method: POST
+      path: /fine_tuning/jobs
+      query:
+        api-version: "${api_version}"
+      body:
+        model: "${model}"
+        training_file: "${training_file}"
+        validation_file: "${validation_file}"
+        suffix: "${suffix}"
+        seed: "${seed}"
+        hyperparameters: "${hyperparameters}"
+    input:
+      model:
+        type: string
+        description: The base model to fine-tune, e.g. gpt-4o-mini-2024-07-18.
+        example: gpt-4o-mini-2024-07-18
+      training_file:
+        type: string
+        description: File id of the JSONL training set, from list_files.
+      validation_file:
+        type: string
+        description: >-
+          File id of a held-out validation set. Strongly recommended -- without
+          it you cannot tell learning from memorisation.
+        optional: true
+      suffix:
+        type: string
+        description: A suffix for the resulting model name, up to 40 characters.
+        optional: true
+        max_length: 40
+      seed:
+        type: integer
+        description: Seed for reproducibility across runs.
+        optional: true
+      hyperparameters:
+        type: object
+        description: >-
+          n_epochs, batch_size and learning_rate_multiplier. The defaults Azure
+          derives from the dataset are usually better than a guess.
+        optional: true
+      api_version:
+        type: string
+        description: Azure OpenAI data-plane API version.
+        optional: true
+        default: "2024-10-21"
+    output:
+      description: The fine-tuning job as created.
+      type: object
+      properties:
+        id: {type: string, description: "The job id; poll get_fine_tuning_job with it."}
+        status: {type: string, description: "pending or running at this point."}
+        model: {type: string, description: "The base model being tuned."}
+
+  get_fine_tuning_job:
+    title: Get a fine-tuning job's status
+    description: >-
+      Follow a fine-tuning job. `status` moves through pending, running and
+      succeeded, or fails. On success `fine_tuned_model` names the new model --
+      which then has to be deployed on the resource before
+      create_chat_completion can call it, since inference addresses deployments
+      rather than models.
+
+      `trained_tokens` is what the run cost.
+    category: fine-tuning
+    read_only: true
+    request:
+      method: GET
+      path: /fine_tuning/jobs/${job_id}
+      query:
+        api-version: "${api_version}"
+    input:
+      job_id:
+        type: string
+        description: The fine-tuning job id.
+      api_version:
+        type: string
+        description: Azure OpenAI data-plane API version.
+        optional: true
+        default: "2024-10-21"
+    output:
+      description: The fine-tuning job and its progress.
+      type: object
+      properties:
+        id: {type: string, description: "The job id."}
+        status: {type: string, description: "pending, running, succeeded, failed or cancelled."}
+        fine_tuned_model: {type: string, description: "The resulting model name, on success. Must be deployed before use."}
+        trained_tokens: {type: integer, description: "Tokens processed, which is what the run was billed on."}
+        error: {type: object, description: "Why it failed, on failure."}
+
+  cancel_fine_tuning_job:
+    title: Cancel a fine-tuning job
+    description: >-
+      Stop a fine-tuning job that is pending or running. Tokens already
+      processed are still billed, and no usable model comes out of a cancelled
+      run -- so cancelling is a way to stop spending, not a way to get a partial
+      result.
+    category: fine-tuning
+    destructive: true
+    notes: Tokens already processed are billed, and the run produces no usable model.
+    request:
+      method: POST
+      path: /fine_tuning/jobs/${job_id}/cancel
+      query:
+        api-version: "${api_version}"
+      body: {}
+    input:
+      job_id:
+        type: string
+        description: The fine-tuning job to cancel.
+      api_version:
+        type: string
+        description: Azure OpenAI data-plane API version.
+        optional: true
+        default: "2024-10-21"
+    output:
+      description: The job, now cancelled.
+      type: object
+      properties:
+        id: {type: string, description: "The job id."}
+        status: {type: string, description: "cancelled."}
+
+  list_fine_tuning_events:
+    title: Get a fine-tuning job's progress log
+    description: >-
+      The event log of a fine-tuning run -- per-epoch training loss, validation
+      loss where a validation file was given, and any warnings. This is where
+      you find out whether the model is actually improving or has started
+      overfitting, which the job's `status` alone never tells you.
+    category: fine-tuning
+    read_only: true
+    request:
+      method: GET
+      path: /fine_tuning/jobs/${job_id}/events
+      query:
+        api-version: "${api_version}"
+        limit: "${limit}"
+        after: "${after}"
+    input:
+      job_id:
+        type: string
+        description: The fine-tuning job id.
+      limit:
+        type: integer
+        description: How many events to return.
+        optional: true
+        minimum: 1
+      after:
+        type: string
+        description: Continue after this event id, for paging.
+        optional: true
+      api_version:
+        type: string
+        description: Azure OpenAI data-plane API version.
+        optional: true
+        default: "2024-10-21"
+    output:
+      description: The job's events, newest first.
+      type: array
+      response_path: data
+      items: {type: object, description: "id, created_at, level, message and data holding step, train_loss and valid_loss."}

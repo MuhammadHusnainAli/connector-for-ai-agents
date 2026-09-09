@@ -1,0 +1,466 @@
+# Azure Queue Storage tools -- the Queue Service REST API.
+#
+# The connection's base url is the storage account's queue endpoint
+# (`https://<account>.queue.core.windows.net`) and authenticates with a
+# Microsoft Entra ID token, so the caller needs a data-plane role such as
+# Storage Queue Data Reader, Storage Queue Data Contributor or Storage Queue
+# Data Message Processor. Owner or Contributor on the storage account is a
+# CONTROL-plane role and the queue endpoint answers 403 to it -- the same trap
+# as the blob endpoint.
+#
+# ## Everything speaks XML
+#
+# Listings come back as XML documents, and messages are sent as XML too:
+#
+#     <QueueMessage><MessageText>your text here</MessageText></QueueMessage>
+#
+# put_message builds that wrapper for you from a plain string. get_messages
+# returns XML you have to parse -- `MessageId`, `PopReceipt`, `MessageText`,
+# `DequeueCount` and the visibility timestamps.
+#
+# ## Base64, or not
+#
+# Queue Storage stores whatever bytes you put in `MessageText`. The official
+# SDKs default to base64-encoding it, so a queue written by a .NET or Python
+# application will look like base64 here, and text written by this connector
+# will look like gibberish to those SDKs unless they are configured for plain
+# text. Decide which convention the queue uses before writing to it.
+#
+# ## Reading a message hides it, it does not remove it
+#
+# get_messages makes a message invisible for `visibilitytimeout` seconds and
+# returns a `PopReceipt`. If delete_message is not called with that receipt
+# before the timeout expires, the message comes back and is delivered again --
+# at-least-once, and the reason `DequeueCount` exists. peek_messages reads
+# without hiding anything and without a receipt, so it can never be followed by
+# a delete.
+#
+# The receipt is in the response BODY here, not a header, so unlike Service Bus
+# the full receive-process-delete cycle works end to end through this connector.
+#
+# ## Header-only operations are absent
+#
+# Get Queue Metadata and Get Queue Properties answer entirely in response
+# headers with an empty body, and this package surfaces bodies. They are left
+# out rather than shipped as tools that return nothing. The approximate message
+# count they carry can be had from list_queues' XML instead.
+#
+# Docs: https://learn.microsoft.com/rest/api/storageservices/queue-service-rest-api
+
+connector_id: azure-storage-queue
+display_name: Azure Queue Storage
+docs_url: https://learn.microsoft.com/rest/api/storageservices/queue-service-rest-api
+
+tools:
+
+  # -- queues ----------------------------------------------------------------
+
+  list_queues:
+    title: List the account's queues
+    description: >-
+      Every queue in the storage account, as an XML EnumerationResults document.
+      Narrow with `prefix`, and pass `include` as "metadata" to get each
+      queue's metadata inline. Page with the `NextMarker` element the response
+      ends with -- pass it back as `marker`.
+    category: queues
+    read_only: true
+    notes: Returns XML, not JSON.
+    request:
+      method: GET
+      path: /
+      query:
+        comp: list
+        prefix: "${prefix}"
+        marker: "${marker}"
+        maxresults: "${max_results}"
+        include: "${include}"
+    input:
+      prefix:
+        type: string
+        description: Only return queues whose name starts with this.
+        optional: true
+        example: orders-
+      marker:
+        type: string
+        description: Continuation token from a previous response's NextMarker element.
+        optional: true
+      max_results:
+        type: integer
+        description: How many queues per page, up to 5000.
+        optional: true
+        minimum: 1
+        maximum: 5000
+      include:
+        type: string
+        description: Set to metadata to include each queue's metadata in the listing.
+        optional: true
+        enum: [metadata]
+    output:
+      description: An XML EnumerationResults document listing the queues.
+      type: string
+
+  create_queue:
+    title: Create a queue
+    description: >-
+      Create a queue in the account. Idempotent in a useful way: creating a
+      queue that already exists with the same metadata returns 204 rather than
+      failing, so this is safe to call on every start-up.
+
+      Queue names are 3 to 63 characters, lowercase letters, digits and hyphens,
+      and cannot start or end with a hyphen.
+    category: queues
+    request:
+      method: PUT
+      path: /${queue_name}
+      body: {}
+    input:
+      queue_name:
+        type: string
+        description: The queue name -- 3 to 63 lowercase letters, digits and hyphens.
+        example: orders
+        pattern: "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$"
+    output:
+      description: Empty. 201 means created, 204 that it already existed unchanged.
+      type: object
+
+  delete_queue:
+    title: Delete a queue
+    description: >-
+      Destroy a queue and every message in it. Irreversible -- Queue Storage has
+      no soft delete for queues, and the messages are not recoverable.
+
+      The name stays unusable for at least 30 seconds afterwards while the
+      service finishes, so an immediate recreate returns 409.
+    category: queues
+    destructive: true
+    notes: Deletes all messages with the queue. The name cannot be reused for about 30 seconds.
+    request:
+      method: DELETE
+      path: /${queue_name}
+    input:
+      queue_name:
+        type: string
+        description: The queue to destroy, with everything in it.
+        example: scratch-queue
+    output:
+      description: Empty on success.
+      type: object
+
+  get_queue_acl:
+    title: Get a queue's stored access policies
+    description: >-
+      The stored access policies on a queue, as XML. Each policy names a
+      permission set and an expiry, and a shared access signature bound to one
+      can be revoked by deleting the policy -- which is the only way to revoke a
+      SAS early short of rotating the account key.
+
+      An empty document means no policies, and therefore that any SAS on this
+      queue is free-standing and irrevocable until it expires.
+    category: queues
+    read_only: true
+    notes: Returns XML, not JSON.
+    request:
+      method: GET
+      path: /${queue_name}
+      query:
+        comp: acl
+    input:
+      queue_name:
+        type: string
+        description: The queue.
+        example: orders
+    output:
+      description: An XML SignedIdentifiers document, empty when no policies are set.
+      type: string
+
+  # -- messages --------------------------------------------------------------
+
+  put_message:
+    title: Add a message to a queue
+    description: >-
+      Append a message to the back of a queue. The text is wrapped in the
+      `<QueueMessage><MessageText>` envelope the service requires.
+
+      Whether to base64-encode the text depends on what reads the queue: the
+      official SDKs base64 by default, so a plain string written here will not
+      decode cleanly for them. Match whatever convention the consumer uses.
+
+      `visibility_timeout` delays the message becoming visible, which is how you
+      schedule work for later -- up to 7 days. `message_ttl` is how long it
+      survives unread; -1 means forever. Messages are capped at 64 KB.
+    category: messages
+    notes: Maximum message size is 64 KB. Consider whether the consumer expects base64-encoded text.
+    request:
+      method: POST
+      path: /${queue_name}/messages
+      query:
+        visibilitytimeout: "${visibility_timeout}"
+        messagettl: "${message_ttl}"
+      headers:
+        content-type: application/xml
+      content: "<QueueMessage><MessageText>${message_text}</MessageText></QueueMessage>"
+    input:
+      queue_name:
+        type: string
+        description: The queue to add to.
+        example: orders
+      message_text:
+        type: string
+        description: >-
+          The message content. Must be XML-safe -- escape any &, < or > it
+          contains, or base64-encode the whole thing.
+        example: '{"orderId": 1001}'
+      visibility_timeout:
+        type: integer
+        description: >-
+          Seconds before the message becomes visible to consumers. 0 is
+          immediate; up to 604800 (7 days) schedules it for later.
+        optional: true
+        minimum: 0
+        maximum: 604800
+      message_ttl:
+        type: integer
+        description: Seconds before the message expires unread. -1 means it never expires.
+        optional: true
+        minimum: -1
+    output:
+      description: An XML document with the new message's id, insertion time, expiry and pop receipt.
+      type: string
+
+  get_messages:
+    title: Receive messages from a queue
+    description: >-
+      Take up to 32 messages off the front of a queue and hide them from other
+      consumers for `visibility_timeout` seconds. The XML response carries each
+      message's `MessageId`, `PopReceipt`, `MessageText` and `DequeueCount`.
+
+      This does NOT delete anything. Call delete_message with the id and pop
+      receipt once the work is done; if you do not, the message reappears when
+      the timeout expires and is delivered again. Size the timeout to how long
+      processing actually takes -- too short and the same message gets handled
+      twice.
+
+      A high `DequeueCount` on a message means it keeps failing, which is the
+      signal to move it aside rather than retry forever.
+    category: messages
+    read_only: true
+    notes: >-
+      Read-only in the sense that it destroys nothing, but not side-effect free:
+      the messages it returns are hidden from other consumers until the
+      visibility timeout expires or delete_message removes them.
+    request:
+      method: GET
+      path: /${queue_name}/messages
+      query:
+        numofmessages: "${number_of_messages}"
+        visibilitytimeout: "${visibility_timeout}"
+    input:
+      queue_name:
+        type: string
+        description: The queue to read from.
+        example: orders
+      number_of_messages:
+        type: integer
+        description: How many messages to take, 1 to 32.
+        optional: true
+        default: 1
+        minimum: 1
+        maximum: 32
+      visibility_timeout:
+        type: integer
+        description: >-
+          Seconds the messages stay hidden from other consumers, 1 to 604800.
+          Make it longer than processing takes.
+        optional: true
+        default: 30
+        minimum: 1
+        maximum: 604800
+    output:
+      description: An XML QueueMessagesList with each message's id, pop receipt, text and dequeue count.
+      type: string
+
+  peek_messages:
+    title: Look at messages without taking them
+    description: >-
+      Read up to 32 messages from the front of a queue without hiding them and
+      without a pop receipt. Other consumers can still take them, and nothing
+      you peek at can be deleted -- delete_message needs a receipt that only
+      get_messages provides.
+
+      This is the tool for inspecting a queue's backlog safely: it changes
+      nothing and cannot accidentally consume work.
+    category: messages
+    read_only: true
+    notes: No pop receipt is returned, so a peeked message cannot be deleted.
+    request:
+      method: GET
+      path: /${queue_name}/messages
+      query:
+        peekonly: "true"
+        numofmessages: "${number_of_messages}"
+    input:
+      queue_name:
+        type: string
+        description: The queue to look at.
+        example: orders
+      number_of_messages:
+        type: integer
+        description: How many messages to peek at, 1 to 32.
+        optional: true
+        default: 1
+        minimum: 1
+        maximum: 32
+    output:
+      description: An XML QueueMessagesList with each message's id, text, insertion time and dequeue count.
+      type: string
+
+  delete_message:
+    title: Delete a message after processing it
+    description: >-
+      Remove a message from the queue for good. Needs both its `MessageId` and
+      the `PopReceipt` from the get_messages call that handed it to you -- the
+      receipt is what proves you currently hold the message, and it changes
+      every time the message is received.
+
+      Fails with 400 if the receipt is stale, which means the visibility timeout
+      expired and someone else has it now.
+    category: messages
+    destructive: true
+    request:
+      method: DELETE
+      path: /${queue_name}/messages/${message_id}
+      query:
+        popreceipt: "${pop_receipt}"
+    input:
+      queue_name:
+        type: string
+        description: The queue the message came from.
+        example: orders
+      message_id:
+        type: string
+        description: The message's MessageId, from get_messages.
+      pop_receipt:
+        type: string
+        description: The PopReceipt from the same get_messages response. Stale receipts are rejected.
+    output:
+      description: Empty on success; 400 when the pop receipt has expired.
+      type: object
+
+  update_message:
+    title: Extend a message's lock or change its contents
+    description: >-
+      Change a received message's visibility timeout, its text, or both.
+      Extending the timeout is how a consumer keeps a lease on work that is
+      taking longer than expected; rewriting the text lets a multi-step consumer
+      record progress in the message itself.
+
+      Needs the current pop receipt, and RETURNS A NEW ONE in the response
+      headers -- which this package does not surface, so a second update or a
+      delete after this will fail on the stale receipt. Prefer setting a long
+      enough visibility timeout on get_messages in the first place.
+    category: messages
+    notes: The new pop receipt comes back in a response header this package does not surface, so the old one becomes unusable.
+    request:
+      method: PUT
+      path: /${queue_name}/messages/${message_id}
+      query:
+        popreceipt: "${pop_receipt}"
+        visibilitytimeout: "${visibility_timeout}"
+      headers:
+        content-type: application/xml
+      content: "<QueueMessage><MessageText>${message_text}</MessageText></QueueMessage>"
+    input:
+      queue_name:
+        type: string
+        description: The queue the message is in.
+        example: orders
+      message_id:
+        type: string
+        description: The message's MessageId.
+      pop_receipt:
+        type: string
+        description: The current PopReceipt from get_messages.
+      visibility_timeout:
+        type: integer
+        description: New visibility timeout in seconds, 0 to 604800. 0 makes it visible immediately.
+        minimum: 0
+        maximum: 604800
+      message_text:
+        type: string
+        description: The message's new content. Must be XML-safe.
+        example: '{"orderId": 1001, "step": 2}'
+    output:
+      description: Empty. The new pop receipt is in a response header.
+      type: object
+
+  clear_messages:
+    title: Delete every message in a queue
+    description: >-
+      Empty a queue completely, leaving the queue itself in place. Irreversible
+      and indiscriminate: it removes messages currently hidden by another
+      consumer's visibility timeout as well as visible ones, so work in flight
+      is destroyed.
+
+      On a queue with a lot of messages this may return 500 having deleted only
+      some of them; call it again until it succeeds.
+    category: messages
+    destructive: true
+    notes: Also removes messages another consumer is currently processing.
+    request:
+      method: DELETE
+      path: /${queue_name}/messages
+    input:
+      queue_name:
+        type: string
+        description: The queue to empty.
+        example: scratch-queue
+    output:
+      description: Empty on success; may need repeating on a very large queue.
+      type: object
+
+  # -- service ---------------------------------------------------------------
+
+  get_service_properties:
+    title: Get the queue service's logging and metrics settings
+    description: >-
+      The account-wide Queue Storage configuration as XML: analytics logging,
+      hour and minute metrics, CORS rules and the default service version.
+      Worth reading when you need to know whether queue operations are being
+      logged at all before trying to audit them.
+    category: service
+    read_only: true
+    notes: Returns XML, not JSON.
+    request:
+      method: GET
+      path: /
+      query:
+        restype: service
+        comp: properties
+    input: {}
+    output:
+      description: An XML StorageServiceProperties document.
+      type: string
+
+  get_service_stats:
+    title: Get geo-replication status for the queue service
+    description: >-
+      Replication status and the last sync time for the secondary region. Only
+      answers on the secondary endpoint of a read-access geo-redundant account;
+      elsewhere it returns an error.
+
+      `LastSyncTime` is the useful field: everything written before it is
+      readable from the secondary, and anything after it may not have replicated
+      yet.
+    category: service
+    read_only: true
+    notes: Only valid against the secondary endpoint of an RA-GRS account. Returns XML.
+    request:
+      method: GET
+      path: /
+      query:
+        restype: service
+        comp: stats
+    input: {}
+    output:
+      description: An XML StorageServiceStats document with the geo-replication status and last sync time.
+      type: string

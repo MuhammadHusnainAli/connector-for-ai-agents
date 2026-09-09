@@ -1,0 +1,1065 @@
+# Azure Blob Storage tools -- the Blob Service REST API.
+#
+# The connection's base url is the storage account's blob endpoint
+# (https://<account>.blob.core.windows.net) and authenticates with an Entra ID
+# token (scope https://storage.azure.com/.default), so the caller needs a data
+# plane role such as Storage Blob Data Reader or Storage Blob Data Contributor.
+# Owner or Contributor on the account is *not* enough: those are control plane
+# roles and the blob endpoint answers 403 to them.
+#
+# Two properties of this API shape every tool below.
+#
+# It speaks XML, not JSON. Every listing comes back as an XML document, so
+# those tools describe their output as text -- parse it rather than expecting
+# an object.
+#
+# It answers largely in headers. Get Blob Properties, Get Blob Metadata and Get
+# Container Properties put their entire answer in response headers with an
+# empty body, and this package surfaces response bodies rather than headers, so
+# those calls would return nothing useful and are deliberately absent. Reach
+# for list_blobs with include set to "metadata,tags" instead: the same
+# information arrives inside the XML, for every blob at once. For the same
+# reason there are no lease tools -- a lease is only useful if you can read the
+# lease id the service returns.
+#
+# Blob names may contain slashes ("2026/06/report.pdf"). They are percent-
+# encoded into the path, which the service decodes, so a hierarchical name
+# works as written.
+#
+# Uploads go on the wire as text. upload_blob and append_block send whatever
+# string you give them, which suits JSON, CSV, Markdown and logs; binary
+# content needs a client that can send raw bytes.
+#
+# Docs: https://learn.microsoft.com/rest/api/storageservices/blob-service-rest-api
+
+connector_id: azure-blob-storage
+display_name: Azure Blob Storage
+docs_url: https://learn.microsoft.com/rest/api/storageservices/blob-service-rest-api
+
+tools:
+
+  list_containers:
+    title: List containers in the account
+    description: >-
+      List the account's blob containers as an XML EnumerationResults document,
+      each with its last-modified time, lease and public access state. Narrow
+      with prefix, and pass include "metadata" to get each container's metadata
+      inline. Page with the NextMarker the response ends with.
+    category: containers
+    read_only: true
+    request:
+      method: GET
+      path: /
+      query:
+        comp: list
+        prefix: "${prefix}"
+        marker: "${marker}"
+        maxresults: "${max_results}"
+        include: "${include}"
+    input:
+      prefix:
+        type: string
+        description: Only return containers whose name starts with this.
+        optional: true
+        example: logs-
+      marker:
+        type: string
+        description: Continuation token from a previous response's NextMarker element.
+        optional: true
+      max_results:
+        type: integer
+        description: How many containers to return per page. The service caps this at 5000.
+        optional: true
+        minimum: 1
+        maximum: 5000
+      include:
+        type: string
+        description: 'Comma-separated extras to include: metadata, deleted, system.'
+        optional: true
+        example: metadata
+    output:
+      description: An XML EnumerationResults document listing the containers, ending in NextMarker.
+      type: string
+
+  create_container:
+    title: Create a container
+    description: >-
+      Create a new container in the account. public_access decides whether
+      anonymous callers may read it -- leave it unset for private, which is
+      almost always what you want; "container" makes both the blobs and the
+      listing world-readable. Answers 409 when the container already exists.
+    category: containers
+    request:
+      method: PUT
+      path: /${container}
+      query:
+        restype: container
+      headers:
+        x-ms-blob-public-access: "${public_access}"
+    input:
+      container:
+        type: string
+        description: Name for the container -- lower case letters, digits and dashes, 3 to 63 characters.
+        example: reports
+        pattern: ^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$
+      public_access:
+        type: string
+        description: >-
+          Anonymous access level. Omit for private. "blob" allows anonymous
+          reads of blobs whose name is known; "container" also allows listing.
+        optional: true
+        enum: [blob, container]
+    output:
+      description: Empty body -- 201 Created on success, 409 when the container already exists.
+      type: string
+
+  delete_container:
+    title: Delete a container
+    description: >-
+      Delete a container and every blob in it. The delete is asynchronous: the
+      container name cannot be reused until the service has finished purging
+      it, which can take minutes. If the account has container soft delete
+      enabled it can be restored within the retention window; otherwise this is
+      permanent.
+    category: containers
+    destructive: true
+    request:
+      method: DELETE
+      path: /${container}
+      query:
+        restype: container
+      headers:
+        x-ms-lease-id: "${lease_id}"
+    input:
+      container:
+        type: string
+        description: Name of the container to delete.
+        example: reports
+      lease_id:
+        type: string
+        description: Required when the container is leased -- the active lease id.
+        optional: true
+    output:
+      description: Empty body -- 202 Accepted on success.
+      type: string
+
+  get_container_acl:
+    title: Get a container's access policy
+    description: >-
+      Read the container's stored access policies as XML, along with its public
+      access level. Stored access policies are what shared access signatures
+      can be bound to, so revoking a policy here revokes every SAS issued
+      against it.
+    category: containers
+    read_only: true
+    request:
+      method: GET
+      path: /${container}
+      query:
+        restype: container
+        comp: acl
+    input:
+      container:
+        type: string
+        description: Name of the container.
+        example: reports
+    output:
+      description: An XML SignedIdentifiers document listing the stored access policies.
+      type: string
+
+  set_container_acl:
+    title: Set a container's access policy
+    description: >-
+      Replace the container's stored access policies, and optionally its public
+      access level. The body is the API's own SignedIdentifiers XML -- a full
+      replace, so send every policy you want kept. Removing a policy
+      immediately invalidates every shared access signature issued against it.
+    category: containers
+    request:
+      method: PUT
+      path: /${container}
+      query:
+        restype: container
+        comp: acl
+      headers:
+        content-type: application/xml
+        x-ms-blob-public-access: "${public_access}"
+      content: "${signed_identifiers_xml}"
+    input:
+      container:
+        type: string
+        description: Name of the container.
+        example: reports
+      signed_identifiers_xml:
+        type: string
+        description: >-
+          The policies as a SignedIdentifiers XML document. Send
+          "<SignedIdentifiers />" to clear them all.
+        example: <SignedIdentifiers><SignedIdentifier><Id>readers</Id><AccessPolicy><Start>2026-01-01T00:00:00Z</Start><Expiry>2027-01-01T00:00:00Z</Expiry><Permission>r</Permission></AccessPolicy></SignedIdentifier></SignedIdentifiers>
+      public_access:
+        type: string
+        description: Anonymous access level to set at the same time. Omit to make the container private.
+        optional: true
+        enum: [blob, container]
+    output:
+      description: Empty body -- 200 OK on success.
+      type: string
+
+  list_blobs:
+    title: List blobs in a container
+    description: >-
+      List a container's blobs as XML, with each blob's size, content type,
+      last-modified time, ETag and access tier. This is the workhorse read of
+      the whole API: pass include "metadata,tags" to get metadata and tags
+      inline rather than making a call per blob, "versions" or "snapshots" for
+      history, and "deleted" to find soft-deleted blobs to undelete. Set
+      delimiter to "/" to walk a virtual directory one level at a time --
+      folders come back as BlobPrefix elements.
+    category: blobs
+    read_only: true
+    request:
+      method: GET
+      path: /${container}
+      query:
+        restype: container
+        comp: list
+        prefix: "${prefix}"
+        delimiter: "${delimiter}"
+        marker: "${marker}"
+        maxresults: "${max_results}"
+        include: "${include}"
+    input:
+      container:
+        type: string
+        description: Name of the container to list.
+        example: reports
+      prefix:
+        type: string
+        description: 'Only return blobs whose name starts with this, e.g. "2026/06/".'
+        optional: true
+        example: 2026/06/
+      delimiter:
+        type: string
+        description: 'Set to "/" to collapse each virtual directory into one BlobPrefix entry.'
+        optional: true
+        example: /
+      marker:
+        type: string
+        description: Continuation token from a previous response's NextMarker element.
+        optional: true
+      max_results:
+        type: integer
+        description: How many blobs to return per page. The service caps this at 5000.
+        optional: true
+        minimum: 1
+        maximum: 5000
+      include:
+        type: string
+        description: >-
+          Comma-separated extras: metadata, tags, snapshots, versions, deleted,
+          uncommittedblobs, copy, immutabilitypolicy, legalhold.
+        optional: true
+        example: metadata,tags
+    output:
+      description: An XML EnumerationResults document listing the blobs, ending in NextMarker.
+      type: string
+
+  download_blob:
+    title: Download a blob
+    description: >-
+      Fetch a blob's content. Set range to pull only part of a large object --
+      "bytes=0-1023" for the first kilobyte -- which is also how to peek at a
+      file that is too big to read whole. Pass snapshot or version_id to read a
+      historical copy rather than the current one. The content comes back as
+      text, so this suits JSON, CSV, logs and documents rather than images or
+      archives.
+    category: blobs
+    read_only: true
+    request:
+      method: GET
+      path: /${container}/${blob_name}
+      query:
+        snapshot: "${snapshot}"
+        versionid: "${version_id}"
+      headers:
+        x-ms-range: "${range}"
+        If-None-Match: "${if_none_match}"
+    input:
+      container:
+        type: string
+        description: Name of the container.
+        example: reports
+      blob_name:
+        type: string
+        description: Full name of the blob, slashes included.
+        example: 2026/06/summary.json
+      range:
+        type: string
+        description: 'Byte range to return, e.g. "bytes=0-1023". Omit for the whole blob.'
+        optional: true
+        example: bytes=0-1023
+      snapshot:
+        type: string
+        description: Timestamp of a snapshot to read instead of the current blob.
+        optional: true
+      version_id:
+        type: string
+        description: Version id to read instead of the current blob, when versioning is on.
+        optional: true
+      if_none_match:
+        type: string
+        description: Return 304 when the blob's ETag still matches this value.
+        optional: true
+    output:
+      description: The blob's content.
+      type: string
+
+  upload_blob:
+    title: Upload a block blob
+    description: >-
+      Write a blob in one call, creating it or overwriting whatever was there.
+      There is no "create only" mode by default -- pass if_none_match "*" to
+      fail rather than overwrite an existing blob. Good for content up to a few
+      tens of megabytes; beyond that use put_block and put_block_list to upload
+      in parts. Sends text, so binary content needs a raw-bytes client instead.
+    category: blobs
+    request:
+      method: PUT
+      path: /${container}/${blob_name}
+      headers:
+        x-ms-blob-type: BlockBlob
+        content-type: "${content_type}"
+        x-ms-blob-content-type: "${content_type}"
+        x-ms-access-tier: "${access_tier}"
+        x-ms-tags: "${tags}"
+        If-None-Match: "${if_none_match}"
+        If-Match: "${if_match}"
+      content: "${content}"
+    input:
+      container:
+        type: string
+        description: Name of the container to write into.
+        example: reports
+      blob_name:
+        type: string
+        description: Full name for the blob, slashes included.
+        example: 2026/06/summary.json
+      content:
+        type: string
+        description: The blob's content.
+        example: '{"total": 42}'
+      content_type:
+        type: string
+        description: Media type stored with the blob and returned when it is read.
+        optional: true
+        default: application/octet-stream
+        example: application/json
+      access_tier:
+        type: string
+        description: Storage tier to write the blob into. Cool and Archive cost less but read slower.
+        optional: true
+        enum: [Hot, Cool, Cold, Archive]
+      tags:
+        type: string
+        description: >-
+          Blob index tags as a url-encoded query string, e.g.
+          "project=atlas&stage=final". Searchable with find_blobs_by_tags.
+        optional: true
+      if_none_match:
+        type: string
+        description: Pass "*" to create only if no blob of that name exists.
+        optional: true
+      if_match:
+        type: string
+        description: Only write when the existing blob's ETag matches this value.
+        optional: true
+    output:
+      description: Empty body -- 201 Created on success.
+      type: string
+
+  delete_blob:
+    title: Delete a blob
+    description: >-
+      Delete a blob. With soft delete enabled on the account the blob is
+      recoverable with undelete_blob for the retention period; without it, this
+      is permanent. include_snapshots decides what happens to the blob's
+      snapshots -- the call fails if the blob has snapshots and you say
+      nothing.
+    category: blobs
+    destructive: true
+    request:
+      method: DELETE
+      path: /${container}/${blob_name}
+      query:
+        snapshot: "${snapshot}"
+        versionid: "${version_id}"
+      headers:
+        x-ms-delete-snapshots: "${include_snapshots}"
+        If-Match: "${if_match}"
+    input:
+      container:
+        type: string
+        description: Name of the container.
+        example: reports
+      blob_name:
+        type: string
+        description: Full name of the blob to delete.
+        example: 2026/06/summary.json
+      include_snapshots:
+        type: string
+        description: >-
+          include deletes the blob and its snapshots; only deletes the snapshots
+          and leaves the blob. Required when the blob has snapshots.
+        optional: true
+        enum: [include, only]
+      snapshot:
+        type: string
+        description: Delete just this snapshot rather than the blob.
+        optional: true
+      version_id:
+        type: string
+        description: Delete just this version rather than the current blob.
+        optional: true
+      if_match:
+        type: string
+        description: Only delete when the blob's ETag matches this value.
+        optional: true
+    output:
+      description: Empty body -- 202 Accepted on success.
+      type: string
+
+  undelete_blob:
+    title: Restore a soft-deleted blob
+    description: >-
+      Bring back a blob deleted while soft delete was enabled on the account,
+      along with any soft-deleted snapshots it had. Find candidates with
+      list_blobs and include "deleted". Fails once the retention period has
+      passed.
+    category: blobs
+    request:
+      method: PUT
+      path: /${container}/${blob_name}
+      query:
+        comp: undelete
+    input:
+      container:
+        type: string
+        description: Name of the container.
+        example: reports
+      blob_name:
+        type: string
+        description: Full name of the soft-deleted blob to restore.
+        example: 2026/06/summary.json
+    output:
+      description: Empty body -- 200 OK on success.
+      type: string
+
+  copy_blob:
+    title: Copy a blob from a URL
+    description: >-
+      Start a server-side copy into this blob from any accessible URL -- another
+      blob in this account, a blob in another account with a SAS, or a public
+      URL. Nothing streams through the caller. Copies within a storage account
+      finish immediately; cross-account ones run in the background, and
+      list_blobs with include "copy" reports the progress.
+    category: blobs
+    request:
+      method: PUT
+      path: /${container}/${blob_name}
+      headers:
+        x-ms-copy-source: "${source_url}"
+        x-ms-access-tier: "${access_tier}"
+        x-ms-tags: "${tags}"
+        If-None-Match: "${if_none_match}"
+    input:
+      container:
+        type: string
+        description: Container to copy into.
+        example: reports
+      blob_name:
+        type: string
+        description: Full name for the destination blob.
+        example: 2026/06/summary-copy.json
+      source_url:
+        type: string
+        description: >-
+          URL of the blob to copy from, including a SAS token when the source is
+          not public or in this account.
+        format: uri
+        example: https://other.blob.core.windows.net/reports/summary.json?sv=...
+      access_tier:
+        type: string
+        description: Storage tier to write the destination blob into.
+        optional: true
+        enum: [Hot, Cool, Cold, Archive]
+      tags:
+        type: string
+        description: 'Blob index tags for the destination, as a url-encoded query string.'
+        optional: true
+      if_none_match:
+        type: string
+        description: Pass "*" to fail rather than overwrite an existing destination blob.
+        optional: true
+    output:
+      description: Empty body -- 202 Accepted once the copy is queued or complete.
+      type: string
+
+  abort_copy_blob:
+    title: Abort a running blob copy
+    description: >-
+      Cancel a copy still in progress, leaving the destination blob present but
+      with zero length. Only useful for cross-account copies, since copies
+      within an account complete before the call returns.
+    category: blobs
+    request:
+      method: PUT
+      path: /${container}/${blob_name}
+      query:
+        comp: copy
+        copyid: "${copy_id}"
+      headers:
+        x-ms-copy-action: abort
+    input:
+      container:
+        type: string
+        description: Container the destination blob is in.
+        example: reports
+      blob_name:
+        type: string
+        description: Full name of the destination blob.
+        example: 2026/06/summary-copy.json
+      copy_id:
+        type: string
+        description: Id of the copy operation, from the CopyId reported by list_blobs.
+        example: 1f812371-a41d-49e6-b123-f4b542e851c5
+    output:
+      description: Empty body -- 204 No Content once the copy is aborted.
+      type: string
+
+  get_blob_tags:
+    title: Get a blob's index tags
+    description: >-
+      Read one blob's index tags as XML. Tags are the searchable key/value
+      metadata find_blobs_by_tags queries, and are separate from the blob's
+      ordinary metadata.
+    category: blobs
+    read_only: true
+    request:
+      method: GET
+      path: /${container}/${blob_name}
+      query:
+        comp: tags
+        snapshot: "${snapshot}"
+        versionid: "${version_id}"
+    input:
+      container:
+        type: string
+        description: Name of the container.
+        example: reports
+      blob_name:
+        type: string
+        description: Full name of the blob.
+        example: 2026/06/summary.json
+      snapshot:
+        type: string
+        description: Read the tags of a snapshot rather than the current blob.
+        optional: true
+      version_id:
+        type: string
+        description: Read the tags of a specific version rather than the current blob.
+        optional: true
+    output:
+      description: An XML Tags document listing the blob's index tags.
+      type: string
+
+  set_blob_tags:
+    title: Set a blob's index tags
+    description: >-
+      Replace a blob's index tags. The body is the API's own Tags XML, and it
+      is a full replace -- tags you leave out are removed. A blob may carry up
+      to ten tags, and they are what find_blobs_by_tags searches on.
+    category: blobs
+    request:
+      method: PUT
+      path: /${container}/${blob_name}
+      query:
+        comp: tags
+      headers:
+        content-type: application/xml
+      content: "${tags_xml}"
+    input:
+      container:
+        type: string
+        description: Name of the container.
+        example: reports
+      blob_name:
+        type: string
+        description: Full name of the blob.
+        example: 2026/06/summary.json
+      tags_xml:
+        type: string
+        description: >-
+          The complete tag set as a Tags XML document. Send "<Tags><TagSet />
+          </Tags>" to clear every tag.
+        example: <Tags><TagSet><Tag><Key>project</Key><Value>atlas</Value></Tag></TagSet></Tags>
+    output:
+      description: Empty body -- 204 No Content on success.
+      type: string
+
+  set_blob_tier:
+    title: Change a blob's storage tier
+    description: >-
+      Move a blob between the Hot, Cool, Cold and Archive tiers. Archiving is
+      cheap to store and expensive to read: an archived blob cannot be
+      downloaded at all until it is rehydrated, which is this same call back to
+      Hot or Cool and takes hours. rehydrate_priority High shortens that.
+    category: blobs
+    request:
+      method: PUT
+      path: /${container}/${blob_name}
+      query:
+        comp: tier
+        snapshot: "${snapshot}"
+        versionid: "${version_id}"
+      headers:
+        x-ms-access-tier: "${access_tier}"
+        x-ms-rehydrate-priority: "${rehydrate_priority}"
+    input:
+      container:
+        type: string
+        description: Name of the container.
+        example: reports
+      blob_name:
+        type: string
+        description: Full name of the blob.
+        example: 2026/06/summary.json
+      access_tier:
+        type: string
+        description: Tier to move the blob to. Archive makes it unreadable until rehydrated.
+        enum: [Hot, Cool, Cold, Archive]
+        example: Cool
+      rehydrate_priority:
+        type: string
+        description: How quickly to rehydrate from Archive. High costs more and takes about an hour.
+        optional: true
+        enum: [High, Standard]
+      snapshot:
+        type: string
+        description: Change the tier of a snapshot rather than the current blob.
+        optional: true
+      version_id:
+        type: string
+        description: Change the tier of a specific version rather than the current blob.
+        optional: true
+    output:
+      description: Empty body -- 200 when the change is immediate, 202 when rehydration was started.
+      type: string
+
+  create_snapshot:
+    title: Snapshot a blob
+    description: >-
+      Take a read-only, point-in-time copy of a blob. Snapshots share unchanged
+      blocks with the blob, so they are cheap until the blob diverges. Find
+      them with list_blobs and include "snapshots"; read one by passing its
+      timestamp as snapshot to download_blob.
+    category: blobs
+    request:
+      method: PUT
+      path: /${container}/${blob_name}
+      query:
+        comp: snapshot
+      headers:
+        If-Match: "${if_match}"
+    input:
+      container:
+        type: string
+        description: Name of the container.
+        example: reports
+      blob_name:
+        type: string
+        description: Full name of the blob to snapshot.
+        example: 2026/06/summary.json
+      if_match:
+        type: string
+        description: Only snapshot when the blob's ETag matches this value.
+        optional: true
+    output:
+      description: Empty body -- 201 Created; the snapshot's timestamp is in the x-ms-snapshot header.
+      type: string
+
+  set_blob_expiry:
+    title: Set a blob's expiry
+    description: >-
+      Schedule a blob for automatic deletion. expiry_option chooses how the
+      time is expressed -- RelativeToNow with milliseconds, Absolute with an
+      RFC 1123 date, or NeverExpire to cancel a pending expiry. Only available
+      on hierarchical namespace (Data Lake Gen2) accounts.
+    category: blobs
+    request:
+      method: PUT
+      path: /${container}/${blob_name}
+      query:
+        comp: expiry
+      headers:
+        x-ms-expiry-option: "${expiry_option}"
+        x-ms-expiry-time: "${expiry_time}"
+    input:
+      container:
+        type: string
+        description: Name of the container.
+        example: reports
+      blob_name:
+        type: string
+        description: Full name of the blob.
+        example: 2026/06/scratch.json
+      expiry_option:
+        type: string
+        description: >-
+          How expiry_time is interpreted. NeverExpire clears a pending expiry and
+          needs no time.
+        enum: [NeverExpire, RelativeToCreation, RelativeToNow, Absolute]
+        example: RelativeToNow
+      expiry_time:
+        type: string
+        description: >-
+          Milliseconds for the relative options, or an RFC 1123 date for
+          Absolute. Omit for NeverExpire.
+        optional: true
+        example: "86400000"
+    output:
+      description: Empty body -- 200 OK on success.
+      type: string
+
+  get_block_list:
+    title: List a blob's blocks
+    description: >-
+      List the blocks that make up a block blob, as XML, with the size of each.
+      block_list_type "uncommitted" shows blocks uploaded by put_block but not
+      yet assembled, which is how to resume or diagnose an interrupted
+      multi-part upload.
+    category: blocks
+    read_only: true
+    request:
+      method: GET
+      path: /${container}/${blob_name}
+      query:
+        comp: blocklist
+        blocklisttype: "${block_list_type}"
+        snapshot: "${snapshot}"
+    input:
+      container:
+        type: string
+        description: Name of the container.
+        example: reports
+      blob_name:
+        type: string
+        description: Full name of the blob.
+        example: 2026/06/large.csv
+      block_list_type:
+        type: string
+        description: Which blocks to list -- those already assembled, those still pending, or both.
+        optional: true
+        default: committed
+        enum: [committed, uncommitted, all]
+      snapshot:
+        type: string
+        description: List the blocks of a snapshot rather than the current blob.
+        optional: true
+    output:
+      description: An XML BlockList document with the committed and uncommitted blocks.
+      type: string
+
+  put_block:
+    title: Upload one block of a blob
+    description: >-
+      Upload a single part of a large block blob. block_id is a
+      base64-encoded label you choose; every block of one blob must use ids of
+      the same length, so pad them ("MDAwMDAx" for 000001). Blocks stay
+      uncommitted -- and invisible -- until put_block_list assembles them, and
+      are discarded after a week if it never runs.
+    category: blocks
+    request:
+      method: PUT
+      path: /${container}/${blob_name}
+      query:
+        comp: block
+        blockid: "${block_id}"
+      headers:
+        content-type: application/octet-stream
+      content: "${content}"
+    input:
+      container:
+        type: string
+        description: Name of the container.
+        example: reports
+      blob_name:
+        type: string
+        description: Full name of the blob being assembled.
+        example: 2026/06/large.csv
+      block_id:
+        type: string
+        description: >-
+          Base64-encoded block id, at most 64 bytes before encoding. Every block
+          of one blob must use the same id length.
+        example: MDAwMDAx
+      content:
+        type: string
+        description: This block's content.
+    output:
+      description: Empty body -- 201 Created once the block is staged.
+      type: string
+
+  put_block_list:
+    title: Assemble a blob from its blocks
+    description: >-
+      Commit staged blocks into a blob, in the order the XML lists them -- this
+      is what makes a multi-part upload visible. The body is the API's own
+      BlockList XML, where each id goes in Latest, Committed or Uncommitted.
+      Any staged block you leave out is discarded.
+    category: blocks
+    request:
+      method: PUT
+      path: /${container}/${blob_name}
+      query:
+        comp: blocklist
+      headers:
+        content-type: application/xml
+        x-ms-blob-content-type: "${content_type}"
+        x-ms-tags: "${tags}"
+      content: "${block_list_xml}"
+    input:
+      container:
+        type: string
+        description: Name of the container.
+        example: reports
+      blob_name:
+        type: string
+        description: Full name of the blob to assemble.
+        example: 2026/06/large.csv
+      block_list_xml:
+        type: string
+        description: >-
+          The block ids in order, as a BlockList XML document. Latest takes the
+          uncommitted block if there is one and the committed block otherwise.
+        example: <BlockList><Latest>MDAwMDAx</Latest><Latest>MDAwMDAy</Latest></BlockList>
+      content_type:
+        type: string
+        description: Media type to store with the assembled blob.
+        optional: true
+        example: text/csv
+      tags:
+        type: string
+        description: 'Blob index tags as a url-encoded query string, e.g. "project=atlas".'
+        optional: true
+    output:
+      description: Empty body -- 201 Created once the blob is assembled.
+      type: string
+
+  create_append_blob:
+    title: Create an append blob
+    description: >-
+      Create an empty append blob -- a blob that can only be added to, which is
+      what logs and audit trails want. Writing to it is append_block; it cannot
+      be overwritten in place, and it caps at 50,000 appends.
+    category: blobs
+    request:
+      method: PUT
+      path: /${container}/${blob_name}
+      headers:
+        x-ms-blob-type: AppendBlob
+        x-ms-blob-content-type: "${content_type}"
+        x-ms-tags: "${tags}"
+        If-None-Match: "${if_none_match}"
+    input:
+      container:
+        type: string
+        description: Name of the container.
+        example: logs
+      blob_name:
+        type: string
+        description: Full name for the append blob.
+        example: 2026/06/app.log
+      content_type:
+        type: string
+        description: Media type stored with the blob.
+        optional: true
+        default: text/plain
+      tags:
+        type: string
+        description: 'Blob index tags as a url-encoded query string.'
+        optional: true
+      if_none_match:
+        type: string
+        description: Pass "*" to fail rather than replace an existing blob of that name.
+        optional: true
+    output:
+      description: Empty body -- 201 Created on success.
+      type: string
+
+  append_block:
+    title: Append to an append blob
+    description: >-
+      Add a block to the end of an append blob. Pass max_size or append_position
+      for conditional appends -- append_position makes the write idempotent by
+      failing if the blob is not the length you expect, which is how a retry
+      avoids writing the same line twice.
+    category: blobs
+    request:
+      method: PUT
+      path: /${container}/${blob_name}
+      query:
+        comp: appendblock
+      headers:
+        content-type: application/octet-stream
+        x-ms-blob-condition-maxsize: "${max_size}"
+        x-ms-blob-condition-appendpos: "${append_position}"
+      content: "${content}"
+    input:
+      container:
+        type: string
+        description: Name of the container.
+        example: logs
+      blob_name:
+        type: string
+        description: Full name of the append blob.
+        example: 2026/06/app.log
+      content:
+        type: string
+        description: The content to append.
+        example: '2026-06-01T09:00:00Z INFO started'
+      max_size:
+        type: integer
+        description: Fail the append if it would take the blob past this many bytes.
+        optional: true
+        minimum: 1
+      append_position:
+        type: integer
+        description: >-
+          Fail unless the blob is exactly this many bytes long, which makes a
+          retried append idempotent.
+        optional: true
+        minimum: 0
+    output:
+      description: Empty body -- 201 Created once the block is appended.
+      type: string
+
+  find_blobs_by_tags:
+    title: Find blobs by index tag
+    description: >-
+      Search the whole account for blobs whose index tags match an expression,
+      e.g. "project"='atlas' AND "stage"='final'. Tag values must be quoted with
+      single quotes and tag names with double quotes. This is the only way to
+      find blobs without knowing which container they are in.
+    category: blobs
+    read_only: true
+    request:
+      method: GET
+      path: /
+      query:
+        comp: blobs
+        where: "${where}"
+        marker: "${marker}"
+        maxresults: "${max_results}"
+    input:
+      where:
+        type: string
+        description: >-
+          Tag filter expression -- tag names in double quotes, values in single
+          quotes, joined with AND.
+        example: '"project"=''atlas'''
+      marker:
+        type: string
+        description: Continuation token from a previous response's NextMarker element.
+        optional: true
+      max_results:
+        type: integer
+        description: How many blobs to return per page.
+        optional: true
+        minimum: 1
+        maximum: 5000
+    output:
+      description: An XML EnumerationResults document listing the matching blobs and their containers.
+      type: string
+
+  get_service_properties:
+    title: Get the blob service's properties
+    description: >-
+      Read the account's blob service settings as XML -- logging, hour and
+      minute metrics, CORS rules, the default service version, soft delete
+      retention and the static website configuration.
+    category: service
+    read_only: true
+    request:
+      method: GET
+      path: /
+      query:
+        restype: service
+        comp: properties
+    input: {}
+    output:
+      description: An XML StorageServiceProperties document with logging, metrics, CORS and retention settings.
+      type: string
+
+  set_service_properties:
+    title: Set the blob service's properties
+    description: >-
+      Replace the account's blob service settings. The body is the API's own
+      StorageServiceProperties XML and it is a full replace -- read
+      get_service_properties first and send the whole document back amended, or
+      settings you omit revert to their defaults. This is account-wide and
+      affects every container.
+    category: service
+    request:
+      method: PUT
+      path: /
+      query:
+        restype: service
+        comp: properties
+      headers:
+        content-type: application/xml
+      content: "${service_properties_xml}"
+    input:
+      service_properties_xml:
+        type: string
+        description: >-
+          The complete StorageServiceProperties XML document, with Logging,
+          HourMetrics, MinuteMetrics, Cors, DeleteRetentionPolicy and
+          StaticWebsite blocks.
+        example: <StorageServiceProperties><DeleteRetentionPolicy><Enabled>true</Enabled><Days>7</Days></DeleteRetentionPolicy></StorageServiceProperties>
+    output:
+      description: Empty body -- 202 Accepted on success.
+      type: string
+
+  get_user_delegation_key:
+    title: Get a user delegation key
+    description: >-
+      Obtain a key for signing user delegation shared access signatures -- SAS
+      tokens backed by this Entra ID identity rather than by the account key.
+      That is the recommended way to hand a time-limited download link to
+      someone, since the resulting SAS inherits the identity's RBAC permissions
+      and can be revoked by revoking the key. The key may be valid for at most
+      seven days.
+    category: service
+    request:
+      method: POST
+      path: /
+      query:
+        restype: service
+        comp: userdelegationkey
+      headers:
+        content-type: application/xml
+      content: <?xml version="1.0" encoding="utf-8"?><KeyInfo><Start>${start}</Start><Expiry>${expiry}</Expiry></KeyInfo>
+    input:
+      start:
+        type: string
+        description: ISO 8601 UTC time the key becomes valid, e.g. 2026-06-01T00:00:00Z.
+        example: "2026-06-01T00:00:00Z"
+      expiry:
+        type: string
+        description: ISO 8601 UTC time the key stops working. At most seven days after start.
+        example: "2026-06-02T00:00:00Z"
+    output:
+      description: >-
+        An XML UserDelegationKey document with the signed object and tenant
+        ids, validity window, and the key value used to sign a SAS.
+      type: string

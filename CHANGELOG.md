@@ -4,6 +4,175 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **47 more connectors: Azure, and the vector, graph and cloud databases.** The
+  catalogue goes from 1,586 to 1,633; 1,234 now connect end to end from
+  user-supplied values alone. Every base url and verification endpoint was
+  called for real, unauthenticated, and
+  [docs/azure-and-vector-connectors.md](docs/azure-and-vector-connectors.md)
+  records what each check returned.
+  - **Azure data planes (17)** — `azure-ai-search`, `azure-cosmos-db`,
+    `azure-key-vault`, `azure-app-configuration`, `azure-monitor-logs`,
+    `azure-data-explorer`, `azure-service-bus`, `azure-ai-services`,
+    `azure-ai-language`, `azure-document-intelligence`, `azure-content-safety`,
+    `azure-ai-translator`, `azure-ai-speech`, `azure-maps`, and
+    `azure-storage-queue`/`-table`/`-file` alongside the existing
+    `azure-blob-storage`. Each carries the Entra scope its own service demands,
+    which is the detail that most often breaks an Azure integration; Cosmos DB
+    also gets the `type=aad&ver=1.0&sig=` authorization form and the
+    `x-ms-version`/`x-ms-date` headers it requires instead of a plain bearer.
+  - **Azure control plane (11)** — `azure-resource-manager` plus one entry per
+    resource provider: `azure-virtual-machines`, `azure-postgresql`,
+    `azure-mysql`, `azure-sql-database`, `azure-aks`, `azure-app-service`,
+    `azure-container-registry`, `azure-cosmos-db-accounts`,
+    `azure-ai-search-management` and `azure-storage-accounts`. They share
+    `management.azure.com` and differ in the verification endpoint, so
+    `connect()` proves access to *that* provider rather than to the
+    subscription in general. api-versions come from the current `stable`
+    folders of `Azure/azure-rest-api-specs`.
+  - **Vector and search databases (12)** — `qdrant`, `qdrant-cloud`,
+    `opensearch`, `elasticsearch`, `pinecone`, `chroma`, `milvus`,
+    `zilliz-cloud`, `typesense`, `marqo`, `turbopuffer` and `upstash-vector`.
+  - **Graph and operational databases (7)** — `neo4j` (the HTTP Query API),
+    `neo4j-aura`, `mongodb-atlas`, `redis-cloud`, `upstash`,
+    `couchbase-capella` and `singlestore`.
+
+- **Tool packs for eight more connectors, 1,052 tools in all**, every one written
+  against the provider's own reference. Seven of them had nothing but the raw
+  `get_from_api`/`post_to_api` fallbacks; the eighth had a generated pack:
+  - **`adp-workforce-now` (267), `adp-workforce-now-next-gen` (199),
+    `adp-run` (84) and `adp-lyric` (65)** — one pack per ADP product, built from
+    ADP's own API Explorer and the OpenAPI document behind each API there, so
+    each carries the endpoints ADP publishes *for that product* rather than a
+    shared guess. Reads are OData collections; writes are ADP events, with
+    `post_event` and `get_event_metadata` reaching any event name and a typed
+    tool for every event ADP documents.
+  - **`adyen` (339)** — Management, Balance Platform Configuration, Legal Entity
+    Management, Transfers, Disputes, Balance Control, Checkout, Recurring,
+    Payout and Data Protection. Adyen serves each of those from a different
+    host, so every tool pins its own with `base_url_override` and works whatever
+    `resource` the connection was configured with. The API-credential roles
+    Adyen documents per call are recorded in each tool's `notes`. Adyen has more
+    APIs than those ten, and writing a pack replaces a connector's raw request
+    tools, so the pack keeps five of its own (`get_from_adyen_api` and friends)
+    that follow the connection's `resource` for the services it does not name.
+  - **`affinity` (58)** — the whole Affinity v1 CRM: lists and list entries,
+    fields, field values and their change history, persons, organizations,
+    opportunities, interactions, relationship strengths, notes, entity files,
+    reminders and webhooks.
+  - **`adyntel` (32)** — replaces the generated pack with full coverage: Meta,
+    Google, LinkedIn and TikTok ad scrapes, keyword search, domain keywords,
+    traffic estimates, tracking pixels, recurring tracking jobs and reseller
+    user administration.
+  - **`adrapid` (8)** — banner rendering end to end, plus the template, media
+    and font library the overrides draw on.
+
+- **Tool packs for eleven Azure connectors, and Entra ID siblings for the five
+  key-based ones: 468 tools in all.** Every one of these connectors previously
+  shipped only the raw `get_from_api`/`post_to_api` fallbacks, which tell an
+  agent nothing about what the service can do. Each pack is written against
+  Microsoft's own REST reference, and every tool carries an optional
+  `api_version` argument defaulting to the version this catalogue pins for that
+  connector — Azure makes `api-version` mandatory on every call and versions
+  each resource provider separately, so a service pinned elsewhere is a
+  per-call override rather than a fork of the pack.
+  - **`azure-ai-search` (41)** — the search service's own data plane: indexes,
+    documents, indexers, data sources, skillsets, synonym maps and aliases.
+    `search_documents` covers all four retrieval styles in one tool — keyword,
+    OData filter, vector and semantic — because on this API a hybrid query is
+    simply several of them in the same request.
+  - **`azure-container-registry` (49)** — registries, admin and scoped
+    credentials, geo-replication, webhooks, scope maps, tokens, cache rules and
+    ACR Tasks with their runs and logs. Tasks version separately from the
+    registry resource, so those tools default to their own api-version.
+  - **`azure-app-service` (42)** — web apps, function apps, slots and swaps,
+    App Service plans, app settings and connection strings, runtime and logging
+    configuration, deployments, source control, publish profiles and function
+    keys.
+  - **`azure-ai-speech` (38)** — batch transcription, Custom Speech models,
+    projects, datasets, endpoints and evaluations, plus batch and real-time
+    synthesis. `list_voices` and `synthesize_speech` override the base url to
+    the region's `*.tts.speech.microsoft.com` host, which is where Microsoft
+    puts synthesis.
+  - **`azure-aks` (37)** — clusters, node pools, upgrades, maintenance windows
+    and snapshots, with `list_cluster_user_credentials` for the kubeconfig and
+    `run_command` for reaching a private cluster's Kubernetes API from the
+    management plane.
+  - **`azure-ai-language` (31)** — sentiment, key phrases, entities, PII,
+    entity linking and language detection as one tool each rather than one
+    `kind` argument, plus the asynchronous job APIs, conversational language
+    understanding, custom question answering, and the authoring APIs behind
+    them. Four families, four api-versions.
+  - **`azure-blob-storage` (26)** — containers, blobs, blocks, snapshots, tags,
+    tiers and `get_user_delegation_key` for signing SAS tokens from the Entra
+    identity rather than the account key.
+  - **`azure-ai-search-management` (23)** — the Microsoft.Search control plane:
+    services, scaling, admin and query keys, quota, and private link. Its
+    `list_admin_keys` is what supplies the key the `azure-ai-search` data-plane
+    connector authenticates with.
+  - **`azure-ai-services` (21)** — the multi-service resource, so one pack
+    across five path prefixes: image analysis and OCR, content safety with its
+    blocklists, document intelligence, Language and Translator.
+  - **`azure-app-configuration` (15)** — key-values with their labels, locks,
+    revisions and snapshots, plus feature flags, which are key-values under a
+    reserved prefix rather than a resource of their own.
+  - **`azure-ai-translator` (7)** — the complete Translator Text v3.0 surface:
+    translate, detect, transliterate, break sentence, dictionary lookup and
+    examples, and the supported-language list.
+
+- **Five Entra ID connectors for the Azure AI services (138 tools).**
+  `azure-ai-language-entra`, `azure-ai-search-entra`, `azure-ai-services-entra`,
+  `azure-ai-speech-entra` and `azure-ai-translator-entra` are the same
+  endpoints, the same tools and the same base urls as their key-based
+  namesakes (taking the catalogue to 1,638 connectors), authenticating as a
+  service principal (client credentials against
+  Microsoft Entra ID) instead of with `Ocp-Apim-Subscription-Key`. A connector
+  carries one auth mode, so supporting both means two entries — the pattern the
+  catalogue already used for `azure-ai-search` and `azure-ai-search-management`.
+  Each carries the scope its own service demands (`search.azure.com/.default`
+  for Search, `cognitiveservices.azure.com/.default` for the rest), and the
+  Translator sibling additionally carries the resource's ARM id, which
+  Translator requires as `Ocp-Apim-ResourceId` when the caller presents a token
+  rather than a key. These are the only way in on a resource with local
+  authentication disabled, and each pack's header records the Azure RBAC role
+  the principal needs.
+
+### Changed
+
+- **`weaviate` is categorised `search`, not `other`**, so it lists alongside the
+  vector databases added here. It is the only existing definition this release
+  changes.
+
+- **A tool path may now be a single whole-path placeholder.** `${path}` is the
+  documented shape for a raw request tool — the slot holds a whole path, so its
+  slashes are structural — but the pack lint rejected it for having no leading
+  `/`, which is why no written pack could carry an escape hatch. The rule now
+  accepts a path that is exactly one placeholder, and still rejects a typo like
+  `v1/users`.
+
+### Fixed
+
+- **`MMM` in a date template rendered as garbage.** The moment-style token
+  table rewrote `MM` before `MMM`, so `MMM` became `%mM` and a template asking
+  for "Sep" produced "09M". Tokens are now ordered longest-first, `ddd` and
+  `MMM` are supported, and both use fixed English abbreviations rather than
+  strftime's locale-dependent `%a`/`%b` -- a provider that wants an RFC 1123
+  date (Azure's `x-ms-date`) rejects "lun." from a French host. This is what
+  lets `azure-cosmos-db` generate the date header Cosmos requires.
+
+- **`proxy.body` is now applied.** Three connectors (Adyntel, Mandrill, Sage)
+  authenticate from a field inside the JSON body rather than a header, and the
+  catalogue has always recorded that as `proxy.body` — but nothing merged it
+  into the outgoing request, so those credentials had to be passed as tool
+  arguments. `RequestBuilder` now merges the resolved template under the
+  caller's body, nested objects included. A request with no JSON body of its own
+  is left alone, so this cannot turn a GET into a request with content, and a
+  template the connection cannot fill in is dropped rather than sent as a
+  literal `${…}`.
+
 ## [0.2.0] — 2026-09-01
 
 The catalogue told you how to *connect* to 1,586 APIs. This release adds the

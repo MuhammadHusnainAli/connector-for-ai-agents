@@ -156,3 +156,43 @@ def test_tba_signs_each_request(manager: ConnectorManager) -> None:
     assert header.startswith('OAuth realm="TSTDRV_123"')
     assert 'oauth_signature_method="HMAC-SHA256"' in header
     assert 'oauth_token="tid"' in header
+
+
+def test_proxy_body_credentials_are_merged_into_a_json_body(manager: ConnectorManager) -> None:
+    """Adyntel authenticates from inside the body, so the builder puts them there."""
+    connection = Connection(
+        connection_id="c",
+        connector_id="adyntel",
+        auth_mode=AuthMode.API_KEY,
+        credentials={"type": "API_KEY", "apiKey": "hd-abc-def"},
+        connection_config={"email": "you@company.com"},
+    )
+    request = manager.prepare_request(
+        connection, "POST", "/facebook", json_body={"company_domain": "nike.com"}
+    )
+    assert request.json_body == {
+        "api_key": "hd-abc-def",
+        "email": "you@company.com",
+        "company_domain": "nike.com",
+    }
+
+
+def test_proxy_body_merges_nested_objects_and_never_invents_a_body(
+    manager: ConnectorManager,
+) -> None:
+    """Sage nests its credentials, and a bodyless call must stay bodyless."""
+    connection = Connection(
+        connection_id="c",
+        connector_id="sage-member",
+        auth_mode=AuthMode.API_KEY,
+        credentials={"type": "API_KEY", "apiKey": "k"},
+        connection_config={"acctId": "A1", "loginId": "L1"},
+    )
+    posted = manager.prepare_request(
+        connection, "POST", "/members", json_body={"auth": {"key": "override"}, "name": "x"}
+    )
+    assert posted.json_body == {
+        "auth": {"acctId": "A1", "key": "override", "loginId": "L1"},
+        "name": "x",
+    }
+    assert manager.prepare_request(connection, "GET", "/members").json_body is None

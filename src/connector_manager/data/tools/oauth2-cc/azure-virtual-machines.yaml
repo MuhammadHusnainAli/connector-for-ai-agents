@@ -1,0 +1,1514 @@
+# Azure Virtual Machines tools -- Microsoft.Compute in Azure Resource Manager.
+#
+# This is the VM control plane: it creates, sizes, starts, stops and images
+# virtual machines and the disks under them. It is not a way into the guest
+# operating system, with one deliberate exception -- run_command executes a
+# shell script or PowerShell inside a running VM through the Azure agent and
+# returns its stdout, which needs no inbound network path and no SSH key.
+#
+# ## Stopped is not stopped
+#
+# The single most expensive misunderstanding on this API. `power_off_virtual_machine` stops
+# the operating system but keeps the compute reserved, and you keep paying for
+# it. `deallocate_virtual_machine` releases the compute, and only then does the VM stop
+# costing anything but its disks. An agent asked to "shut down the VM to save
+# money" wants deallocate_virtual_machine.
+#
+# `restart_virtual_machine`, `redeploy_virtual_machine` and `reimage_virtual_machine` also differ more than their names
+# suggest: restart reboots in place, redeploy moves the VM to a fresh host
+# (which is the fix for a VM wedged by a failing host), and reimage RESETS THE
+# OS DISK to its original image, destroying everything on it.
+#
+# ## PUT replaces, PATCH merges
+#
+# create_or_update_virtual_machine is a full replace: send back the object you read from
+# get_virtual_machine with your change applied, or you will strip network interfaces and
+# disks off the VM. update_virtual_machine (PATCH) merges and is what you want for a tag, a
+# size change or a boot-diagnostics flag.
+#
+# ## Everything mutating is asynchronous
+#
+# Start, stop, resize, create and delete all return 200 or 202 immediately.
+# get_vm_instance_view is the truthful answer to "is it actually running": its
+# `statuses` array carries `PowerState/running`, `PowerState/deallocated` and
+# the provisioning state, none of which appear on the VM object itself unless
+# you ask for `$expand=instanceView`.
+#
+# The connection carries the tenant and subscription, so the subscription is
+# filled in from the connection. Authorisation is Azure RBAC on the service
+# principal -- Reader for the reads, Virtual Machine Contributor for the rest --
+# so no tool declares scopes.
+#
+# Not covered: creating a VM from scratch. It needs a network interface, a
+# virtual network, a subnet and often a public IP, all from Microsoft.Network,
+# which this connector does not reach -- use `azure-resource-manager`'s
+# create_deployment with a template for that. create_or_update_virtual_machine is for
+# changing a VM that already exists.
+#
+# Docs: https://learn.microsoft.com/rest/api/compute/virtual-machines
+
+connector_id: azure-virtual-machines
+display_name: Azure Virtual Machines
+docs_url: https://learn.microsoft.com/rest/api/compute/virtual-machines
+
+tools:
+
+  # -- finding VMs -----------------------------------------------------------
+
+  list_virtual_machines:
+    title: List every VM in the subscription
+    description: >-
+      Every virtual machine in the subscription, across all resource groups,
+      with its size, OS profile, storage profile and network interfaces. Pass
+      "instanceView" as statusOnly is not available here -- use
+      get_vm_instance_view for power state, or list_virtual_machines_by_location
+      when you only care about one region.
+    category: virtual-machines
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/providers/Microsoft.Compute/virtualMachines
+      query:
+        api-version: "${api_version}"
+        $filter: "${filter}"
+    input:
+      filter:
+        type: string
+        description: OData filter over the VMs, e.g. by virtualMachineScaleSet.
+        optional: true
+      api_version:
+        type: string
+        description: Microsoft.Compute API version.
+        optional: true
+        default: "2026-04-01"
+    output:
+      description: Every VM in the subscription.
+      type: array
+      response_path: value
+      items: {type: object, description: "id, name, location, tags and properties (hardwareProfile.vmSize, storageProfile, osProfile, networkProfile, provisioningState)."}
+
+  list_virtual_machines_in_group:
+    title: List the VMs in a resource group
+    description: >-
+      The virtual machines in one resource group. Cheaper than scanning the
+      subscription when the group is known, and the usual first call before
+      acting on a named VM.
+    category: virtual-machines
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Compute/virtualMachines
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: The resource group to look in.
+        example: prod-rg
+      api_version:
+        type: string
+        description: Microsoft.Compute API version.
+        optional: true
+        default: "2026-04-01"
+    output:
+      description: The VMs in the group.
+      type: array
+      response_path: value
+      items: {type: object, description: "id, name, location, tags and properties."}
+
+  list_virtual_machines_by_location:
+    title: List the VMs in one region
+    description: >-
+      Every VM in the subscription that lives in a given Azure region. Useful
+      for regional capacity and cost sweeps, and for checking what would be
+      affected by a regional incident.
+    category: virtual-machines
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/providers/Microsoft.Compute/locations/${location}/virtualMachines
+      query:
+        api-version: "${api_version}"
+    input:
+      location:
+        type: string
+        description: The region, in wire form.
+        example: westeurope
+      api_version:
+        type: string
+        description: Microsoft.Compute API version.
+        optional: true
+        default: "2026-04-01"
+    output:
+      description: The VMs in that region.
+      type: array
+      response_path: value
+      items: {type: object, description: "id, name, location and properties."}
+
+  get_virtual_machine:
+    title: Get a virtual machine
+    description: >-
+      One VM's full model: size, image, OS and data disks, network interfaces,
+      identity, availability zone and provisioning state. Pass expand as
+      "instanceView" to get the runtime status in the same call.
+
+      This is the object to read, amend and send back to create_or_update_vm --
+      a PUT built from anything less will strip whatever you left out.
+    category: virtual-machines
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Compute/virtualMachines/${vm_name}
+      query:
+        api-version: "${api_version}"
+        $expand: "${expand}"
+    input:
+      resource_group:
+        type: string
+        description: The VM's resource group.
+        example: prod-rg
+      vm_name:
+        type: string
+        description: The VM name.
+        example: web-01
+      expand:
+        type: string
+        description: Set to instanceView to include the runtime status alongside the model.
+        optional: true
+        enum: [instanceView, userData]
+      api_version:
+        type: string
+        description: Microsoft.Compute API version.
+        optional: true
+        default: "2026-04-01"
+    output:
+      description: The VM's model, and its instance view when expanded.
+      type: object
+      properties:
+        id: {type: string, description: "The VM's ARM id."}
+        name: {type: string, description: "The VM name."}
+        location: {type: string, description: "Its region."}
+        properties: {type: object, description: "hardwareProfile, storageProfile, osProfile, networkProfile, diagnosticsProfile, provisioningState and instanceView when expanded."}
+
+  get_vm_instance_view:
+    title: Get a VM's runtime state
+    description: >-
+      What the VM is actually doing right now, which the VM object itself does
+      not say. The `statuses` array is the answer to "is it running": look for
+      `PowerState/running`, `PowerState/stopped` (still billed) or
+      `PowerState/deallocated` (not billed). Also carries per-disk and
+      per-extension status, the boot diagnostics blob urls, and the OS name and
+      version the agent reports.
+
+      Poll this after start, restart, power_off or deallocate rather than
+      assuming the 202 meant done.
+    category: virtual-machines
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Compute/virtualMachines/${vm_name}/instanceView
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: The VM's resource group.
+        example: prod-rg
+      vm_name:
+        type: string
+        description: The VM name.
+        example: web-01
+      api_version:
+        type: string
+        description: Microsoft.Compute API version.
+        optional: true
+        default: "2026-04-01"
+    output:
+      description: The VM's live status.
+      type: object
+      properties:
+        statuses: {type: array, description: "Includes ProvisioningState/succeeded and PowerState/running|stopped|deallocated."}
+        disks: {type: array, description: "Per-disk status, including encryption settings."}
+        extensions: {type: array, description: "Per-extension status and any failure message."}
+        bootDiagnostics: {type: object, description: "Console screenshot and serial log blob urls."}
+        vmAgent: {type: object, description: "The guest agent's version and status."}
+
+  list_available_vm_sizes:
+    title: List sizes this VM could be resized to
+    description: >-
+      Every VM size available on the hardware cluster the VM currently sits on,
+      with its cores, memory and disk limits. Resizing to a size that is NOT in
+      this list requires deallocating the VM first, because it has to move to a
+      different cluster -- which is why a resize that the portal accepted can
+      fail here. Feed a name from this list into resize_vm.
+    category: virtual-machines
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Compute/virtualMachines/${vm_name}/vmSizes
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: The VM's resource group.
+        example: prod-rg
+      vm_name:
+        type: string
+        description: The VM name.
+        example: web-01
+      api_version:
+        type: string
+        description: Microsoft.Compute API version.
+        optional: true
+        default: "2026-04-01"
+    output:
+      description: Sizes the VM can move to without being deallocated.
+      type: array
+      response_path: value
+      items: {type: object, description: "name, numberOfCores, memoryInMB, maxDataDiskCount, osDiskSizeInMB and resourceDiskSizeInMB."}
+
+  # -- changing VMs ----------------------------------------------------------
+
+  update_virtual_machine:
+    title: Patch a virtual machine
+    description: >-
+      Merge a partial change into a VM -- a tag, a new size, boot diagnostics,
+      an identity -- leaving everything you did not mention untouched. The safe
+      way to change a VM, and what to use in preference to
+      create_or_update_virtual_machine unless you genuinely mean to replace the
+      whole object.
+
+      Asynchronous; a size change reboots the VM.
+    category: virtual-machines
+    request:
+      method: PATCH
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Compute/virtualMachines/${vm_name}
+      query:
+        api-version: "${api_version}"
+      body:
+        tags: "${tags}"
+        properties: "${properties}"
+    input:
+      resource_group:
+        type: string
+        description: The VM's resource group.
+        example: prod-rg
+      vm_name:
+        type: string
+        description: The VM to change.
+        example: web-01
+      tags:
+        type: object
+        description: Tags to set on the VM.
+        optional: true
+      properties:
+        type: object
+        description: >-
+          The VM properties to change, e.g. a hardwareProfile with a new vmSize
+          or a diagnosticsProfile. Anything omitted is left alone.
+        optional: true
+      api_version:
+        type: string
+        description: Microsoft.Compute API version.
+        optional: true
+        default: "2026-04-01"
+    output:
+      description: The VM after the patch.
+      type: object
+      properties:
+        id: {type: string, description: "The VM's ARM id."}
+        properties: {type: object, description: "The merged VM properties, including provisioningState."}
+
+  resize_virtual_machine:
+    title: Change a VM's size
+    description: >-
+      Move a VM to a different size. This REBOOTS the VM -- there is no
+      in-place resize -- so anything running on it stops. If the new size is not
+      in list_available_vm_sizes the VM has to be deallocated first, because it
+      needs to move to different hardware; deallocate_vm, then resize, then
+      start_vm.
+
+      Sizes are billed from the moment the resize takes effect.
+    category: virtual-machines
+    notes: Reboots the VM. Sizes outside list_available_vm_sizes need the VM deallocated first.
+    request:
+      method: PATCH
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Compute/virtualMachines/${vm_name}
+      query:
+        api-version: "${api_version}"
+      body:
+        properties:
+          hardwareProfile:
+            vmSize: "${vm_size}"
+    input:
+      resource_group:
+        type: string
+        description: The VM's resource group.
+        example: prod-rg
+      vm_name:
+        type: string
+        description: The VM to resize.
+        example: web-01
+      vm_size:
+        type: string
+        description: The new size, from list_available_vm_sizes.
+        example: Standard_D4s_v5
+      api_version:
+        type: string
+        description: Microsoft.Compute API version.
+        optional: true
+        default: "2026-04-01"
+    output:
+      description: The VM with its new size, once the resize is accepted.
+      type: object
+      properties:
+        id: {type: string, description: "The VM's ARM id."}
+        properties: {type: object, description: "hardwareProfile.vmSize and provisioningState."}
+
+  create_or_update_virtual_machine:
+    title: Create or replace a virtual machine
+    description: >-
+      PUT a complete VM object. This is a FULL REPLACE: the body you send
+      becomes the VM, so read the current object with get_virtual_machine,
+      change what you need, and send the whole thing back. Sending a partial
+      body strips network interfaces, data disks and identities.
+
+      Creating a VM from nothing also needs a network interface that already
+      exists in Microsoft.Network, which this connector does not reach -- use
+      `azure-resource-manager`'s create_deployment for a from-scratch build.
+
+      Asynchronous: poll get_virtual_machine for provisioningState Succeeded.
+    category: virtual-machines
+    notes: A full replace. Read the VM first and send the amended object back.
+    request:
+      method: PUT
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Compute/virtualMachines/${vm_name}
+      query:
+        api-version: "${api_version}"
+      body:
+        location: "${location}"
+        tags: "${tags}"
+        zones: "${zones}"
+        identity: "${identity}"
+        plan: "${plan}"
+        properties: "${properties}"
+    input:
+      resource_group:
+        type: string
+        description: The VM's resource group.
+        example: prod-rg
+      vm_name:
+        type: string
+        description: The VM name.
+        example: web-01
+      location:
+        type: string
+        description: The VM's region. Cannot be changed after creation.
+        example: westeurope
+      properties:
+        type: object
+        description: >-
+          The complete VM properties -- hardwareProfile, storageProfile,
+          osProfile, networkProfile and so on, exactly as get_virtual_machine
+          returns them.
+      tags:
+        type: object
+        description: Tags for the VM. Omitting these on a replace removes the existing ones.
+        optional: true
+      zones:
+        type: array
+        description: Availability zones for the VM, e.g. ["1"]. Fixed at creation.
+        optional: true
+        items: {type: string}
+      identity:
+        type: object
+        description: "Managed identity block, e.g. {\"type\": \"SystemAssigned\"}."
+        optional: true
+      plan:
+        type: object
+        description: Marketplace plan, required for images bought from the Marketplace.
+        optional: true
+      api_version:
+        type: string
+        description: Microsoft.Compute API version.
+        optional: true
+        default: "2026-04-01"
+    output:
+      description: The VM as created or replaced.
+      type: object
+      properties:
+        id: {type: string, description: "The VM's ARM id."}
+        properties: {type: object, description: "The VM body, including provisioningState."}
+
+  delete_virtual_machine:
+    title: Delete a virtual machine
+    description: >-
+      Destroy a VM. What goes with it depends on how the VM was built: disks,
+      network interfaces and public IPs are only deleted if their
+      `deleteOption` was set to Delete, and otherwise survive as orphaned
+      resources that keep costing money -- check list_disks afterwards.
+
+      Irreversible and asynchronous.
+    category: virtual-machines
+    destructive: true
+    notes: Disks and NICs with deleteOption Detach survive the VM and keep billing.
+    request:
+      method: DELETE
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Compute/virtualMachines/${vm_name}
+      query:
+        api-version: "${api_version}"
+        forceDeletion: "${force_deletion}"
+    input:
+      resource_group:
+        type: string
+        description: The VM's resource group.
+        example: prod-rg
+      vm_name:
+        type: string
+        description: The VM to destroy.
+        example: web-01
+      force_deletion:
+        type: boolean
+        description: Skip the graceful shutdown and delete immediately. Supported on some VM types only.
+        optional: true
+      api_version:
+        type: string
+        description: Microsoft.Compute API version.
+        optional: true
+        default: "2026-04-01"
+    output:
+      description: Empty. A 202 means deletion started.
+      type: object
+
+  # -- power -----------------------------------------------------------------
+
+  start_virtual_machine:
+    title: Start a VM
+    description: >-
+      Power on a stopped or deallocated VM. Asynchronous: poll
+      get_vm_instance_view until `statuses` shows `PowerState/running`. Starting
+      a deallocated VM reallocates compute, so it can fail if the region is out
+      of capacity for that size -- a stopped (not deallocated) VM cannot.
+    category: power
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Compute/virtualMachines/${vm_name}/start
+      query:
+        api-version: "${api_version}"
+      body: {}
+    input:
+      resource_group:
+        type: string
+        description: The VM's resource group.
+        example: prod-rg
+      vm_name:
+        type: string
+        description: The VM to start.
+        example: web-01
+      api_version:
+        type: string
+        description: Microsoft.Compute API version.
+        optional: true
+        default: "2026-04-01"
+    output:
+      description: Empty on acceptance; the VM starts asynchronously.
+      type: object
+
+  power_off_virtual_machine:
+    title: Stop a VM but keep paying for it
+    description: >-
+      Shut the guest OS down while KEEPING the compute allocated. The VM stays
+      billed at its full compute rate. This is what you want when you need the
+      VM back on the same hardware quickly, or to stop it without releasing a
+      scarce size.
+
+      To actually stop the bill, use deallocate_virtual_machine. Set
+      skip_shutdown to cut power without asking the OS to shut down cleanly --
+      faster, and the same risk to unflushed data as pulling the plug.
+    category: power
+    notes: The VM continues to accrue compute charges. deallocate_virtual_machine is the one that stops them.
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Compute/virtualMachines/${vm_name}/powerOff
+      query:
+        api-version: "${api_version}"
+        skipShutdown: "${skip_shutdown}"
+      body: {}
+    input:
+      resource_group:
+        type: string
+        description: The VM's resource group.
+        example: prod-rg
+      vm_name:
+        type: string
+        description: The VM to power off.
+        example: web-01
+      skip_shutdown:
+        type: boolean
+        description: Cut power without a graceful OS shutdown. Risks unflushed data.
+        optional: true
+      api_version:
+        type: string
+        description: Microsoft.Compute API version.
+        optional: true
+        default: "2026-04-01"
+    output:
+      description: Empty on acceptance.
+      type: object
+
+  deallocate_virtual_machine:
+    title: Stop a VM and release its compute
+    description: >-
+      Shut the VM down and give the compute back to Azure, which is what stops
+      the compute charges -- only the disks keep billing. This is the tool for
+      "shut it down to save money", and the one that power_off is usually
+      mistaken for.
+
+      The trade-off is on the way back up: start_virtual_machine has to find
+      capacity again, the VM may land on different hardware, and any ephemeral
+      (temporary) disk contents are lost. A dynamic public IP also changes.
+    category: power
+    notes: The temporary disk is wiped and a dynamic public IP address changes on the next start.
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Compute/virtualMachines/${vm_name}/deallocate
+      query:
+        api-version: "${api_version}"
+      body: {}
+    input:
+      resource_group:
+        type: string
+        description: The VM's resource group.
+        example: prod-rg
+      vm_name:
+        type: string
+        description: The VM to deallocate.
+        example: web-01
+      api_version:
+        type: string
+        description: Microsoft.Compute API version.
+        optional: true
+        default: "2026-04-01"
+    output:
+      description: Empty on acceptance.
+      type: object
+
+  restart_virtual_machine:
+    title: Restart a VM
+    description: >-
+      Reboot the VM in place, on the same host, keeping its disks and its
+      temporary disk. The mildest of the three recovery actions here: try this
+      before redeploy_virtual_machine, and never reach for
+      reimage_virtual_machine as a reboot, because that one wipes the OS disk.
+    category: power
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Compute/virtualMachines/${vm_name}/restart
+      query:
+        api-version: "${api_version}"
+      body: {}
+    input:
+      resource_group:
+        type: string
+        description: The VM's resource group.
+        example: prod-rg
+      vm_name:
+        type: string
+        description: The VM to restart.
+        example: web-01
+      api_version:
+        type: string
+        description: Microsoft.Compute API version.
+        optional: true
+        default: "2026-04-01"
+    output:
+      description: Empty on acceptance.
+      type: object
+
+  redeploy_virtual_machine:
+    title: Move a VM to a new host and restart it
+    description: >-
+      Shut the VM down, move it to a fresh Azure host and power it back on. The
+      fix for a VM that is unreachable or misbehaving because of a problem on
+      the underlying host, which a plain restart cannot clear.
+
+      The temporary disk is wiped, and the VM is unavailable for the duration --
+      longer than a restart.
+    category: power
+    notes: Wipes the temporary disk and takes longer than a restart.
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Compute/virtualMachines/${vm_name}/redeploy
+      query:
+        api-version: "${api_version}"
+      body: {}
+    input:
+      resource_group:
+        type: string
+        description: The VM's resource group.
+        example: prod-rg
+      vm_name:
+        type: string
+        description: The VM to redeploy.
+        example: web-01
+      api_version:
+        type: string
+        description: Microsoft.Compute API version.
+        optional: true
+        default: "2026-04-01"
+    output:
+      description: Empty on acceptance.
+      type: object
+
+  reimage_virtual_machine:
+    title: Reset a VM's OS disk to its original image
+    description: >-
+      Reinstall the VM from the image it was created from. EVERYTHING ON THE OS
+      DISK IS DESTROYED -- installed software, configuration, logs, anything not
+      on a separate data disk. Data disks are kept unless temp_disk is set.
+
+      This is not a reboot and not a repair: it is a factory reset. Use
+      restart_virtual_machine or redeploy_virtual_machine for a VM that is
+      merely stuck.
+    category: power
+    destructive: true
+    notes: Destroys the contents of the OS disk. Data disks survive unless temp_disk is set.
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Compute/virtualMachines/${vm_name}/reimage
+      query:
+        api-version: "${api_version}"
+      body:
+        tempDisk: "${temp_disk}"
+    input:
+      resource_group:
+        type: string
+        description: The VM's resource group.
+        example: prod-rg
+      vm_name:
+        type: string
+        description: The VM to reimage.
+        example: web-01
+      temp_disk:
+        type: boolean
+        description: Also reimage the temporary disk. Only valid for VMs with an ephemeral OS disk.
+        optional: true
+        default: false
+      api_version:
+        type: string
+        description: Microsoft.Compute API version.
+        optional: true
+        default: "2026-04-01"
+    output:
+      description: Empty on acceptance.
+      type: object
+
+  # -- running things inside the VM ------------------------------------------
+
+  run_command_on_vm:
+    title: Run a script inside a VM
+    description: >-
+      Execute a shell script or PowerShell inside a running VM through the Azure
+      guest agent, and get its stdout and stderr back. No inbound network path,
+      no open port and no SSH key is needed -- which makes this both the most
+      useful tool here for diagnosing a VM and the one with the widest blast
+      radius, since it runs as root or SYSTEM.
+
+      `command_id` picks the built-in command: `RunShellScript` for Linux,
+      `RunPowerShellScript` for Windows. `script` is the list of lines to run.
+      Synchronous from the caller's point of view but capped at 90 minutes, and
+      the output is truncated at 4 KB per stream.
+
+      The VM must be running and its guest agent healthy -- check
+      get_vm_instance_view's `vmAgent` first if this hangs.
+    category: operations
+    notes: Runs as root or SYSTEM inside the guest. Output is truncated to about 4 KB per stream.
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Compute/virtualMachines/${vm_name}/runCommand
+      query:
+        api-version: "${api_version}"
+      body:
+        commandId: "${command_id}"
+        script: "${script}"
+        parameters: "${parameters}"
+    input:
+      resource_group:
+        type: string
+        description: The VM's resource group.
+        example: prod-rg
+      vm_name:
+        type: string
+        description: The VM to run the script on. Must be running.
+        example: web-01
+      command_id:
+        type: string
+        description: RunShellScript for Linux, RunPowerShellScript for Windows.
+        enum: [RunShellScript, RunPowerShellScript]
+      script:
+        type: array
+        description: The script, one list element per line.
+        items: {type: string}
+        example: '["df -h", "systemctl status nginx"]'
+      parameters:
+        type: array
+        description: >-
+          Named arguments for the script, each {"name": "...", "value": "..."},
+          available as $1/$2 on Linux or named parameters on Windows.
+        optional: true
+        items: {type: object}
+      api_version:
+        type: string
+        description: Microsoft.Compute API version.
+        optional: true
+        default: "2026-04-01"
+    output:
+      description: The command's output, in value[].message.
+      type: object
+      properties:
+        value: {type: array, description: "One entry per output stream; `message` holds the text, truncated at about 4 KB."}
+
+  retrieve_boot_diagnostics_data:
+    title: Get a VM's console screenshot and serial log
+    description: >-
+      SAS urls for the VM's boot diagnostics -- a screenshot of the console and
+      the serial console log. This is how you see a VM that will not finish
+      booting, when nothing else can reach it: the serial log carries the kernel
+      panic, the fsck prompt or the Windows stop code.
+
+      Boot diagnostics must be enabled on the VM. The urls expire.
+    category: operations
+    read_only: true
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Compute/virtualMachines/${vm_name}/retrieveBootDiagnosticsData
+      query:
+        api-version: "${api_version}"
+        sasUriExpirationTimeInMinutes: "${expiration_minutes}"
+      body: {}
+    input:
+      resource_group:
+        type: string
+        description: The VM's resource group.
+        example: prod-rg
+      vm_name:
+        type: string
+        description: The VM to read boot diagnostics for.
+        example: web-01
+      expiration_minutes:
+        type: integer
+        description: How long the returned SAS urls stay valid, in minutes.
+        optional: true
+        default: 60
+        minimum: 1
+        maximum: 1440
+      api_version:
+        type: string
+        description: Microsoft.Compute API version.
+        optional: true
+        default: "2026-04-01"
+    output:
+      description: Time-limited urls for the console screenshot and serial log.
+      type: object
+      properties:
+        consoleScreenshotBlobUri: {type: string, description: "SAS url for a PNG of the console."}
+        serialConsoleLogBlobUri: {type: string, description: "SAS url for the serial console log."}
+
+  assess_vm_patches:
+    title: Check which patches a VM is missing
+    description: >-
+      Ask the guest agent to inventory available OS updates and report them by
+      classification and severity, without installing anything. Read-only from
+      the VM's point of view, though it does take a few minutes. Pair with
+      install_vm_patches once you know what is outstanding.
+    category: operations
+    read_only: true
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Compute/virtualMachines/${vm_name}/assessPatches
+      query:
+        api-version: "${api_version}"
+      body: {}
+    input:
+      resource_group:
+        type: string
+        description: The VM's resource group.
+        example: prod-rg
+      vm_name:
+        type: string
+        description: The VM to assess.
+        example: web-01
+      api_version:
+        type: string
+        description: Microsoft.Compute API version.
+        optional: true
+        default: "2026-04-01"
+    output:
+      description: The patch assessment.
+      type: object
+      properties:
+        status: {type: string, description: "InProgress, Succeeded, Failed or CompletedWithWarnings."}
+        availablePatches: {type: array, description: "Each missing patch, with its classification and reboot behaviour."}
+        criticalAndSecurityPatchCount: {type: integer, description: "How many of the missing patches are critical or security."}
+        otherPatchCount: {type: integer, description: "How many of the rest."}
+
+  install_vm_patches:
+    title: Install OS patches on a VM
+    description: >-
+      Install operating system updates inside the guest, filtered by
+      classification. This can reboot the VM depending on reboot_setting, and
+      patching is not reversible -- run assess_vm_patches first, and take a
+      snapshot of the OS disk (create_snapshot) if the workload matters.
+
+      `maximum_duration` is an ISO 8601 duration such as PT2H; the operation
+      stops cleanly when it runs out rather than being cut off mid-install.
+    category: operations
+    notes: Can reboot the VM. Patching cannot be rolled back.
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Compute/virtualMachines/${vm_name}/installPatches
+      query:
+        api-version: "${api_version}"
+      body:
+        maximumDuration: "${maximum_duration}"
+        rebootSetting: "${reboot_setting}"
+        linuxParameters:
+          $when: "${linux_classifications}"
+          classificationsToInclude: "${linux_classifications}"
+        windowsParameters:
+          $when: "${windows_classifications}"
+          classificationsToInclude: "${windows_classifications}"
+    input:
+      resource_group:
+        type: string
+        description: The VM's resource group.
+        example: prod-rg
+      vm_name:
+        type: string
+        description: The VM to patch.
+        example: web-01
+      reboot_setting:
+        type: string
+        description: >-
+          IfRequired reboots only when a patch demands it; Never installs what
+          it can without rebooting; Always reboots afterwards.
+        optional: true
+        default: IfRequired
+        enum: [IfRequired, Never, Always]
+      maximum_duration:
+        type: string
+        description: ISO 8601 duration to spend patching, e.g. PT2H.
+        optional: true
+        default: PT2H
+      linux_classifications:
+        type: array
+        description: Linux patch classifications to install, e.g. ["Critical", "Security"].
+        optional: true
+        items: {type: string}
+      windows_classifications:
+        type: array
+        description: Windows patch classifications to install, e.g. ["Critical", "Security"].
+        optional: true
+        items: {type: string}
+      api_version:
+        type: string
+        description: Microsoft.Compute API version.
+        optional: true
+        default: "2026-04-01"
+    output:
+      description: The patch installation result.
+      type: object
+      properties:
+        status: {type: string, description: "InProgress, Succeeded, Failed or CompletedWithWarnings."}
+        installedPatchCount: {type: integer, description: "How many patches went on."}
+        rebootStatus: {type: string, description: "Whether a reboot was needed, started or completed."}
+        patches: {type: array, description: "Per-patch outcome."}
+
+  # -- disks and snapshots ---------------------------------------------------
+
+  list_disks:
+    title: List managed disks in the subscription
+    description: >-
+      Every managed disk in the subscription, with its size, SKU, encryption and
+      -- the field worth looking at -- `diskState`. A disk in state `Unattached`
+      belongs to no VM and is pure cost, which is what a VM deleted without
+      `deleteOption: Delete` leaves behind.
+    category: disks
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/providers/Microsoft.Compute/disks
+      query:
+        api-version: "${api_version}"
+    input:
+      api_version:
+        type: string
+        description: Microsoft.Compute disks API version.
+        optional: true
+        default: "2025-01-02"
+    output:
+      description: Every managed disk in the subscription.
+      type: array
+      response_path: value
+      items: {type: object, description: "id, name, location, sku and properties (diskSizeGB, diskState, osType, encryption, timeCreated)."}
+
+  list_disks_in_group:
+    title: List managed disks in a resource group
+    description: >-
+      The managed disks in one resource group, with size, SKU and attachment
+      state. The natural follow-up to delete_virtual_machine when you want to
+      know what survived it.
+    category: disks
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Compute/disks
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: The resource group to look in.
+        example: prod-rg
+      api_version:
+        type: string
+        description: Microsoft.Compute disks API version.
+        optional: true
+        default: "2025-01-02"
+    output:
+      description: The disks in the group.
+      type: array
+      response_path: value
+      items: {type: object, description: "id, name, sku and properties (diskSizeGB, diskState, managedBy)."}
+
+  get_disk:
+    title: Get a managed disk
+    description: >-
+      One disk's size, performance tier, encryption settings, `diskState` and
+      `managedBy` -- the ARM id of the VM it is attached to, or absent when it
+      is orphaned. Read it before deleting a disk you believe is unused.
+    category: disks
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Compute/disks/${disk_name}
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: The disk's resource group.
+        example: prod-rg
+      disk_name:
+        type: string
+        description: The disk name.
+        example: web-01-osdisk
+      api_version:
+        type: string
+        description: Microsoft.Compute disks API version.
+        optional: true
+        default: "2025-01-02"
+    output:
+      description: The disk.
+      type: object
+      properties:
+        id: {type: string, description: "The disk's ARM id."}
+        sku: {type: object, description: "Premium_LRS, StandardSSD_LRS and so on."}
+        properties: {type: object, description: "diskSizeGB, diskState, osType, managedBy, encryption and timeCreated."}
+
+  delete_disk:
+    title: Delete a managed disk
+    description: >-
+      Destroy a managed disk and the data on it. Irreversible. A disk attached
+      to a VM cannot be deleted -- detach it or delete the VM first, and the
+      call answers 409 until then, which is a useful safety net.
+
+      Take a create_snapshot first if there is any doubt.
+    category: disks
+    destructive: true
+    request:
+      method: DELETE
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Compute/disks/${disk_name}
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: The disk's resource group.
+        example: prod-rg
+      disk_name:
+        type: string
+        description: The disk to destroy.
+        example: orphaned-datadisk
+      api_version:
+        type: string
+        description: Microsoft.Compute disks API version.
+        optional: true
+        default: "2025-01-02"
+    output:
+      description: Empty. A 202 means deletion started.
+      type: object
+
+  list_snapshots:
+    title: List disk snapshots
+    description: >-
+      Every disk snapshot in the subscription, with its source disk, size and
+      creation time. Snapshots are full point-in-time copies that keep billing
+      until deleted, so this is worth sweeping periodically as well as before a
+      restore.
+    category: disks
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/providers/Microsoft.Compute/snapshots
+      query:
+        api-version: "${api_version}"
+    input:
+      api_version:
+        type: string
+        description: Microsoft.Compute snapshots API version.
+        optional: true
+        default: "2025-01-02"
+    output:
+      description: Every snapshot in the subscription.
+      type: array
+      response_path: value
+      items: {type: object, description: "id, name, location and properties (diskSizeGB, timeCreated, creationData.sourceResourceId)."}
+
+  create_snapshot:
+    title: Snapshot a managed disk
+    description: >-
+      Take a point-in-time copy of a managed disk. The single most useful thing
+      to do before anything destructive -- a reimage, a patch run, an in-guest
+      migration -- because a snapshot can be turned back into a disk and
+      attached to a new VM.
+
+      `source_disk_id` is the disk's full ARM id, from get_disk. The snapshot
+      lands in the region you name, and bills for its stored size until
+      delete_snapshot removes it.
+    category: disks
+    request:
+      method: PUT
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Compute/snapshots/${snapshot_name}
+      query:
+        api-version: "${api_version}"
+      body:
+        location: "${location}"
+        tags: "${tags}"
+        sku:
+          $when: "${sku_name}"
+          name: "${sku_name}"
+        properties:
+          incremental: "${incremental}"
+          creationData:
+            createOption: Copy
+            sourceResourceId: "${source_disk_id}"
+    input:
+      resource_group:
+        type: string
+        description: The resource group to put the snapshot in.
+        example: prod-rg
+      snapshot_name:
+        type: string
+        description: A name for the snapshot.
+        example: web-01-osdisk-2026-01-15
+      location:
+        type: string
+        description: The region to store the snapshot in, normally the disk's own.
+        example: westeurope
+      source_disk_id:
+        type: string
+        description: The full ARM id of the disk to snapshot, from get_disk.
+        example: /subscriptions/3fa85f64-5717-4562-b3fc-2c963f66afa6/resourceGroups/prod-rg/providers/Microsoft.Compute/disks/web-01-osdisk
+      incremental:
+        type: boolean
+        description: >-
+          Store only the blocks changed since the previous snapshot of the same
+          disk. Much cheaper for a repeated schedule.
+        optional: true
+        default: true
+      sku_name:
+        type: string
+        description: Snapshot storage type. Standard_LRS is the cheap default.
+        optional: true
+        enum: [Standard_LRS, Standard_ZRS, Premium_LRS]
+      tags:
+        type: object
+        description: Tags for the snapshot.
+        optional: true
+      api_version:
+        type: string
+        description: Microsoft.Compute snapshots API version.
+        optional: true
+        default: "2025-01-02"
+    output:
+      description: The snapshot as created.
+      type: object
+      properties:
+        id: {type: string, description: "The snapshot's ARM id."}
+        properties: {type: object, description: "diskSizeGB, provisioningState, timeCreated and creationData."}
+
+  delete_snapshot:
+    title: Delete a disk snapshot
+    description: >-
+      Remove a snapshot and stop it billing. Irreversible, and it takes with it
+      the ability to restore that point in time. With incremental snapshots the
+      chain is managed by Azure, so deleting an older one does not invalidate
+      the newer ones.
+    category: disks
+    destructive: true
+    request:
+      method: DELETE
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Compute/snapshots/${snapshot_name}
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: The snapshot's resource group.
+        example: prod-rg
+      snapshot_name:
+        type: string
+        description: The snapshot to delete.
+        example: web-01-osdisk-2026-01-15
+      api_version:
+        type: string
+        description: Microsoft.Compute snapshots API version.
+        optional: true
+        default: "2025-01-02"
+    output:
+      description: Empty. A 202 means deletion started.
+      type: object
+
+  # -- scale sets ------------------------------------------------------------
+
+  list_vm_scale_sets:
+    title: List virtual machine scale sets
+    description: >-
+      Every VM scale set in the subscription, with its SKU, capacity, upgrade
+      policy and provisioning state. `sku.capacity` is the instance count, which
+      is what scale_vm_scale_set changes.
+    category: scale-sets
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/providers/Microsoft.Compute/virtualMachineScaleSets
+      query:
+        api-version: "${api_version}"
+    input:
+      api_version:
+        type: string
+        description: Microsoft.Compute API version.
+        optional: true
+        default: "2026-04-01"
+    output:
+      description: Every scale set in the subscription.
+      type: array
+      response_path: value
+      items: {type: object, description: "id, name, location, sku (name, tier, capacity) and properties (upgradePolicy, virtualMachineProfile, provisioningState)."}
+
+  get_vm_scale_set:
+    title: Get a virtual machine scale set
+    description: >-
+      One scale set in full: its SKU and instance count, the VM profile every
+      instance is built from, its upgrade policy and whether it uses
+      Uniform or Flexible orchestration. Read this before scaling, since the
+      current `sku.capacity` is the number you are changing from.
+    category: scale-sets
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Compute/virtualMachineScaleSets/${scale_set_name}
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: The scale set's resource group.
+        example: prod-rg
+      scale_set_name:
+        type: string
+        description: The scale set name.
+        example: web-vmss
+      api_version:
+        type: string
+        description: Microsoft.Compute API version.
+        optional: true
+        default: "2026-04-01"
+    output:
+      description: The scale set.
+      type: object
+      properties:
+        id: {type: string, description: "The scale set's ARM id."}
+        sku: {type: object, description: "name, tier and capacity -- capacity is the instance count."}
+        properties: {type: object, description: "upgradePolicy, virtualMachineProfile, orchestrationMode and provisioningState."}
+
+  list_vm_scale_set_instances:
+    title: List the VMs inside a scale set
+    description: >-
+      Every instance in a scale set with its `instanceId`, model, and whether it
+      is on the latest model. An instance whose `latestModelApplied` is false is
+      running an older VM profile than the scale set now defines -- which is the
+      usual explanation for inconsistent behaviour across a fleet.
+    category: scale-sets
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Compute/virtualMachineScaleSets/${scale_set_name}/virtualMachines
+      query:
+        api-version: "${api_version}"
+        $filter: "${filter}"
+        $expand: "${expand}"
+    input:
+      resource_group:
+        type: string
+        description: The scale set's resource group.
+        example: prod-rg
+      scale_set_name:
+        type: string
+        description: The scale set name.
+        example: web-vmss
+      filter:
+        type: string
+        description: OData filter, e.g. "properties/latestModelApplied eq false".
+        optional: true
+      expand:
+        type: string
+        description: Set to instanceView to include each instance's runtime status.
+        optional: true
+        enum: [instanceView]
+      api_version:
+        type: string
+        description: Microsoft.Compute API version.
+        optional: true
+        default: "2026-04-01"
+    output:
+      description: The scale set's instances.
+      type: array
+      response_path: value
+      items: {type: object, description: "instanceId, name and properties (latestModelApplied, provisioningState, vmId)."}
+
+  scale_vm_scale_set:
+    title: Change a scale set's instance count
+    description: >-
+      Set the number of instances in a scale set by patching `sku.capacity`.
+      Scaling up creates instances from the current VM profile; scaling down
+      removes them according to the scale-in policy, which by default balances
+      across zones and removes the newest first.
+
+      Asynchronous, and instances removed on scale-in are destroyed, not
+      stopped. If an autoscale rule is attached to the scale set it will
+      override whatever you set here at its next evaluation.
+    category: scale-sets
+    notes: Scaling in destroys instances. An autoscale setting on the scale set will override this.
+    request:
+      method: PATCH
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Compute/virtualMachineScaleSets/${scale_set_name}
+      query:
+        api-version: "${api_version}"
+      body:
+        sku:
+          capacity: "${capacity}"
+    input:
+      resource_group:
+        type: string
+        description: The scale set's resource group.
+        example: prod-rg
+      scale_set_name:
+        type: string
+        description: The scale set to scale.
+        example: web-vmss
+      capacity:
+        type: integer
+        description: The instance count to scale to.
+        minimum: 0
+        example: "5"
+      api_version:
+        type: string
+        description: Microsoft.Compute API version.
+        optional: true
+        default: "2026-04-01"
+    output:
+      description: The scale set with its new capacity.
+      type: object
+      properties:
+        sku: {type: object, description: "The updated capacity."}
+        properties: {type: object, description: "provisioningState -- Updating while instances are created or removed."}
+
+  start_vm_scale_set:
+    title: Start scale set instances
+    description: >-
+      Power on the instances in a scale set. Pass instance_ids to start only
+      some of them; omit it to start every instance. Asynchronous.
+    category: scale-sets
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Compute/virtualMachineScaleSets/${scale_set_name}/start
+      query:
+        api-version: "${api_version}"
+      body:
+        instanceIds: "${instance_ids}"
+    input:
+      resource_group:
+        type: string
+        description: The scale set's resource group.
+        example: prod-rg
+      scale_set_name:
+        type: string
+        description: The scale set.
+        example: web-vmss
+      instance_ids:
+        type: array
+        description: Instance ids to start, from list_vm_scale_set_instances. Omit for all of them.
+        optional: true
+        items: {type: string}
+      api_version:
+        type: string
+        description: Microsoft.Compute API version.
+        optional: true
+        default: "2026-04-01"
+    output:
+      description: Empty on acceptance.
+      type: object
+
+  deallocate_vm_scale_set:
+    title: Deallocate scale set instances
+    description: >-
+      Stop instances in a scale set and release their compute, which is what
+      stops them billing -- the scale set equivalent of
+      deallocate_virtual_machine, and equally distinct from a plain power off.
+      Pass instance_ids to deallocate only some; omit it for the whole set.
+
+      Instances keep their disks and come back on start_vm_scale_set, capacity
+      permitting.
+    category: scale-sets
+    notes: Releases compute so it stops billing. Temporary disks are wiped.
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Compute/virtualMachineScaleSets/${scale_set_name}/deallocate
+      query:
+        api-version: "${api_version}"
+      body:
+        instanceIds: "${instance_ids}"
+    input:
+      resource_group:
+        type: string
+        description: The scale set's resource group.
+        example: prod-rg
+      scale_set_name:
+        type: string
+        description: The scale set.
+        example: web-vmss
+      instance_ids:
+        type: array
+        description: Instance ids to deallocate. Omit for every instance.
+        optional: true
+        items: {type: string}
+      api_version:
+        type: string
+        description: Microsoft.Compute API version.
+        optional: true
+        default: "2026-04-01"
+    output:
+      description: Empty on acceptance.
+      type: object
+
+  restart_vm_scale_set:
+    title: Restart scale set instances
+    description: >-
+      Reboot instances in a scale set in place. Pass instance_ids to restart
+      only some -- a rolling restart is just repeated calls with small batches,
+      which is far safer than restarting the whole set at once.
+    category: scale-sets
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Compute/virtualMachineScaleSets/${scale_set_name}/restart
+      query:
+        api-version: "${api_version}"
+      body:
+        instanceIds: "${instance_ids}"
+    input:
+      resource_group:
+        type: string
+        description: The scale set's resource group.
+        example: prod-rg
+      scale_set_name:
+        type: string
+        description: The scale set.
+        example: web-vmss
+      instance_ids:
+        type: array
+        description: Instance ids to restart. Omit for every instance, which takes the whole fleet down at once.
+        optional: true
+        items: {type: string}
+      api_version:
+        type: string
+        description: Microsoft.Compute API version.
+        optional: true
+        default: "2026-04-01"
+    output:
+      description: Empty on acceptance.
+      type: object
+
+  # -- images and sizes ------------------------------------------------------
+
+  list_vm_sizes_in_location:
+    title: List VM sizes available in a region
+    description: >-
+      Every VM size Azure offers in a region, with cores, memory, maximum data
+      disks and OS disk size. This is the catalogue to pick from when building a
+      VM; list_available_vm_sizes is the narrower question of what an existing
+      VM can move to without being deallocated.
+    category: catalogue
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/providers/Microsoft.Compute/locations/${location}/vmSizes
+      query:
+        api-version: "${api_version}"
+    input:
+      location:
+        type: string
+        description: The region, in wire form.
+        example: westeurope
+      api_version:
+        type: string
+        description: Microsoft.Compute API version.
+        optional: true
+        default: "2026-04-01"
+    output:
+      description: The VM sizes available in the region.
+      type: array
+      response_path: value
+      items: {type: object, description: "name, numberOfCores, memoryInMB, maxDataDiskCount, osDiskSizeInMB and resourceDiskSizeInMB."}
+
+  list_compute_usage:
+    title: Get compute quota usage in a region
+    description: >-
+      Current usage against the subscription's compute quotas in one region --
+      total regional vCPUs, per-family vCPUs, VM count and so on, each with its
+      limit. This is the answer to a create or start that failed with a quota
+      error, and worth checking before a scale-out.
+    category: catalogue
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/providers/Microsoft.Compute/locations/${location}/usages
+      query:
+        api-version: "${api_version}"
+    input:
+      location:
+        type: string
+        description: The region to report quota for.
+        example: westeurope
+      api_version:
+        type: string
+        description: Microsoft.Compute API version.
+        optional: true
+        default: "2026-04-01"
+    output:
+      description: Quota usage and limits for compute in that region.
+      type: array
+      response_path: value
+      items: {type: object, description: "name.value, name.localizedValue, currentValue, limit and unit."}

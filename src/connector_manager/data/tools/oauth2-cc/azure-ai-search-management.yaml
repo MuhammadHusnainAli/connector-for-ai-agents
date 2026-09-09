@@ -1,0 +1,984 @@
+# Azure AI Search management tools -- Microsoft.Search in Azure Resource
+# Manager.
+#
+# This is the control plane: it creates, scales, keys and firewalls search
+# *services*. It never touches indexes or documents -- that is the data plane,
+# and the azure-ai-search connector covers it. The usual split is that this
+# connector's list_admin_keys is what gets you the key that connector
+# authenticates with.
+#
+# The connection authenticates as a service principal (client credentials
+# against Microsoft Entra ID, scope https://management.azure.com/.default) and
+# carries the tenant and subscription, so paths below start at
+# /subscriptions/${connectionConfig.subscriptionId} and the subscription is
+# filled in from the connection rather than passed per call.
+#
+# Two ARM conventions run through everything here:
+#
+#   * `api-version` is mandatory on every request. Each tool takes it as an
+#     optional argument defaulting to the version this catalogue pins.
+#   * PUT is a full replace and PATCH is a merge. update_search_service (PATCH)
+#     is the safe way to change replicas, partitions or tags;
+#     create_or_update_search_service (PUT) replaces the whole resource and
+#     will drop properties you leave out.
+#
+# Scaling is not instant: replica and partition changes return 200 with
+# provisioningState "provisioning", and get_search_service is how you watch
+# for "succeeded".
+#
+# Docs: https://learn.microsoft.com/rest/api/searchmanagement/
+
+connector_id: azure-ai-search-management
+display_name: Azure AI Search (Management)
+docs_url: https://learn.microsoft.com/rest/api/searchmanagement/
+
+tools:
+
+  list_search_services:
+    title: List search services in the subscription
+    description: >-
+      List every Azure AI Search service in the subscription, across all
+      resource groups, with each one's SKU, replica and partition counts,
+      location and provisioning state. The starting point for finding a service
+      whose resource group you do not already know.
+    category: services
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/providers/Microsoft.Search/searchServices
+      query:
+        api-version: "${api_version}"
+    input:
+      api_version:
+        type: string
+        description: Microsoft.Search ARM API version to call.
+        optional: true
+        default: "2025-05-01"
+    output:
+      description: Every search service in the subscription.
+      type: array
+      items: {type: object, description: "id, name, location, sku, tags and properties (replicaCount, partitionCount, status, hostingMode)."}
+      response_path: value
+
+  list_search_services_by_resource_group:
+    title: List search services in a resource group
+    description: >-
+      List the Azure AI Search services in one resource group, with their SKUs,
+      scale and provisioning state. Narrower and cheaper than scanning the whole
+      subscription when the group is known.
+    category: services
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Search/searchServices
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Name of the resource group.
+        example: search-rg
+      api_version:
+        type: string
+        description: Microsoft.Search ARM API version to call.
+        optional: true
+        default: "2025-05-01"
+    output:
+      description: The search services in the resource group.
+      type: array
+      items: {type: object, description: "id, name, location, sku and properties."}
+      response_path: value
+
+  get_search_service:
+    title: Get a search service
+    description: >-
+      Read one search service's full ARM resource -- SKU, replica and partition
+      counts, hosting mode, public network access, network rules, authentication
+      options, managed identity and provisioning state. Poll this after a scale
+      change to see provisioningState reach "succeeded".
+    category: services
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Search/searchServices/${service_name}
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the service is in.
+        example: search-rg
+      service_name:
+        type: string
+        description: Name of the search service.
+        example: contoso
+      api_version:
+        type: string
+        description: Microsoft.Search ARM API version to call.
+        optional: true
+        default: "2025-05-01"
+    output:
+      description: The search service resource.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        location: {type: string}
+        sku: {type: object}
+        identity: {type: object}
+        properties: {type: object, description: "replicaCount, partitionCount, status, statusDetails, provisioningState, hostingMode, publicNetworkAccess, networkRuleSet, authOptions."}
+
+  create_or_update_search_service:
+    title: Create or replace a search service
+    description: >-
+      Create a search service, or replace an existing one's definition. This is
+      a full PUT -- properties you leave out are reset, so prefer
+      update_search_service for changing scale or tags on a live service. The
+      SKU cannot be changed after creation; free tier allows one replica and one
+      partition only. Returns while provisioning continues, so poll
+      get_search_service.
+    category: services
+    request:
+      method: PUT
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Search/searchServices/${service_name}
+      query:
+        api-version: "${api_version}"
+      body:
+        location: "${location}"
+        sku:
+          name: "${sku}"
+        tags: "${tags}"
+        identity: "${identity}"
+        properties:
+          replicaCount: "${replica_count}"
+          partitionCount: "${partition_count}"
+          hostingMode: "${hosting_mode}"
+          publicNetworkAccess: "${public_network_access}"
+          networkRuleSet: "${network_rule_set}"
+          authOptions: "${auth_options}"
+          disableLocalAuth: "${disable_local_auth}"
+          semanticSearch: "${semantic_search}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group to create the service in.
+        example: search-rg
+      service_name:
+        type: string
+        description: Name of the service -- becomes the first label of its endpoint, so it must be globally unique.
+        example: contoso
+        pattern: ^[a-z0-9][a-z0-9-]{0,58}[a-z0-9]$
+      location:
+        type: string
+        description: Azure region for the service, e.g. westeurope.
+        example: westeurope
+      sku:
+        type: string
+        description: Pricing tier. Cannot be changed after the service is created.
+        enum: [free, basic, standard, standard2, standard3, storage_optimized_l1, storage_optimized_l2]
+        example: standard
+      replica_count:
+        type: integer
+        description: Replicas, which set query throughput and availability. 1 to 12.
+        optional: true
+        minimum: 1
+        maximum: 12
+      partition_count:
+        type: integer
+        description: Partitions, which set storage and indexing throughput. 1, 2, 3, 4, 6 or 12.
+        optional: true
+        minimum: 1
+        maximum: 12
+      hosting_mode:
+        type: string
+        description: highDensity packs many small indexes onto standard3; default otherwise.
+        optional: true
+        enum: [default, highDensity]
+      public_network_access:
+        type: string
+        description: Whether the service answers on its public endpoint at all.
+        optional: true
+        enum: [enabled, disabled]
+      network_rule_set:
+        type: object
+        description: 'IP firewall rules, e.g. {"ipRules": [{"value": "203.0.113.0/24"}]}.'
+        optional: true
+      auth_options:
+        type: object
+        description: 'How data-plane calls authenticate, e.g. {"aadOrApiKey": {"aadAuthFailureMode": "http401WithBearerChallenge"}}.'
+        optional: true
+      disable_local_auth:
+        type: boolean
+        description: Turn API keys off entirely, leaving Entra ID as the only data-plane auth.
+        optional: true
+      semantic_search:
+        type: string
+        description: Semantic ranker tier for the service.
+        optional: true
+        enum: [disabled, free, standard]
+      identity:
+        type: object
+        description: 'Managed identity for the service, e.g. {"type": "SystemAssigned"}.'
+        optional: true
+      tags:
+        type: object
+        description: Resource tags as key/value pairs.
+        optional: true
+      api_version:
+        type: string
+        description: Microsoft.Search ARM API version to call.
+        optional: true
+        default: "2025-05-01"
+    output:
+      description: The service resource as stored, with provisioning still in progress.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        properties: {type: object}
+
+  update_search_service:
+    title: Update a search service
+    description: >-
+      Merge changes into an existing search service -- scale replicas or
+      partitions, retag, change public network access or firewall rules. Unlike
+      the PUT form this leaves untouched properties alone, which makes it the
+      right tool for a live service. Scaling is asynchronous; watch
+      provisioningState with get_search_service.
+    category: services
+    request:
+      method: PATCH
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Search/searchServices/${service_name}
+      query:
+        api-version: "${api_version}"
+      body:
+        tags: "${tags}"
+        sku:
+          $when: "${sku}"
+          name: "${sku}"
+        properties:
+          replicaCount: "${replica_count}"
+          partitionCount: "${partition_count}"
+          publicNetworkAccess: "${public_network_access}"
+          networkRuleSet: "${network_rule_set}"
+          authOptions: "${auth_options}"
+          disableLocalAuth: "${disable_local_auth}"
+          semanticSearch: "${semantic_search}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the service is in.
+        example: search-rg
+      service_name:
+        type: string
+        description: Name of the service to update.
+        example: contoso
+      replica_count:
+        type: integer
+        description: New replica count, for query throughput and availability.
+        optional: true
+        minimum: 1
+        maximum: 12
+      partition_count:
+        type: integer
+        description: New partition count, for storage and indexing throughput.
+        optional: true
+        minimum: 1
+        maximum: 12
+      sku:
+        type: string
+        description: Pricing tier. Only settable on services that were created without one.
+        optional: true
+        enum: [free, basic, standard, standard2, standard3, storage_optimized_l1, storage_optimized_l2]
+      public_network_access:
+        type: string
+        description: Whether the service answers on its public endpoint.
+        optional: true
+        enum: [enabled, disabled]
+      network_rule_set:
+        type: object
+        description: Replacement IP firewall rules for the service.
+        optional: true
+      auth_options:
+        type: object
+        description: How data-plane calls authenticate -- keys, Entra ID, or both.
+        optional: true
+      disable_local_auth:
+        type: boolean
+        description: Turn API keys off, leaving Entra ID as the only data-plane auth.
+        optional: true
+      semantic_search:
+        type: string
+        description: Semantic ranker tier for the service.
+        optional: true
+        enum: [disabled, free, standard]
+      tags:
+        type: object
+        description: Replacement resource tags as key/value pairs.
+        optional: true
+      api_version:
+        type: string
+        description: Microsoft.Search ARM API version to call.
+        optional: true
+        default: "2025-05-01"
+    output:
+      description: The service resource after the merge.
+      type: object
+      properties:
+        id: {type: string}
+        properties: {type: object}
+
+  delete_search_service:
+    title: Delete a search service
+    description: >-
+      Delete a search service and everything in it -- every index, indexer, data
+      source, skillset and document. There is no recycle bin and no restore, so
+      confirm the service name against get_search_service before calling this.
+    category: services
+    destructive: true
+    request:
+      method: DELETE
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Search/searchServices/${service_name}
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the service is in.
+        example: search-rg
+      service_name:
+        type: string
+        description: Name of the service to delete.
+        example: contoso
+      api_version:
+        type: string
+        description: Microsoft.Search ARM API version to call.
+        optional: true
+        default: "2025-05-01"
+    output:
+      description: Empty -- 200 when deleted, 204 when the service was already gone.
+      type: object
+
+  list_admin_keys:
+    title: Get a service's admin API keys
+    description: >-
+      Return the service's two admin keys, which grant full read and write
+      access to every index and document on it. These are the credentials the
+      azure-ai-search data-plane connector takes. Treat the response as a
+      secret: it is the whole service.
+    category: keys
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Search/searchServices/${service_name}/listAdminKeys
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the service is in.
+        example: search-rg
+      service_name:
+        type: string
+        description: Name of the search service.
+        example: contoso
+      api_version:
+        type: string
+        description: Microsoft.Search ARM API version to call.
+        optional: true
+        default: "2025-05-01"
+    output:
+      description: The service's two admin keys.
+      type: object
+      properties:
+        primaryKey: {type: string}
+        secondaryKey: {type: string}
+
+  regenerate_admin_key:
+    title: Regenerate an admin API key
+    description: >-
+      Roll one of the two admin keys. Anything still using the old value stops
+      working immediately, which is why there are two: move clients to the
+      secondary, roll the primary, move them back, roll the secondary.
+    category: keys
+    destructive: true
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Search/searchServices/${service_name}/regenerateAdminKey/${key_kind}
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the service is in.
+        example: search-rg
+      service_name:
+        type: string
+        description: Name of the search service.
+        example: contoso
+      key_kind:
+        type: string
+        description: Which of the two admin keys to roll.
+        enum: [primary, secondary]
+        example: secondary
+      api_version:
+        type: string
+        description: Microsoft.Search ARM API version to call.
+        optional: true
+        default: "2025-05-01"
+    output:
+      description: Both admin keys, with the rolled one holding its new value.
+      type: object
+      properties:
+        primaryKey: {type: string}
+        secondaryKey: {type: string}
+
+  list_query_keys:
+    title: List a service's query keys
+    description: >-
+      List the read-only query keys defined on the service, each with its name
+      and value. A query key can search documents but cannot see or change
+      index definitions, which makes it the key to ship in a client
+      application.
+    category: keys
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Search/searchServices/${service_name}/listQueryKeys
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the service is in.
+        example: search-rg
+      service_name:
+        type: string
+        description: Name of the search service.
+        example: contoso
+      api_version:
+        type: string
+        description: Microsoft.Search ARM API version to call.
+        optional: true
+        default: "2025-05-01"
+    output:
+      description: The service's query keys.
+      type: array
+      items: {type: object, description: "name and key."}
+      response_path: value
+
+  create_query_key:
+    title: Create a query key
+    description: >-
+      Mint a new read-only query key with a name of your choosing. Give each
+      client application its own named key so one can be revoked with
+      delete_query_key without disturbing the others. Up to 50 per service.
+    category: keys
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Search/searchServices/${service_name}/createQueryKey/${key_name}
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the service is in.
+        example: search-rg
+      service_name:
+        type: string
+        description: Name of the search service.
+        example: contoso
+      key_name:
+        type: string
+        description: A label for the key, so it can be recognised and revoked later.
+        example: mobile-app
+      api_version:
+        type: string
+        description: Microsoft.Search ARM API version to call.
+        optional: true
+        default: "2025-05-01"
+    output:
+      description: The new query key and its name.
+      type: object
+      properties:
+        name: {type: string}
+        key: {type: string}
+
+  delete_query_key:
+    title: Delete a query key
+    description: >-
+      Revoke a query key by its value, not its name -- take the value from
+      list_query_keys. Every client still sending that key starts getting 403
+      immediately.
+    category: keys
+    destructive: true
+    request:
+      method: DELETE
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Search/searchServices/${service_name}/deleteQueryKey/${key}
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the service is in.
+        example: search-rg
+      service_name:
+        type: string
+        description: Name of the search service.
+        example: contoso
+      key:
+        type: string
+        description: The key's value, from list_query_keys -- not its name.
+        secret: true
+      api_version:
+        type: string
+        description: Microsoft.Search ARM API version to call.
+        optional: true
+        default: "2025-05-01"
+    output:
+      description: Empty -- 204 when revoked, 404 when no such key exists.
+      type: object
+
+  check_name_availability:
+    title: Check whether a service name is free
+    description: >-
+      Ask whether a proposed service name can be used. Service names are
+      globally unique because they become the DNS label of the endpoint, so
+      check before create_or_update_search_service rather than after it fails.
+    category: services
+    read_only: true
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/providers/Microsoft.Search/checkNameAvailability
+      query:
+        api-version: "${api_version}"
+      body:
+        name: "${name}"
+        type: searchServices
+    input:
+      name:
+        type: string
+        description: The service name to test.
+        example: contoso
+      api_version:
+        type: string
+        description: Microsoft.Search ARM API version to call.
+        optional: true
+        default: "2025-05-01"
+    output:
+      description: Whether the name is free, and why not when it is taken.
+      type: object
+      properties:
+        nameAvailable: {type: boolean}
+        reason: {type: string, description: "Invalid or AlreadyExists."}
+        message: {type: string}
+
+  list_usages:
+    title: List search quota usage in a region
+    description: >-
+      Report, per SKU, how many search services the subscription already has in
+      a region against how many it may have. Check this before creating a
+      service, since hitting the quota is the usual cause of a create failing.
+    category: quota
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/providers/Microsoft.Search/locations/${location}/usages
+      query:
+        api-version: "${api_version}"
+    input:
+      location:
+        type: string
+        description: Azure region to report quota for, e.g. westeurope.
+        example: westeurope
+      api_version:
+        type: string
+        description: Microsoft.Search ARM API version to call.
+        optional: true
+        default: "2025-05-01"
+    output:
+      description: Per-SKU current usage and limit in the region.
+      type: array
+      items: {type: object, description: "unit, currentValue, limit and name (value and localizedValue)."}
+      response_path: value
+
+  list_private_endpoint_connections:
+    title: List private endpoint connections
+    description: >-
+      List the private endpoint connections to a search service, each with the
+      state of its approval. This is how a service is reached from a virtual
+      network without a public endpoint.
+    category: networking
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Search/searchServices/${service_name}/privateEndpointConnections
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the service is in.
+        example: search-rg
+      service_name:
+        type: string
+        description: Name of the search service.
+        example: contoso
+      api_version:
+        type: string
+        description: Microsoft.Search ARM API version to call.
+        optional: true
+        default: "2025-05-01"
+    output:
+      description: The service's private endpoint connections.
+      type: array
+      items: {type: object, description: "id, name and properties (privateEndpoint, privateLinkServiceConnectionState)."}
+      response_path: value
+
+  get_private_endpoint_connection:
+    title: Get a private endpoint connection
+    description: >-
+      Read one private endpoint connection, including the approval state and
+      any description the approver left. Use it to confirm a pending request
+      before approving it.
+    category: networking
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Search/searchServices/${service_name}/privateEndpointConnections/${connection_name}
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the service is in.
+        example: search-rg
+      service_name:
+        type: string
+        description: Name of the search service.
+        example: contoso
+      connection_name:
+        type: string
+        description: Name of the private endpoint connection.
+        example: contoso-pe-connection
+      api_version:
+        type: string
+        description: Microsoft.Search ARM API version to call.
+        optional: true
+        default: "2025-05-01"
+    output:
+      description: The private endpoint connection and its approval state.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        properties: {type: object}
+
+  update_private_endpoint_connection:
+    title: Approve or reject a private endpoint connection
+    description: >-
+      Set the approval state of a private endpoint connection -- Approved lets
+      the private endpoint reach the service, Rejected refuses it. This is the
+      call that completes a cross-subscription private link request.
+    category: networking
+    request:
+      method: PUT
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Search/searchServices/${service_name}/privateEndpointConnections/${connection_name}
+      query:
+        api-version: "${api_version}"
+      body:
+        properties:
+          privateLinkServiceConnectionState:
+            status: "${status}"
+            description: "${description}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the service is in.
+        example: search-rg
+      service_name:
+        type: string
+        description: Name of the search service.
+        example: contoso
+      connection_name:
+        type: string
+        description: Name of the private endpoint connection.
+        example: contoso-pe-connection
+      status:
+        type: string
+        description: New approval state for the connection.
+        enum: [Pending, Approved, Rejected, Disconnected]
+        example: Approved
+      description:
+        type: string
+        description: Note recorded with the decision, shown to the requester.
+        optional: true
+      api_version:
+        type: string
+        description: Microsoft.Search ARM API version to call.
+        optional: true
+        default: "2025-05-01"
+    output:
+      description: The connection after the state change.
+      type: object
+      properties:
+        id: {type: string}
+        properties: {type: object}
+
+  delete_private_endpoint_connection:
+    title: Delete a private endpoint connection
+    description: >-
+      Remove a private endpoint connection. Traffic from that private endpoint
+      stops reaching the service at once; if the service also has public access
+      disabled, it may become unreachable entirely.
+    category: networking
+    destructive: true
+    request:
+      method: DELETE
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Search/searchServices/${service_name}/privateEndpointConnections/${connection_name}
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the service is in.
+        example: search-rg
+      service_name:
+        type: string
+        description: Name of the search service.
+        example: contoso
+      connection_name:
+        type: string
+        description: Name of the private endpoint connection to remove.
+        example: contoso-pe-connection
+      api_version:
+        type: string
+        description: Microsoft.Search ARM API version to call.
+        optional: true
+        default: "2025-05-01"
+    output:
+      description: The connection as it was deleted, or empty when already gone.
+      type: object
+
+  list_supported_private_link_resources:
+    title: List private link resource types
+    description: >-
+      List the group ids a private endpoint may target on a search service.
+      Needed when creating the private endpoint itself, which asks for the group
+      id rather than inferring it.
+    category: networking
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Search/searchServices/${service_name}/privateLinkResources
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the service is in.
+        example: search-rg
+      service_name:
+        type: string
+        description: Name of the search service.
+        example: contoso
+      api_version:
+        type: string
+        description: Microsoft.Search ARM API version to call.
+        optional: true
+        default: "2025-05-01"
+    output:
+      description: The private link group ids the service supports.
+      type: array
+      items: {type: object, description: "id, name and properties (groupId, requiredMembers, requiredZoneNames)."}
+      response_path: value
+
+  list_shared_private_link_resources:
+    title: List shared private link resources
+    description: >-
+      List the outbound private links a search service holds -- the connections
+      an indexer uses to reach a storage account, SQL database or Cosmos DB
+      that has no public endpoint.
+    category: networking
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Search/searchServices/${service_name}/sharedPrivateLinkResources
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the service is in.
+        example: search-rg
+      service_name:
+        type: string
+        description: Name of the search service.
+        example: contoso
+      api_version:
+        type: string
+        description: Microsoft.Search ARM API version to call.
+        optional: true
+        default: "2025-05-01"
+    output:
+      description: The service's outbound shared private link resources.
+      type: array
+      items: {type: object, description: "id, name and properties (privateLinkResourceId, groupId, status, provisioningState)."}
+      response_path: value
+
+  get_shared_private_link_resource:
+    title: Get a shared private link resource
+    description: >-
+      Read one outbound private link and its status. status is Pending until
+      the owner of the target resource approves the request, and an indexer
+      cannot use the link before then.
+    category: networking
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Search/searchServices/${service_name}/sharedPrivateLinkResources/${link_name}
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the service is in.
+        example: search-rg
+      service_name:
+        type: string
+        description: Name of the search service.
+        example: contoso
+      link_name:
+        type: string
+        description: Name of the shared private link resource.
+        example: blob-link
+      api_version:
+        type: string
+        description: Microsoft.Search ARM API version to call.
+        optional: true
+        default: "2025-05-01"
+    output:
+      description: The shared private link resource and its approval status.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        properties: {type: object}
+
+  create_shared_private_link_resource:
+    title: Create an outbound private link
+    description: >-
+      Ask a search service for a private outbound connection to another Azure
+      resource, so its indexers can reach a data source that has no public
+      endpoint. The target's owner must approve the request before the link
+      works -- poll get_shared_private_link_resource until status is Approved.
+    category: networking
+    request:
+      method: PUT
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Search/searchServices/${service_name}/sharedPrivateLinkResources/${link_name}
+      query:
+        api-version: "${api_version}"
+      body:
+        properties:
+          privateLinkResourceId: "${private_link_resource_id}"
+          groupId: "${group_id}"
+          requestMessage: "${request_message}"
+          resourceRegion: "${resource_region}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the search service is in.
+        example: search-rg
+      service_name:
+        type: string
+        description: Name of the search service.
+        example: contoso
+      link_name:
+        type: string
+        description: A name for the link, used to read and delete it later.
+        example: blob-link
+      private_link_resource_id:
+        type: string
+        description: Full ARM resource id of the target -- the storage account, SQL server or Cosmos DB account.
+        example: /subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/data-rg/providers/Microsoft.Storage/storageAccounts/contosodata
+      group_id:
+        type: string
+        description: Sub-resource to connect to, e.g. blob, sqlServer, table, Sql for Cosmos DB.
+        example: blob
+      request_message:
+        type: string
+        description: Message shown to the target resource's owner when they review the request.
+        optional: true
+      resource_region:
+        type: string
+        description: Region of the target resource, required when it differs from the service's.
+        optional: true
+      api_version:
+        type: string
+        description: Microsoft.Search ARM API version to call.
+        optional: true
+        default: "2025-05-01"
+    output:
+      description: The link as created, with status Pending until it is approved.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        properties: {type: object}
+
+  delete_shared_private_link_resource:
+    title: Delete an outbound private link
+    description: >-
+      Remove a shared private link. Any indexer relying on it to reach its data
+      source starts failing on its next run, so repoint or disable those first.
+    category: networking
+    destructive: true
+    request:
+      method: DELETE
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Search/searchServices/${service_name}/sharedPrivateLinkResources/${link_name}
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the service is in.
+        example: search-rg
+      service_name:
+        type: string
+        description: Name of the search service.
+        example: contoso
+      link_name:
+        type: string
+        description: Name of the shared private link resource to delete.
+        example: blob-link
+      api_version:
+        type: string
+        description: Microsoft.Search ARM API version to call.
+        optional: true
+        default: "2025-05-01"
+    output:
+      description: Empty; deletion is asynchronous and reports through the azure-asyncoperation header.
+      type: object
+
+  list_operations:
+    title: List Microsoft.Search operations
+    description: >-
+      List every ARM operation the Microsoft.Search provider exposes, with the
+      display name and description of each. Useful for working out which role
+      action a permission error is actually complaining about.
+    category: service
+    read_only: true
+    request:
+      method: GET
+      path: /providers/Microsoft.Search/operations
+      query:
+        api-version: "${api_version}"
+    input:
+      api_version:
+        type: string
+        description: Microsoft.Search ARM API version to call.
+        optional: true
+        default: "2025-05-01"
+    output:
+      description: The provider's available operations.
+      type: array
+      items: {type: object, description: "name and display (provider, resource, operation, description)."}
+      response_path: value

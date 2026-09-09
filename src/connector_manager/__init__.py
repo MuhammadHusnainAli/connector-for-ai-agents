@@ -1,4 +1,4 @@
-"""connector_manager -- 1,586 API connectors, their auth, their tools, and connections.
+"""connector_manager -- 1,633 API connectors, their auth, their tools, and connections.
 
 What this package does:
 

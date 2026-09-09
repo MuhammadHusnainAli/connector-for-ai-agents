@@ -1,9 +1,9 @@
 """Build authenticated requests from a provider definition + a Connection.
 
 :class:`RequestBuilder` resolves a connector's ``proxy.base_url``,
-``proxy.headers`` and ``proxy.query`` templates against a connection and applies
-the per-auth-mode authorization header. It performs no I/O, so the sync and async
-managers share it unchanged.
+``proxy.headers``, ``proxy.query`` and ``proxy.body`` templates against a
+connection and applies the per-auth-mode authorization header. It performs no
+I/O, so the sync and async managers share it unchanged.
 """
 
 from __future__ import annotations
@@ -18,7 +18,13 @@ from urllib.parse import quote, urlencode, urlparse
 
 from .errors import RequestError
 from .http import Request
-from .interpolation import has_placeholder, interpolate, is_unresolved, stable_replacers
+from .interpolation import (
+    has_placeholder,
+    interpolate,
+    interpolate_deep,
+    is_unresolved,
+    stable_replacers,
+)
 from .models import AuthMode, Connection
 
 #: Headers a caller may not silently lose when provider headers are merged in.
@@ -46,6 +52,7 @@ class RequestBuilder:
     ) -> Request:
         method = method.upper()
         url = self.url(endpoint)
+        json_body = self.body(json_body)
         payload = body if body is not None else json_body
         return Request(
             method=method,
@@ -55,6 +62,22 @@ class RequestBuilder:
             json_body=json_body,
             content=content,
         )
+
+    def body(self, json_body: Any = None) -> Any:
+        """Caller body plus any ``proxy.body`` template (api-key-in-body).
+
+        A handful of providers -- Adyntel, Mandrill, Sage -- authenticate on
+        every call from a field inside the JSON body rather than from a header,
+        and the catalogue records that as ``proxy.body``. Merging it here is
+        what keeps those credentials out of every tool's argument list. The
+        caller wins on a conflict, and a request with no JSON body of its own is
+        left alone: this must never turn a GET into a request with content.
+        """
+        template = (self.provider.get("proxy") or {}).get("body")
+        if not isinstance(template, Mapping) or not isinstance(json_body, Mapping):
+            return json_body
+        resolved = _drop_unresolved(interpolate_deep(dict(template), self.namespace()))
+        return _merge(resolved, dict(json_body))
 
     def base_url(self) -> str:
         """Resolve the provider's proxy base url for this connection."""
@@ -294,6 +317,43 @@ def _oauth1_header(
 
     signed = {**oauth_params, "oauth_signature": signature}
     return "OAuth " + ", ".join(f'{_q(k)}="{_q(v)}"' for k, v in sorted(signed.items()))
+
+
+
+def _drop_unresolved(node: Any) -> Any:
+    """Strip the keys whose template the connection could not fill in.
+
+    A connector's ``proxy.body`` may name a connection_config field the user
+    never supplied. Sending ``"${acctId}"`` verbatim is worse than sending
+    nothing, so those keys are dropped -- and an object left empty by that goes
+    with them, since providers read ``{}`` as "clear this".
+    """
+    if isinstance(node, dict):
+        out = {}
+        for key, value in node.items():
+            cleaned = _drop_unresolved(value)
+            if cleaned is None:
+                continue
+            out[key] = cleaned
+        return out or None
+    if isinstance(node, list):
+        items = [c for c in (_drop_unresolved(v) for v in node) if c is not None]
+        return items or None
+    if isinstance(node, str) and is_unresolved(node):
+        return None
+    return node
+
+
+def _merge(base: Any, override: Mapping[str, Any]) -> dict[str, Any]:
+    """``override`` wins, but nested objects merge rather than replace."""
+    out = dict(base or {})
+    for key, value in override.items():
+        existing = out.get(key)
+        if isinstance(existing, Mapping) and isinstance(value, Mapping):
+            out[key] = _merge(existing, value)
+        else:
+            out[key] = value
+    return out
 
 
 def _q(value: str) -> str:

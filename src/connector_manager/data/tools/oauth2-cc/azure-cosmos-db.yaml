@@ -1,0 +1,786 @@
+# Azure Cosmos DB (NoSQL) data plane -- documents, not accounts.
+#
+# This connector talks to `https://<account>.documents.azure.com` and reads and
+# writes the actual data. Creating the account, setting throughput and handing
+# out keys is the sibling `azure-cosmos-db-accounts` connector, which talks to
+# management.azure.com instead.
+#
+# Authentication is a Microsoft Entra ID token (scope
+# https://cosmos.azure.com/.default) rather than a master key, so the principal
+# needs a **data-plane role assignment** -- Cosmos DB Built-in Data Reader or
+# Data Contributor -- which is a completely different thing from the Azure RBAC
+# Contributor role on the account. A principal with Owner on the subscription
+# and no data-plane assignment gets 403 here, and that surprise is the single
+# most common reason this connector appears not to work.
+#
+# ## The partition key is not optional
+#
+# Every point operation on a document -- read, replace, patch, delete -- must
+# carry the document's partition key value in the `x-ms-documentdb-partitionkey`
+# header, and Cosmos DB wants it as a JSON ARRAY: `["acme-corp"]`, not
+# `acme-corp`. The tools here take `partition_key` as that literal array string,
+# and getting it wrong produces a 404 rather than an error that explains itself,
+# because Cosmos DB looked in the wrong physical partition and found nothing.
+#
+# Which property is the partition key is fixed when the container is created;
+# `azure-cosmos-db-accounts`' get_sql_container reports it.
+#
+# ## Queries
+#
+# query_documents is a POST with a distinctive content type and a header that
+# marks the body as a query rather than a document. Use parameters -- `@status`
+# with a `parameters` array -- rather than string-building, both for injection
+# safety and so Cosmos DB can cache the plan.
+#
+# A query that cannot be served from one partition needs
+# `enable_cross_partition` set. That works, and it fans the query out to every
+# physical partition, which costs RU/s proportional to how many there are.
+#
+# ## Request Units, not rows
+#
+# Every response carries `x-ms-request-charge`, the RU cost of that call. This
+# package surfaces bodies rather than headers, so you will not see it here --
+# but the cost is real, and a cross-partition query over a large container can
+# consume a container's whole second of throughput in one call and then 429.
+#
+# ## Not covered
+#
+# Stored procedures, triggers and user-defined functions can be listed but
+# executing a stored procedure needs its arguments as a bare JSON array body,
+# which this format cannot express. Change feed needs response headers. Bulk
+# operations need the SDK's batch protocol.
+#
+# Docs: https://learn.microsoft.com/rest/api/cosmos-db/
+
+connector_id: azure-cosmos-db
+display_name: Azure Cosmos DB (NoSQL)
+docs_url: https://learn.microsoft.com/rest/api/cosmos-db/
+
+tools:
+
+  # -- databases and containers ----------------------------------------------
+
+  list_databases:
+    title: List databases in the account
+    description: >-
+      Every database in the Cosmos DB account, each with its id and its
+      `_self` link. Databases are namespaces; the data lives in the containers
+      under them. This is the cheapest call that proves the connection and the
+      data-plane role assignment both work.
+    category: databases
+    read_only: true
+    request:
+      method: GET
+      path: /dbs
+    input: {}
+    output:
+      description: The account's databases.
+      type: array
+      response_path: Databases
+      items: {type: object, description: "id, _rid, _self, _etag and _ts."}
+
+  get_database:
+    title: Get a database
+    description: >-
+      One database by id. Thin -- it exists mostly to confirm a database is
+      there before working in it, and to get its `_rid`.
+    category: databases
+    read_only: true
+    request:
+      method: GET
+      path: /dbs/${database_id}
+    input:
+      database_id:
+        type: string
+        description: The database id.
+        example: appdb
+    output:
+      description: The database.
+      type: object
+      properties:
+        id: {type: string, description: "The database id."}
+        _rid: {type: string, description: "Its internal resource id."}
+        _self: {type: string, description: "Its self link."}
+
+  create_database:
+    title: Create a database
+    description: >-
+      Create a database in the account. Databases are cheap namespaces --
+      provisioning shared throughput on one is done through the
+      `azure-cosmos-db-accounts` connector, not here. Creating one that already
+      exists returns 409.
+    category: databases
+    request:
+      method: POST
+      path: /dbs
+      body:
+        id: "${database_id}"
+    input:
+      database_id:
+        type: string
+        description: The database id to create.
+        example: appdb
+    output:
+      description: The database as created.
+      type: object
+      properties:
+        id: {type: string, description: "The database id."}
+        _rid: {type: string, description: "Its internal resource id."}
+
+  delete_database:
+    title: Delete a database
+    description: >-
+      Destroy a database and every container and document in it. Irreversible
+      from the data plane -- recovery would need the account's continuous backup
+      and a restore through the control plane.
+    category: databases
+    destructive: true
+    request:
+      method: DELETE
+      path: /dbs/${database_id}
+    input:
+      database_id:
+        type: string
+        description: The database to destroy, with everything in it.
+        example: scratchdb
+    output:
+      description: Empty on success.
+      type: object
+
+  list_containers:
+    title: List containers in a database
+    description: >-
+      Every container in a database, each with its partition key definition,
+      indexing policy and default TTL. The `partitionKey.paths` here is what
+      every document operation's `partition_key` header has to correspond to,
+      so this is the call to make before touching documents in an unfamiliar
+      container.
+    category: containers
+    read_only: true
+    request:
+      method: GET
+      path: /dbs/${database_id}/colls
+    input:
+      database_id:
+        type: string
+        description: The database.
+        example: appdb
+    output:
+      description: The database's containers.
+      type: array
+      response_path: DocumentCollections
+      items: {type: object, description: "id, partitionKey (paths and kind), indexingPolicy, defaultTtl, _rid and _self."}
+
+  get_container:
+    title: Get a container
+    description: >-
+      One container's definition -- its partition key path, indexing policy,
+      unique key policy and default TTL. `defaultTtl` is worth checking on any
+      container where documents seem to vanish: a positive value expires every
+      document that many seconds after its last write.
+    category: containers
+    read_only: true
+    request:
+      method: GET
+      path: /dbs/${database_id}/colls/${container_id}
+    input:
+      database_id:
+        type: string
+        description: The database.
+        example: appdb
+      container_id:
+        type: string
+        description: The container.
+        example: orders
+    output:
+      description: The container definition.
+      type: object
+      properties:
+        id: {type: string, description: "The container id."}
+        partitionKey: {type: object, description: "paths and kind -- the property every document operation must supply."}
+        indexingPolicy: {type: object, description: "includedPaths, excludedPaths, compositeIndexes and vectorIndexes."}
+        defaultTtl: {type: integer, description: "Seconds until documents expire, or absent when TTL is off."}
+
+  create_container:
+    title: Create a container
+    description: >-
+      Create a container with a partition key. The partition key path is
+      PERMANENT and decides how the container scales -- pick a property with
+      many distinct values that queries usually filter on, such as `/tenantId`,
+      not a status field with three values.
+
+      Provisioning throughput on the new container is a control-plane operation
+      (`azure-cosmos-db-accounts`' create_sql_container does both at once); a
+      container created here inherits the database's shared throughput, or the
+      account's serverless billing.
+    category: containers
+    notes: The partition key cannot be changed afterwards. Recreating the container is the only way to change it.
+    request:
+      method: POST
+      path: /dbs/${database_id}/colls
+      body:
+        id: "${container_id}"
+        partitionKey:
+          paths: "${partition_key_paths}"
+          kind: "${partition_key_kind}"
+        defaultTtl: "${default_ttl}"
+        indexingPolicy: "${indexing_policy}"
+        uniqueKeyPolicy: "${unique_key_policy}"
+    input:
+      database_id:
+        type: string
+        description: The database to create the container in.
+        example: appdb
+      container_id:
+        type: string
+        description: The container id.
+        example: orders
+      partition_key_paths:
+        type: array
+        description: Partition key paths, e.g. ["/tenantId"]. Permanent.
+        items: {type: string}
+      partition_key_kind:
+        type: string
+        description: Hash for a single-path key, MultiHash for a hierarchical one.
+        optional: true
+        default: Hash
+        enum: [Hash, MultiHash]
+      default_ttl:
+        type: integer
+        description: >-
+          Seconds after last write before a document expires. -1 enables TTL
+          without expiring anything by default. Omit for no expiry.
+        optional: true
+      indexing_policy:
+        type: object
+        description: Indexing policy. Omit for Cosmos DB's index-everything default.
+        optional: true
+      unique_key_policy:
+        type: object
+        description: >-
+          Unique constraints within a partition, as
+          {"uniqueKeys": [{"paths": ["/email"]}]}. Permanent.
+        optional: true
+    output:
+      description: The container as created.
+      type: object
+      properties:
+        id: {type: string, description: "The container id."}
+        partitionKey: {type: object, description: "The partition key definition."}
+        _rid: {type: string, description: "Its internal resource id."}
+
+  delete_container:
+    title: Delete a container
+    description: >-
+      Destroy a container and every document in it. Irreversible from the data
+      plane. The database and its other containers are untouched.
+    category: containers
+    destructive: true
+    request:
+      method: DELETE
+      path: /dbs/${database_id}/colls/${container_id}
+    input:
+      database_id:
+        type: string
+        description: The database.
+        example: appdb
+      container_id:
+        type: string
+        description: The container to destroy, with every document in it.
+        example: scratch
+    output:
+      description: Empty on success.
+      type: object
+
+  # -- documents -------------------------------------------------------------
+
+  query_documents:
+    title: Run a SQL query against a container
+    description: >-
+      Execute a Cosmos DB SQL query and return the matching documents. The main
+      read path, and the one to reach for over list_documents whenever you know
+      what you are looking for.
+
+      Parameterise: `SELECT * FROM c WHERE c.status = @status` with
+      `parameters` of `[{"name": "@status", "value": "open"}]`. Do not build
+      values into the query text -- parameters are both safer and cheaper,
+      because Cosmos DB caches the plan.
+
+      A query filtered on the partition key runs on one partition and is cheap.
+      Anything else needs enable_cross_partition, which fans out to every
+      physical partition and costs RU/s in proportion. Page with max_item_count
+      and the `x-ms-continuation` token from the previous response.
+    category: documents
+    read_only: true
+    notes: Cross-partition queries fan out to every partition and can consume a container's whole throughput in one call.
+    request:
+      method: POST
+      path: /dbs/${database_id}/colls/${container_id}/docs
+      headers:
+        content-type: application/query+json
+        x-ms-documentdb-isquery: "True"
+        x-ms-documentdb-query-enablecrosspartition: "${enable_cross_partition}"
+        x-ms-documentdb-partitionkey: "${partition_key}"
+        x-ms-max-item-count: "${max_item_count}"
+        x-ms-continuation: "${continuation}"
+      body:
+        query: "${query}"
+        parameters: "${parameters}"
+    input:
+      database_id:
+        type: string
+        description: The database.
+        example: appdb
+      container_id:
+        type: string
+        description: The container to query.
+        example: orders
+      query:
+        type: string
+        description: >-
+          The Cosmos DB SQL query. `c` is the conventional alias for the
+          container. Use @name placeholders for every value.
+        example: SELECT * FROM c WHERE c.status = @status
+      parameters:
+        type: array
+        description: >-
+          Values for the query's placeholders, each
+          {"name": "@status", "value": "open"}.
+        optional: true
+        items: {type: object}
+      partition_key:
+        type: string
+        description: >-
+          Restrict the query to one partition, as a JSON array string such as
+          ["acme-corp"]. Much cheaper than a cross-partition query when you know
+          it.
+        optional: true
+      enable_cross_partition:
+        type: string
+        description: >-
+          Set to True for a query that is not confined to one partition.
+          Required, or the query is rejected, whenever partition_key is absent
+          and the filter does not pin the key.
+        optional: true
+        default: "True"
+        enum: ["True", "False"]
+      max_item_count:
+        type: integer
+        description: How many documents per page. -1 lets the service decide.
+        optional: true
+        minimum: -1
+      continuation:
+        type: string
+        description: The x-ms-continuation token from the previous page's response headers.
+        optional: true
+    output:
+      description: The matching documents.
+      type: array
+      response_path: Documents
+      items: {type: object, description: "Each matching document, or each projected row when the query has a SELECT list."}
+
+  list_documents:
+    title: List documents in a container
+    description: >-
+      Read documents from a container without a query. Fine for a small
+      container or a quick look; for anything selective use query_documents,
+      which lets the index do the work instead of scanning.
+
+      Page with max_item_count and the `x-ms-continuation` token. Supplying
+      partition_key restricts the read to one partition and is much cheaper.
+    category: documents
+    read_only: true
+    request:
+      method: GET
+      path: /dbs/${database_id}/colls/${container_id}/docs
+      headers:
+        x-ms-max-item-count: "${max_item_count}"
+        x-ms-continuation: "${continuation}"
+        x-ms-documentdb-partitionkey: "${partition_key}"
+    input:
+      database_id:
+        type: string
+        description: The database.
+        example: appdb
+      container_id:
+        type: string
+        description: The container.
+        example: orders
+      max_item_count:
+        type: integer
+        description: How many documents per page.
+        optional: true
+        default: 100
+        minimum: 1
+      continuation:
+        type: string
+        description: The x-ms-continuation token from the previous page.
+        optional: true
+      partition_key:
+        type: string
+        description: Restrict to one partition, as a JSON array string such as ["acme-corp"].
+        optional: true
+    output:
+      description: A page of documents.
+      type: array
+      response_path: Documents
+      items: {type: object, description: "Each document, including its id, its partition key property and the system fields _rid, _ts and _etag."}
+
+  get_document:
+    title: Read one document by id
+    description: >-
+      Point-read a single document. The cheapest possible read in Cosmos DB --
+      about 1 RU -- and always preferable to a query when you know both the id
+      and the partition key.
+
+      `partition_key` must be the document's partition key VALUE as a JSON array
+      string: `["acme-corp"]`. Getting it wrong returns 404, not an error saying
+      the key was wrong, because Cosmos DB looked in a different partition.
+    category: documents
+    read_only: true
+    notes: A wrong partition_key returns 404 rather than an explanatory error.
+    request:
+      method: GET
+      path: /dbs/${database_id}/colls/${container_id}/docs/${document_id}
+      headers:
+        x-ms-documentdb-partitionkey: "${partition_key}"
+    input:
+      database_id:
+        type: string
+        description: The database.
+        example: appdb
+      container_id:
+        type: string
+        description: The container.
+        example: orders
+      document_id:
+        type: string
+        description: The document's id property.
+        example: order-1001
+      partition_key:
+        type: string
+        description: >-
+          The document's partition key value, as a JSON array string, e.g.
+          ["acme-corp"] or [123].
+        example: '["acme-corp"]'
+    output:
+      description: The document.
+      type: object
+      properties:
+        id: {type: string, description: "The document id."}
+        _etag: {type: string, description: "Concurrency token; pass it to replace_document as if_match for a safe update."}
+        _ts: {type: integer, description: "Last write time, as a Unix timestamp."}
+
+  create_document:
+    title: Create a document
+    description: >-
+      Insert a document into a container. The body must include an `id`
+      property and the container's partition key property, and the
+      `partition_key` header must carry the same value that property holds --
+      a mismatch is rejected.
+
+      Fails with 409 if a document with that id already exists in that
+      partition. Set upsert to True to replace it instead, which is what makes
+      this idempotent.
+    category: documents
+    request:
+      method: POST
+      path: /dbs/${database_id}/colls/${container_id}/docs
+      headers:
+        x-ms-documentdb-partitionkey: "${partition_key}"
+        x-ms-documentdb-is-upsert: "${upsert}"
+      body: "${document}"
+    input:
+      database_id:
+        type: string
+        description: The database.
+        example: appdb
+      container_id:
+        type: string
+        description: The container.
+        example: orders
+      document:
+        type: object
+        description: >-
+          The document. Must carry an `id` and the container's partition key
+          property, whose value must match the partition_key header.
+        example: '{"id": "order-1001", "tenantId": "acme-corp", "total": 42}'
+      partition_key:
+        type: string
+        description: The document's partition key value as a JSON array string, e.g. ["acme-corp"].
+        example: '["acme-corp"]'
+      upsert:
+        type: string
+        description: Set to True to replace an existing document with the same id instead of failing with 409.
+        optional: true
+        enum: ["True", "False"]
+    output:
+      description: The document as stored, with its system fields.
+      type: object
+      properties:
+        id: {type: string, description: "The document id."}
+        _etag: {type: string, description: "The new concurrency token."}
+        _ts: {type: integer, description: "Write time, as a Unix timestamp."}
+
+  replace_document:
+    title: Replace a document
+    description: >-
+      Overwrite a document entirely. Everything not in `document` is gone --
+      this is a full replace, not a merge, so read the document first or use
+      patch_document for a partial change.
+
+      Passing `if_match` with the document's `_etag` makes the write
+      conditional: it fails with 412 if anything else changed the document since
+      you read it, which is how you avoid losing a concurrent update. The
+      partition key value cannot be changed by a replace.
+    category: documents
+    notes: A full replace. Use patch_document to change individual fields.
+    request:
+      method: PUT
+      path: /dbs/${database_id}/colls/${container_id}/docs/${document_id}
+      headers:
+        x-ms-documentdb-partitionkey: "${partition_key}"
+        If-Match: "${if_match}"
+      body: "${document}"
+    input:
+      database_id:
+        type: string
+        description: The database.
+        example: appdb
+      container_id:
+        type: string
+        description: The container.
+        example: orders
+      document_id:
+        type: string
+        description: The id of the document to replace.
+        example: order-1001
+      document:
+        type: object
+        description: >-
+          The complete new document, including its id and unchanged partition
+          key property. Anything omitted is removed.
+      partition_key:
+        type: string
+        description: The document's partition key value as a JSON array string.
+        example: '["acme-corp"]'
+      if_match:
+        type: string
+        description: >-
+          The document's _etag from a previous read. Makes the write fail with
+          412 if someone else changed it first.
+        optional: true
+    output:
+      description: The document as stored.
+      type: object
+      properties:
+        id: {type: string, description: "The document id."}
+        _etag: {type: string, description: "The new concurrency token."}
+
+  patch_document:
+    title: Patch individual fields of a document
+    description: >-
+      Change specific properties of a document without sending the whole thing.
+      `operations` is a list of `{"op": "set", "path": "/status", "value":
+      "shipped"}` -- ops are `add`, `set`, `replace`, `remove`, `incr` and
+      `move`, and paths are JSON-Pointer-style.
+
+      Cheaper and much safer than replace_document for a small change, since it
+      cannot silently drop the fields you did not send. Up to 10 operations per
+      call, and the partition key property cannot be patched.
+    category: documents
+    notes: Maximum 10 operations per call. The partition key property cannot be changed.
+    request:
+      method: PATCH
+      path: /dbs/${database_id}/colls/${container_id}/docs/${document_id}
+      headers:
+        content-type: application/json_patch+json
+        x-ms-documentdb-partitionkey: "${partition_key}"
+        If-Match: "${if_match}"
+      body:
+        operations: "${operations}"
+        condition: "${condition}"
+    input:
+      database_id:
+        type: string
+        description: The database.
+        example: appdb
+      container_id:
+        type: string
+        description: The container.
+        example: orders
+      document_id:
+        type: string
+        description: The id of the document to patch.
+        example: order-1001
+      operations:
+        type: array
+        description: >-
+          Up to 10 operations, each {"op": "set", "path": "/status", "value":
+          "shipped"}. op may be add, set, replace, remove, incr or move.
+        items: {type: object}
+      partition_key:
+        type: string
+        description: The document's partition key value as a JSON array string.
+        example: '["acme-corp"]'
+      condition:
+        type: string
+        description: >-
+          A SQL predicate that must hold for the patch to apply, e.g.
+          "from c where c.status = 'open'". The patch is rejected otherwise.
+        optional: true
+      if_match:
+        type: string
+        description: The document's _etag, to make the patch fail if it changed first.
+        optional: true
+    output:
+      description: The document after the patch.
+      type: object
+      properties:
+        id: {type: string, description: "The document id."}
+        _etag: {type: string, description: "The new concurrency token."}
+
+  delete_document:
+    title: Delete a document
+    description: >-
+      Remove one document. Irreversible -- Cosmos DB has no per-document
+      recycle bin, and recovery would mean restoring the whole account from
+      continuous backup.
+
+      As with every point operation, `partition_key` must match or the call
+      returns 404 without deleting anything. Pass `if_match` to make the delete
+      conditional on the document not having changed.
+    category: documents
+    destructive: true
+    request:
+      method: DELETE
+      path: /dbs/${database_id}/colls/${container_id}/docs/${document_id}
+      headers:
+        x-ms-documentdb-partitionkey: "${partition_key}"
+        If-Match: "${if_match}"
+    input:
+      database_id:
+        type: string
+        description: The database.
+        example: appdb
+      container_id:
+        type: string
+        description: The container.
+        example: orders
+      document_id:
+        type: string
+        description: The document to delete.
+        example: order-1001
+      partition_key:
+        type: string
+        description: The document's partition key value as a JSON array string.
+        example: '["acme-corp"]'
+      if_match:
+        type: string
+        description: The document's _etag, to fail with 412 if it changed since you read it.
+        optional: true
+    output:
+      description: Empty on success.
+      type: object
+
+  # -- server-side code and offers -------------------------------------------
+
+  list_stored_procedures:
+    title: List a container's stored procedures
+    description: >-
+      The JavaScript stored procedures registered on a container, with their
+      bodies. Useful for auditing what server-side logic a container carries --
+      executing one is not possible through this connector, because it needs the
+      arguments as a bare JSON array body.
+    category: server-side
+    read_only: true
+    request:
+      method: GET
+      path: /dbs/${database_id}/colls/${container_id}/sprocs
+    input:
+      database_id:
+        type: string
+        description: The database.
+        example: appdb
+      container_id:
+        type: string
+        description: The container.
+        example: orders
+    output:
+      description: The container's stored procedures.
+      type: array
+      response_path: StoredProcedures
+      items: {type: object, description: "id, body (the JavaScript) and _rid."}
+
+  list_triggers:
+    title: List a container's triggers
+    description: >-
+      The pre- and post-triggers registered on a container, each with its
+      operation (All, Create, Replace, Delete) and type (Pre or Post). A trigger
+      only runs when a request explicitly asks for it, so an unexpected one is
+      rarely the cause of surprising behaviour -- but they are worth knowing
+      about before changing write paths.
+    category: server-side
+    read_only: true
+    request:
+      method: GET
+      path: /dbs/${database_id}/colls/${container_id}/triggers
+    input:
+      database_id:
+        type: string
+        description: The database.
+        example: appdb
+      container_id:
+        type: string
+        description: The container.
+        example: orders
+    output:
+      description: The container's triggers.
+      type: array
+      response_path: Triggers
+      items: {type: object, description: "id, body, triggerOperation and triggerType."}
+
+  list_user_defined_functions:
+    title: List a container's user-defined functions
+    description: >-
+      The JavaScript UDFs registered on a container. A UDF can be called from
+      inside a query's WHERE or SELECT, so an unfamiliar function name in a
+      query that fails is usually explained here.
+    category: server-side
+    read_only: true
+    request:
+      method: GET
+      path: /dbs/${database_id}/colls/${container_id}/udfs
+    input:
+      database_id:
+        type: string
+        description: The database.
+        example: appdb
+      container_id:
+        type: string
+        description: The container.
+        example: orders
+    output:
+      description: The container's user-defined functions.
+      type: array
+      response_path: UserDefinedFunctions
+      items: {type: object, description: "id, body (the JavaScript) and _rid."}
+
+  list_offers:
+    title: List throughput offers in the account
+    description: >-
+      The throughput provisioned across the account, one offer per database or
+      container that has its own. This is the data-plane view of what
+      `azure-cosmos-db-accounts`' throughput tools configure -- useful for
+      spotting a container quietly provisioned far above what it needs.
+    category: throughput
+    read_only: true
+    request:
+      method: GET
+      path: /offers
+    input: {}
+    output:
+      description: The account's throughput offers.
+      type: array
+      response_path: Offers
+      items: {type: object, description: "id, offerVersion, resource (the container or database it applies to) and content.offerThroughput."}

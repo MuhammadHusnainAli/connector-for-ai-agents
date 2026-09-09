@@ -1,0 +1,2891 @@
+# RUN Powered by ADP tools -- the APIs ADP publishes for this product.
+#
+# RUN is ADP's small-business payroll product, and the API reflects that:
+# payroll is the centre of gravity -- pay data input, pay statements,
+# payroll outputs, pay distributions, deduction configurations and US tax
+# profiles -- with worker records, organisation identities, enterprise
+# reports and applicant onboarding around it. RUN's code lists are its own
+# (`list_*_codelists`), and they are what a write's code fields must come
+# from.
+#
+# ADP's HCM APIs split cleanly in two, and the tools follow that split:
+#
+#   * **reads** are ordinary REST collections under a domain prefix --
+#     `/hr/v2/workers`, `/payroll/v1/pay-statements`, `/time/v2/...` -- and take
+#     OData-style `$filter`, `$select`, `$top` and `$skip` where ADP documents
+#     them;
+#   * **writes are events**, not PUTs. Changing anything about a worker means
+#     posting to `/events/{domain}/{version}/{event-name}` with an event
+#     payload; there is no `PATCH /workers/{aoid}`. Each event also has a
+#     `/meta` sibling describing the payload it accepts and the code values it
+#     will take on this client's configuration.
+#
+# Three things worth planning for:
+#
+#   * **read `/meta` before writing.** ADP code lists -- job codes, reason codes,
+#     department ids -- are per-client, and an event carrying a code the client
+#     does not define is rejected. `get_event_metadata` is that check, and every
+#     resource with a `/meta` endpoint has a `get_*_metadata` tool here;
+#   * **a worker is addressed by `aoid`**, the Associate OID, not by employee
+#     number or SSN. `list_workers` is how you resolve one;
+#   * **entitlement is per client.** Every path below is one ADP publishes for
+#     this product, but whether a given client's certificate can call it depends
+#     on what that client bought and consented to, so a 401 or 403 on one tool
+#     does not mean the credential is broken.
+#
+# `post_event` and `get_event_metadata` are the general form of the write side:
+# they reach any ADP event name, including ones ADP adds after this pack was
+# written. The typed event tools below cover every event ADP documents for this
+# product today.
+#
+# Not covered, deliberately:
+#
+#   * **event `/meta` endpoints** have no typed tool of their own --
+#     `get_event_metadata` reaches every one of them, and a typed tool per event
+#     would double this file for no new capability;
+#   * **`/event-notifications/...` paths.** Those describe what ADP *posts to
+#     you* when something happens; they are not endpoints a client calls;
+#   * **multipart operations** such as the worker photo upload, whose
+#     `multipart/mixed` body this pack's request format cannot express.
+#
+# This connector authenticates with client credentials over mutual TLS -- the
+# certificate is part of the connection, so a 401 here usually means the
+# certificate rather than the token. ADP scopes access through the client's
+# consent and product entitlements rather than through named OAuth scopes, so no
+# tool here declares any.
+#
+# Source: ADP's own API Explorer for this product,
+# https://developers.adp.com/apis/api-explorer/pr-offrg-run
+# and the OpenAPI document each API there links to.
+
+connector_id: adp-run
+display_name: RUN Powered by ADP
+docs_url: https://developers.adp.com/apis/api-explorer/pr-offrg-run
+
+tools:
+
+  # -- events: the general form -----------------------------------------------
+
+  post_event:
+    title: Post an ADP event
+    description: >-
+      ADP's universal write. Every change -- hiring, terminating, changing a
+      name, an address, a deduction -- is an event posted to
+      `/events/{domain}/{version}/{event-name}`, and this tool reaches any of
+      them, including events this pack has no typed tool for. Domains are `hr`,
+      `payroll`, `time`, `staffing` and `core`; event names look like
+      `worker.hire` or `worker.business-communication.email.change`. Call
+      `get_event_metadata` for the same event first: it returns the payload
+      shape and the code values this client accepts.
+    category: events
+    request:
+      method: POST
+      path: /events/${domain}/${event_version}/${event_name}
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      domain:
+        type: string
+        description: The event domain, e.g. hr, payroll, time, staffing or core.
+        example: hr
+      event_name:
+        type: string
+        description: The event name, e.g. worker.hire or worker.legal-name.change.
+        example: worker.hire
+      event:
+        type: object
+        description: >-
+          The event payload -- typically {"events": [{"data": {...}}]} as the
+          event's own metadata describes.
+      event_version:
+        type: string
+        description: Version segment of the event, usually v1 or v2.
+        optional: true
+        default: v1
+    output:
+      description: ADP's confirmation, including any events it generated.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  get_event_metadata:
+    title: Get an event's payload schema
+    description: >-
+      What one event accepts on this client's configuration: its fields, which
+      are required, and the code values each code field permits. ADP's code
+      lists are per-client, so this is the check that stops an event being
+      rejected for an unknown reason code. Works for every event, including the
+      ones with typed tools below.
+    category: events
+    read_only: true
+    request:
+      method: GET
+      path: /events/${domain}/${event_version}/${event_name}/meta
+    input:
+      domain:
+        type: string
+        description: The event domain, e.g. hr, payroll, time, staffing or core.
+        example: hr
+      event_name:
+        type: string
+        description: The event name, e.g. worker.hire.
+        example: worker.hire
+      event_version:
+        type: string
+        description: Version segment of the event, usually v1 or v2.
+        optional: true
+        default: v1
+    output:
+      description: The event's metadata.
+      type: object
+      properties:
+        meta: {type: object, description: "The event's fields and the code values this client accepts."}
+
+  # -- core: Organization Identities ---------------------------------------------
+
+  list_organization_identities:
+    title: "Organization Identities"
+    description: >-
+      Request the list of all available organization identities that the
+      requester is authorized to view. From the Organization Identities API on
+      RUN Powered by ADP. Narrow and page it with OData: `$filter` narrows the
+      collection.
+    category: core.organization_identities
+    read_only: true
+    request:
+      method: GET
+      path: "/core/v1/organization-identities"
+      query:
+        "$filter": "${filter}"
+    input:
+      filter:
+        type: string
+        description: >-
+          The OData $filter parameter MUST be used to specify the filter
+          criterion.
+        optional: true
+    output:
+      description: >-
+        The matching organization identities, as ADP holds them for this
+        client.
+      type: object
+
+  # -- core: Organization Management ---------------------------------------------
+
+  list_organizations:
+    title: "Multiple Organizations Details Based on $filter Criteria"
+    description: >-
+      Retrieve details multiple for multiple organizations (companies) based
+      on the selection criteria provded via $filter (OData) query parameter.
+      From the Organization Management API on RUN Powered by ADP. Narrow and
+      page it with OData: `$expand` pulls in related records, `$filter`
+      narrows the collection, `$select` trims a large payload to the fields
+      you need.
+    category: core.organizations
+    read_only: true
+    request:
+      method: GET
+      path: "/core/v2/organizations"
+      query:
+        "$expand": "${expand}"
+        "$filter": "${filter}"
+        "$select": "${select}"
+    input:
+      expand:
+        type: string
+        description: >-
+          The OData $expand parameter MUST be used to specify the expand
+          criterion
+        optional: true
+      filter:
+        type: string
+        description: >-
+          The OData $filter parameter MUST be used to specify the filter
+          criterion
+        optional: true
+      select:
+        type: string
+        description: >-
+          The OData $select parameter MUST be used to specify the selection
+          criterion
+        optional: true
+    output:
+      description: >-
+        The matching organizations, as ADP holds them for this client.
+      type: object
+
+  # -- hcm: Applicant Onboarding -------------------------------------------------
+
+  onboard_applicant:
+    title: "Initiate New Applicant Onboarding"
+    description: >-
+      Data related to the applicant onboarding request. From the Applicant
+      Onboarding API on RUN Powered by ADP. The body follows the shape this
+      resource's `/meta` sibling describes for this client.
+    category: hcm.applicant_onboard
+    request:
+      method: POST
+      path: "/hcm/v2/applicant.onboard"
+      headers:
+        Content-Type: application/json
+      body: "${payload}"
+    input:
+      payload:
+        type: object
+        description: >-
+          The request body, in the shape this resource's `/meta` describes for
+          this client.
+    output:
+      description: >-
+        ADP's confirmation, including any applicant.onboard it created or
+        changed.
+      type: object
+
+  get_applicant_onboard_metadata:
+    title: "Initiate New Applicant Onboarding Metadata"
+    description: >-
+      Returns an API metadata. What this resource looks like on this client's
+      configuration -- its fields, which are required, and the code values
+      each code field permits. ADP's code lists are per-client, so this is the
+      check that stops a write being rejected for an unknown code. Part of the
+      Applicant Onboarding API on RUN Powered by ADP.
+    category: hcm.meta
+    read_only: true
+    request:
+      method: GET
+      path: "/hcm/v2/applicant.onboard/meta"
+      query:
+        "$filter": "${filter}"
+    input:
+      filter:
+        type: string
+        description: >-
+          The OData $filter parameter MUST be used to specify the filter
+          criteria. The usage sample is below. Various criteria could be
+          combined using and/or operands and () to set the operand precedence.
+        optional: true
+    output:
+      description: >-
+        The resource's metadata for this client: its fields, which are
+        required, and the code values each code field accepts.
+      type: object
+      properties:
+        meta: {type: object, description: "The field and code-list metadata."}
+
+  update_applicant_onboarding:
+    title: "Update Existing Applicant Onboarding Details"
+    description: >-
+      Data related to the applicant onboarding request. From the Applicant
+      Onboarding API on RUN Powered by ADP. The body follows the shape this
+      resource's `/meta` sibling describes for this client.
+    category: hcm.onboarding
+    request:
+      method: PUT
+      path: "/hcm/v2/applicants/${applicant_id}/onboarding"
+      headers:
+        Content-Type: application/json
+      body: "${payload}"
+    input:
+      applicant_id:
+        type: string
+        description: >-
+          Unique identifier of the applicant
+      payload:
+        type: object
+        description: >-
+          The request body, in the shape this resource's `/meta` describes for
+          this client.
+    output:
+      description: >-
+        ADP's confirmation, including any onboarding it created or changed.
+      type: object
+
+  complete_applicant_onboarding:
+    title: "Complete Existing Applicant Onboarding"
+    description: >-
+      Data related to the applicant onboarding request. From the Applicant
+      Onboarding API on RUN Powered by ADP. The body follows the shape this
+      resource's `/meta` sibling describes for this client.
+    category: hcm.onboarding_complete
+    request:
+      method: POST
+      path: "/hcm/v2/applicants/${applicant_id}/onboarding.complete"
+      headers:
+        Content-Type: application/json
+      body: "${payload}"
+    input:
+      applicant_id:
+        type: string
+        description: >-
+          Unique identifier of the applicant
+      payload:
+        type: object
+        description: >-
+          The request body, in the shape this resource's `/meta` describes for
+          this client.
+    output:
+      description: >-
+        ADP's confirmation, including any onboarding.complete it created or
+        changed.
+      type: object
+
+  get_applicant_onboarding_metadata:
+    title: "Retrieve Update Existing Applicant Onboarding Request Metadata"
+    description: >-
+      Returns an API metadata. What this resource looks like on this client's
+      configuration -- its fields, which are required, and the code values
+      each code field permits. ADP's code lists are per-client, so this is the
+      check that stops a write being rejected for an unknown code. Part of the
+      Applicant Onboarding API on RUN Powered by ADP.
+    category: hcm.meta
+    read_only: true
+    request:
+      method: GET
+      path: "/hcm/v2/applicants/${applicant_id}/onboarding/meta"
+      query:
+        "$filter": "${filter}"
+    input:
+      applicant_id:
+        type: string
+        description: >-
+          Unique identifier of the applicant
+      filter:
+        type: string
+        description: >-
+          The OData $filter parameter MUST be used to specify the filter
+          criteria. The usage sample is below. Various criteria could be
+          combined using and/or operands and () to set the operand precedence.
+        optional: true
+    output:
+      description: >-
+        The resource's metadata for this client: its fields, which are
+        required, and the code values each code field accepts.
+      type: object
+      properties:
+        meta: {type: object, description: "The field and code-list metadata."}
+
+  # -- hcm: HCM Enterprise Reports -----------------------------------------------
+
+  create_enterprise_report_package:
+    title: "Create report packages"
+    description: >-
+      Create one or more report packages containing a set of associated report
+      templates. From the HCM Enterprise Reports API on RUN Powered by ADP.
+      The body follows the shape this resource's `/meta` sibling describes for
+      this client.
+    category: hcm.enterprise_report_packages
+    request:
+      method: POST
+      path: "/hcm/v2/enterprise-report-packages"
+      headers:
+        Content-Type: application/json
+      body: "${payload}"
+    input:
+      payload:
+        type: object
+        description: >-
+          The request body, in the shape this resource's `/meta` describes for
+          this client.
+    output:
+      description: >-
+        ADP's confirmation, including any enterprise report packages it
+        created or changed.
+      type: object
+
+  update_enterprise_report_package:
+    title: "Change/replace a report package"
+    description: >-
+      Change or replace a report package which contains a set of report
+      templates. From the HCM Enterprise Reports API on RUN Powered by ADP.
+      The body follows the shape this resource's `/meta` sibling describes for
+      this client.
+    category: hcm.enterprise_report_packages
+    request:
+      method: PUT
+      path: "/hcm/v2/enterprise-report-packages/${report_package_id}"
+      headers:
+        Content-Type: application/json
+      body: "${payload}"
+    input:
+      report_package_id:
+        type: string
+        description: >-
+          Report Package ID
+      payload:
+        type: object
+        description: >-
+          The request body, in the shape this resource's `/meta` describes for
+          this client.
+    output:
+      description: >-
+        ADP's confirmation, including any enterprise report packages it
+        created or changed.
+      type: object
+
+  get_report_package_export_content:
+    title: "Retrieve the file content of the execution for a report package"
+    description: >-
+      Retrieve the file content of an execution for a report package based on
+      id. From the HCM Enterprise Reports API on RUN Powered by ADP.
+    category: hcm.content
+    read_only: true
+    request:
+      method: GET
+      path: "/hcm/v2/enterprise-report-packages/${report_package_id}/executions/${execution_id}/exports/${export_id}/content"
+    input:
+      report_package_id:
+        type: string
+        description: >-
+          Report Package ID
+      execution_id:
+        type: string
+        description: >-
+          Execution ID
+      export_id:
+        type: string
+        description: >-
+          Execution Export ID
+    output:
+      description: >-
+        The matching content, as ADP holds them for this client.
+      type: object
+
+  list_enterprise_reports:
+    title: "List Enterprise Report Templates"
+    description: >-
+      Request the list of all available enterprise report templates that the
+      requester is authorized to view. From the HCM Enterprise Reports API on
+      RUN Powered by ADP. Narrow and page it with OData: `$orderby` sorts
+      them, `$select` trims a large payload to the fields you need, `$filter`
+      narrows the collection, `$top` caps how many come back, `$skip` walks
+      past a page.
+    category: hcm.enterprise_reports
+    read_only: true
+    request:
+      method: GET
+      path: "/hcm/v2/enterprise-reports"
+      query:
+        "$orderby": "${orderby}"
+        "$select": "${select}"
+        "$filter": "${filter}"
+        "$top": "${top}"
+        "$skip": "${skip}"
+    input:
+      orderby:
+        type: string
+        description: >-
+          The OData $orderby parameter MUST be used to specify the order
+          criterion
+        optional: true
+      select:
+        type: string
+        description: >-
+          The OData $select parameter MUST be used to specify the selection
+          criterion
+        optional: true
+      filter:
+        type: string
+        description: >-
+          The OData $filter parameter MUST be used to specify the filter
+          criterion
+        optional: true
+      top:
+        type: string
+        description: >-
+          The OData $top parameter MUST be used to specify the maximum number
+          criterion
+        optional: true
+      skip:
+        type: string
+        description: >-
+          The OData $skip parameter MUST be used to specify the start sequence
+          criterion
+        optional: true
+    output:
+      description: >-
+        The matching enterprise reports, as ADP holds them for this client.
+      type: object
+
+  # -- hcm: RUN Custom Codelists -------------------------------------------------
+
+  list_worker_management_codelists:
+    title: "Retrieve codes available for specific worker management code types"
+    description: >-
+      Request the list of all available codelists of a type identified by the
+      {code-type}, that support worker management. From the RUN Custom
+      Codelists API on RUN Powered by ADP.
+    category: codelists.run
+    read_only: true
+    request:
+      method: GET
+      path: "/codelists/hr/v3/worker-management/${code_type}/RUN/${version_id}"
+    input:
+      code_type:
+        type: string
+        description: >-
+          The type of the associated staffing codelist
+      version_id:
+        type: string
+        description: >-
+          The version of the associated codelist
+    output:
+      description: >-
+        The RUN ADP holds for this client.
+      type: object
+
+  list_payroll_processing_codelists_v1:
+    title: "Payroll Processing Codelist"
+    description: >-
+      Request the list of all available codelists of a type identified by the
+      {code-type}, that support payroll processing. From the RUN Custom
+      Codelists API on RUN Powered by ADP.
+    category: codelists.run
+    read_only: true
+    request:
+      method: GET
+      path: "/codelists/payroll/v1/payroll-processing/${processing_code_type}/run"
+    input:
+      processing_code_type:
+        type: string
+        description: >-
+          The type of the associated payroll processing codelist
+    output:
+      description: >-
+        The matching run, as ADP holds them for this client.
+      type: object
+
+  list_payroll_configuration_detail_management_codelists:
+    title: "Payroll Configuration Detail Management Codelist"
+    description: >-
+      Request the list of all available codelists of a type identified by the
+      {code-type}, that support payroll configuration detail management. From
+      the RUN Custom Codelists API on RUN Powered by ADP.
+    category: codelists.run
+    read_only: true
+    request:
+      method: GET
+      path: "/codelists/payroll/v3/payroll-configuration-detail-management/${configuration_code_type}/run"
+    input:
+      configuration_code_type:
+        type: string
+        description: >-
+          The type of the associated payroll processing codelist
+    output:
+      description: >-
+        The matching run, as ADP holds them for this client.
+      type: object
+
+  list_payroll_instruction_management_codelists:
+    title: "Payroll Instruction Management Codelist"
+    description: >-
+      Request the list of all available codelists of a type identified by the
+      {code-type}, that support payroll instruction management. From the RUN
+      Custom Codelists API on RUN Powered by ADP.
+    category: codelists.run
+    read_only: true
+    request:
+      method: GET
+      path: "/codelists/payroll/v3/payroll-instruction-management/${code_type}/run"
+    input:
+      code_type:
+        type: string
+        description: >-
+          The type of the associated staffing codelist
+    output:
+      description: >-
+        The matching run, as ADP holds them for this client.
+      type: object
+
+  list_payroll_processing_codelists:
+    title: "Payroll Processing Codelist"
+    description: >-
+      Request the list of all available codelists of a type identified by the
+      {code-type}, that support payroll processing. From the RUN Custom
+      Codelists API on RUN Powered by ADP.
+    category: codelists.run
+    read_only: true
+    request:
+      method: GET
+      path: "/codelists/payroll/v3/payroll-processing/${code_type}/run"
+    input:
+      code_type:
+        type: string
+        description: >-
+          The type of the associated staffing codelist
+    output:
+      description: >-
+        The matching run, as ADP holds them for this client.
+      type: object
+
+  # -- hr: Workers ---------------------------------------------------------------
+
+  list_workers:
+    title: "Workers Data Collection"
+    description: >-
+      Request the list of all available workers that the requester is
+      authorized to view. From the Workers API on RUN Powered by ADP. Narrow
+      and page it with OData: `$top` caps how many come back, `$expand` pulls
+      in related records, `$filter` narrows the collection, `$select` trims a
+      large payload to the fields you need, `$count` asks for the total
+      instead of the records, `$skip` walks past a page. It also takes
+      `asOfDate`.
+    category: hr.workers
+    read_only: true
+    request:
+      method: GET
+      path: "/hr/v2/workers"
+      query:
+        "$top": "${top}"
+        "$expand": "${expand}"
+        "asOfDate": "${as_of_date}"
+        "$filter": "${filter}"
+        "$select": "${select}"
+        "$count": "${count}"
+        "$skip": "${skip}"
+    input:
+      top:
+        type: string
+        description: >-
+          The OData $top parameter MUST be used to specify the maximum number
+          criterion.
+        optional: true
+      expand:
+        type: string
+        description: >-
+          The OData $expand parameter MUST be used to specify the expansion
+          criterion.
+        optional: true
+      as_of_date:
+        type: string
+        description: >-
+          current/effective date or selected date to see the workers data as
+          of specific date
+        optional: true
+      filter:
+        type: string
+        description: >-
+          The OData $filter parameter MUST be used to specify the filter
+          criteria. The usage sample is below. Various criteria could be
+          combined using and/or operands and () to set the operand precedence.
+        optional: true
+      select:
+        type: string
+        description: >-
+          The OData $select parameter MUST be used to specify the selection
+          criterion.
+        optional: true
+      count:
+        type: boolean
+        description: >-
+          The OData $count parameter MUST be used to specify the total number
+          criterion.
+        optional: true
+      skip:
+        type: string
+        description: >-
+          The OData $skip parameter MUST be used to specify the start sequence
+          criterion.
+        optional: true
+    output:
+      description: >-
+        The matching workers, as ADP holds them for this client.
+      type: object
+
+  get_worker:
+    title: "Individual Worker Data"
+    description: >-
+      Returns a worker. From the Workers API on RUN Powered by ADP. Narrow and
+      page it with OData: `$expand` pulls in related records, `$select` trims
+      a large payload to the fields you need. It also takes `asOfDate`.
+    category: hr.workers
+    read_only: true
+    request:
+      method: GET
+      path: "/hr/v2/workers/${aoid}"
+      query:
+        "$expand": "${expand}"
+        "asOfDate": "${as_of_date}"
+        "$select": "${select}"
+    input:
+      aoid:
+        type: string
+        description: >-
+          Associate OID
+      expand:
+        type: string
+        description: >-
+          The OData $expand parameter MUST be used to specify the expansion
+          criterion.
+        optional: true
+      as_of_date:
+        type: string
+        description: >-
+          current/effective date or selected date to see the workers data as
+          of specific date
+        optional: true
+      select:
+        type: string
+        description: >-
+          The OData $select parameter MUST be used to specify the selection
+          criterion.
+        optional: true
+    output:
+      description: >-
+        The worker ADP holds for this client.
+      type: object
+
+  get_specific_worker_metadata:
+    title: "Specific Worker Meta"
+    description: >-
+      Returns a worker specific meta. What this resource looks like on this
+      client's configuration -- its fields, which are required, and the code
+      values each code field permits. ADP's code lists are per-client, so this
+      is the check that stops a write being rejected for an unknown code. Part
+      of the Workers API on RUN Powered by ADP.
+    category: hr.meta
+    read_only: true
+    request:
+      method: GET
+      path: "/hr/v2/workers/${aoid}/meta"
+      query:
+        "$filter": "${filter}"
+    input:
+      aoid:
+        type: string
+        description: >-
+          Associate OID
+      filter:
+        type: string
+        description: >-
+          The OData $filter parameter MUST be used to specify the filter
+          criteria. The usage sample is below. Various criteria could be
+          combined using and/or operands and () to set the operand precedence.
+        optional: true
+    output:
+      description: >-
+        The resource's metadata for this client: its fields, which are
+        required, and the code values each code field accepts.
+      type: object
+      properties:
+        meta: {type: object, description: "The field and code-list metadata."}
+
+  # -- payroll: Deduction Configuration Management -------------------------------
+
+  list_deduction_configurations:
+    title: "Manage Deduction Configurations"
+    description: >-
+      Request the list of all available deduction configurations that the
+      requester is authorized to view. From the Deduction Configuration
+      Management API on RUN Powered by ADP. Narrow and page it with OData:
+      `$filter` narrows the collection, `$skip` walks past a page, `$top` caps
+      how many come back, `$select` trims a large payload to the fields you
+      need. It also takes `asOfDate`.
+    category: payroll.deduction_configurations
+    read_only: true
+    request:
+      method: GET
+      path: "/payroll/v3/deduction-configurations"
+      query:
+        "$filter": "${filter}"
+        "asOfDate": "${as_of_date}"
+        "$skip": "${skip}"
+        "$top": "${top}"
+        "$select": "${select}"
+    input:
+      filter:
+        type: string
+        description: >-
+          The OData $filter parameter MUST be used to specify the filter
+          criterion
+        optional: true
+      as_of_date:
+        type: string
+        description: >-
+          Indicative data as of this effective date
+        optional: true
+      skip:
+        type: string
+        description: >-
+          The OData $skip parameter MUST be used to specify the number of
+          pages to skip while fetching records
+        optional: true
+      top:
+        type: string
+        description: >-
+          The OData $top parameter MUST be used to specify the number of
+          records to fetch from the collection
+        optional: true
+      select:
+        type: string
+        description: >-
+          The OData $select parameter MUST be used to specify the select
+          projection
+        optional: true
+    output:
+      description: >-
+        The matching deduction configurations, as ADP holds them for this
+        client.
+      type: object
+
+  create_deduction_configuration:
+    title: "Manage Deduction Configurations"
+    description: >-
+      Add a list of deduction configurations. From the Deduction Configuration
+      Management API on RUN Powered by ADP. The body follows the shape this
+      resource's `/meta` sibling describes for this client.
+    category: payroll.deduction_configurations
+    request:
+      method: POST
+      path: "/payroll/v3/deduction-configurations"
+      headers:
+        Content-Type: application/json
+      body: "${payload}"
+    input:
+      payload:
+        type: object
+        description: >-
+          The request body, in the shape this resource's `/meta` describes for
+          this client.
+    output:
+      description: >-
+        ADP's confirmation, including any deduction configurations it created
+        or changed.
+      type: object
+
+  get_deduction_configuration_metadata:
+    title: "Deduction Configuration Meta"
+    description: >-
+      Returns a meta. What this resource looks like on this client's
+      configuration -- its fields, which are required, and the code values
+      each code field permits. ADP's code lists are per-client, so this is the
+      check that stops a write being rejected for an unknown code. Part of the
+      Deduction Configuration Management API on RUN Powered by ADP.
+    category: payroll.meta
+    read_only: true
+    request:
+      method: GET
+      path: "/payroll/v3/deduction-configurations/meta"
+      query:
+        "$filter": "${filter}"
+    input:
+      filter:
+        type: string
+        description: >-
+          The OData $filter parameter MUST be used to specify the filter
+          criterion
+        optional: true
+    output:
+      description: >-
+        The resource's metadata for this client: its fields, which are
+        required, and the code values each code field accepts.
+      type: object
+      properties:
+        meta: {type: object, description: "The field and code-list metadata."}
+
+  get_deduction_configuration:
+    title: "Manage Deduction Configurations"
+    description: >-
+      Return details of a single deduction configuration. From the Deduction
+      Configuration Management API on RUN Powered by ADP. It also takes
+      `asOfDate`.
+    category: payroll.deduction_configurations
+    read_only: true
+    request:
+      method: GET
+      path: "/payroll/v3/deduction-configurations/${deduction_configurations_id}"
+      query:
+        "asOfDate": "${as_of_date}"
+    input:
+      deduction_configurations_id:
+        type: string
+        description: >-
+          Deduction Configuration ID
+      as_of_date:
+        type: string
+        description: >-
+          Indicative data as of this effective date
+        optional: true
+    output:
+      description: >-
+        The deduction configuration ADP holds for this client.
+      type: object
+
+  # -- payroll: Pay Data Input ---------------------------------------------------
+
+  list_pay_data_input:
+    title: "Pay Data Input"
+    description: >-
+      Request the list of all available pay data input that the requester is
+      authorized to view. From the Pay Data Input API on RUN Powered by ADP.
+      Narrow and page it with OData: `$filter` narrows the collection,
+      `$count` asks for the total instead of the records, `$top` caps how many
+      come back, `$skip` walks past a page.
+    category: payroll.pay_data_input
+    read_only: true
+    request:
+      method: GET
+      path: "/payroll/v1/pay-data-input"
+      query:
+        "$filter": "${filter}"
+        "$count": "${count}"
+        "$top": "${top}"
+        "$skip": "${skip}"
+    input:
+      filter:
+        type: string
+        description: >-
+          The OData $filter parameter MUST be used to specify the filter
+          criterion.
+        optional: true
+      count:
+        type: boolean
+        description: >-
+          Use the OData $count parameter to specify that the response should
+          return the total number of instance resources Ex. $count=true
+        optional: true
+      top:
+        type: string
+        description: >-
+          The OData $top parameter MUST be used to specify the maximum number
+          criterion
+        optional: true
+      skip:
+        type: string
+        description: >-
+          The OData $skip parameter MUST be used to specify the start sequence
+          criterion
+        optional: true
+    output:
+      description: >-
+        The matching pay data input, as ADP holds them for this client.
+      type: object
+
+  # -- payroll: Pay Statements ---------------------------------------------------
+
+  list_pay_statements:
+    title: "Pay Statements"
+    description: >-
+      Retrieves information of all the Pay Statement available under a
+      specific worker. From the Pay Statements API on RUN Powered by ADP. It
+      also takes `numberoflastpaydates`.
+    category: payroll.pay_statements
+    read_only: true
+    request:
+      method: GET
+      path: "/payroll/v1/workers/${aoid}/pay-statements"
+      query:
+        "numberoflastpaydates": "${numberoflastpaydates}"
+    input:
+      aoid:
+        type: string
+        description: >-
+          Associate OID
+      numberoflastpaydates:
+        type: integer
+        description: >-
+          Maximum pay statements which should be returned based on a request
+        optional: true
+    output:
+      description: >-
+        The matching pay statements, as ADP holds them for this client.
+      type: object
+
+  get_pay_statement:
+    title: "Pay Statement"
+    description: >-
+      Request the details of a specific pay statement. From the Pay Statements
+      API on RUN Powered by ADP.
+    category: payroll.pay_statements
+    read_only: true
+    request:
+      method: GET
+      path: "/payroll/v1/workers/${aoid}/pay-statements/${pay_statement_id}"
+    input:
+      aoid:
+        type: string
+        description: >-
+          Associate OID
+      pay_statement_id:
+        type: string
+        description: >-
+          Pay statement ID
+    output:
+      description: >-
+        The pay statement ADP holds for this client.
+      type: object
+
+  get_pay_statement_image:
+    title: "Pay Statement Image"
+    description: >-
+      Request the details of a specific paystatement as an image. From the Pay
+      Statements API on RUN Powered by ADP.
+    category: payroll.images
+    read_only: true
+    request:
+      method: GET
+      path: "/payroll/v1/workers/${aoid}/pay-statements/${pay_statement_id}/images/${image_id}.${image_extension}"
+    input:
+      aoid:
+        type: string
+        description: >-
+          Associate OID
+      pay_statement_id:
+        type: string
+        description: >-
+          Pay statement ID
+      image_id:
+        type: string
+        description: >-
+          Pay statement Image ID
+      image_extension:
+        type: string
+        description: >-
+          Pay statement Image Extension
+    output:
+      description: >-
+        The image ADP holds for this client.
+      type: object
+
+  # -- payroll: Payroll Outputs --------------------------------------------------
+
+  list_payroll_output:
+    title: "Payroll Outputs"
+    description: >-
+      Returns complete payroll output details that the requester is authorized
+      to view based on the supplied filter criteria. From the Payroll Outputs
+      API on RUN Powered by ADP. Narrow and page it with OData: `$filter`
+      narrows the collection.
+    category: payroll.payroll_output
+    read_only: true
+    request:
+      method: GET
+      path: "/payroll/v1/payroll-output"
+      query:
+        "$filter": "${filter}"
+    input:
+      filter:
+        type: string
+        description: >-
+          The OData $filter parameter is used to limit the payroll outputs
+          returned.
+        optional: true
+    output:
+      description: >-
+        The matching payroll output, as ADP holds them for this client.
+      type: object
+
+  get_payroll_output_metadata:
+    title: "Payroll Outputs Meta"
+    description: >-
+      Returns a meta. What this resource looks like on this client's
+      configuration -- its fields, which are required, and the code values
+      each code field permits. ADP's code lists are per-client, so this is the
+      check that stops a write being rejected for an unknown code. Part of the
+      Payroll Outputs API on RUN Powered by ADP.
+    category: payroll.meta
+    read_only: true
+    request:
+      method: GET
+      path: "/payroll/v1/payroll-output/meta"
+      query:
+        "$filter": "${filter}"
+    input:
+      filter:
+        type: string
+        description: >-
+          The OData $filter parameter is used to limit the payroll outputs
+          returned.
+        optional: true
+    output:
+      description: >-
+        The resource's metadata for this client: its fields, which are
+        required, and the code values each code field accepts.
+      type: object
+      properties:
+        meta: {type: object, description: "The field and code-list metadata."}
+
+  get_payroll_output:
+    title: "Payroll Output Details"
+    description: >-
+      Returns payroll output details. From the Payroll Outputs API on RUN
+      Powered by ADP.
+    category: payroll.payroll_output
+    read_only: true
+    request:
+      method: GET
+      path: "/payroll/v1/payroll-output/${output_id}"
+    input:
+      output_id:
+        type: string
+        description: >-
+          Payroll Output ID
+    output:
+      description: >-
+        The payroll output ADP holds for this client.
+      type: object
+
+  # -- payroll: US Tax Profiles --------------------------------------------------
+
+  get_worker_us_tax_profile_federal:
+    title: "US Federal Tax Profile Details"
+    description: >-
+      Return complete details of the worker US Federal tax profile. From the
+      US Tax Profiles API on RUN Powered by ADP. Narrow and page it with
+      OData: `$select` trims a large payload to the fields you need, `$filter`
+      narrows the collection. It also takes `asOfDate`.
+    category: payroll.federal
+    read_only: true
+    request:
+      method: GET
+      path: "/payroll/v1/workers/${aoid}/us-tax-profiles/${us_tax_profile_id}/federal"
+      query:
+        "$select": "${select}"
+        "$filter": "${filter}"
+        "asOfDate": "${as_of_date}"
+    input:
+      aoid:
+        type: string
+        description: >-
+          Associate OID
+      us_tax_profile_id:
+        type: string
+        description: >-
+          US Tax Profile ID
+      select:
+        type: string
+        description: >-
+          The OData $select parameter MUST be used to specify the selection
+          criterion
+        optional: true
+      filter:
+        type: string
+        description: >-
+          The OData $filter parameter MUST be used to specify the filter
+          criterion.
+        optional: true
+      as_of_date:
+        type: string
+        description: >-
+          current date or selected date to see benefit election history of a
+          participant as of date
+        optional: true
+    output:
+      description: >-
+        The matching federal, as ADP holds them for this client.
+      type: object
+
+  get_worker_us_tax_profile_federal_metadata:
+    title: "US Federal Tax Profile Meta"
+    description: >-
+      Returns an API metadata. What this resource looks like on this client's
+      configuration -- its fields, which are required, and the code values
+      each code field permits. ADP's code lists are per-client, so this is the
+      check that stops a write being rejected for an unknown code. Part of the
+      US Tax Profiles API on RUN Powered by ADP.
+    category: payroll.meta
+    read_only: true
+    request:
+      method: GET
+      path: "/payroll/v1/workers/${aoid}/us-tax-profiles/${us_tax_profile_id}/federal/meta"
+      query:
+        "$filter": "${filter}"
+    input:
+      aoid:
+        type: string
+        description: >-
+          Associate OID
+      us_tax_profile_id:
+        type: string
+        description: >-
+          US Tax Profile ID
+      filter:
+        type: string
+        description: >-
+          The OData $filter parameter MUST be used to specify the filter
+          criterion.
+        optional: true
+    output:
+      description: >-
+        The resource's metadata for this client: its fields, which are
+        required, and the code values each code field accepts.
+      type: object
+      properties:
+        meta: {type: object, description: "The field and code-list metadata."}
+
+  get_worker_us_tax_profile_state:
+    title: "US State Tax Profile Details"
+    description: >-
+      Return complete details of the worker US State tax profile. From the US
+      Tax Profiles API on RUN Powered by ADP. Narrow and page it with OData:
+      `$select` trims a large payload to the fields you need, `$filter`
+      narrows the collection. It also takes `asOfDate`.
+    category: payroll.state
+    read_only: true
+    request:
+      method: GET
+      path: "/payroll/v1/workers/${aoid}/us-tax-profiles/${us_tax_profile_id}/state"
+      query:
+        "$select": "${select}"
+        "$filter": "${filter}"
+        "asOfDate": "${as_of_date}"
+    input:
+      aoid:
+        type: string
+        description: >-
+          Associate OID
+      us_tax_profile_id:
+        type: string
+        description: >-
+          US Tax Profile ID
+      select:
+        type: string
+        description: >-
+          The OData $select parameter MUST be used to specify the selection
+          criterion
+        optional: true
+      filter:
+        type: string
+        description: >-
+          The OData $filter parameter MUST be used to specify the filter
+          criterion.
+        optional: true
+      as_of_date:
+        type: string
+        description: >-
+          current date or selected date to see benefit election history of a
+          participant as of date
+        optional: true
+    output:
+      description: >-
+        The matching state, as ADP holds them for this client.
+      type: object
+
+  get_worker_us_tax_profile_state_metadata:
+    title: "US State Tax Profile Meta"
+    description: >-
+      Returns an API metadata. What this resource looks like on this client's
+      configuration -- its fields, which are required, and the code values
+      each code field permits. ADP's code lists are per-client, so this is the
+      check that stops a write being rejected for an unknown code. Part of the
+      US Tax Profiles API on RUN Powered by ADP.
+    category: payroll.meta
+    read_only: true
+    request:
+      method: GET
+      path: "/payroll/v1/workers/${aoid}/us-tax-profiles/${us_tax_profile_id}/state/meta"
+      query:
+        "$filter": "${filter}"
+    input:
+      aoid:
+        type: string
+        description: >-
+          Associate OID
+      us_tax_profile_id:
+        type: string
+        description: >-
+          US Tax Profile ID
+      filter:
+        type: string
+        description: >-
+          The OData $filter parameter MUST be used to specify the filter
+          criterion.
+        optional: true
+    output:
+      description: >-
+        The resource's metadata for this client: its fields, which are
+        required, and the code values each code field accepts.
+      type: object
+      properties:
+        meta: {type: object, description: "The field and code-list metadata."}
+
+  # -- payroll: Worker Pay Distributions -----------------------------------------
+
+  list_pay_distributions:
+    title: "Pay Distributions"
+    description: >-
+      Request all available pay distributions for a worker. From the Worker
+      Pay Distributions API on RUN Powered by ADP. Narrow and page it with
+      OData: `$filter` narrows the collection. It also takes `status`,
+      `asOfDate`.
+    category: payroll.pay_distributions
+    read_only: true
+    request:
+      method: GET
+      path: "/payroll/v2/workers/${aoid}/pay-distributions"
+      query:
+        "status": "${status}"
+        "asOfDate": "${as_of_date}"
+        "$filter": "${filter}"
+    input:
+      aoid:
+        type: string
+        description: >-
+          Associate OID
+      status:
+        type: string
+        description: >-
+          This parameter allows for the retrieval of pay distributions of a
+          given status (or statuses) in the practitioner context only. Allowed
+          values: active, inactive, all. If the parameter is omitted all
+          distributions, including pending (if…
+      as_of_date:
+        type: string
+        description: >-
+          This parameter allows for the retrieval of pay distributions as of
+          given date. If the parameter is omitted the distributions, as of
+          current date should be returned
+        optional: true
+      filter:
+        type: string
+        description: >-
+          The OData $filter parameter MUST be used to specify the filter
+          criterion.
+        optional: true
+    output:
+      description: >-
+        The matching pay distributions, as ADP holds them for this client.
+      type: object
+
+  get_pay_distribution_metadata:
+    title: "Pay Distribution Meta"
+    description: >-
+      Returns a meta. What this resource looks like on this client's
+      configuration -- its fields, which are required, and the code values
+      each code field permits. ADP's code lists are per-client, so this is the
+      check that stops a write being rejected for an unknown code. Part of the
+      Worker Pay Distributions API on RUN Powered by ADP.
+    category: payroll.meta
+    read_only: true
+    request:
+      method: GET
+      path: "/payroll/v2/workers/${aoid}/pay-distributions/meta"
+      query:
+        "$filter": "${filter}"
+    input:
+      aoid:
+        type: string
+        description: >-
+          Associate OID
+      filter:
+        type: string
+        description: >-
+          The OData $filter parameter MUST be used to specify the filter
+          criterion.
+        optional: true
+    output:
+      description: >-
+        The resource's metadata for this client: its fields, which are
+        required, and the code values each code field accepts.
+      type: object
+      properties:
+        meta: {type: object, description: "The field and code-list metadata."}
+
+  # -- payroll: Worker Payroll Instructions --------------------------------------
+
+  list_worker_general_deduction_instructions:
+    title: "Payroll General Deduction Instruction"
+    description: >-
+      Request the list of all available payroll instructions that the
+      requester is authorized to view. From the Worker Payroll Instructions
+      API on RUN Powered by ADP. Narrow and page it with OData: `$select`
+      trims a large payload to the fields you need, `$filter` narrows the
+      collection. It also takes `asOfDate`, `inactive`.
+    category: payroll.general_deduction
+    read_only: true
+    request:
+      method: GET
+      path: "/payroll/v1/workers/${aoid}/payroll-instructions/general-deduction"
+      query:
+        "asOfDate": "${as_of_date}"
+        "inactive": "${inactive}"
+        "$select": "${select}"
+        "$filter": "${filter}"
+    input:
+      aoid:
+        type: string
+        description: >-
+          Associate OID as provisoned in the ADP registry
+      as_of_date:
+        type: string
+        description: >-
+          Allows for filtering based the date when the records are effective.
+          If the parameter is omitted, the current date is assumed
+        optional: true
+      inactive:
+        type: string
+        description: >-
+          Indictes the inactive instructons should be included in the
+          response. If the parameter is omitted, only active are returned
+        optional: true
+      select:
+        type: string
+        description: >-
+          The OData $select parameter MUST be used to specify the selection
+          criterion
+        optional: true
+      filter:
+        type: string
+        description: >-
+          The OData $filter parameter MUST be used to specify the filter
+          criterion.
+        optional: true
+    output:
+      description: >-
+        The matching general deduction, as ADP holds them for this client.
+      type: object
+
+  # -- events: core --------------------------------------------------------------
+
+  change_organization_identities_address:
+    title: "Change Organization Identity Address"
+    description: >-
+      An organization identity address change. Writes are events in ADP, and
+      this posts `organization-identities.address.change` to
+      `/events/core/v1/organization-identities.address.change`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Organization Identities API
+      on RUN Powered by ADP.
+    category: events.organization_identities
+    request:
+      method: POST
+      path: "/events/core/v1/organization-identities.address.change"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  # -- events: hr ----------------------------------------------------------------
+
+  change_worker_birth_date:
+    title: "Change Birth Date"
+    description: >-
+      A worker's birth date changed. Writes are events in ADP, and this posts
+      `worker.birth-date.change` to `/events/hr/v1/worker.birth-date.change`.
+      Read `get_event_metadata` for the same event first: the payload's shape,
+      and which code values this client's configuration accepts, are
+      per-client and an unknown code is rejected. Part of the Workers -
+      Biological Data Management API on RUN Powered by ADP.
+    category: events.worker
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.birth-date.change"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  change_worker_gender:
+    title: "Change Gender"
+    description: >-
+      A worker's gender changed. Writes are events in ADP, and this posts
+      `worker.gender.change` to `/events/hr/v1/worker.gender.change`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Workers - Biological Data
+      Management API on RUN Powered by ADP.
+    category: events.worker
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.gender.change"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  add_worker_business_communication_email:
+    title: "Add Worker Business Email"
+    description: >-
+      A worker adds a business email. Writes are events in ADP, and this posts
+      `worker.business-communication.email.add` to
+      `/events/hr/v1/worker.business-communication.email.add`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Workers - Business
+      Communication Management API on RUN Powered by ADP.
+    category: events.worker
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.business-communication.email.add"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  change_worker_business_communication_email:
+    title: "Change Worker Business Email"
+    description: >-
+      A worker changes a business email. Writes are events in ADP, and this
+      posts `worker.business-communication.email.change` to
+      `/events/hr/v1/worker.business-communication.email.change`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Workers - Business
+      Communication Management API on RUN Powered by ADP.
+    category: events.worker
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.business-communication.email.change"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  remove_worker_business_communication_email:
+    title: "Remove Worker Business Email"
+    description: >-
+      A worker removes a business email. Writes are events in ADP, and this
+      posts `worker.business-communication.email.remove` to
+      `/events/hr/v1/worker.business-communication.email.remove`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Workers - Business
+      Communication Management API on RUN Powered by ADP.
+    category: events.worker
+    destructive: true
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.business-communication.email.remove"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  add_worker_work_assignment_additional_remuneration:
+    title: "Add Additional Remuneration"
+    description: >-
+      A worker's additional remuneration (e.g. bonus, commission, etc.) is
+      added. Writes are events in ADP, and this posts
+      `worker.work-assignment.additional-remuneration.add` to
+      `/events/hr/v1/worker.work-assignment.additional-remuneration.add`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Workers - Compensation
+      Management API on RUN Powered by ADP.
+    category: events.worker
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.work-assignment.additional-remuneration.add"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  change_worker_work_assignment_additional_remuneration:
+    title: "Change Additional Remuneration"
+    description: >-
+      A worker's additional remuneration (e.g. bonus, commission, etc.) is
+      removed. Writes are events in ADP, and this posts
+      `worker.work-assignment.additional-remuneration.change` to
+      `/events/hr/v1/worker.work-assignment.additional-remuneration.change`.
+      Read `get_event_metadata` for the same event first: the payload's shape,
+      and which code values this client's configuration accepts, are
+      per-client and an unknown code is rejected. Part of the Workers -
+      Compensation Management API on RUN Powered by ADP.
+    category: events.worker
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.work-assignment.additional-remuneration.change"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  remove_worker_work_assignment_additional_remuneration:
+    title: "Remove Additional Remuneration"
+    description: >-
+      A worker's additional remuneration (e.g. bonus, commission, etc.) is
+      removed. Writes are events in ADP, and this posts
+      `worker.work-assignment.additional-remuneration.remove` to
+      `/events/hr/v1/worker.work-assignment.additional-remuneration.remove`.
+      Read `get_event_metadata` for the same event first: the payload's shape,
+      and which code values this client's configuration accepts, are
+      per-client and an unknown code is rejected. Part of the Workers -
+      Compensation Management API on RUN Powered by ADP.
+    category: events.worker
+    destructive: true
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.work-assignment.additional-remuneration.remove"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  change_worker_work_assignment_base_remuneration:
+    title: "Change Base Remuneration"
+    description: >-
+      A worker's base remuneration is changed. Writes are events in ADP, and
+      this posts `worker.work-assignment.base-remuneration.change` to
+      `/events/hr/v1/worker.work-assignment.base-remuneration.change`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Workers - Compensation
+      Management API on RUN Powered by ADP.
+    category: events.worker
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.work-assignment.base-remuneration.change"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  change_worker_custom_field_code:
+    title: "Change Worker Custom Code"
+    description: >-
+      A worker changes a custom field that is a code. Writes are events in
+      ADP, and this posts `worker.custom-field.code.change` to
+      `/events/hr/v1/worker.custom-field.code.change`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Workers - Custom Data
+      Management API on RUN Powered by ADP.
+    category: events.worker
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.custom-field.code.change"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  change_worker_original_hire_date:
+    title: "Change Worker Original Hire Date"
+    description: >-
+      Change worker original hire date. Writes are events in ADP, and this
+      posts `worker.worker-original-hire-date.change` to
+      `/events/hr/v1/worker.worker-original-hire-date.change`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Workers - Dates Management
+      API on RUN Powered by ADP.
+    category: events.worker
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.worker-original-hire-date.change"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  change_worker_rehire_date:
+    title: "Change Worker Rehire Date"
+    description: >-
+      Change worker rehire date. Writes are events in ADP, and this posts
+      `worker.worker-rehire-date.change` to
+      `/events/hr/v1/worker.worker-rehire-date.change`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Workers - Dates Management
+      API on RUN Powered by ADP.
+    category: events.worker
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.worker-rehire-date.change"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  change_worker_termination_date:
+    title: "Change Worker Termination Date"
+    description: >-
+      Change worker termination date. Writes are events in ADP, and this posts
+      `worker.worker-termination-date.change` to
+      `/events/hr/v1/worker.worker-termination-date.change`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Workers - Dates Management
+      API on RUN Powered by ADP.
+    category: events.worker
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.worker-termination-date.change"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  change_worker_ethnicity:
+    title: "Change Worker Ethnicity"
+    description: >-
+      A worker ethnicity changed. Writes are events in ADP, and this posts
+      `worker.ethnicity.change` to `/events/hr/v1/worker.ethnicity.change`.
+      Read `get_event_metadata` for the same event first: the payload's shape,
+      and which code values this client's configuration accepts, are
+      per-client and an unknown code is rejected. Part of the Workers -
+      Demographic Data Management API on RUN Powered by ADP.
+    category: events.worker
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.ethnicity.change"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  change_worker_former_name:
+    title: "Change Former Name"
+    description: >-
+      A worker's former name is updated. Writes are events in ADP, and this
+      posts `worker.former-name.change` to
+      `/events/hr/v1/worker.former-name.change`. Read `get_event_metadata` for
+      the same event first: the payload's shape, and which code values this
+      client's configuration accepts, are per-client and an unknown code is
+      rejected. Part of the Workers - Demographic Data Management API on RUN
+      Powered by ADP.
+    category: events.worker
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.former-name.change"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  change_worker_legal_name:
+    title: "Change Legal Name"
+    description: >-
+      A worker changes his/her legal name in a given context. Writes are
+      events in ADP, and this posts `worker.legal-name.change` to
+      `/events/hr/v1/worker.legal-name.change`. Read `get_event_metadata` for
+      the same event first: the payload's shape, and which code values this
+      client's configuration accepts, are per-client and an unknown code is
+      rejected. Part of the Workers - Demographic Data Management API on RUN
+      Powered by ADP.
+    category: events.worker
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.legal-name.change"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  change_worker_preferred_name:
+    title: "Change Preferred Name"
+    description: >-
+      A worker changes his/her preferred name in a given context. Writes are
+      events in ADP, and this posts `worker.preferred-name.change` to
+      `/events/hr/v1/worker.preferred-name.change`. Read `get_event_metadata`
+      for the same event first: the payload's shape, and which code values
+      this client's configuration accepts, are per-client and an unknown code
+      is rejected. Part of the Workers - Demographic Data Management API on
+      RUN Powered by ADP.
+    category: events.worker
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.preferred-name.change"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  change_worker_government_id:
+    title: "Change Worker Government ID"
+    description: >-
+      A worker government id changed. Writes are events in ADP, and this posts
+      `worker.government-id.change` to
+      `/events/hr/v1/worker.government-id.change`. Read `get_event_metadata`
+      for the same event first: the payload's shape, and which code values
+      this client's configuration accepts, are per-client and an unknown code
+      is rejected. Part of the Workers - Identification Management API on RUN
+      Powered by ADP.
+    category: events.worker
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.government-id.change"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  hire_worker:
+    title: "Hire Worker"
+    description: >-
+      A worker is hired. Writes are events in ADP, and this posts
+      `worker.hire` to `/events/hr/v1/worker.hire`. Read `get_event_metadata`
+      for the same event first: the payload's shape, and which code values
+      this client's configuration accepts, are per-client and an unknown code
+      is rejected. Part of the Workers - Lifecycle Management API on RUN
+      Powered by ADP.
+    category: events.worker
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.hire"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  onboard_worker:
+    title: "Onboard Worker"
+    description: >-
+      A worker is onboarded. Writes are events in ADP, and this posts
+      `worker.onboard` to `/events/hr/v1/worker.onboard`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Workers - Lifecycle
+      Management API on RUN Powered by ADP.
+    category: events.worker
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.onboard"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  rehire_worker:
+    title: "Rehire Worker"
+    description: >-
+      A worker is rehired. Writes are events in ADP, and this posts
+      `worker.rehire` to `/events/hr/v1/worker.rehire`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Workers - Lifecycle
+      Management API on RUN Powered by ADP.
+    category: events.worker
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.rehire"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  terminate_worker:
+    title: "Terminate Worker"
+    description: >-
+      A worker is terminated involuntarily. Writes are events in ADP, and this
+      posts `worker.terminate` to `/events/hr/v1/worker.terminate`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Workers - Lifecycle
+      Management API on RUN Powered by ADP.
+    category: events.worker
+    destructive: true
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.terminate"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  change_worker_legal_address:
+    title: "Change Worker Legal Address"
+    description: >-
+      Worker legal address changes. Writes are events in ADP, and this posts
+      `worker.legal-address.change` to
+      `/events/hr/v1/worker.legal-address.change`. Read `get_event_metadata`
+      for the same event first: the payload's shape, and which code values
+      this client's configuration accepts, are per-client and an unknown code
+      is rejected. Part of the Workers - Personal Communication Management API
+      on RUN Powered by ADP.
+    category: events.worker
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.legal-address.change"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  add_worker_personal_communication_email:
+    title: "Add Worker Personal Email"
+    description: >-
+      A worker adds a personal email. Writes are events in ADP, and this posts
+      `worker.personal-communication.email.add` to
+      `/events/hr/v1/worker.personal-communication.email.add`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Workers - Personal
+      Communication Management API on RUN Powered by ADP.
+    category: events.worker
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.personal-communication.email.add"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  change_worker_personal_communication_email:
+    title: "Change Worker Personal Email"
+    description: >-
+      A worker changes a personal email. Writes are events in ADP, and this
+      posts `worker.personal-communication.email.change` to
+      `/events/hr/v1/worker.personal-communication.email.change`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Workers - Personal
+      Communication Management API on RUN Powered by ADP.
+    category: events.worker
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.personal-communication.email.change"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  remove_worker_personal_communication_email:
+    title: "Remove Worker Personal Email"
+    description: >-
+      A worker removes a personal email. Writes are events in ADP, and this
+      posts `worker.personal-communication.email.remove` to
+      `/events/hr/v1/worker.personal-communication.email.remove`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Workers - Personal
+      Communication Management API on RUN Powered by ADP.
+    category: events.worker
+    destructive: true
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.personal-communication.email.remove"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  add_worker_personal_communication_landline:
+    title: "Add Worker Personal Landline"
+    description: >-
+      A worker adds a personal landline. Writes are events in ADP, and this
+      posts `worker.personal-communication.landline.add` to
+      `/events/hr/v1/worker.personal-communication.landline.add`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Workers - Personal
+      Communication Management API on RUN Powered by ADP.
+    category: events.worker
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.personal-communication.landline.add"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  change_worker_personal_communication_landline:
+    title: "Change Worker Personal Landline"
+    description: >-
+      A worker changes a personal landline. Writes are events in ADP, and this
+      posts `worker.personal-communication.landline.change` to
+      `/events/hr/v1/worker.personal-communication.landline.change`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Workers - Personal
+      Communication Management API on RUN Powered by ADP.
+    category: events.worker
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.personal-communication.landline.change"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  remove_worker_personal_communication_landline:
+    title: "Remove Worker Personal Landline"
+    description: >-
+      A worker removes a personal landline. Writes are events in ADP, and this
+      posts `worker.personal-communication.landline.remove` to
+      `/events/hr/v1/worker.personal-communication.landline.remove`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Workers - Personal
+      Communication Management API on RUN Powered by ADP.
+    category: events.worker
+    destructive: true
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.personal-communication.landline.remove"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  add_worker_personal_communication_mobile:
+    title: "Add Worker Personal Mobile"
+    description: >-
+      A worker adds a personal mobile telephone. Writes are events in ADP, and
+      this posts `worker.personal-communication.mobile.add` to
+      `/events/hr/v1/worker.personal-communication.mobile.add`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Workers - Personal
+      Communication Management API on RUN Powered by ADP.
+    category: events.worker
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.personal-communication.mobile.add"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  change_worker_personal_communication_mobile:
+    title: "Change Worker Personal Mobile"
+    description: >-
+      A worker changes a personal mobile telephone. Writes are events in ADP,
+      and this posts `worker.personal-communication.mobile.change` to
+      `/events/hr/v1/worker.personal-communication.mobile.change`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Workers - Personal
+      Communication Management API on RUN Powered by ADP.
+    category: events.worker
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.personal-communication.mobile.change"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  remove_worker_personal_communication_mobile:
+    title: "Remove Worker Personal Mobile"
+    description: >-
+      A worker removes a personal mobile telephone. Writes are events in ADP,
+      and this posts `worker.personal-communication.mobile.remove` to
+      `/events/hr/v1/worker.personal-communication.mobile.remove`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Workers - Personal
+      Communication Management API on RUN Powered by ADP.
+    category: events.worker
+    destructive: true
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.personal-communication.mobile.remove"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  change_worker_work_assignment_home_work_location:
+    title: "Change Home Work Location"
+    description: >-
+      The home work location of the work assignment is changed. Writes are
+      events in ADP, and this posts
+      `worker.work-assignment.home-work-location.change` to
+      `/events/hr/v1/worker.work-assignment.home-work-location.change`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Workers - Work Deployment
+      Management API on RUN Powered by ADP.
+    category: events.worker
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.work-assignment.home-work-location.change"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  change_worker_work_assignment_standard_hours:
+    title: "Change Standard Hours"
+    description: >-
+      A worker's number of standard hours is changed. Writes are events in
+      ADP, and this posts `worker.work-assignment.standard-hours.change` to
+      `/events/hr/v1/worker.work-assignment.standard-hours.change`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Workers - Work Deployment
+      Management API on RUN Powered by ADP.
+    category: events.worker
+    request:
+      method: POST
+      path: "/events/hr/v1/worker.work-assignment.standard-hours.change"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  # -- events: payroll -----------------------------------------------------------
+
+  add_pay_data_input:
+    title: "Add Pay Data Input"
+    description: >-
+      Add pay data input information. Writes are events in ADP, and this posts
+      `pay-data-input.add` to `/events/payroll/v1/pay-data-input.add`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Pay Data Input API on RUN
+      Powered by ADP.
+    category: events.pay_data_input
+    request:
+      method: POST
+      path: "/events/payroll/v1/pay-data-input.add"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  replace_pay_data_input:
+    title: "Replace Pay Data Input"
+    description: >-
+      Replace pay data input information. Writes are events in ADP, and this
+      posts `pay-data-input.replace` to
+      `/events/payroll/v1/pay-data-input.replace`. Read `get_event_metadata`
+      for the same event first: the payload's shape, and which code values
+      this client's configuration accepts, are per-client and an unknown code
+      is rejected. Part of the Pay Data Input API on RUN Powered by ADP.
+    category: events.pay_data_input
+    request:
+      method: POST
+      path: "/events/payroll/v1/pay-data-input.replace"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  change_us_tax_profile_federal_income_tax_instruction:
+    title: "US Federal Tax Profile - Change Federal Income Tax Instruction"
+    description: >-
+      Change a new US tax profile federal income tax instruction. Writes are
+      events in ADP, and this posts
+      `us-tax-profile.federal-income-tax-instruction.change` to
+      `/events/payroll/v1/us-tax-profile.federal-income-tax-instruction.change`.
+      Read `get_event_metadata` for the same event first: the payload's shape,
+      and which code values this client's configuration accepts, are
+      per-client and an unknown code is rejected. Part of the US Tax Profiles
+      API on RUN Powered by ADP.
+    category: events.us_tax_profile
+    request:
+      method: POST
+      path: "/events/payroll/v1/us-tax-profile.federal-income-tax-instruction.change"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  add_us_tax_profile_state_income_tax_instruction:
+    title: "US State Tax Profile - Add State Income Tax Instruction"
+    description: >-
+      Add a new US tax profile state income tax instruction. Writes are events
+      in ADP, and this posts `us-tax-profile.state-income-tax-instruction.add`
+      to `/events/payroll/v2/us-tax-profile.state-income-tax-instruction.add`.
+      Read `get_event_metadata` for the same event first: the payload's shape,
+      and which code values this client's configuration accepts, are
+      per-client and an unknown code is rejected. Part of the US Tax Profiles
+      API on RUN Powered by ADP.
+    category: events.us_tax_profile
+    request:
+      method: POST
+      path: "/events/payroll/v2/us-tax-profile.state-income-tax-instruction.add"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  change_us_tax_profile_state_income_tax_instruction:
+    title: "US State Tax Profile - Change State Income Tax Instruction"
+    description: >-
+      Change a new US tax profile state income tax instruction. Writes are
+      events in ADP, and this posts
+      `us-tax-profile.state-income-tax-instruction.change` to
+      `/events/payroll/v2/us-tax-profile.state-income-tax-instruction.change`.
+      Read `get_event_metadata` for the same event first: the payload's shape,
+      and which code values this client's configuration accepts, are
+      per-client and an unknown code is rejected. Part of the US Tax Profiles
+      API on RUN Powered by ADP.
+    category: events.us_tax_profile
+    request:
+      method: POST
+      path: "/events/payroll/v2/us-tax-profile.state-income-tax-instruction.change"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  change_worker_pay_distribution:
+    title: "Change Pay Distribution"
+    description: >-
+      A worker changes how the pay is distributed for a given payroll
+      agreement. Writes are events in ADP, and this posts
+      `worker.pay-distribution.change` to
+      `/events/payroll/v1/worker.pay-distribution.change`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Worker Pay Distributions
+      API on RUN Powered by ADP.
+    category: events.worker
+    request:
+      method: POST
+      path: "/events/payroll/v1/worker.pay-distribution.change"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  change_worker_general_deduction_instruction:
+    title: "Change Worker General Deduction Instruction"
+    description: >-
+      Change worker general deduction instruction information. Writes are
+      events in ADP, and this posts
+      `worker-general-deduction-instruction.change` to
+      `/events/payroll/v2/worker-general-deduction-instruction.change`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Worker Payroll Instructions
+      API on RUN Powered by ADP.
+    category: events.worker_general_deduction_instruction
+    request:
+      method: POST
+      path: "/events/payroll/v2/worker-general-deduction-instruction.change"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  start_worker_general_deduction_instruction:
+    title: "Start Worker General Deduction Instruction"
+    description: >-
+      Start worker general deduction instruction information. Writes are
+      events in ADP, and this posts
+      `worker-general-deduction-instruction.start` to
+      `/events/payroll/v2/worker-general-deduction-instruction.start`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Worker Payroll Instructions
+      API on RUN Powered by ADP.
+    category: events.worker_general_deduction_instruction
+    request:
+      method: POST
+      path: "/events/payroll/v2/worker-general-deduction-instruction.start"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  stop_worker_general_deduction_instruction:
+    title: "Stop Worker General Deduction Instruction"
+    description: >-
+      Stop worker general deduction instruction information. Writes are events
+      in ADP, and this posts `worker-general-deduction-instruction.stop` to
+      `/events/payroll/v2/worker-general-deduction-instruction.stop`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Worker Payroll Instructions
+      API on RUN Powered by ADP.
+    category: events.worker_general_deduction_instruction
+    destructive: true
+    request:
+      method: POST
+      path: "/events/payroll/v2/worker-general-deduction-instruction.stop"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}
+
+  # -- events: staffing ----------------------------------------------------------
+
+  onboard_applicant_v1:
+    title: "Applicant Onboard"
+    description: >-
+      Applicant onboard. Writes are events in ADP, and this posts
+      `applicant.onboard` to `/events/staffing/v1/applicant.onboard`. Read
+      `get_event_metadata` for the same event first: the payload's shape, and
+      which code values this client's configuration accepts, are per-client
+      and an unknown code is rejected. Part of the Job Applications API on RUN
+      Powered by ADP.
+    category: events.applicant
+    request:
+      method: POST
+      path: "/events/staffing/v1/applicant.onboard"
+      headers:
+        Content-Type: application/json
+      body: "${event}"
+    input:
+      event:
+        type: object
+        description: >-
+          The event payload, in the shape this event's `/meta` describes --
+          typically {"events": [{"data": {...}}]} with the code values this
+          client defines.
+    output:
+      description: >-
+        ADP's confirmation, including the events it generated in response.
+      type: object
+      properties:
+        confirmMessage: {type: object, description: "ADP's acknowledgement of the event."}
+        events: {type: array, description: "The events ADP recorded, with their ids."}

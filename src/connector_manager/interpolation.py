@@ -40,15 +40,30 @@ _NOW_OFFSET_RE = re.compile(r"^now([+-]\d+):([a-zA-Z]+):(.+)$")
 _NOW_FORMAT_RE = re.compile(r"^now:(.+)$")
 _STEP_RE = re.compile(r"\$\{step(\d+)\..*?\}")
 
+#: English day and month abbreviations, for the RFC 1123 dates several
+#: providers want in a signed header (Azure's ``x-ms-date``, AWS's ``Date``).
+#: Spelled out rather than taken from ``%a``/``%b``, which follow the process
+#: locale and would produce "lun." on a French host -- a header the provider
+#: rejects.
+_WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+_MONTHS = (
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+)
+
 # Mapping from the moment.js style date tokens used in definitions to strftime.
+# Longest token first: ``MM`` before ``MMM`` would rewrite the latter to
+# ``%mM``, which renders as "09M" rather than "Sep".
 _MOMENT_TOKENS = [
     ("YYYY", "%Y"),
+    ("SSS", "%f"),
+    ("MMM", "%%b"),
     ("MM", "%m"),
     ("DD", "%d"),
+    ("ddd", "%%a"),
     ("HH", "%H"),
     ("mm", "%M"),
     ("ss", "%S"),
-    ("SSS", "%f"),
     ("X", "%s"),
 ]
 
@@ -141,7 +156,10 @@ def _moment_format(dt: datetime, fmt: str) -> str:
     if "%f" in out:
         # strftime gives microseconds; moment's SSS is milliseconds.
         rendered = re.sub(r"(\d{3})\d{3}", r"\1", rendered)
-    return rendered
+    # ``%%a``/``%%b`` survive strftime as literal ``%a``/``%b``, which is how
+    # the locale-independent names get substituted last.
+    rendered = rendered.replace("%a", _WEEKDAYS[dt.weekday()])
+    return rendered.replace("%b", _MONTHS[dt.month - 1])
 
 
 def _resolve_now(expression: str, replacers: dict[str, Any]) -> str | None:

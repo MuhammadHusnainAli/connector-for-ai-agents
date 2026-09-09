@@ -9,6 +9,7 @@ it cannot resolve, or claims to be read-only while issuing a DELETE.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -24,6 +25,9 @@ from connector_manager.tools.registry import TOOLS_DIR
 METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE"})
 #: Methods that only read, so must be flagged read_only and never destructive.
 SAFE_METHODS = frozenset({"GET"})
+#: A path that is exactly one placeholder holds a whole path the caller supplies
+#: -- the raw escape-hatch shape -- rather than a path of the pack's own.
+WHOLE_PATH = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}")
 
 
 @pytest.fixture(scope="module")
@@ -159,7 +163,9 @@ def test_requests_are_well_formed(tools: ToolRegistry) -> None:
         request = tool.request
         assert request.method in METHODS, f"{_id(tool)} uses method {request.method}"
         assert request.encoding in ("json", "form"), f"{_id(tool)} encoding {request.encoding!r}"
-        assert request.path.startswith("/"), f"{_id(tool)} path {request.path!r} must start with /"
+        assert request.path.startswith("/") or WHOLE_PATH.fullmatch(request.path), (
+            f"{_id(tool)} path {request.path!r} must start with / or be a whole-path placeholder"
+        )
         if request.method in SAFE_METHODS:
             assert request.body is None, f"{_id(tool)} is a {request.method} with a body"
 
@@ -317,9 +323,15 @@ def test_only_writes_carry_a_body(tools: ToolRegistry, registry: ConnectorRegist
                 continue
             if tool.request.body is None and tool.request.content is None:
                 # Action-style POSTs (Graph's /send, Calendar's quickAdd) carry
-                # everything in the path or the query string, which is fine --
-                # what is not fine is a required argument with nowhere to go.
-                addressable = template_arguments(tool.request.path) | template_arguments(tool.request.query)
+                # everything in the path, the query string or a header -- Azure
+                # Blob's Copy Blob puts the whole instruction in
+                # x-ms-copy-source -- which is fine. What is not fine is a
+                # required argument with nowhere to go at all.
+                addressable = (
+                    template_arguments(tool.request.path)
+                    | template_arguments(tool.request.query)
+                    | template_arguments(tool.request.headers)
+                )
                 stranded = [p.name for p in tool.required_parameters() if p.name not in addressable]
                 assert not stranded, f"{_id(tool)} is a {tool.request.method} whose arguments go nowhere: {stranded}"
 

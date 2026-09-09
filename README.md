@@ -1,6 +1,6 @@
 # connector-for-ai-agents
 
-**1,586 API connectors for Python — every auth field each one needs, the code that turns filled-in fields into a working, verified connection, and tools on every single connector. Sync and async.**
+**1,638 API connectors for Python — every auth field each one needs, the code that turns filled-in fields into a working, verified connection, and tools on every single connector. Sync and async.**
 
 [![PyPI](https://img.shields.io/pypi/v/connector-for-ai-agents)](https://pypi.org/project/connector-for-ai-agents/)
 [![Python](https://img.shields.io/pypi/pyversions/connector-for-ai-agents)](https://pypi.org/project/connector-for-ai-agents/)
@@ -8,7 +8,7 @@
 [![Licence](https://img.shields.io/badge/licence-Elastic%202.0-blue)](LICENSE)
 
 Building an AI agent, an integrations page, or an internal tool that has to talk
-to Stripe, Slack, HubSpot, Notion, Jira, Shopify and 1,581 other APIs? The hard
+to Stripe, Slack, HubSpot, Notion, Jira, Shopify and 1,633 other APIs? The hard
 part is rarely the HTTP call. It is knowing that this provider wants a bearer
 token and that one wants `X-API-KEY`, that a third needs a client-credentials
 exchange against a per-tenant domain, and which endpoint proves the credentials
@@ -54,10 +54,10 @@ stored on your behalf.
 
 ## Why this exists
 
-- **1,586 connectors, bundled.** Auth mode, field definitions, base url and a
+- **1,638 connectors, bundled.** Auth mode, field definitions, base url and a
   verification endpoint for each. No API calls to browse them, no rate limits,
   no service to sign up for. Works offline and in air-gapped builds.
-- **1,190 connect end to end from user input alone.** API keys, basic auth,
+- **1,239 connect end to end from user input alone.** API keys, basic auth,
   client credentials, multi-step token exchanges, locally signed JWTs, WSSE and
   OAuth 1.0a request signing all complete inside the library.
 - **Verified, not assumed.** `connect()` calls the provider's own verification
@@ -69,13 +69,13 @@ stored on your behalf.
 - **Built for forms and for tools.** Every connector describes its own fields —
   title, description, example, regex, enum, secret, order — so you can render a
   connection form, or hand an LLM a tool spec, straight from the catalogue.
-- **Tools on all 1,586 connectors.** 236 of them ship named
+- **Tools on all 1,638 connectors.** 302 of them ship named
   capabilities — `send_email_with_file_attachments`, `create_deal`,
   `merge_pull_request` — with typed inputs, described outputs, and the scopes the
   provider demands. Given a connection, you get back which of them that
   particular client id and secret may actually call, and which scope is missing
   from each one that it may not.
-- **Typed, tested, small.** Full type hints with `py.typed`, 229 tests covering
+- **Typed, tested, small.** Full type hints with `py.typed`, 238 tests covering
   every connector and every tool in the catalogue, and four runtime dependencies.
 - **Your security model stays yours.** Connections come back as plain objects.
   Where they live and how they are encrypted is your call.
@@ -100,7 +100,7 @@ uv add connector-for-ai-agents
 ```
 
 Python 3.10+. Runtime dependencies: `httpx`, `PyYAML`, `PyJWT`, `cryptography`.
-The distribution carries the connector definitions and all 1,591 logos, so
+The distribution carries the connector definitions and all 1,643 logos, so
 nothing is fetched at runtime.
 
 The distribution is named `connector-for-ai-agents`; the import is
@@ -169,7 +169,7 @@ connection = Connection.from_dict(saved)
 ## Browse the catalogue
 
 ```python
-len(manager)                       # 1586
+len(manager)                       # 1633
 manager.categories()               # 31 categories: 'crm', 'accounting', 'hr', …
 manager.auth_modes()               # {'API_KEY': 899, 'OAUTH2': 361, 'OAUTH2_CC': 110, …}
 
@@ -185,10 +185,10 @@ Filters: `search`, `category`, `auth_mode`, `supported_only`,
 
 ### Pagination
 
-1,586 connectors is too many to hand a UI at once. Ask for a page by number or
+1,638 connectors is too many to hand a UI at once. Ask for a page by number or
 by raw `offset` and you get a `ConnectorPage` carrying the items **and** the
 numbers a picker needs — including `total`, counted before paging, so rendering
-"showing 21-40 of 1,586" never costs a second call.
+"showing 21-40 of 1,638" never costs a second call.
 
 ```python
 page = manager.paginate_connectors(page=2, page_size=20, category="crm")
@@ -307,20 +307,20 @@ Examples elsewhere in this README use the sync manager; add `await` for async.
 
 | Auth mode | Connectors | Support |
 | --- | --- | --- |
-| `API_KEY` | 899 | Full — connect and verify |
-| `OAUTH2_CC` | 110 | Full — client-credentials exchange, including basic, custom and `private_key_jwt`, plus refresh |
-| `BASIC` | 109 | Full — connect and verify |
+| `API_KEY` | 921 | Full — connect and verify |
+| `OAUTH2_CC` | 129 | Full — client-credentials exchange, including basic, custom and `private_key_jwt`, plus refresh |
+| `BASIC` | 112 | Full — connect and verify |
 | `TWO_STEP` | 63 | Full — token exchange, chained `additional_steps`, cookie and header extraction, refresh |
 | `JWT` | 4 | Full — signed locally with HMAC, RSA or EC |
 | `NONE`, `INSTALL_PLUGIN` | 3 | Full |
 | `SIGNATURE` | 1 | Full — WS-Security UsernameToken |
 | `TBA` | 1 | Full — OAuth 1.0a HMAC-SHA256 request signing |
-| `OAUTH2` | 361 | Import tokens from your own OAuth layer; the refresh-token grant runs here |
+| `OAUTH2` | 364 | Import tokens from your own OAuth layer; the refresh-token grant runs here |
 | `MCP_OAUTH2`, `MCP_OAUTH2_GENERIC`, `OAUTH1`, `APP`, `CUSTOM` | 32 | Import tokens; request signing works once imported |
 | `BILL`, `AWS_SIGV4` | 3 | Not implemented — raises `UnsupportedAuthModeError` |
 
-**1,190 connectors connect end to end from user-supplied values alone.** The
-remaining 396 need a token you obtained elsewhere, or an auth mode this package
+**1,239 connectors connect end to end from user-supplied values alone.** The
+remaining 399 need a token you obtained elsewhere, or an auth mode this package
 does not implement.
 
 ## OAuth connectors
@@ -462,12 +462,12 @@ from the registry by `python scripts/scaffold_tools.py --catalogue`.
 ### Coverage
 
 <!-- tool-coverage-summary:start -->
-**Every one of the 1,586 connectors exposes tools — 12,476 in total.**
+**Every one of the 1,638 connectors exposes tools — 14,525 in total.**
 
-- **3,487 hand-authored** across 123 packs covering 135 connectors, written against the providers' own references, with typed inputs and real scope names.
-- **1,639 generated from providers' published OpenAPI specifications**, across 156 packs.
-- **595 connectors** get a `check_connection` tool built from the verification endpoint their catalogue entry declares.
-- **700 connectors** have only the raw authenticated request tools, which claim nothing about the provider's API.
+- **5,498 hand-authored** across 169 packs covering 181 connectors, written against the providers' own references, with typed inputs and real scope names.
+- **1,627 generated from providers' published OpenAPI specifications**, across 155 packs.
+- **610 connectors** get a `check_connection` tool built from the verification endpoint their catalogue entry declares.
+- **692 connectors** have only the raw authenticated request tools, which claim nothing about the provider's API.
 
 [TOOLS.md](TOOLS.md) lists every connector and its tools.
 <!-- tool-coverage-summary:end -->
@@ -479,8 +479,11 @@ and destructive flags must match its HTTP verb.
 <!-- tool-coverage:start -->
 | Connector | Provider | Tools | Source |
 |---|---|---:|---|
+| `adyen` | Adyen | 339 | hand-authored |
 | `active-campaign` | ActiveCampaign | 320 | hand-authored |
+| `adp-workforce-now` | ADP Workforce Now | 267 | hand-authored |
 | `adobe-commerce` | Adobe Commerce | 244 | hand-authored |
+| `adp-workforce-now-next-gen` | ADP Workforce Now Next Generation | 199 | hand-authored |
 | `google-ads` | Google Ads | 174 | hand-authored |
 | `google-play` | Google Play | 145 | hand-authored |
 | `google-workspace-admin` | Google Workspace Admin | 134 | hand-authored |
@@ -489,36 +492,70 @@ and destructive flags must match its HTTP verb.
 | `addepar-basic` | Addepar (Basic Auth) | 102 | hand-authored |
 | `google-cloud-storage` | Google Cloud Storage | 87 | hand-authored |
 | `google-gemini` | Google Gemini | 85 | hand-authored |
+| `adp-run` | RUN Powered by ADP | 84 | hand-authored |
 | `google-mail` | Gmail | 81 | hand-authored |
 | `adp` | ADP | 66 | hand-authored |
 | `google-drive` | Google Drive | 66 | hand-authored |
+| `adp-lyric` | ADP Lyric | 65 | hand-authored |
 | `adobe-workfront` | Adobe Workfront | 59 | hand-authored |
 | `accelo` | Accelo | 58 | hand-authored |
+| `affinity` | Affinity (v1) | 58 | hand-authored |
+| `neo4j-aura` | Neo4j Aura (management API) | 58 | hand-authored |
+| `neo4j` | Neo4j (Query API v2) | 57 | hand-authored |
 | `google-analytics` | Google Analytics | 56 | hand-authored |
 | `microsoft`, `outlook`, `microsoft-tenant-specific` | Microsoft 365 (Graph) | 54 | hand-authored |
 | `add-to-calendar-pro` | Add to Calendar PRO | 50 | hand-authored |
+| `azure-container-registry` | Azure Container Registry | 49 | hand-authored |
 | `acumatica` | Acumatica | 47 | hand-authored |
 | `google-bigquery` | Google BigQuery | 47 | hand-authored |
+| `azure-app-service` | Azure App Service | 42 | hand-authored |
+| `azure-ai-search` | Azure AI Search | 41 | hand-authored |
+| `azure-ai-search-entra` | Azure AI Search (Entra ID) | 41 | hand-authored |
 | `google-calendar` | Google Calendar | 39 | hand-authored |
+| `azure-ai-speech` | Azure AI Speech | 38 | hand-authored |
+| `azure-ai-speech-entra` | Azure AI Speech (Entra ID) | 38 | hand-authored |
+| `azure-aks` | Azure Kubernetes Service | 37 | hand-authored |
+| `azure-virtual-machines` | Azure Virtual Machines | 36 | hand-authored |
 | `absorb-lms` | Absorb LMS | 35 | hand-authored |
 | `acuity-scheduling` | Acuity Scheduling | 33 | hand-authored |
 | `google-chat` | Google Chat | 33 | hand-authored |
+| `adyntel` | Adyntel | 32 | hand-authored |
 | `hubspot` | HubSpot | 32 | hand-authored |
+| `azure-ai-language` | Azure AI Language | 31 | hand-authored |
+| `azure-ai-language-entra` | Azure AI Language (Entra ID) | 31 | hand-authored |
+| `azure-resource-manager` | Azure Resource Manager | 31 | hand-authored |
 | `adobe-umapi` | UMAPI (Adobe User Management API) | 29 | hand-authored |
 | `github` | GitHub | 27 | hand-authored |
 | `google-health` | Google Health | 27 | hand-authored |
 | `abyssale` | Abyssale | 26 | hand-authored |
+| `azure-blob-storage` | Azure Blob Storage | 26 | hand-authored |
 | `google-contacts` | Google Contacts | 25 | hand-authored |
 | `slack` | Slack | 25 | hand-authored |
 | `stripe` | Stripe | 24 | hand-authored |
+| `azure-ai-search-management` | Azure AI Search (Management) | 23 | hand-authored |
+| `azure-devops` | Azure DevOps | 23 | hand-authored |
+| `azure-key-vault` | Azure Key Vault | 23 | hand-authored |
+| `azure-postgresql` | Azure Database for PostgreSQL | 23 | hand-authored |
+| `azure-sql-database` | Azure SQL Database | 23 | hand-authored |
 | `add-event` | AddEvent | 22 | hand-authored |
+| `azure-cosmos-db-accounts` | Azure Cosmos DB (Accounts) | 22 | hand-authored |
+| `azure-storage-accounts` | Azure Storage (Accounts) | 22 | hand-authored |
+| `azure-ai-services` | Azure AI Services | 21 | hand-authored |
+| `azure-ai-services-entra` | Azure AI Services (Entra ID) | 21 | hand-authored |
+| `azure-mysql` | Azure Database for MySQL | 21 | hand-authored |
 | `3cx` | 3CX | 20 | hand-authored |
+| `azure-cosmos-db` | Azure Cosmos DB (NoSQL) | 19 | hand-authored |
+| `azure-service-bus` | Azure Service Bus | 19 | hand-authored |
 | `google-sheet` | Google Sheets | 19 | hand-authored |
 | `google-meet` | Google Meet | 18 | hand-authored |
+| `azure-data-explorer` | Azure Data Explorer (Kusto) | 17 | hand-authored |
+| `azure-openai-service` | Azure OpenAI Service | 17 | hand-authored |
+| `azure-storage-file` | Azure Files | 17 | hand-authored |
 | `google-maps` | Google Maps | 17 | hand-authored |
 | `microsoft-entra-id`, `microsoft-admin` | Microsoft Entra ID | 16 | hand-authored |
 | `1password-scim` | 1Password (SCIM) | 15 | hand-authored |
 | `asana` | Asana | 15 | hand-authored |
+| `azure-app-configuration` | Azure App Configuration | 15 | hand-authored |
 | `front` | Front | 15 | hand-authored |
 | `gitlab` | GitLab | 15 | hand-authored |
 | `jira` | Jira | 15 | hand-authored |
@@ -534,6 +571,7 @@ and destructive flags must match its HTTP verb.
 | `mailchimp` | Mailchimp | 14 | hand-authored |
 | `zendesk` | Zendesk | 14 | hand-authored |
 | `auth0` | Auth0 | 13 | hand-authored |
+| `azure-maps` | Azure Maps | 13 | hand-authored |
 | `close` | Close | 13 | hand-authored |
 | `copper` | Copper | 13 | hand-authored |
 | `digitalocean` | DigitalOcean | 13 | hand-authored |
@@ -543,6 +581,9 @@ and destructive flags must match its HTTP verb.
 | `sendgrid` | SendGrid | 13 | hand-authored |
 | `squareup`, `squareup-sandbox` | Square | 13 | hand-authored |
 | `webflow` | Webflow | 13 | hand-authored |
+| `azure-document-intelligence` | Azure AI Document Intelligence | 12 | hand-authored |
+| `azure-storage-queue` | Azure Queue Storage | 12 | hand-authored |
+| `azure-storage-table` | Azure Table Storage | 12 | hand-authored |
 | `clickup` | ClickUp | 12 | hand-authored |
 | `docusign`, `docusign-sandbox` | DocuSign | 12 | hand-authored |
 | `eventbrite` | Eventbrite | 12 | hand-authored |
@@ -577,6 +618,7 @@ and destructive flags must match its HTTP verb.
 | `smartsheet` | Smartsheet | 11 | hand-authored |
 | `typeform` | Typeform | 11 | hand-authored |
 | `adobe` | Adobe | 10 | hand-authored |
+| `azure-content-safety` | Azure AI Content Safety | 10 | hand-authored |
 | `calendly` | Calendly | 10 | hand-authored |
 | `constant-contact` | Constant Contact | 10 | hand-authored |
 | `google-forms` | Google Forms | 10 | hand-authored |
@@ -587,8 +629,11 @@ and destructive flags must match its HTTP verb.
 | `gusto`, `gusto-demo` | Gusto | 9 | hand-authored |
 | `one-note`, `microsoft-onenote` | OneNote | 9 | hand-authored |
 | `twilio` | Twilio | 9 | hand-authored |
+| `adrapid` | AdRapid | 8 | hand-authored |
 | `mixpanel` | Mixpanel | 8 | hand-authored |
 | `1password-events` | 1Password (Events API) | 7 | hand-authored |
+| `azure-ai-translator` | Azure AI Translator | 7 | hand-authored |
+| `azure-ai-translator-entra` | Azure AI Translator (Entra ID) | 7 | hand-authored |
 | `google-calendar-mcp` | Google Calendar (MCP) | 7 | hand-authored |
 | `google-safebrowsing` | Google Safebrowsing | 7 | hand-authored |
 | `microsoft-people` | Microsoft People | 7 | hand-authored |
@@ -600,6 +645,7 @@ and destructive flags must match its HTTP verb.
 | `google-maps-platform` | Google Maps Platform | 5 | hand-authored |
 | `google-slides` | Google Slides | 5 | hand-authored |
 | `1password-users` | 1Password (Users API) | 4 | hand-authored |
+| `azure-monitor-logs` | Azure Monitor Logs | 4 | hand-authored |
 | `google-service-account` | Google Service Account | 3 | hand-authored |
 | `abstract` | Abstract | 1 | hand-authored |
 | `cisco-meraki` | Cisco Meraki | 14 | spec-generated |
@@ -623,7 +669,6 @@ and destructive flags must match its HTTP verb.
 | `vimeo-basic` | Vimeo (Basic Auth) | 14 | spec-generated |
 | `xero-oauth2-cc` | Xero (Client Credentials) | 14 | spec-generated |
 | `zoom-cc` | Zoom (Server-to-Server OAuth) | 14 | spec-generated |
-| `adyntel` | Adyntel | 12 | spec-generated |
 | `agentline` | AgentLine | 12 | spec-generated |
 | `ahrefs` | Ahrefs | 12 | spec-generated |
 | `akkio` | Akkio | 12 | spec-generated |
@@ -761,7 +806,7 @@ and destructive flags must match its HTTP verb.
 <!-- tool-coverage:end -->
 
 <!-- tool-coverage-note:start -->
-A pack is always better than the fallbacks: it names real operations instead of handing the caller a raw request. 240 of the connectors without one are OAuth2. Adding a pack is a single file — see
+A pack is always better than the fallbacks: it names real operations instead of handing the caller a raw request. 238 of the connectors without one are OAuth2. Adding a pack is a single file — see
 [Adding tools for a connector](#adding-tools-for-a-connector), or let
 `scripts/generate_from_openapi.py` build one where the provider publishes a spec.
 <!-- tool-coverage-note:end -->
@@ -936,7 +981,7 @@ Installing the package installs a `connectors` command, equivalent to
 
 ```bash
 connectors list --search hubspot
-connectors list --page 2 --page-size 20        # showing 21-40 of 1586 · page 2/80
+connectors list --page 2 --page-size 20        # showing 21-40 of 1633 · page 2/82
 connectors list --all --page-size 200          # page through everything
 connectors show 1password-users                # every field it needs
 connectors stats                               # totals by auth mode and category
@@ -997,7 +1042,7 @@ control.
 | `tools/executor.py` | `ToolExecutor` | argument validation, template binding, result parsing |
 | `data/connectors/` | — | connector definitions, one YAML file per auth mode |
 | `data/tools/` | — | tool packs, one YAML file per connector |
-| `data/icons/` | — | 1,591 SVG logos |
+| `data/icons/` | — | 1,643 SVG logos |
 
 Run the suite with `uv run pytest -q` — 229 tests. Coverage includes the whole
 catalogue: every connector must expose a name, an icon, a buildable auth schema
@@ -1145,6 +1190,7 @@ right folder; `--check` lints every pack and is what CI runs.
 | [SECURITY.md](SECURITY.md) | Reporting a vulnerability, and handling credentials safely |
 | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | How we treat each other |
 | [docs/added-connectors.md](docs/added-connectors.md) | Provenance and live check behind every connector added in 0.1.2 |
+| [docs/azure-and-vector-connectors.md](docs/azure-and-vector-connectors.md) | Azure's control and data planes, and the vector, graph and database connectors |
 | [TOOLS.md](TOOLS.md) | Every connector and the tools it exposes, generated |
 | [docs/tools.md](docs/tools.md) | The tool pack format, field by field |
 | [scripts/split_connectors.py](scripts/split_connectors.py) | Regroups the catalogue into one file per auth mode |
