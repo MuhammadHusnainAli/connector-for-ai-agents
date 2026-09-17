@@ -35,6 +35,11 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
+      - name: Check the tool index is current
+        # Lookups resolve through data/tools/index.json; a pack added without
+        # rebuilding it is invisible to the registry.
+        run: python scripts/build_index.py --check
+
       - name: Check the catalogue is grouped by auth mode
         run: python scripts/split_connectors.py --check
 
@@ -58,8 +63,10 @@ jobs:
       - name: Build sdist and wheel
         run: |
           python -m pip install --upgrade pip build twine
+          python scripts/build_index.py --check
           python -m build
           python -m twine check --strict dist/*
+          python scripts/verify_wheel.py
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:

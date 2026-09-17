@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Regroup the connector catalogue into one YAML file per auth mode.
+"""Regroup the connector catalogue into one JSON file per auth mode.
 
-The catalogue started life as a single ``connectors.yaml``. At ~1,600 entries
+The catalogue started life as a single ``connectors.json``. At ~1,600 entries
 that file was 840 KB, which makes review diffs unreadable and edits
-collision-prone. This script shards it into ``data/connectors/<auth-mode>.yaml``
+collision-prone. This script shards it into ``data/connectors/<auth-mode>.json``
 and can re-run at any time to put entries back in the right file after an auth
 mode changes.
 
@@ -17,31 +17,18 @@ Grouping key is the *effective* auth mode: an alias inherits its target's mode
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 from typing import Any, Iterable
 
-import yaml
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = REPO_ROOT / "src" / "connector_manager" / "data"
-LEGACY_FILE = DATA_DIR / "connectors.yaml"
+LEGACY_FILE = DATA_DIR / "connectors.json"
 CONNECTORS_DIR = DATA_DIR / "connectors"
 
 #: Bucket for entries whose auth mode is absent or unrecognised.
 FALLBACK_MODE = "NONE"
-
-HEADER = """\
-# Connector definitions: {mode} auth.
-#
-# Auth mode, credential/config fields, api base url and verification endpoint
-# for each connector, sorted by connector id. One file per auth mode; the
-# registry loads every *.yaml under this directory and merges them.
-#
-# Machine-generated grouping -- run `python scripts/split_connectors.py` after
-# changing an `auth_mode` so the entry lands in the right file.
-"""
-
 
 def slug(mode: str) -> str:
     """``OAUTH2_CC`` -> ``oauth2-cc``, the file stem for that mode."""
@@ -49,10 +36,10 @@ def slug(mode: str) -> str:
 
 
 def load_source(path: Path) -> dict[str, dict[str, Any]]:
-    """Load the catalogue from a single YAML file or a directory of them."""
+    """Load the catalogue from a single JSON file or a directory of them."""
     entries: dict[str, dict[str, Any]] = {}
-    for file in iter_yaml_files(path):
-        chunk = yaml.safe_load(file.read_text(encoding="utf-8")) or {}
+    for file in iter_catalogue_files(path):
+        chunk = json.loads(file.read_text(encoding="utf-8")) or {}
         for key, value in chunk.items():
             if key in entries:
                 raise SystemExit(f"duplicate connector id {key!r} in {file}")
@@ -60,11 +47,11 @@ def load_source(path: Path) -> dict[str, dict[str, Any]]:
     return entries
 
 
-def iter_yaml_files(path: Path) -> Iterable[Path]:
+def iter_catalogue_files(path: Path) -> Iterable[Path]:
     if path.is_dir():
-        files = sorted(path.rglob("*.yaml"))
+        files = sorted(path.rglob("*.json"))
         if not files:
-            raise SystemExit(f"no *.yaml files under {path}")
+            raise SystemExit(f"no *.json files under {path}")
         return files
     if path.is_file():
         return [path]
@@ -104,25 +91,25 @@ def group(entries: dict[str, dict[str, Any]]) -> dict[str, dict[str, dict[str, A
 
 
 def render(mode: str, bucket: dict[str, dict[str, Any]]) -> str:
-    body = yaml.safe_dump(
-        bucket,
-        sort_keys=True,
-        allow_unicode=True,
-        default_flow_style=False,
-        width=10**9,
-    )
-    return HEADER.format(mode=mode) + body
+    """One auth mode's connectors as compact JSON.
+
+    ``sort_keys`` so the grouping is reproducible and a re-run of this script
+    produces a byte-identical file -- which is what ``--check`` compares. Tool
+    packs are emphatically not written this way: their tool order is authored.
+    """
+    del mode  # part of the signature for callers that label their output
+    return json.dumps(bucket, separators=(",", ":"), ensure_ascii=False, sort_keys=True)
 
 
 def write(buckets: dict[str, dict[str, dict[str, Any]]], dest: Path) -> list[Path]:
     dest.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
     for mode, bucket in buckets.items():
-        path = dest / f"{slug(mode)}.yaml"
+        path = dest / f"{slug(mode)}.json"
         path.write_text(render(mode, bucket), encoding="utf-8")
         written.append(path)
     # Drop files for modes that no longer have any connectors.
-    for stale in sorted(dest.glob("*.yaml")):
+    for stale in sorted(dest.glob("*.json")):
         if stale not in written:
             stale.unlink()
     return written
@@ -131,8 +118,8 @@ def write(buckets: dict[str, dict[str, dict[str, Any]]], dest: Path) -> list[Pat
 def check(buckets: dict[str, dict[str, dict[str, Any]]], dest: Path) -> int:
     """Compare the grouping against what is on disk; report every difference."""
     problems: list[str] = []
-    expected = {dest / f"{slug(mode)}.yaml": render(mode, bucket) for mode, bucket in buckets.items()}
-    on_disk = set(dest.glob("*.yaml"))
+    expected = {dest / f"{slug(mode)}.json": render(mode, bucket) for mode, bucket in buckets.items()}
+    on_disk = set(dest.glob("*.json"))
 
     for path in sorted(on_disk - set(expected)):
         problems.append(f"{path.name}: no connector uses this auth mode any more")
@@ -181,7 +168,7 @@ def main() -> int:
         "--source",
         type=Path,
         default=None,
-        help="catalogue to read: a YAML file or a directory of them "
+        help="catalogue to read: a JSON file or a directory of them "
         f"(default: {CONNECTORS_DIR}, falling back to the legacy {LEGACY_FILE.name})",
     )
     parser.add_argument("--dest", type=Path, default=CONNECTORS_DIR, help="directory to write the per-mode files into")

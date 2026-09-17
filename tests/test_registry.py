@@ -36,7 +36,7 @@ def test_icons_are_svg(registry: ConnectorRegistry) -> None:
 
 def test_aliases_inherit_their_target(registry: ConnectorRegistry) -> None:
     aliased = [c for c in registry if c.alias]
-    assert aliased, "expected providers.yaml to contain aliases"
+    assert aliased, "expected the catalogue to contain aliases"
     for connector in aliased:
         target = registry.get(connector.alias)
         # An alias keeps the target's auth mode unless it overrides it explicitly.

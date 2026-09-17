@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Create and check connector tool packs.
 
-Tools live in ``data/tools/<auth-mode>/<connector-id>.yaml``, one file per
+Tools live in ``data/tools/<auth-mode>/<connector-id>.json``, one file per
 connector, mirroring how the connector catalogue is sharded by auth mode.
 Adding a connector's tools is a one-file job -- no code change, no registry
 edit -- and this script writes the skeleton in the right place and validates
@@ -21,9 +21,11 @@ form you can run against a file you are still editing.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -45,64 +47,46 @@ METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE"})
 #: test would wave through as a placeholder.
 PLACEHOLDER_HOSTS = frozenset({"example.com", "example.org", "example.net"})
 
-SKELETON = '''\
-# {display_name} tools.
-#
-# Docs: {docs_url}
-#
-# Fill in one entry per capability. Each tool needs: a description a model can
-# act on, the scopes the provider demands, the request it makes, typed inputs,
-# and a described output. `python scripts/scaffold_tools.py --check` validates
-# the file; `pytest tests/test_tool_packs.py` is the same contract in CI.
-
-connector_id: {connector_id}
-display_name: {display_name}
-docs_url: {docs_url}
-
-# Uncomment when the provider's scope names need normalising before comparison
-# (case-insensitive names, a shared URL prefix, or hierarchical scopes).
-# scope_rules:
-#   case_insensitive: false
-#   strip_prefixes: []
-#   implies:
-#     write: [read]
-
-# Uncomment when the provider can report a live credential's real scopes,
-# either from a token-info endpoint or from the access token's own claims.
-# scope_discovery:
-#   method: GET
-#   endpoint: /oauth/token/info
-#   scopes_path: scopes          # or "header:x-oauth-scopes", or jwt_claim: scp
-
-tools:
-
-  list_things:
-    title: List things
-    description: >-
-      Replace this with a description an agent can act on: what the tool does,
-      what it returns, and when to reach for a different tool instead.
-    category: things
-    scopes: []
-    read_only: true
-    request:
-      method: GET
-      path: /v1/things
-      query:
-        limit: "${{limit}}"
-    input:
-      limit:
-        type: integer
-        description: How many things to return.
-        optional: true
-        default: 50
-        minimum: 1
-        maximum: 100
-    output:
-      description: A page of things.
-      type: object
-      properties:
-        data: {{type: array}}
-'''
+#: The starting point `--new` writes. JSON carries no comments, so the guidance
+#: that used to live in this template is printed to the terminal instead -- see
+#: the end of scaffold().
+SKELETON: dict[str, Any] = {
+    "connector_id": "",
+    "display_name": "",
+    "docs_url": "",
+    "tools": {
+        "list_things": {
+            "title": "List things",
+            "description": (
+                "Replace this with a description an agent can act on: what the tool "
+                "does, what it returns, and when to reach for a different tool instead."
+            ),
+            "category": "things",
+            "scopes": [],
+            "read_only": True,
+            "request": {
+                "method": "GET",
+                "path": "/v1/things",
+                "query": {"limit": "${limit}"},
+            },
+            "input": {
+                "limit": {
+                    "type": "integer",
+                    "description": "How many things to return.",
+                    "optional": True,
+                    "default": 50,
+                    "minimum": 1,
+                    "maximum": 100,
+                }
+            },
+            "output": {
+                "description": "A page of things.",
+                "type": "object",
+                "properties": {"data": {"type": "array"}},
+            },
+        }
+    },
+}
 
 
 def slug(mode: str) -> str:
@@ -122,25 +106,34 @@ def scaffold(connector_id: str, registry: ConnectorRegistry, force: bool) -> int
         print(f"no connector '{connector_id}' in the catalogue", file=sys.stderr)
         return 1
 
-    path = TOOLS_DIR / slug(connector.auth_mode.value) / f"{connector_id}.yaml"
+    path = TOOLS_DIR / slug(connector.auth_mode.value) / f"{connector_id}.json"
     if path.exists() and not force:
         print(f"{display(path)} already exists (pass --force to overwrite)", file=sys.stderr)
         return 1
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        SKELETON.format(
-            connector_id=connector_id,
-            display_name=connector.display_name,
-            docs_url="https://example.com/api-docs  # replace with the provider's reference",
-        ),
-        encoding="utf-8",
-    )
+    skeleton = json.loads(json.dumps(SKELETON))  # a copy, so --new is repeatable
+    skeleton["connector_id"] = connector_id
+    skeleton["display_name"] = connector.display_name
+    skeleton["docs_url"] = "https://example.com/api-docs"
+    path.write_text(json.dumps(skeleton, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
     print(f"wrote {display(path)}")
     print(f"  auth mode : {connector.auth_mode.value}")
     print(f"  base url  : {connector.base_url or '-'}  (tool paths are relative to this)")
-    print("\nNext: fill in the tools, then run")
+    print(
+        "\nEach tool needs: a description a model can act on, the scopes the provider\n"
+        "demands, the request it makes, typed inputs, and a described output.\n"
+        "\nOptional keys the loader understands, none of them in the skeleton:\n"
+        "  scope_rules       {case_insensitive, strip_prefixes, implies}\n"
+        "                    when scope names need normalising before comparison\n"
+        "  scope_discovery   {method, endpoint, scopes_path}\n"
+        "                    when the provider can report a live credential's scopes\n"
+        "  applies_to        other connector ids this pack also serves\n"
+    )
+    print("Then replace docs_url with the provider's reference and run")
     print("  python scripts/scaffold_tools.py --check")
+    print("  python scripts/build_index.py      # after adding or renaming a pack")
     return 0
 
 
@@ -188,7 +181,7 @@ def _check_pack(pack: ToolPack, registry: ConnectorRegistry, seen: dict[str, str
         return [f"{where}: connector '{pack.connector_id}' is not in the catalogue"]
 
     if path.stem != pack.connector_id:
-        problems.append(f"{where}: should be named {pack.connector_id}.yaml")
+        problems.append(f"{where}: should be named {pack.connector_id}.json")
     expected = slug(connector.auth_mode.value)
     if path.parent.name != expected:
         problems.append(f"{where}: is under {path.parent.name}/ but {pack.connector_id} is {expected}")

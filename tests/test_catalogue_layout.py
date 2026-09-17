@@ -1,4 +1,4 @@
-"""The catalogue is sharded into one YAML file per auth mode.
+"""The catalogue is sharded into one JSON file per auth mode.
 
 These tests guard the invariants the sharding relies on: every file holds only
 its own auth mode, ids are unique across files, and a connector id resolves the
@@ -7,12 +7,12 @@ same however the catalogue is spelled on disk.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
-import yaml
 
 from connector_manager import AuthMode, ConnectorRegistry
 from connector_manager.registry import CONNECTORS_DIR, _load_definitions
@@ -28,14 +28,17 @@ def registry() -> ConnectorRegistry:
 
 @pytest.fixture(scope="module")
 def shards() -> dict[Path, dict]:
-    return {path: yaml.safe_load(path.read_text(encoding="utf-8")) or {} for path in sorted(CONNECTORS_DIR.glob("*.yaml"))}
+    return {
+        path: json.loads(path.read_text(encoding="utf-8")) or {}
+        for path in sorted(CONNECTORS_DIR.glob("*.json"))
+    }
 
 
 def test_catalogue_is_sharded(shards: dict[Path, dict]) -> None:
     assert CONNECTORS_DIR.is_dir(), "expected a data/connectors/ directory"
     assert len(shards) > 1, "expected the catalogue split across several files"
     # The names the split script derives from the auth modes.
-    assert {"api-key.yaml", "oauth2.yaml", "basic.yaml"} <= {p.name for p in shards}
+    assert {"api-key.json", "oauth2.json", "basic.json"} <= {p.name for p in shards}
 
 
 def test_no_file_is_oversized(shards: dict[Path, dict]) -> None:
@@ -79,10 +82,10 @@ def test_split_script_reports_no_drift() -> None:
 def test_a_single_file_catalogue_still_loads(tmp_path: Path, registry: ConnectorRegistry) -> None:
     """Back-compat: pre-0.1.3 bundles and custom catalogues are one file."""
     merged = {}
-    for path in sorted(CONNECTORS_DIR.glob("*.yaml")):
-        merged.update(yaml.safe_load(path.read_text(encoding="utf-8")) or {})
-    single = tmp_path / "connectors.yaml"
-    single.write_text(yaml.safe_dump(merged, sort_keys=True, allow_unicode=True, width=10**9), encoding="utf-8")
+    for path in sorted(CONNECTORS_DIR.glob("*.json")):
+        merged.update(json.loads(path.read_text(encoding="utf-8")) or {})
+    single = tmp_path / "connectors.json"
+    single.write_text(json.dumps(merged, sort_keys=True), encoding="utf-8")
 
     from_file = ConnectorRegistry(connectors_file=single)
     assert len(from_file) == len(registry)
@@ -91,8 +94,8 @@ def test_a_single_file_catalogue_still_loads(tmp_path: Path, registry: Connector
 
 
 def test_duplicate_ids_across_files_are_rejected(tmp_path: Path) -> None:
-    (tmp_path / "a.yaml").write_text("dup:\n  auth_mode: API_KEY\n", encoding="utf-8")
-    (tmp_path / "b.yaml").write_text("dup:\n  auth_mode: BASIC\n", encoding="utf-8")
+    (tmp_path / "a.json").write_text(json.dumps({"dup": {"auth_mode": "API_KEY"}}), encoding="utf-8")
+    (tmp_path / "b.json").write_text(json.dumps({"dup": {"auth_mode": "BASIC"}}), encoding="utf-8")
     with pytest.raises(ValueError, match="duplicate connector id"):
         _load_definitions(tmp_path)
 
@@ -100,11 +103,16 @@ def test_duplicate_ids_across_files_are_rejected(tmp_path: Path) -> None:
 def test_alias_chains_resolve_regardless_of_file_order(tmp_path: Path) -> None:
     """google-calendar-mcp -> google-calendar -> google spans three files."""
     # Written so the alphabetical merge order puts the target file *last*.
-    (tmp_path / "z-target.yaml").write_text(
-        "root:\n  auth_mode: OAUTH2\n  display_name: Root\n  categories: [x]\n", encoding="utf-8"
+    (tmp_path / "z-target.json").write_text(
+        json.dumps({"root": {"auth_mode": "OAUTH2", "display_name": "Root", "categories": ["x"]}}),
+        encoding="utf-8",
     )
-    (tmp_path / "m-middle.yaml").write_text("middle:\n  alias: root\n  display_name: Middle\n", encoding="utf-8")
-    (tmp_path / "a-leaf.yaml").write_text("leaf:\n  alias: middle\n  display_name: Leaf\n", encoding="utf-8")
+    (tmp_path / "m-middle.json").write_text(
+        json.dumps({"middle": {"alias": "root", "display_name": "Middle"}}), encoding="utf-8"
+    )
+    (tmp_path / "a-leaf.json").write_text(
+        json.dumps({"leaf": {"alias": "middle", "display_name": "Leaf"}}), encoding="utf-8"
+    )
 
     entries = _load_definitions(tmp_path)
     assert entries["leaf"]["auth_mode"] == "OAUTH2"
@@ -113,12 +121,16 @@ def test_alias_chains_resolve_regardless_of_file_order(tmp_path: Path) -> None:
 
 
 def test_alias_cycle_does_not_hang(tmp_path: Path) -> None:
-    (tmp_path / "cycle.yaml").write_text("a:\n  alias: b\nb:\n  alias: a\n", encoding="utf-8")
+    (tmp_path / "cycle.json").write_text(
+        json.dumps({"a": {"alias": "b"}, "b": {"alias": "a"}}), encoding="utf-8"
+    )
     entries = _load_definitions(tmp_path)
     assert set(entries) == {"a", "b"}
 
 
 def test_dangling_alias_is_left_alone(tmp_path: Path) -> None:
-    (tmp_path / "dangling.yaml").write_text("orphan:\n  alias: nowhere\n  auth_mode: API_KEY\n", encoding="utf-8")
+    (tmp_path / "dangling.json").write_text(
+        json.dumps({"orphan": {"alias": "nowhere", "auth_mode": "API_KEY"}}), encoding="utf-8"
+    )
     entries = _load_definitions(tmp_path)
     assert entries["orphan"]["auth_mode"] == "API_KEY"

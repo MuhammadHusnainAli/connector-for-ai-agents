@@ -18,31 +18,33 @@ network.
 ## Adding a connector
 
 Connectors live in `src/connector_manager/data/connectors/`, **one file per auth
-mode** — an `API_KEY` connector goes in `api-key.yaml`, an `OAUTH2` one in
-`oauth2.yaml`, and so on. Within a file, one key per connector, sorted
+mode** — an `API_KEY` connector goes in `api-key.json`, an `OAUTH2` one in
+`oauth2.json`, and so on. Within a file, one key per connector, sorted
 alphabetically. A minimal API-key entry:
 
-```yaml
-example-app:
-  auth_mode: API_KEY
-  categories:
-    - productivity
-  credentials:
-    apiKey:
-      title: API Key
-      description: Your Example App API key.
-      type: string
-      secret: true
-  display_name: Example App
-  proxy:
-    base_url: https://api.example.com/v1
-    headers:
-      authorization: Bearer ${apiKey}
-    verification:
-      endpoints:
-        - /me
-      method: GET
+```json
+"example-app": {
+  "auth_mode": "API_KEY",
+  "categories": ["productivity"],
+  "credentials": {
+    "apiKey": {
+      "title": "API Key",
+      "description": "Your Example App API key.",
+      "type": "string",
+      "secret": true
+    }
+  },
+  "display_name": "Example App",
+  "proxy": {
+    "base_url": "https://api.example.com/v1",
+    "headers": {"authorization": "Bearer ${apiKey}"},
+    "verification": {"endpoints": ["/me"], "method": "GET"}
+  }
+}
 ```
+
+The files are written compact, one line each; `python scripts/split_connectors.py`
+regroups and reformats them, so add your entry and let the script normalise it.
 
 What a good entry needs:
 
@@ -88,7 +90,7 @@ new ones — it makes review much harder.
 
 A connector's *tools* are the named capabilities an agent can call with it —
 `send_email_with_file_attachments`, `create_deal`, `merge_pull_request`. They
-live in one YAML file per connector, in the folder for that connector's auth
+live in one JSON file per connector, in the folder for that connector's auth
 mode, and adding a set needs no code change:
 
 ```bash
@@ -96,12 +98,13 @@ mode, and adding a set needs no code change:
 python scripts/discover_openapi.py --out plan.json          # find specs
 python scripts/generate_from_openapi.py --plan plan.json    # build packs from them
 
-python scripts/scaffold_tools.py --new stripe   # writes data/tools/oauth2/stripe.yaml
+python scripts/scaffold_tools.py --new stripe   # writes data/tools/oauth2/stripe.json
 python scripts/scaffold_tools.py --check        # lints every pack, and README's coverage table
 python scripts/scaffold_tools.py --readme       # refreshes that table after adding a pack
 python scripts/scaffold_tools.py --backlog      # what still needs a pack, most-connected categories first
 python scripts/scaffold_tools.py --catalogue    # regenerate TOOLS.md after adding a pack
 python scripts/scaffold_tools.py --backlog --category crm --limit 20
+python scripts/build_index.py                   # rebuild the lookup index after adding a pack
 pytest tests/test_tool_packs.py                 # the same contract, in CI
 ```
 
@@ -116,14 +119,14 @@ will look for:
 - **Scopes come from the provider's own docs**, and `docs_url` has to point at
   the page they came from so a reviewer can check them. If a provider does not
   put permissions on the token at all — Notion, Asana, Intercom — declare no
-  scopes and say so in the file's header comment. Guessing a scope name is worse
+  scopes and say so in the pull request. Guessing a scope name is worse
   than declaring none, because a wrong one disables a tool that in fact works.
 - **Arguments are the tool's contract.** Every one needs a type and a
   description; every one must be read by some template; no template may read one
   that is not declared. Prefer arguments a model can fill from a conversation
   (`to`, `subject`, `body`) over ones it would have to construct (`raw`,
   `payload`) — `$map` and `$mime` exist so the provider's shape stays in the
-  YAML rather than in the caller's head.
+  pack rather than in the caller's head.
 - **`read_only` and `destructive` gate approval policies**, so they must match
   the verb: `GET` is read-only, `DELETE` is destructive, and a POST that only
   reads (GraphQL, search endpoints) is read-only too.

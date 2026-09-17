@@ -4,8 +4,8 @@
     python scripts/count_catalogue.py                     # the two totals
     python scripts/count_catalogue.py --include-baseline  # + synthesised tools
 
-Connectors come from ``data/connectors/*.yaml``, tools from the authored packs
-under ``data/tools/<auth-mode>/<connector-id>.yaml``. A connector with no pack
+Connectors come from ``data/connectors/*.json``, tools from the authored packs
+under ``data/tools/<auth-mode>/<connector-id>.json``. A connector with no pack
 still gets a baseline pack at runtime (``check_connection`` plus the raw HTTP
 verbs); those are synthesised rather than authored, so they are counted only
 with ``--include-baseline``.

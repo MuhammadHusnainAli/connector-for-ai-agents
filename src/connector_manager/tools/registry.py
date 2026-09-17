@@ -2,9 +2,9 @@
 
 Layout, mirroring the connector catalogue's one-file-per-auth-mode sharding::
 
-    data/tools/<auth-mode>/<connector-id>.yaml
+    data/tools/<auth-mode>/<connector-id>.json
 
-so ``data/tools/oauth2/hubspot.yaml`` holds every HubSpot tool and nothing else.
+so ``data/tools/oauth2/hubspot.json`` holds every HubSpot tool and nothing else.
 Adding a connector's tools means adding one file -- no code change, no registry
 edit. :mod:`scripts.scaffold_tools` writes the skeleton and ``--check``
 validates placement.
@@ -12,11 +12,10 @@ validates placement.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any, Iterator
-
-import yaml
 
 from ..errors import UnknownToolError
 from .models import (
@@ -60,8 +59,14 @@ def _data_dir() -> Path:
         return Path(__file__).parent.parent / "data"
 
 
-#: Root of the bundled tool packs.
+#: Root of the bundled tool packs, one JSON file per connector.
 TOOLS_DIR = _data_dir() / "tools"
+#: Name of the index living beside them: connector id -> the one pack file that
+#: serves it, plus each pack's tool count. With it, opening a connector's tools
+#: reads a single small file; without it the only way to find the pack claiming
+#: an ``applies_to`` alias is to open all 406, which was 12s of cold start.
+#: Maintained by ``scripts/build_index.py``.
+INDEX_NAME = "index.json"
 
 
 class ToolRegistry:
@@ -75,17 +80,54 @@ class ToolRegistry:
     """
 
     def __init__(self, tools_dir: str | Path | None = None) -> None:
-        self.tools_dir = Path(tools_dir or TOOLS_DIR)
         self._packs: dict[str, ToolPack] = {}
         self._by_connector: dict[str, ToolPack] = {}
-        self._load()
+        #: Populated only in compiled mode; ``None`` means every pack is already
+        #: parsed and :attr:`_by_connector` is authoritative.
+        self._index: dict[str, Any] | None = None
+
+        # An index means packs can be found without opening them, so they are
+        # parsed on demand. A directory without one -- a caller pointing at
+        # their own packs -- is read eagerly, which still works, just slower.
+        self.tools_dir = Path(tools_dir or TOOLS_DIR)
+        index = self.tools_dir / INDEX_NAME
+        if index.is_file():
+            self._index = json.loads(index.read_text(encoding="utf-8"))
+        else:
+            self._load()
+
+    # -- lazy resolution ---------------------------------------------------
+
+    def _pack_for(self, connector_id: object) -> ToolPack | None:
+        """The pack serving ``connector_id``, parsing its file on first use."""
+        if self._index is None:
+            return self._by_connector.get(connector_id)  # type: ignore[arg-type]
+        owner = self._index["by_connector"].get(connector_id)
+        if owner is None:
+            return None
+        pack = self._packs.get(owner)
+        if pack is None:
+            pack = load_pack(self.tools_dir / self._index["packs"][owner]["file"])
+            self._packs[owner] = pack
+            for cid in pack.connector_ids:
+                self._by_connector[cid] = pack
+        return pack
+
+    def _materialise(self) -> None:
+        """Parse every pack. Only whole-catalogue callers need this."""
+        if self._index is None:
+            return
+        for owner in self._index["packs"]:
+            self._pack_for(owner)
 
     # -- loading -----------------------------------------------------------
 
     def _load(self) -> None:
         if not self.tools_dir.is_dir():
             return
-        for path in sorted(self.tools_dir.rglob("*.yaml")):
+        for path in sorted(self.tools_dir.rglob("*.json")):
+            if path.name == INDEX_NAME:
+                continue
             pack = load_pack(path)
             if pack.connector_id in self._packs:
                 raise ValueError(f"duplicate tool pack for {pack.connector_id!r} in {path}")
@@ -103,31 +145,39 @@ class ToolRegistry:
 
     def __len__(self) -> int:
         """How many packs are bundled (not how many tools)."""
-        return len(self._packs)
+        return len(self._index["packs"]) if self._index is not None else len(self._packs)
 
     def __iter__(self) -> Iterator[ToolPack]:
+        self._materialise()
         return iter(self._packs.values())
 
     def __contains__(self, connector_id: object) -> bool:
+        if self._index is not None:
+            return connector_id in self._index["by_connector"]
         return connector_id in self._by_connector
 
     @property
     def packs(self) -> list[ToolPack]:
+        self._materialise()
         return list(self._packs.values())
 
     def connector_ids(self) -> list[str]:
         """Every connector id that resolves to a pack, aliases included."""
+        if self._index is not None:
+            return sorted(self._index["by_connector"])
         return sorted(self._by_connector)
 
     def has(self, connector_id: str) -> bool:
+        if self._index is not None:
+            return connector_id in self._index["by_connector"]
         return connector_id in self._by_connector
 
     def pack(self, connector_id: str) -> ToolPack | None:
         """The pack serving ``connector_id``, or ``None`` when none is bundled."""
-        return self._by_connector.get(connector_id)
+        return self._pack_for(connector_id)
 
     def get_pack(self, connector_id: str) -> ToolPack:
-        pack = self._by_connector.get(connector_id)
+        pack = self._pack_for(connector_id)
         if pack is None:
             raise UnknownToolError(
                 f"No tools are bundled for connector '{connector_id}'",
@@ -136,7 +186,7 @@ class ToolRegistry:
         return pack
 
     def tools(self, connector_id: str) -> list[Tool]:
-        pack = self._by_connector.get(connector_id)
+        pack = self._pack_for(connector_id)
         return list(pack.tools.values()) if pack else []
 
     def tool(self, connector_id: str, name: str) -> Tool:
@@ -152,11 +202,17 @@ class ToolRegistry:
         return tool
 
     def total_tools(self) -> int:
+        # The index carries per-pack counts, so this stays a sum over integers
+        # rather than a reason to parse the whole catalogue.
+        if self._index is not None:
+            return sum(p["tools"] for p in self._index["packs"].values())
         return sum(len(pack) for pack in self._packs.values())
 
     def search(self, query: str, connector_id: str | None = None) -> list[Tool]:
         """Tools whose name, title or description mentions ``query``."""
         needle = (query or "").strip().lower()
+        # Searching one connector reads one pack; searching all of them is the
+        # one call that genuinely needs every file.
         packs = [self.get_pack(connector_id)] if connector_id else self.packs
         out: list[Tool] = []
         for pack in packs:
@@ -168,6 +224,16 @@ class ToolRegistry:
 
     def stats(self) -> dict[str, Any]:
         """Counts a README or a CLI ``stats`` command can print verbatim."""
+        if self._index is not None:
+            counts = {cid: p["tools"] for cid, p in self._index["packs"].items()}
+            return {
+                "packs": len(counts),
+                "connectors_covered": len(self._index["by_connector"]),
+                "tools": self.total_tools(),
+                "by_connector": dict(
+                    sorted(counts.items(), key=lambda kv: -kv[1])
+                ),
+            }
         return {
             "packs": len(self._packs),
             "connectors_covered": len(self._by_connector),
@@ -180,14 +246,14 @@ class ToolRegistry:
 
 
 # ---------------------------------------------------------------------------
-# YAML -> dataclasses
+# JSON -> dataclasses
 # ---------------------------------------------------------------------------
 
 
 def load_pack(path: str | Path) -> ToolPack:
-    """Parse one ``<connector-id>.yaml`` tool pack."""
+    """Parse one ``<connector-id>.json`` tool pack."""
     path = Path(path)
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    data = json.loads(path.read_text(encoding="utf-8")) or {}
     if not isinstance(data, dict):
         raise ValueError(f"{path}: expected a mapping at the top level")
     connector_id = str(data.get("connector_id") or path.stem)

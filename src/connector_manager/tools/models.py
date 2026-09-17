@@ -7,7 +7,7 @@ inputs, described output) *and* everything this package needs to actually run it
 (HTTP method, path, query/body templates), plus the OAuth scopes the provider
 demands for it.
 
-Tools are data: they live in ``data/tools/<auth-mode>/<connector-id>.yaml`` and
+Tools are data: they live in ``data/tools/<auth-mode>/<connector-id>.json`` and
 are loaded by :class:`~connector_manager.tools.registry.ToolRegistry`. Nothing
 here performs I/O.
 """

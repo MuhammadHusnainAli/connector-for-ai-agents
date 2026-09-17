@@ -99,7 +99,7 @@ pip install connector-for-ai-agents
 uv add connector-for-ai-agents
 ```
 
-Python 3.10+. Runtime dependencies: `httpx`, `PyYAML`, `PyJWT`, `cryptography`.
+Python 3.10+. Runtime dependencies: `httpx`, `PyJWT`, `cryptography`.
 The distribution carries the connector definitions and all 1,643 logos, so
 nothing is fetched at runtime.
 
@@ -895,7 +895,7 @@ A pack is always better than the fallbacks: it names real operations instead of 
 
 ## Adding tools for a connector
 
-Tools are data, in `data/tools/<auth-mode>/<connector-id>.yaml` — the same
+Tools are data, in `data/tools/<auth-mode>/<connector-id>.json` — the same
 one-file-per-auth-mode sharding the connector catalogue uses. No code change, no
 registry edit.
 
@@ -903,34 +903,34 @@ registry edit.
 python scripts/scaffold_tools.py --new stripe   # writes the file in the right folder
 python scripts/scaffold_tools.py --check        # lints every pack
 python scripts/scaffold_tools.py --list         # what is covered so far
+python scripts/build_index.py                   # after adding or renaming a pack
 ```
 
 One tool looks like this:
 
-```yaml
-create_contact:
-  title: Create a contact
-  description: >-
-    Create a contact record. `properties` is a map of HubSpot internal property
-    names to values — email, firstname, lastname, lifecyclestage and any custom
-    property. Email is the deduplication key.
-  category: crm.contacts
-  scopes: [crm.objects.contacts.write]      # all of these; scopes_any for alternatives
-  request:
-    method: POST
-    path: /crm/v3/objects/contacts
-    body:
-      properties: "${properties}"
-  input:
-    properties:
-      type: object
-      description: Internal property name to value.
-  output:
-    description: The created contact.
-    type: object
-    properties:
-      id: {type: string}
+```json
+"create_contact": {
+  "title": "Create a contact",
+  "description": "Create a contact record. `properties` is a map of HubSpot internal property names to values — email, firstname, lastname, lifecyclestage and any custom property. Email is the deduplication key.",
+  "category": "crm.contacts",
+  "scopes": ["crm.objects.contacts.write"],
+  "request": {
+    "method": "POST",
+    "path": "/crm/v3/objects/contacts",
+    "body": {"properties": "${properties}"}
+  },
+  "input": {
+    "properties": {"type": "object", "description": "Internal property name to value."}
+  },
+  "output": {
+    "description": "The created contact.",
+    "type": "object",
+    "properties": {"id": {"type": "string"}}
+  }
+}
 ```
+
+`scopes` means *all* of these; use `scopes_any` when any one of them will do.
 
 `${argument}` binds at call time. A value that is exactly one placeholder keeps
 the argument's own type — an object stays an object; an embedded one is
@@ -942,36 +942,46 @@ An object that wanted content and got none disappears too, rather than being
 sent as `{}` — which most providers read as *clear this field*. Where an
 object's point is a single optional argument, `$when` makes that explicit:
 
-```yaml
-body:
-  $when: "${body}"          # renaming a draft must not PATCH an empty body over it
-  contentType: "${body_type}"
-  content: "${body}"
+```json
+"body": {
+  "$when": "${body}",
+  "contentType": "${body_type}",
+  "content": "${body}"
+}
 ```
+
+Renaming a draft must not PATCH an empty body over it, which is what `$when`
+prevents.
 
 Three more constructs cover the shapes providers actually want:
 
-```yaml
-# $map: a list of plain values becomes a list of provider-shaped objects
-toRecipients:
-  $map:
-    source: "${to}"
-    template: {emailAddress: {address: "${item}"}}
+`$map` turns a list of plain values into a list of provider-shaped objects;
+`$keyed` does the same but keys them into an object, as Planner's assignments
+want; `$mime` turns ordinary fields into a base64url RFC 2822 message, which is
+what Gmail's send API takes.
 
-# $keyed: the same, but keyed into an object (Planner's assignments)
-assignments:
-  $keyed:
-    source: "${assignee_ids}"
-    key: "${item}"
-    value: {"@odata.type": "#microsoft.graph.plannerAssignment"}
-
-# $mime: ordinary fields become a base64url RFC 2822 message (Gmail's send API)
-raw:
-  $mime:
-    to: "${to}"
-    subject: "${subject}"
-    body: "${body}"
-    attachments: "${attachments}"
+```json
+"toRecipients": {
+  "$map": {
+    "source": "${to}",
+    "template": {"emailAddress": {"address": "${item}"}}
+  }
+},
+"assignments": {
+  "$keyed": {
+    "source": "${assignee_ids}",
+    "key": "${item}",
+    "value": {"@odata.type": "#microsoft.graph.plannerAssignment"}
+  }
+},
+"raw": {
+  "$mime": {
+    "to": "${to}",
+    "subject": "${subject}",
+    "body": "${body}",
+    "attachments": "${attachments}"
+  }
+}
 ```
 
 `encoding: form` sends the body as `application/x-www-form-urlencoded` with
@@ -981,16 +991,18 @@ bracket notation for nested values, which is what Stripe and Twilio take.
 A pack can also declare how its provider spells scopes and how to read a live
 credential's real ones:
 
-```yaml
-applies_to: [outlook]           # other connector ids this same pack serves
-scope_rules:
-  case_insensitive: true
-  strip_prefixes: ["https://www.googleapis.com/auth/"]
-  implies:
-    Mail.ReadWrite: [Mail.Read]
-scope_discovery:
-  jwt_claim: scp                # or an endpoint + scopes_path, or header:x-oauth-scopes
+```json
+"applies_to": ["outlook"],
+"scope_rules": {
+  "case_insensitive": true,
+  "strip_prefixes": ["https://www.googleapis.com/auth/"],
+  "implies": {"Mail.ReadWrite": ["Mail.Read"]}
+},
+"scope_discovery": {"jwt_claim": "scp"}
 ```
+
+`applies_to` lists other connector ids this same pack serves. `scope_discovery`
+also accepts an endpoint plus `scopes_path`, or `header:x-oauth-scopes`.
 
 `pytest tests/test_tool_packs.py` runs the same contract as `--check` over every
 bundled pack.
@@ -1109,7 +1121,7 @@ control.
 | Module | Main classes | Role |
 | --- | --- | --- |
 | `manager.py` | `BaseConnectorManager`, `ConnectorManager`, `AsyncConnectorManager` | the public facade |
-| `registry.py` | `ConnectorRegistry` | merges `data/connectors/*.yaml` and icons, pagination, builds `AuthSchema` |
+| `registry.py` | `ConnectorRegistry` | merges `data/connectors/*.json` and icons, pagination, builds `AuthSchema` |
 | `models.py` | `Connector`, `ConnectorPage`, `AuthField`, `AuthSchema`, `Connection`, `AuthMode` | the data model |
 | `auth/` | `AuthStrategy` subclasses | one class per auth mode |
 | `flows.py` | `FlowRunner`, `AsyncFlowRunner` | drive one auth flow either sync or async |
@@ -1119,11 +1131,11 @@ control.
 | `validation.py` | — | required, pattern, enum, format, `visible_when` |
 | `interpolation.py` | — | the `${…}` template engine |
 | `tools/models.py` | `Tool`, `ToolPack`, `ToolReport`, `ScopeRules`, `ToolResult` | the tool data model |
-| `tools/registry.py` | `ToolRegistry` | loads `data/tools/<auth-mode>/*.yaml` |
+| `tools/registry.py` | `ToolRegistry` | resolves `data/tools/index.json`, loads a pack on first use |
 | `tools/permissions.py` | `ScopeDiscoverer`, `build_report` | grant vs. required scopes, live discovery |
 | `tools/executor.py` | `ToolExecutor` | argument validation, template binding, result parsing |
-| `data/connectors/` | — | connector definitions, one YAML file per auth mode |
-| `data/tools/` | — | tool packs, one YAML file per connector |
+| `data/connectors/` | — | connector definitions, one JSON file per auth mode |
+| `data/tools/` | — | tool packs, one JSON file per connector, plus `index.json` |
 | `data/icons/` | — | 1,643 SVG logos |
 
 Run the suite with `uv run pytest -q` — 229 tests. Coverage includes the whole
@@ -1229,19 +1241,19 @@ The catalogue is split by auth mode, one file per mode under
 `src/connector_manager/data/connectors/`:
 
 ```
-data/connectors/api-key.yaml     899 connectors
-                oauth2.yaml      361
-                oauth2-cc.yaml   110
-                basic.yaml       109
-                two-step.yaml     63
-                mcp-oauth2.yaml   24
+data/connectors/api-key.json     921 connectors
+                oauth2.json      364
+                oauth2-cc.json   134
+                basic.json       112
+                two-step.json     63
+                mcp-oauth2.json   24
                 ...              14 smaller modes
 ```
 
-The registry loads every `*.yaml` under that directory and merges them, so the
+The registry loads every `*.json` under that directory and merges them, so the
 layout is an organisational detail rather than API: ids stay unique across
 files, and an alias resolves against its target wherever that target lives.
-`ConnectorRegistry(connectors_file=...)` still accepts a single YAML file if you
+`ConnectorRegistry(connectors_file=...)` still accepts a single JSON file if you
 ship your own catalogue.
 
 `python scripts/split_connectors.py` regroups the files after an `auth_mode`
@@ -1251,13 +1263,13 @@ Tool packs sit alongside, sharded the same way — one file per connector, in th
 folder for that connector's auth mode:
 
 ```
-data/tools/oauth2/microsoft.yaml     54 tools  (also serves outlook)
-                  hubspot.yaml       32
-                  github.yaml        27
+data/tools/oauth2/microsoft.json     54 tools  (also serves outlook)
+                  hubspot.json       32
+                  github.json        27
                   ...
-           api-key/sendgrid.yaml     13
-           basic/twilio.yaml          9
-           oauth1/trello.yaml        12
+           api-key/sendgrid.json     13
+           basic/twilio.json          9
+           oauth1/trello.json        12
 ```
 
 `python scripts/scaffold_tools.py --new <connector-id>` writes a skeleton in the

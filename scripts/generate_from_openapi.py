@@ -494,33 +494,23 @@ def build_pack(connector_id: str, spec_url: str, max_tools: int, registry: Conne
         "generated_from": spec_url,
         "tools": tools,
     }
-    path = TOOLS_DIR / slug(connector.auth_mode.value) / f"{connector_id}.yaml"
+    path = TOOLS_DIR / slug(connector.auth_mode.value) / f"{connector_id}.json"
     return path, pack
 
 
-HEADER = """\
-# {display_name} tools -- GENERATED from the provider's OpenAPI specification.
-#
-#   source: {spec_url}
-#
-# Every path, method, parameter and description below comes from that spec.
-# Nothing here is inferred: operations the spec did not describe well enough to
-# build a usable tool from were skipped rather than guessed at.
-#
-# This is a starting point, not a hand-authored pack. It has no scope
-# annotations, and it covers a representative slice of the API rather than the
-# whole surface. Replacing it with a researched pack is an improvement -- delete
-# the `generated` flag once you do.
-"""
-
-
 def write_pack(path: Path, pack: dict[str, Any]) -> None:
-    import yaml
+    """Write a generated pack.
 
+    ``sort_keys=False``: the tools come out in the spec's own order, and that
+    order is what a model is shown. JSON carries no comments, so what used to
+    be a header explaining that the pack is generated now lives in the
+    ``generated`` and ``generated_from`` keys the loader already reads.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    body = yaml.safe_dump(pack, sort_keys=False, allow_unicode=True, width=100, default_flow_style=False)
-    header = HEADER.format(display_name=pack["display_name"], spec_url=pack["generated_from"])
-    path.write_text(header + "\n" + body, encoding="utf-8")
+    path.write_text(
+        json.dumps(pack, indent=2, ensure_ascii=False, sort_keys=False) + "\n",
+        encoding="utf-8",
+    )
 
 
 def main() -> int:
@@ -554,7 +544,7 @@ def main() -> int:
             print(f"skip {connector_id}: not in the catalogue", file=sys.stderr)
             skipped += 1
             continue
-        target = TOOLS_DIR / slug(connector.auth_mode.value) / f"{connector_id}.yaml"
+        target = TOOLS_DIR / slug(connector.auth_mode.value) / f"{connector_id}.json"
         if target.exists() and not args.force:
             print(f"skip {connector_id}: {target.name} already exists")
             skipped += 1

@@ -34,8 +34,12 @@ jobs:
       - name: Build sdist and wheel
         run: |
           python -m pip install --upgrade pip build twine
+          # verify_wheel.py fails the build if the catalogue or its index did
+          # not make it into the wheel, rather than let that reach PyPI.
+          python scripts/build_index.py --check
           python -m build
           python -m twine check --strict dist/*
+          python scripts/verify_wheel.py
 
       # Anything reaching real PyPI must be traceable to a tag: a version can
       # never be re-uploaded once taken, so an untagged publish is permanent and

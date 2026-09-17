@@ -379,13 +379,15 @@ def main() -> int:
     overrides = dict(pair.split("=", 1) for pair in args.rename)
     pack = build_pack(args.connector, args.discovery, overrides, set(args.skip), args.base_url)
 
-    import yaml
-
     registry = ConnectorRegistry()
     mode = registry.get(args.connector).auth_mode.value.lower().replace("_", "-")
-    path = Path(args.out) if args.out else TOOLS_DIR / mode / f"{args.connector}.yaml"
+    path = Path(args.out) if args.out else TOOLS_DIR / mode / f"{args.connector}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.dump(pack, sort_keys=False, width=100, allow_unicode=True), encoding="utf-8")
+    # sort_keys=False: tools keep the discovery document's order.
+    path.write_text(
+        json.dumps(pack, indent=2, ensure_ascii=False, sort_keys=False) + "\n",
+        encoding="utf-8",
+    )
     print(f"wrote {path}: {len(pack['tools'])} tools")
     return 0
 

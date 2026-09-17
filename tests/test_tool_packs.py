@@ -1,6 +1,6 @@
 """Every bundled tool pack, checked as data.
 
-These tests are the contract a new ``data/tools/<auth-mode>/<connector>.yaml``
+These tests are the contract a new ``data/tools/<auth-mode>/<connector>.json``
 has to meet, and they run over every pack, so adding a connector's tools cannot
 quietly ship a tool that names an argument it never declares, points at a path
 it cannot resolve, or claims to be read-only while issuing a DELETE.
@@ -58,10 +58,10 @@ def _id(tool: Tool) -> str:
 
 
 def test_packs_live_in_their_auth_mode_folder(packs: list[ToolPack], registry: ConnectorRegistry) -> None:
-    """``data/tools/oauth2/hubspot.yaml`` -- folder mirrors the catalogue's sharding."""
+    """``data/tools/oauth2/hubspot.json`` -- folder mirrors the catalogue's sharding."""
     for pack in packs:
         path = Path(pack.source)
-        assert path.stem == pack.connector_id, f"{path.name} should be named {pack.connector_id}.yaml"
+        assert path.stem == pack.connector_id, f"{path.name} should be named {pack.connector_id}.json"
         expected = registry.get(pack.connector_id).auth_mode.value.lower().replace("_", "-")
         assert path.parent.name == expected, (
             f"{path.name} is under {path.parent.name}/ but {pack.connector_id} is {expected}"
@@ -129,23 +129,26 @@ def test_the_small_pack_allowance_is_not_stale(packs: list[ToolPack]) -> None:
 # -- tool shape --------------------------------------------------------------
 
 
-def test_no_key_was_swallowed_by_yaml_booleans(packs: list[ToolPack]) -> None:
-    """A bare `on:`/`off:`/`yes:`/`no:` key parses as a boolean, not a string.
+def test_every_key_is_a_string(packs: list[ToolPack]) -> None:
+    """Argument, query and header names are strings, not coerced scalars.
 
-    YAML 1.1 turns those into ``True``/``False``, so an argument or query
-    parameter named `on` silently becomes a key of the wrong type. Quote it.
+    This used to guard a YAML 1.1 hazard: a bare `on:`/`off:`/`yes:`/`no:` key
+    parsed as a boolean, so a parameter named `on` silently became a key of the
+    wrong type. The packs are JSON now, where a key can only be a string, but
+    the invariant is still worth pinning -- the packs were converted from YAML
+    and anything it mangled would have been converted along with them.
     """
     for pack in packs:
         for tool in pack.tools.values():
             for name in (p.name for p in tool.input):
                 assert isinstance(name, str), f"{_id(tool)} has a non-string argument name {name!r}"
                 assert name not in ("True", "False"), (
-                    f"{_id(tool)} has an argument named {name!r} -- quote the key in the YAML"
+                    f"{_id(tool)} has an argument named {name!r}, which was a YAML boolean"
                 )
             for container in (tool.request.query, tool.request.headers):
                 for key in container:
                     assert key not in ("True", "False"), (
-                        f"{_id(tool)} has a {key!r} key -- quote it in the YAML"
+                        f"{_id(tool)} has a {key!r} key, which was a YAML boolean"
                     )
 
 
@@ -527,16 +530,22 @@ def test_scaffold_check_rejects_a_broken_pack(tmp_path: Path) -> None:
     import subprocess
     import sys
 
-    broken = tmp_path / "slack.yaml"
+    broken = tmp_path / "slack.json"
     broken.write_text(
-        "connector_id: slack\n"
-        "display_name: Slack\n"
-        "docs_url: https://api.slack.com/methods\n"
-        "tools:\n"
-        "  bad:\n"
-        "    description: short\n"
-        "    request: {method: GET, path: no-leading-slash}\n"
-        "    output: {}\n",
+        json.dumps(
+            {
+                "connector_id": "slack",
+                "display_name": "Slack",
+                "docs_url": "https://api.slack.com/methods",
+                "tools": {
+                    "bad": {
+                        "description": "short",
+                        "request": {"method": "GET", "path": "no-leading-slash"},
+                        "output": {},
+                    }
+                },
+            }
+        ),
         encoding="utf-8",
     )
     result = subprocess.run(
