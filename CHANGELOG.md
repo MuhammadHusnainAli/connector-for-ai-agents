@@ -4,6 +4,47 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] — 2026-09-18
+
+### Changed
+
+- **The icon set is 2.9 MB instead of 13.3 MB, and the wheel 4.4 MB instead of
+  12 MB.** Two thirds of the icons were never vector: 679 of the 1,643 were
+  Figma exports wrapping a PNG -- typically 4096px wide, cropped by a transform
+  matrix to show a 42x42 corner of itself -- and those 679 held 11.5 MB of the
+  13.3 MB. They are re-rendered at the 62px they actually display at and
+  re-wrapped, so every file is still a valid 62x62 SVG.
+
+      total on disk    13.28 MB -> 2.91 MB    78% smaller
+      largest icon       568 KB -> 56 KB      90% smaller
+      median icon        1.9 KB -> 1.4 KB
+      wheel               12 MB -> 4.4 MB
+
+  `registry.icon()` and `icon_path()` are unchanged, and still return inline
+  SVG. Fidelity was measured, not assumed: 120 icons rendered before and after
+  at display size and composited on white came back at a median difference of
+  0.23/255 and a maximum of 4.69, all of them under 10 -- no visible change.
+
+- **The 964 genuine vector icons keep their paths** and lose only what nothing
+  reads: comments, editor metadata, unreferenced ids, and coordinate precision
+  beyond two decimals, which is sub-pixel at this size.
+
+  Tracing the 679 bitmaps into real paths was measured first and rejected.
+  Traced output averaged 1.25x the size of the original file -- roughly twelve
+  times what re-rendering costs -- and banded the colours. Vectorising a logo
+  bitmap adds path data rather than removing it.
+
+### Added
+
+- `scripts/optimize_icons.py`, which re-encodes the set and reports on it
+  (`--report` measures without writing). It needs inkscape and pillow, neither
+  of which the package itself depends on.
+- `tests/test_icons.py` pins the invariants -- every icon parses as an SVG, the
+  set stays under its size budget, no single icon is oversized, and no icon
+  embeds a bitmap far larger than it displays at. One raw export dropped in
+  from a design tool trips all three size checks, which is how the old set
+  grew to 13 MB unnoticed.
+
 ## [0.2.3] — 2026-09-18
 
 ### Changed
@@ -979,6 +1020,7 @@ particular credential is allowed to do.
   `TBA` and `OAUTH1`, request proxying with interpolation, pagination and retry
   metadata, and a `connectors` CLI.
 
+[0.2.4]: https://github.com/MuhammadHusnainAli/connector-for-ai-agents/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/MuhammadHusnainAli/connector-for-ai-agents/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/MuhammadHusnainAli/connector-for-ai-agents/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/MuhammadHusnainAli/connector-for-ai-agents/compare/v0.2.0...v0.2.1
