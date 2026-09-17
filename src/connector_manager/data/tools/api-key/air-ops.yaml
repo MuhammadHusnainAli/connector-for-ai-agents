@@ -1,0 +1,1702 @@
+# AirOps tools -- run AirOps apps (workflows) and agents, manage knowledge bases
+# (memory stores) and grids, and read AEO insights: how AI assistants mention and
+# cite a brand.
+#
+# Every path, parameter and body field below comes from the OpenAPI fragments
+# AirOps embeds in each page of its API reference
+# (https://docs.airops.com/api-reference, 42 operations), merged into one
+# description. The connection's base url is https://api.airops.com with the
+# workspace API key as a bearer token, so paths start at /public_api.
+#
+# Running things:
+#
+#   * **execute_app waits, async_execute_app does not.** execute_app returns the
+#     output inline but fails if the run tops ten minutes or the workspace is at
+#     capacity; async_execute_app queues the run and returns an execution to poll
+#     with get_execution. Apps must be published. inputs is an object keyed by
+#     the app's input names (get_app lists them);
+#   * chat_with_agent does the same for Agent apps; pass the returned session_id
+#     to continue a conversation;
+#   * runs spend workspace credits; get_execution reports credits_used.
+#
+# AEO insights. Everything under brand kits is keyed by brand_kit_id --
+# list_brand_kits first. Metrics can be filtered by AI provider (chat_gpt,
+# gemini, perplexity, google_ai_mode, google_ai_overview, claude, grok,
+# microsoft_copilot), country, persona, topic and tag; query_brand_kit_analytics
+# is the flexible one, grouping metrics such as mention_rate, share_of_voice and
+# citation_rate by up to three dimensions. The list endpoints are POSTs that
+# only read.
+#
+# Not covered: POST /public_api/workspace_files, a multipart file upload these
+# JSON tools cannot send, and POST /public_api/airops_apps/{app_uuid}/webhook_async_execute,
+# which authenticates with the workspace key in an auth_token query parameter and
+# is meant for third-party services to call -- async_execute_app does the same
+# job with this connection's bearer key. The executions list is documented with a
+# literal :airops_app_id path segment; list_app_executions puts the numeric app
+# id there.
+#
+# Docs: https://docs.airops.com/api-reference
+
+connector_id: air-ops
+display_name: AirOps
+docs_url: https://docs.airops.com/api-reference/using-the-api/authentication
+tools:
+
+  list_apps:
+    title: List apps
+    description: >-
+      List the workspace's AirOps apps (workflows and agents) with their uuids, names and
+      inputs.
+    category: apps
+    read_only: true
+    request:
+      method: GET
+      path: /public_api/airops_apps
+    input: {}
+    output:
+      description: The apps.
+      type: array
+      items:
+        type: object
+
+  get_app:
+    title: Get an app
+    description: >-
+      Read one app: name, description, published versions and the input schema execute_app
+      expects.
+    category: apps
+    read_only: true
+    request:
+      method: GET
+      path: /public_api/airops_apps/${app_uuid}
+    input:
+      app_uuid:
+        type: string
+        description: App uuid, from list_apps or the app's Integrate tab.
+    output:
+      description: The app.
+      type: object
+
+  execute_app:
+    title: Run an app and wait
+    description: >-
+      Run a published app with inputs and wait for the result. Fails if the run takes over
+      ten minutes or the workspace is at capacity -- use async_execute_app for long runs.
+      Spends credits.
+    category: executions
+    destructive: true
+    request:
+      method: POST
+      path: /public_api/airops_apps/${app_uuid}/execute
+      body:
+        version_slug: ${version_slug}
+        inputs: ${inputs}
+    input:
+      app_uuid:
+        type: string
+        description: App uuid, from list_apps or the app's Integrate tab.
+      version_slug:
+        type: integer
+        description: App version to run; defaults to the default version.
+        optional: true
+      inputs:
+        type: object
+        description: Input values keyed by the app's input names.
+    output:
+      description: The execution with its output.
+      type: object
+      response_path: airops_app_execution
+
+  async_execute_app:
+    title: Queue an app run
+    description: >-
+      Queue a run of a published app and return immediately with its execution uuid; poll
+      get_execution for the result. Runs at the workspace's capacity and spends credits.
+    category: executions
+    destructive: true
+    request:
+      method: POST
+      path: /public_api/airops_apps/${app_uuid}/async_execute
+      body:
+        version_slug: ${version_slug}
+        inputs: ${inputs}
+    input:
+      app_uuid:
+        type: string
+        description: App uuid, from list_apps or the app's Integrate tab.
+      version_slug:
+        type: integer
+        description: App version to run; defaults to the default version.
+        optional: true
+      inputs:
+        type: object
+        description: Input values keyed by the app's input names.
+    output:
+      description: The queued execution.
+      type: object
+      response_path: airops_app_execution
+
+  get_execution:
+    title: Get an execution
+    description: >-
+      Read an execution's status (pending, running, error, success, cancelled, review_needed),
+      inputs, output, runtime and credits used.
+    category: executions
+    read_only: true
+    request:
+      method: GET
+      path: /public_api/airops_apps/executions/${execution_uuid}
+    input:
+      execution_uuid:
+        type: string
+        description: Execution uuid.
+    output:
+      description: The execution.
+      type: object
+
+  list_app_executions:
+    title: List an app's executions
+    description: >-
+      Page through every execution of an app with status, inputs and outputs.
+    category: executions
+    read_only: true
+    request:
+      method: GET
+      path: /public_api/airops_apps/${airops_app_id}/executions
+      query:
+        cursor: ${cursor}
+        items: ${items}
+    input:
+      airops_app_id:
+        type: integer
+        description: Numeric app id (the app's id, not its uuid).
+      cursor:
+        type: string
+        description: Cursor from the previous page.
+        optional: true
+      items:
+        type: integer
+        description: Executions per page, 1-100.
+        optional: true
+    output:
+      description: A page of executions.
+      type: object
+
+  cancel_execution:
+    title: Cancel an execution
+    description: >-
+      Stop a pending or running execution; finished ones cannot be cancelled.
+    category: executions
+    destructive: true
+    request:
+      method: PATCH
+      path: /public_api/airops_apps/executions/${execution_uuid}/cancel
+    input:
+      execution_uuid:
+        type: string
+        description: Execution uuid.
+    output:
+      description: The cancelled execution.
+      type: object
+
+  retry_execution:
+    title: Retry an execution
+    description: >-
+      Resume an errored execution from the step that failed. Spends credits for the remaining
+      steps.
+    category: executions
+    request:
+      method: POST
+      path: /public_api/airops_apps/executions/${execution_uuid}/retry
+    input:
+      execution_uuid:
+        type: string
+        description: Execution uuid.
+    output:
+      description: The retried execution.
+      type: object
+
+  rate_execution:
+    title: Rate an execution
+    description: >-
+      Record positive, neutral or negative feedback on a successful execution.
+    category: executions
+    request:
+      method: PATCH
+      path: /public_api/airops_apps/executions/${execution_uuid}/feedback
+      body:
+        feedback: ${feedback}
+    input:
+      execution_uuid:
+        type: string
+        description: Execution uuid.
+      feedback:
+        type: string
+        description: The feedback of the execution
+        enum:
+        - positive
+        - neutral
+        - negative
+    output:
+      description: The rated execution.
+      type: object
+
+  chat_with_agent:
+    title: Chat with an agent
+    description: >-
+      Send a message to an Agent app and wait for its reply. Omit session_id to start a conversation;
+      pass the returned one to continue it. Spends credits.
+    category: agents
+    request:
+      method: POST
+      path: /public_api/agent_apps/${app_uuid}/chat
+      body:
+        message: ${message}
+        inputs: ${inputs}
+        session_id: ${session_id}
+    input:
+      app_uuid:
+        type: string
+        description: App uuid, from list_apps or the app's Integrate tab.
+      message:
+        type: string
+        description: The message to send.
+      inputs:
+        type: object
+        optional: true
+        description: Input values for the agent, keyed by input name.
+      session_id:
+        type: string
+        optional: true
+        description: Session to continue; omit to start a new one.
+    output:
+      description: The agent's reply and session_id.
+      type: object
+
+  async_chat_with_agent:
+    title: Chat with an agent asynchronously
+    description: >-
+      Send a message to an Agent app without waiting for the reply. Spends credits.
+    category: agents
+    request:
+      method: POST
+      path: /public_api/agent_apps/${app_uuid}/async_chat
+      body:
+        message: ${message}
+        inputs: ${inputs}
+    input:
+      app_uuid:
+        type: string
+        description: App uuid, from list_apps or the app's Integrate tab.
+      message:
+        type: string
+        description: The message to send to the agent.
+      inputs:
+        type: object
+        description: Optional inputs to send along with the message.
+        optional: true
+    output:
+      description: Acknowledgement of the queued message.
+      type: object
+
+  search_memory_store:
+    title: Search a knowledge base
+    description: >-
+      Semantic search over a memory store's documents, optionally filtered on document metadata.
+    category: memory_stores
+    read_only: true
+    request:
+      method: GET
+      path: /public_api/vector_stores/${memory_store_id}/search
+      query:
+        query: ${query}
+        topk: ${topk}
+        filter: ${filter}
+    input:
+      memory_store_id:
+        type: string
+        description: Memory store (knowledge base) id.
+      query:
+        type: string
+        description: What to search for.
+      topk:
+        type: integer
+        description: How many results to return.
+        optional: true
+      filter:
+        type: string
+        description: 'Metadata filter as a JSON string, e.g. {"category": "faq"}.'
+        optional: true
+    output:
+      description: The matching document chunks.
+      type: object
+
+  add_memory_store_document:
+    title: Add a document to a knowledge base
+    description: >-
+      Add a text document with a name and optional metadata to a memory store, where it is
+      chunked and embedded for search.
+    category: memory_stores
+    request:
+      method: POST
+      path: /public_api/vector_stores/${memory_store_id}/vector_store_documents
+      body:
+        text: ${text}
+        name: ${name}
+        metadata: ${metadata}
+    input:
+      memory_store_id:
+        type: string
+        description: Memory store (knowledge base) id.
+      text:
+        type: string
+        description: The content of the document
+      name:
+        type: string
+        description: The name of the document
+      metadata:
+        type: object
+        description: The metadata of the document
+        optional: true
+    output:
+      description: The created document.
+      type: object
+
+  update_memory_store_document:
+    title: Update a knowledge base document
+    description: >-
+      Replace a memory store document's text, name and metadata; it is re-embedded.
+    category: memory_stores
+    request:
+      method: PUT
+      path: /public_api/vector_stores/${memory_store_id}/vector_store_documents/${memory_store_document_id}
+      body:
+        text: ${text}
+        name: ${name}
+        metadata: ${metadata}
+    input:
+      memory_store_id:
+        type: string
+        description: Memory store (knowledge base) id.
+      memory_store_document_id:
+        type: string
+        description: Document id within the memory store.
+      text:
+        type: string
+        description: The content of the document
+      name:
+        type: string
+        description: The name of the document
+      metadata:
+        type: object
+        description: The metadata of the document
+        optional: true
+    output:
+      description: The updated document.
+      type: object
+
+  delete_memory_store_document:
+    title: Delete a knowledge base document
+    description: >-
+      Remove a document from a memory store so it no longer appears in search.
+    category: memory_stores
+    destructive: true
+    request:
+      method: DELETE
+      path: /public_api/vector_stores/${memory_store_id}/vector_store_documents/${memory_store_document_id}
+    input:
+      memory_store_id:
+        type: string
+        description: Memory store (knowledge base) id.
+      memory_store_document_id:
+        type: string
+        description: Document id within the memory store.
+    output:
+      description: Confirmation.
+      type: object
+
+  generate_grid_csv:
+    title: Generate a grid sheet CSV
+    description: >-
+      Start generating a CSV export of a grid sheet in the background. Download it with download_grid_csv
+      when ready.
+    category: grids
+    request:
+      method: POST
+      path: /public_api/grids/${grid_id}/sheets/${sheet_id}/generate_csv
+    input:
+      grid_id:
+        type: string
+        description: Grid id.
+      sheet_id:
+        type: string
+        description: Sheet id.
+    output:
+      description: Acknowledgement of the export job.
+      type: object
+
+  download_grid_csv:
+    title: Download a grid sheet CSV
+    description: >-
+      Download the most recently generated CSV of a grid sheet. 404 until generate_grid_csv
+      has produced one.
+    category: grids
+    read_only: true
+    request:
+      method: GET
+      path: /public_api/grids/${grid_id}/sheets/${sheet_id}/download_csv/latest
+    input:
+      grid_id:
+        type: string
+        description: Grid id.
+      sheet_id:
+        type: string
+        description: Sheet id.
+    output:
+      description: The CSV file.
+      type: string
+
+  list_brand_kits:
+    title: List brand kits
+    description: >-
+      List brand kits -- the brand, its competitors, product lines and prompts that every
+      AEO insight is scoped to -- with the brand_kit_id the other tools need.
+    category: aeo
+    read_only: true
+    request:
+      method: POST
+      path: /public_api/brand_kits/list
+      body:
+        workspace_id: ${workspace_id}
+        filters: ${filters}
+        includes: ${includes}
+        fields: ${fields}
+        sort: ${sort}
+        page: ${page}
+        per_page: ${per_page}
+    input:
+      workspace_id:
+        type: integer
+        description: Workspace to read from; omit for every workspace the key belongs to.
+        optional: true
+      filters:
+        type: array
+        description: Filters, each {field, operator, value}.
+        optional: true
+        items:
+          type: object
+      includes:
+        type: array
+        description: Related resources to include, e.g. product_lines, competitors.
+        optional: true
+        items:
+          type: string
+      fields:
+        type: array
+        description: Extra fields to return.
+        optional: true
+        items:
+          type: string
+      sort:
+        type: string
+        description: Sort field; prefix with - for descending.
+        optional: true
+        enum:
+        - brand_name
+        - -brand_name
+        - created_at
+        - -created_at
+        - prompts_count
+        - -prompts_count
+      page:
+        type: integer
+        description: Page number, from 1.
+        optional: true
+      per_page:
+        type: integer
+        description: Items per page.
+        optional: true
+    output:
+      description: A page of brand kits.
+      type: object
+
+  get_brand_kit:
+    title: Get a brand kit
+    description: >-
+      Read one brand kit: brand name, workspace, domains and settings.
+    category: aeo
+    read_only: true
+    request:
+      method: GET
+      path: /public_api/brand_kits/${id}
+    input:
+      id:
+        type: integer
+        description: Brand Kit id.
+    output:
+      description: The brand kit.
+      type: object
+
+  query_brand_kit_analytics:
+    title: Query AEO analytics
+    description: >-
+      Compute AI-search visibility metrics for a brand kit -- mention rate, share of voice,
+      citation rate and count, sentiment, average position, first mention rate -- over a date
+      range, grouped by up to three dimensions (date, provider, topic, country, persona, domain,
+      competitor, domain_category, theme) at daily, weekly, monthly or total grain.
+    category: aeo
+    read_only: true
+    request:
+      method: POST
+      path: /public_api/brand_kits/${brand_kit_id}/analytics
+      body:
+        brand_kit_id: ${brand_kit_id}
+        metrics: ${metrics}
+        dimensions: ${dimensions}
+        grain: ${grain}
+        start_date: ${start_date}
+        end_date: ${end_date}
+        providers: ${providers}
+        topics: ${topics}
+        tags: ${tags}
+        countries: ${countries}
+        personas: ${personas}
+        themes: ${themes}
+        brand_mentioned: ${brand_mentioned}
+        limit: ${limit}
+        offset: ${offset}
+        order_by: ${order_by}
+    input:
+      brand_kit_id:
+        type: integer
+        description: Brand Kit id, from list_brand_kits.
+      metrics:
+        type: array
+        description: 'Metrics: mention_rate, positive_answer_rate, share_of_voice, citation_rate,
+          citation_share, citation_count, sentiment_score, average_position, answer_count,
+          first_mention_rate.'
+        items:
+          type: string
+      dimensions:
+        type: array
+        description: 'Up to three of: date, provider, topic, country, persona, domain, competitor,
+          domain_category, theme.'
+        optional: true
+        items:
+          type: string
+      grain:
+        type: string
+        description: 'Time granularity for aggregation. Default: total'
+        optional: true
+        enum:
+        - daily
+        - weekly
+        - monthly
+        - total
+      start_date:
+        type: string
+        description: 'Start date (YYYY-MM-DD). Default: 7 days ago'
+        optional: true
+      end_date:
+        type: string
+        description: End date (YYYY-MM-DD). Defaults to yesterday. Must be before today because
+          today's data may still be processing and is incomplete — yesterday is used to ensure
+          robust, complete data. Leave blank unless a specific date is requested.
+        optional: true
+      providers:
+        type: array
+        description: 'AI providers: chat_gpt, gemini, perplexity, google_ai_mode, google_ai_overview,
+          claude, grok, microsoft_copilot.'
+        optional: true
+        items:
+          type: string
+      topics:
+        type: array
+        description: Topic ids.
+        optional: true
+        items:
+          type: integer
+      tags:
+        type: object
+        description: 'Tag filter: {"operator": "IN" | "HASALL" | "NOTIN", "value": [tag ids]}.'
+        optional: true
+      countries:
+        type: array
+        description: ISO 3166-1 alpha-2 country codes.
+        optional: true
+        items:
+          type: string
+      personas:
+        type: array
+        description: Persona ids.
+        optional: true
+        items:
+          type: integer
+      themes:
+        type: array
+        description: Sentiment theme ids; only affects sentiment_score.
+        optional: true
+        items:
+          type: integer
+      brand_mentioned:
+        type: string
+        description: 'Filter by prompt type. Options: category (generic prompts - recommended
+          for accurate visibility metrics), brand (prompts mentioning the brand). Defaults
+          to category if not specified'
+        optional: true
+        enum:
+        - brand
+        - category
+      limit:
+        type: integer
+        description: Rows to return, 1-5000 (default 100).
+        optional: true
+      offset:
+        type: integer
+        description: Rows to skip.
+        optional: true
+      order_by:
+        type: string
+        description: Sort, e.g. citation_count DESC.
+        optional: true
+    output:
+      description: Metric rows.
+      type: object
+
+  list_brand_kit_answers:
+    title: List AI answers
+    description: >-
+      List individual AI assistant answers for a brand kit's prompts, with cited URLs and
+      brand and competitor mentions, filtered by prompt, provider, country and whether the
+      brand was mentioned.
+    category: aeo
+    read_only: true
+    request:
+      method: POST
+      path: /public_api/brand_kits/${brand_kit_id}/answers/list
+      body:
+        brand_kit_id: ${brand_kit_id}
+        start_date: ${start_date}
+        end_date: ${end_date}
+        prompt_id: ${prompt_id}
+        providers: ${providers}
+        countries: ${countries}
+        brand_mentioned: ${brand_mentioned}
+        fields: ${fields}
+        page: ${page}
+        per_page: ${per_page}
+    input:
+      brand_kit_id:
+        type: integer
+        description: Brand Kit id, from list_brand_kits.
+      start_date:
+        type: string
+        description: Start date (ISO 8601) on aeo_analyses.created_at. Defaults to 30 days
+          ago.
+        optional: true
+      end_date:
+        type: string
+        description: End date (ISO 8601) on aeo_analyses.created_at. Defaults to today.
+        optional: true
+      prompt_id:
+        type: integer
+        description: Filter answers by a single prompt (question) ID.
+        optional: true
+      providers:
+        type: array
+        description: 'AI providers: chat_gpt, gemini, perplexity, google_ai_mode, google_ai_overview,
+          claude, grok, microsoft_copilot.'
+        optional: true
+        items:
+          type: string
+      countries:
+        type: array
+        description: ISO 3166-1 alpha-2 country codes.
+        optional: true
+        items:
+          type: string
+      brand_mentioned:
+        type: boolean
+        description: When set, filter to answers where the brand was (or was not) mentioned.
+        optional: true
+      fields:
+        type: array
+        description: Extra fields to return, e.g. text, citations, mentions.
+        optional: true
+        items:
+          type: string
+      page:
+        type: integer
+        description: Page number, from 1.
+        optional: true
+      per_page:
+        type: integer
+        description: Items per page.
+        optional: true
+    output:
+      description: A page of answers.
+      type: object
+
+  get_brand_kit_answer:
+    title: Get an AI answer
+    description: >-
+      Read one AI answer with its text, citations and mentions.
+    category: aeo
+    read_only: true
+    request:
+      method: POST
+      path: /public_api/brand_kits/${brand_kit_id}/answers/show
+      body:
+        brand_kit_id: ${brand_kit_id}
+        start_date: ${start_date}
+        end_date: ${end_date}
+        prompt_id: ${prompt_id}
+        providers: ${providers}
+        countries: ${countries}
+        brand_mentioned: ${brand_mentioned}
+        id: ${id}
+        fields: ${fields}
+    input:
+      brand_kit_id:
+        type: integer
+        description: Brand Kit id, from list_brand_kits.
+      start_date:
+        type: string
+        description: Start date (ISO 8601) on aeo_analyses.created_at. Defaults to 30 days
+          ago.
+        optional: true
+      end_date:
+        type: string
+        description: End date (ISO 8601) on aeo_analyses.created_at. Defaults to today.
+        optional: true
+      prompt_id:
+        type: integer
+        description: Filter answers by a single prompt (question) ID.
+        optional: true
+      providers:
+        type: array
+        description: 'AI providers: chat_gpt, gemini, perplexity, google_ai_mode, google_ai_overview,
+          claude, grok, microsoft_copilot.'
+        optional: true
+        items:
+          type: string
+      countries:
+        type: array
+        description: ISO 3166-1 alpha-2 country codes.
+        optional: true
+        items:
+          type: string
+      brand_mentioned:
+        type: boolean
+        description: When set, filter to answers where the brand was (or was not) mentioned.
+        optional: true
+      id:
+        type: integer
+        description: Answer id.
+      fields:
+        type: array
+        description: Fields to return.
+        optional: true
+        items:
+          type: string
+    output:
+      description: The answer.
+      type: object
+
+  list_brand_kit_citations:
+    title: List citations
+    description: >-
+      List the URLs AI answers cite for a brand kit, with citation count, share, rate and
+      influence score, filterable by domain, topic, page type and brand sentiment.
+    category: aeo
+    read_only: true
+    request:
+      method: POST
+      path: /public_api/brand_kits/${brand_kit_id}/citations/list
+      body:
+        brand_kit_id: ${brand_kit_id}
+        tags: ${tags}
+        start_date: ${start_date}
+        end_date: ${end_date}
+        providers: ${providers}
+        countries: ${countries}
+        personas: ${personas}
+        filters: ${filters}
+        fields: ${fields}
+        sort: ${sort}
+        page: ${page}
+        per_page: ${per_page}
+    input:
+      brand_kit_id:
+        type: integer
+        description: Brand Kit id, from list_brand_kits.
+      tags:
+        type: object
+        description: 'Tag filter: {"operator": "IN" | "HASALL" | "NOTIN", "value": [tag ids]}.'
+        optional: true
+      start_date:
+        type: string
+        description: Start date for metrics (ISO 8601). Defaults to 1 month ago.
+        optional: true
+      end_date:
+        type: string
+        description: End date for metrics (ISO 8601). Defaults to today.
+        optional: true
+      providers:
+        type: array
+        description: 'AI providers: chat_gpt, gemini, perplexity, google_ai_mode, google_ai_overview,
+          claude, grok, microsoft_copilot.'
+        optional: true
+        items:
+          type: string
+      countries:
+        type: array
+        description: ISO 3166-1 alpha-2 country codes.
+        optional: true
+        items:
+          type: string
+      personas:
+        type: array
+        description: Persona ids.
+        optional: true
+        items:
+          type: integer
+      filters:
+        type: array
+        description: 'Filters, each {field, operator, value}: domain_category, domain_id,
+          topic_id, brand_mentioned, page_type, brand_referenced, brand_sentiment, mentioned_competitor_domains,
+          url.'
+        optional: true
+        items:
+          type: object
+      fields:
+        type: array
+        description: Extra fields to return.
+        optional: true
+        items:
+          type: string
+      sort:
+        type: string
+        description: citation_count, citation_share, citation_rate or influence_score; prefix
+          - for descending.
+        optional: true
+        enum:
+        - citation_count
+        - -citation_count
+        - citation_share
+        - -citation_share
+        - citation_rate
+        - -citation_rate
+        - influence_score
+        - -influence_score
+      page:
+        type: integer
+        description: Page number, from 1.
+        optional: true
+      per_page:
+        type: integer
+        description: Items per page.
+        optional: true
+    output:
+      description: A page of citations.
+      type: object
+
+  get_brand_kit_citation:
+    title: Get a citation
+    description: >-
+      Read one cited URL's metrics and page context.
+    category: aeo
+    read_only: true
+    request:
+      method: POST
+      path: /public_api/brand_kits/${brand_kit_id}/citations/show
+      body:
+        brand_kit_id: ${brand_kit_id}
+        tags: ${tags}
+        start_date: ${start_date}
+        end_date: ${end_date}
+        providers: ${providers}
+        countries: ${countries}
+        personas: ${personas}
+        id: ${id}
+        filters: ${filters}
+        fields: ${fields}
+    input:
+      brand_kit_id:
+        type: integer
+        description: Brand Kit id, from list_brand_kits.
+      tags:
+        type: object
+        description: 'Tag filter: {"operator": "IN" | "HASALL" | "NOTIN", "value": [tag ids]}.'
+        optional: true
+      start_date:
+        type: string
+        description: Start date for metrics (ISO 8601). Defaults to 1 month ago.
+        optional: true
+      end_date:
+        type: string
+        description: End date for metrics (ISO 8601). Defaults to today.
+        optional: true
+      providers:
+        type: array
+        description: 'AI providers: chat_gpt, gemini, perplexity, google_ai_mode, google_ai_overview,
+          claude, grok, microsoft_copilot.'
+        optional: true
+        items:
+          type: string
+      countries:
+        type: array
+        description: ISO 3166-1 alpha-2 country codes.
+        optional: true
+        items:
+          type: string
+      personas:
+        type: array
+        description: Persona ids.
+        optional: true
+        items:
+          type: integer
+      id:
+        type: integer
+        description: Citation id.
+      filters:
+        type: array
+        description: Filters, each {field, operator, value}.
+        optional: true
+        items:
+          type: object
+      fields:
+        type: array
+        description: Fields to return.
+        optional: true
+        items:
+          type: string
+    output:
+      description: The citation.
+      type: object
+
+  list_brand_kit_competitors:
+    title: List competitors
+    description: >-
+      List the competitors tracked against a brand kit.
+    category: aeo
+    read_only: true
+    request:
+      method: POST
+      path: /public_api/brand_kits/${brand_kit_id}/competitors/list
+      body:
+        brand_kit_id: ${brand_kit_id}
+        filters: ${filters}
+        fields: ${fields}
+        sort: ${sort}
+        page: ${page}
+        per_page: ${per_page}
+    input:
+      brand_kit_id:
+        type: integer
+        description: Brand Kit id, from list_brand_kits.
+      filters:
+        type: array
+        description: Filters, each {field, operator, value}.
+        optional: true
+        items:
+          type: object
+      fields:
+        type: array
+        description: Extra fields to return.
+        optional: true
+        items:
+          type: string
+      sort:
+        type: string
+        description: name or created_at; prefix - for descending.
+        optional: true
+        enum:
+        - name
+        - -name
+        - created_at
+        - -created_at
+      page:
+        type: integer
+        description: Page number, from 1.
+        optional: true
+      per_page:
+        type: integer
+        description: Items per page.
+        optional: true
+    output:
+      description: A page of competitors.
+      type: object
+
+  get_brand_kit_competitor:
+    title: Get a competitor
+    description: >-
+      Read one tracked competitor and its domain.
+    category: aeo
+    read_only: true
+    request:
+      method: GET
+      path: /public_api/brand_kits/${brand_kit_id}/competitors/${id}
+    input:
+      brand_kit_id:
+        type: integer
+        description: Brand Kit id, from list_brand_kits.
+      id:
+        type: integer
+        description: Resource id.
+    output:
+      description: The competitor.
+      type: object
+
+  list_brand_kit_prompts:
+    title: List prompts
+    description: >-
+      List the questions tracked for a brand kit with volume, mention rate, positive answer
+      rate and citation rate, filterable by tag, topic and date.
+    category: aeo
+    read_only: true
+    request:
+      method: POST
+      path: /public_api/brand_kits/${brand_kit_id}/prompts/list
+      body:
+        brand_kit_id: ${brand_kit_id}
+        tags: ${tags}
+        start_date: ${start_date}
+        end_date: ${end_date}
+        providers: ${providers}
+        countries: ${countries}
+        personas: ${personas}
+        filters: ${filters}
+        includes: ${includes}
+        fields: ${fields}
+        sort: ${sort}
+        page: ${page}
+        per_page: ${per_page}
+    input:
+      brand_kit_id:
+        type: integer
+        description: Brand Kit id, from list_brand_kits.
+      tags:
+        type: object
+        description: 'Tag filter: {"operator": "IN" | "HASALL" | "NOTIN", "value": [tag ids]}.'
+        optional: true
+      start_date:
+        type: string
+        description: Start date for metrics (ISO 8601). Defaults to 1 month ago.
+        optional: true
+      end_date:
+        type: string
+        description: End date for metrics (ISO 8601). Defaults to today.
+        optional: true
+      providers:
+        type: array
+        description: 'AI providers: chat_gpt, gemini, perplexity, google_ai_mode, google_ai_overview,
+          claude, grok, microsoft_copilot.'
+        optional: true
+        items:
+          type: string
+      countries:
+        type: array
+        description: ISO 3166-1 alpha-2 country codes.
+        optional: true
+        items:
+          type: string
+      personas:
+        type: array
+        description: Persona ids.
+        optional: true
+        items:
+          type: integer
+      filters:
+        type: array
+        description: Filters, each {field, operator, value}.
+        optional: true
+        items:
+          type: object
+      includes:
+        type: array
+        description: 'Related resources to include: topic, tags.'
+        optional: true
+        items:
+          type: string
+      fields:
+        type: array
+        description: Extra fields to return.
+        optional: true
+        items:
+          type: string
+      sort:
+        type: string
+        description: text, created_at, prompt_volume, mention_rate, positive_answer_rate or
+          citation_rate; prefix - for descending.
+        optional: true
+        enum:
+        - text
+        - -text
+        - created_at
+        - -created_at
+        - prompt_volume
+        - -prompt_volume
+        - mention_rate
+        - -mention_rate
+        - positive_answer_rate
+        - -positive_answer_rate
+        - citation_rate
+        - -citation_rate
+      page:
+        type: integer
+        description: Page number, from 1.
+        optional: true
+      per_page:
+        type: integer
+        description: Items per page.
+        optional: true
+    output:
+      description: A page of prompts.
+      type: object
+
+  get_brand_kit_prompt:
+    title: Get a prompt
+    description: >-
+      Read one tracked prompt (question) with its topic, tags and metrics.
+    category: aeo
+    read_only: true
+    request:
+      method: GET
+      path: /public_api/brand_kits/${brand_kit_id}/prompts/${id}
+    input:
+      brand_kit_id:
+        type: integer
+        description: Brand Kit id, from list_brand_kits.
+      id:
+        type: integer
+        description: Resource id.
+    output:
+      description: The prompt.
+      type: object
+
+  list_brand_kit_personas:
+    title: List personas
+    description: >-
+      List the personas a brand kit asks its prompts as.
+    category: aeo
+    read_only: true
+    request:
+      method: POST
+      path: /public_api/brand_kits/${brand_kit_id}/personas/list
+      body:
+        brand_kit_id: ${brand_kit_id}
+        filters: ${filters}
+        fields: ${fields}
+        sort: ${sort}
+        page: ${page}
+        per_page: ${per_page}
+    input:
+      brand_kit_id:
+        type: integer
+        description: Brand Kit id, from list_brand_kits.
+      filters:
+        type: array
+        description: Filters, each {field, operator, value}.
+        optional: true
+        items:
+          type: object
+      fields:
+        type: array
+        description: Extra fields to return.
+        optional: true
+        items:
+          type: string
+      sort:
+        type: string
+        description: title or created_at; prefix - for descending.
+        optional: true
+        enum:
+        - title
+        - -title
+        - created_at
+        - -created_at
+      page:
+        type: integer
+        description: Page number, from 1.
+        optional: true
+      per_page:
+        type: integer
+        description: Items per page.
+        optional: true
+    output:
+      description: A page of personas.
+      type: object
+
+  get_brand_kit_persona:
+    title: Get a persona
+    description: >-
+      Read one persona used to ask a brand kit's prompts.
+    category: aeo
+    read_only: true
+    request:
+      method: GET
+      path: /public_api/brand_kits/${brand_kit_id}/personas/${id}
+    input:
+      brand_kit_id:
+        type: integer
+        description: Brand Kit id, from list_brand_kits.
+      id:
+        type: integer
+        description: Resource id.
+    output:
+      description: The persona.
+      type: object
+
+  list_brand_kit_topics:
+    title: List topics
+    description: >-
+      List the topics grouping a brand kit's prompts.
+    category: aeo
+    read_only: true
+    request:
+      method: POST
+      path: /public_api/brand_kits/${brand_kit_id}/topics/list
+      body:
+        brand_kit_id: ${brand_kit_id}
+        filters: ${filters}
+        fields: ${fields}
+        sort: ${sort}
+        page: ${page}
+        per_page: ${per_page}
+    input:
+      brand_kit_id:
+        type: integer
+        description: Brand Kit id, from list_brand_kits.
+      filters:
+        type: array
+        description: Filters, each {field, operator, value}.
+        optional: true
+        items:
+          type: object
+      fields:
+        type: array
+        description: Extra fields to return.
+        optional: true
+        items:
+          type: string
+      sort:
+        type: string
+        description: name or created_at; prefix - for descending.
+        optional: true
+        enum:
+        - name
+        - -name
+        - created_at
+        - -created_at
+      page:
+        type: integer
+        description: Page number, from 1.
+        optional: true
+      per_page:
+        type: integer
+        description: Items per page.
+        optional: true
+    output:
+      description: A page of topics.
+      type: object
+
+  get_brand_kit_topic:
+    title: Get a topic
+    description: >-
+      Read one topic grouping a brand kit's prompts.
+    category: aeo
+    read_only: true
+    request:
+      method: GET
+      path: /public_api/brand_kits/${brand_kit_id}/topics/${id}
+    input:
+      brand_kit_id:
+        type: integer
+        description: Brand Kit id, from list_brand_kits.
+      id:
+        type: integer
+        description: Resource id.
+    output:
+      description: The topic.
+      type: object
+
+  list_brand_kit_tags:
+    title: List tags
+    description: >-
+      List the tags applied to a brand kit's prompts, for filtering analytics.
+    category: aeo
+    read_only: true
+    request:
+      method: POST
+      path: /public_api/brand_kits/${brand_kit_id}/tags/list
+      body:
+        brand_kit_id: ${brand_kit_id}
+        filters: ${filters}
+        fields: ${fields}
+        sort: ${sort}
+        page: ${page}
+        per_page: ${per_page}
+    input:
+      brand_kit_id:
+        type: integer
+        description: Brand Kit id, from list_brand_kits.
+      filters:
+        type: array
+        description: Filters, each {field, operator, value}.
+        optional: true
+        items:
+          type: object
+      fields:
+        type: array
+        description: Extra fields to return.
+        optional: true
+        items:
+          type: string
+      sort:
+        type: string
+        description: name or created_at; prefix - for descending.
+        optional: true
+        enum:
+        - name
+        - -name
+        - created_at
+        - -created_at
+      page:
+        type: integer
+        description: Page number, from 1.
+        optional: true
+      per_page:
+        type: integer
+        description: Items per page.
+        optional: true
+    output:
+      description: A page of tags.
+      type: object
+
+  get_brand_kit_tag:
+    title: Get a tag
+    description: >-
+      Read one tag applied to a brand kit's prompts.
+    category: aeo
+    read_only: true
+    request:
+      method: GET
+      path: /public_api/brand_kits/${brand_kit_id}/tags/${id}
+    input:
+      brand_kit_id:
+        type: integer
+        description: Brand Kit id, from list_brand_kits.
+      id:
+        type: integer
+        description: Resource id.
+    output:
+      description: The tag.
+      type: object
+
+  get_sentiment_theme_answers:
+    title: Get sentiment theme answers
+    description: >-
+      List the AI answers behind one sentiment theme, with sentiment details. Find theme ids
+      with query_brand_kit_analytics grouped by theme.
+    category: aeo
+    read_only: true
+    request:
+      method: POST
+      path: /public_api/brand_kits/${brand_kit_id}/sentiment_theme_answers
+      body:
+        brand_kit_id: ${brand_kit_id}
+        sentiment_theme_id: ${sentiment_theme_id}
+        start_date: ${start_date}
+        end_date: ${end_date}
+        providers: ${providers}
+        countries: ${countries}
+        topics: ${topics}
+        personas: ${personas}
+        page: ${page}
+        per_page: ${per_page}
+    input:
+      brand_kit_id:
+        type: integer
+        description: Brand Kit id, from list_brand_kits.
+      sentiment_theme_id:
+        type: integer
+        description: Sentiment theme id.
+      start_date:
+        type: string
+        description: 'Start date (YYYY-MM-DD). Default: 30 days ago'
+        optional: true
+      end_date:
+        type: string
+        description: End date (YYYY-MM-DD). Defaults to yesterday. Must be before today.
+        optional: true
+      providers:
+        type: array
+        description: 'AI providers: chat_gpt, gemini, perplexity, google_ai_mode, google_ai_overview,
+          claude, grok, microsoft_copilot.'
+        optional: true
+        items:
+          type: string
+      countries:
+        type: array
+        description: ISO 3166-1 alpha-2 country codes.
+        optional: true
+        items:
+          type: string
+      topics:
+        type: array
+        description: Topic ids.
+        optional: true
+        items:
+          type: integer
+      personas:
+        type: array
+        description: Persona ids.
+        optional: true
+        items:
+          type: integer
+      page:
+        type: integer
+        description: Page number, from 1.
+        optional: true
+      per_page:
+        type: integer
+        description: Items per page.
+        optional: true
+    output:
+      description: A page of answers.
+      type: object
+
+  list_brand_kit_web_pages:
+    title: List web pages
+    description: >-
+      List a brand's web pages with citations, clicks, impressions, traffic and GA4 or Amplitude
+      key events, optionally through a preset such as almost_page_one, losing_clicks or losing_ai_visibility.
+    category: aeo
+    read_only: true
+    request:
+      method: POST
+      path: /public_api/brand_kits/${brand_kit_id}/web_pages/list
+      body:
+        brand_kit_id: ${brand_kit_id}
+        smart_filter: ${smart_filter}
+        start_date: ${start_date}
+        end_date: ${end_date}
+        event_names: ${event_names}
+        amplitude_event_names: ${amplitude_event_names}
+        filters: ${filters}
+        fields: ${fields}
+        sort: ${sort}
+        page: ${page}
+        per_page: ${per_page}
+    input:
+      brand_kit_id:
+        type: integer
+        description: Brand Kit id, from list_brand_kits.
+      smart_filter:
+        type: string
+        description: 'Apply a predefined filter preset. Available presets: - almost_page_one:
+          Pages ranking 10-20 - losing_clicks: Pages losing clicks despite stable rankings
+          - rankings_slipping: Pages declining in SERP - losing_ai_visibility: Pages losing
+          AI citations - citation_rate_decline: Pages losing citation rate - stale_pages:
+          Pages not updated in 6 months'
+        optional: true
+        enum:
+        - almost_page_one
+        - losing_clicks
+        - rankings_slipping
+        - losing_ai_visibility
+        - citation_rate_decline
+        - stale_pages
+      start_date:
+        type: string
+        description: Start date for analysis period (ISO 8601 format, defaults to 1 month
+          ago)
+        optional: true
+      end_date:
+        type: string
+        description: End date for analysis period (ISO 8601 format, defaults to today)
+        optional: true
+      event_names:
+        type: array
+        description: GA4 key event names to include.
+        optional: true
+        items:
+          type: string
+      amplitude_event_names:
+        type: array
+        description: Amplitude event names to include.
+        optional: true
+        items:
+          type: string
+      filters:
+        type: array
+        description: Filters, each {field, operator, value}.
+        optional: true
+        items:
+          type: object
+      fields:
+        type: array
+        description: Extra fields to return.
+        optional: true
+        items:
+          type: string
+      sort:
+        type: string
+        description: Sort field such as citations_count; prefix - for descending.
+        optional: true
+      page:
+        type: integer
+        description: Page number, from 1.
+        optional: true
+      per_page:
+        type: integer
+        description: Items per page.
+        optional: true
+    output:
+      description: A page of web page metrics.
+      type: object
+
+  list_content_updates:
+    title: List content updates
+    description: >-
+      List the recorded page publishes and refreshes, to correlate content changes with AI
+      visibility.
+    category: aeo
+    read_only: true
+    request:
+      method: POST
+      path: /public_api/brand_kits/${brand_kit_id}/content_updates/list
+      body:
+        workspace_id: ${workspace_id}
+        brand_kit_id: ${brand_kit_id}
+        filters: ${filters}
+        includes: ${includes}
+        fields: ${fields}
+        sort: ${sort}
+        page: ${page}
+        per_page: ${per_page}
+    input:
+      brand_kit_id:
+        type: integer
+        description: Brand Kit id, from list_brand_kits.
+      workspace_id:
+        type: integer
+        description: Workspace to read from; omit for every workspace the key belongs to.
+        optional: true
+      filters:
+        type: array
+        description: Filters, each {field, operator, value}.
+        optional: true
+        items:
+          type: object
+      includes:
+        type: array
+        description: 'Related resources to include: metadata_entries.'
+        optional: true
+        items:
+          type: string
+      fields:
+        type: array
+        description: Extra fields to return.
+        optional: true
+        items:
+          type: string
+      sort:
+        type: string
+        description: created_at, updated_at or url; prefix - for descending.
+        optional: true
+        enum:
+        - created_at
+        - -created_at
+        - updated_at
+        - -updated_at
+        - url
+        - -url
+      page:
+        type: integer
+        description: Page number, from 1.
+        optional: true
+      per_page:
+        type: integer
+        description: Items per page.
+        optional: true
+    output:
+      description: A page of content updates.
+      type: object
+
+  create_content_update:
+    title: Record a content update
+    description: >-
+      Record that a page was published or refreshed, with optional custom attributes, so its
+      impact on AI visibility can be tracked.
+    category: aeo
+    request:
+      method: POST
+      path: /public_api/brand_kits/${brand_kit_id}/content_updates
+      body:
+        url: ${url}
+        type: ${type}
+        custom_attributes: ${custom_attributes}
+    input:
+      brand_kit_id:
+        type: integer
+        description: Brand Kit id, from list_brand_kits.
+      url:
+        type: string
+        description: The page URL to track
+      type:
+        type: string
+        description: Type of content update
+        enum:
+        - page_published
+        - page_refreshed
+      custom_attributes:
+        type: array
+        description: Custom metadata, each {key, value}.
+        optional: true
+        items:
+          type: object
+    output:
+      description: The content update.
+      type: object
+
+  get_content_update:
+    title: Get a content update
+    description: >-
+      Read one recorded page publish or refresh.
+    category: aeo
+    read_only: true
+    request:
+      method: GET
+      path: /public_api/brand_kits/${brand_kit_id}/content_updates/${id}
+    input:
+      brand_kit_id:
+        type: integer
+        description: Brand Kit id, from list_brand_kits.
+      id:
+        type: integer
+        description: Resource id.
+    output:
+      description: The content update.
+      type: object
+
+  delete_content_update:
+    title: Delete a content update
+    description: >-
+      Delete a recorded page publish or refresh.
+    category: aeo
+    destructive: true
+    request:
+      method: DELETE
+      path: /public_api/brand_kits/${brand_kit_id}/content_updates/${id}
+    input:
+      brand_kit_id:
+        type: integer
+        description: Brand Kit id, from list_brand_kits.
+      id:
+        type: integer
+        description: Resource id.
+    output:
+      description: Confirmation.
+      type: object

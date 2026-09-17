@@ -1,0 +1,275 @@
+# Dappier tools -- real-time AI models, recommendations and Ask AI analytics.
+#
+# Two very different things live on this host, and they take different ids:
+#
+#   * **AI models** (`am_...`) answer questions from live data -- web search,
+#     breaking news, market prices, a publisher's own archive. Which data a
+#     model reaches is a property of the model, not of the request, so picking
+#     the right `ai_model_id` from the Dappier marketplace *is* the
+#     configuration;
+#   * **data models** (`dm_...`) back semantic article search. Their `query`
+#     accepts a url as well as a question: given one, Dappier reads that page,
+#     summarises it and recommends related articles -- which is how "related
+#     reading" widgets are built.
+#
+# The analytics endpoints are the publisher and advertiser side of the same
+# product, and share three behaviours worth knowing: data comes from BigQuery
+# with a 5-15 minute lag, responses are cached server-side for up to 30 minutes
+# (send `Cache-Control: no-cache` to bypass), and omitting *either* date
+# defaults **both** to the trailing seven days rather than widening the window.
+#
+# Ask AI analytics and sponsored-conversation analytics do not overlap: once a
+# session enters a sponsored conversation its publisher ids are overwritten
+# with the ad-render ids, so filtering Ask AI analytics by your own publisher
+# macros excludes most sponsored traffic. Use the sponsored endpoint for that.
+#
+# Dappier's ZeroClick endpoints are not included here: they authenticate with
+# an HMAC `zc-signature` over the raw request bytes rather than with this
+# connection's bearer token.
+#
+# Docs: https://docs.dappier.com/api-reference/endpoint/real-time-search
+
+connector_id: dappier
+display_name: API Key
+docs_url: https://docs.dappier.com/api-reference/endpoint/real-time-search
+
+tools:
+
+  search_real_time:
+    title: Search a real-time AI model
+    description: >-
+      Ask one of Dappier's real-time AI models a question and get a
+      synthesised answer back. Which data the model reaches -- live web,
+      breaking news, stock prices, a publisher's own archive -- is a property
+      of the model id, not of the request, so choosing the right `ai_model_id`
+      from the Dappier marketplace is the whole configuration.
+    category: search
+    read_only: true
+    request:
+      method: POST
+      path: /app/aimodel/${ai_model_id}
+      body:
+        query: "${query}"
+    input:
+      ai_model_id:
+        type: string
+        description: The AI model to query, starting with `am_`. Browse them in the Dappier marketplace.
+      query:
+        type: string
+        description: The question or query text to send to the model.
+    output:
+      description: The model's answer, as a `message` string.
+      type: object
+
+  get_ai_recommendations:
+    title: Get AI article recommendations
+    description: >-
+      Semantic article search against a Dappier data model. `query` takes a
+      natural-language question, a keyword, or a url -- given a url, Dappier
+      reads the page, summarises it and recommends articles related to its
+      content, which is what powers "related reading" on an article page.
+    category: search
+    read_only: true
+    request:
+      method: POST
+      path: /app/v2/search
+      query:
+        data_model_id: "${data_model_id}"
+      body:
+        query: "${query}"
+        similarity_top_k: "${similarity_top_k}"
+        ref: "${ref}"
+        num_articles_ref: "${num_articles_ref}"
+        search_algorithm: "${search_algorithm}"
+    input:
+      data_model_id:
+        type: string
+        description: The data model to search, starting with `dm_`. Browse them in the Dappier marketplace.
+      query:
+        type: string
+        description: A natural-language query, a keyword, or a url to find related articles for.
+      similarity_top_k:
+        type: integer
+        description: How many articles to return.
+        optional: true
+        default: '9'
+      ref:
+        type: string
+        description: A domain to prefer results from, where the model supports it.
+        optional: true
+      num_articles_ref:
+        type: integer
+        description: How many of the returned articles must come from `ref`.
+        optional: true
+      search_algorithm:
+        type: string
+        description: Which retrieval algorithm to use.
+        optional: true
+    output:
+      description: The recommended articles, each with its title, url, summary and relevance score.
+      type: object
+
+  get_ask_ai_analytics:
+    title: Get Ask AI analytics
+    description: >-
+      Engagement rollup for the tenant's Ask AI widgets -- summary KPIs plus a
+      daily time series, matching the Dappier dashboard for the same filters.
+      Omitting either date defaults *both* to the trailing seven days, and an
+      explicit range may not exceed 365 days.
+    category: analytics
+    read_only: true
+    request:
+      method: GET
+      path: /v1/analytics/ask-ai
+      query:
+        start_date: "${start_date}"
+        end_date: "${end_date}"
+        widget_id: "${widget_id}"
+        creative_id: "${creative_id}"
+        line_item_id: "${line_item_id}"
+        publisher_id: "${publisher_id}"
+    input:
+      start_date:
+        type: string
+        description: Inclusive start of the window, YYYY-MM-DD UTC.
+        optional: true
+      end_date:
+        type: string
+        description: Inclusive end of the window, YYYY-MM-DD UTC.
+        optional: true
+      widget_id:
+        type: string
+        description: Restrict to one widget. Validated against the key's tenant.
+        optional: true
+      creative_id:
+        type: string
+        description: Filter by the creative id the widget was loaded with.
+        optional: true
+      line_item_id:
+        type: string
+        description: Filter by the line item id the widget was loaded with.
+        optional: true
+      publisher_id:
+        type: string
+        description: Filter by the publisher id the widget was loaded with.
+        optional: true
+    output:
+      description: The requested record.
+      type: object
+
+  get_ask_ai_logs:
+    title: Get Ask AI conversation logs
+    description: >-
+      Raw Ask AI conversation rows, newest first -- the record-level view
+      behind the analytics rollup. Use this to inspect individual
+      conversations; use the analytics tool for aggregates. `limit` defaults
+      to 50 and is silently clamped at 500.
+    category: analytics
+    read_only: true
+    request:
+      method: GET
+      path: /v1/analytics/ask-ai/logs
+      query:
+        start_date: "${start_date}"
+        end_date: "${end_date}"
+        widget_id: "${widget_id}"
+        interaction_type: "${interaction_type}"
+        page: "${page}"
+        limit: "${limit}"
+    input:
+      start_date:
+        type: string
+        description: Inclusive start of the window, YYYY-MM-DD UTC.
+        optional: true
+      end_date:
+        type: string
+        description: Inclusive end of the window, YYYY-MM-DD UTC.
+        optional: true
+      widget_id:
+        type: string
+        description: Restrict to one widget.
+        optional: true
+      interaction_type:
+        type: string
+        description: Which interaction types to include. Defaults to free_form, automated_followup and search.
+        optional: true
+      page:
+        type: integer
+        description: Page number, starting at 1.
+        optional: true
+        default: '1'
+      limit:
+        type: integer
+        description: Rows per page. Defaults to 50, clamped to 500.
+        optional: true
+        default: '50'
+    output:
+      description: The requested record.
+      type: object
+
+  get_sponsored_conversations_analytics:
+    title: Get sponsored conversations analytics
+    description: >-
+      Advertiser-facing rollup for the campaigns this API key's tenant owns --
+      summary KPIs, a daily timeline, and per-campaign, per-prompt and
+      per-click-type breakdowns. This is the endpoint for
+      sponsored-conversation performance; the Ask AI analytics deliberately
+      exclude it.
+    category: analytics
+    read_only: true
+    request:
+      method: GET
+      path: /v1/analytics/sponsored-conversations
+      query:
+        start_date: "${start_date}"
+        end_date: "${end_date}"
+        campaign_id: "${campaign_id}"
+    input:
+      start_date:
+        type: string
+        description: Inclusive start of the window, YYYY-MM-DD UTC.
+        optional: true
+      end_date:
+        type: string
+        description: Inclusive end of the window, YYYY-MM-DD UTC.
+        optional: true
+      campaign_id:
+        type: string
+        description: Restrict to one campaign.
+        optional: true
+    output:
+      description: The requested record.
+      type: object
+
+  get_session_intelligence:
+    title: Get session intelligence
+    description: >-
+      One aggregated payload describing how end users behave in a publisher's
+      Ask AI widgets -- summary KPIs, engagement time, intent breakdown, top
+      queried topics, content-category mix and query-depth distribution. The
+      whole Session Intelligence dashboard in a single call.
+    category: analytics
+    read_only: true
+    request:
+      method: GET
+      path: /v1/analytics/session-intelligence
+      query:
+        start_date: "${start_date}"
+        end_date: "${end_date}"
+        widget_id: "${widget_id}"
+    input:
+      start_date:
+        type: string
+        description: Inclusive start of the window, YYYY-MM-DD UTC.
+        optional: true
+      end_date:
+        type: string
+        description: Inclusive end of the window, YYYY-MM-DD UTC.
+        optional: true
+      widget_id:
+        type: string
+        description: Restrict to one widget.
+        optional: true
+    output:
+      description: The requested record.
+      type: object

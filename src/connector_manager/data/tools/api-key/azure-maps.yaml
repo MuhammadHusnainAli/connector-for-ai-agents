@@ -1,0 +1,764 @@
+# Azure Maps tools -- geocoding, routing, timezones and weather.
+#
+# The connection sends the subscription key as the `subscription-key` query
+# parameter automatically, so no tool here takes a credential. Everything is a
+# GET against `https://atlas.microsoft.com`.
+#
+# ## api-version varies by service, and that is not a mistake
+#
+# Azure Maps versions each service separately, so the defaults here differ on
+# purpose:
+#
+#   * Geocoding and Search -- `2025-01-01`, the current generation;
+#   * Route, Timezone and Geolocation -- `1.0`;
+#   * Weather -- `1.1`.
+#
+# Passing the wrong one gives a 400 that does not explain itself. Leave the
+# defaults alone unless a specific endpoint's documentation says otherwise.
+#
+# ## Coordinates are longitude, latitude
+#
+# Every `coordinates` argument here is **longitude first**, matching GeoJSON
+# and contradicting the latitude-first convention most people type from memory.
+# The older Route and Weather endpoints, confusingly, take `query` as
+# **latitude,longitude** -- the opposite order. Each tool says which it wants,
+# and getting it wrong usually returns a plausible answer for somewhere in the
+# ocean rather than an error.
+#
+# ## What is not here
+#
+# The tile, image and static map endpoints return binary images, which this
+# package cannot carry. The older `/search/address` and `/search/fuzzy`
+# endpoints are superseded by `/geocode` and are left out in its favour.
+# Batch endpoints take a POST body of many requests and are omitted for the
+# same reason the single-request forms are enough for an agent.
+#
+# Docs: https://learn.microsoft.com/rest/api/maps/
+
+connector_id: azure-maps
+display_name: Azure Maps
+docs_url: https://learn.microsoft.com/rest/api/maps/
+
+tools:
+
+  # -- geocoding -------------------------------------------------------------
+
+  geocode:
+    title: Turn an address into coordinates
+    description: >-
+      Find the longitude and latitude of an address or place name. Pass either
+      a free-form `query` -- "1 Microsoft Way, Redmond, WA" -- or the structured
+      arguments, which are more accurate when the parts are already separated.
+
+      Results come back as GeoJSON features, best match first, each with a
+      `confidence` of High, Medium or Low and a `matchCodes` array saying what
+      actually matched. A `Good` match code with High confidence is a real
+      address; `Ambiguous` means several places fit and the first one may not be
+      the right one.
+
+      `coordinates` biases results toward a point without restricting to it,
+      which is what makes "Springfield" resolve near the user rather than in
+      Illinois by default.
+    category: geocoding
+    read_only: true
+    notes: coordinates is longitude first, then latitude.
+    request:
+      method: GET
+      path: /geocode
+      query:
+        api-version: "${api_version}"
+        query: "${query}"
+        addressLine: "${address_line}"
+        locality: "${locality}"
+        adminDistrict: "${admin_district}"
+        postalCode: "${postal_code}"
+        countryRegion: "${country_region}"
+        coordinates: "${coordinates}"
+        top: "${top}"
+        view: "${view}"
+    input:
+      query:
+        type: string
+        description: >-
+          The address or place as free text. Use this or the structured
+          arguments below, not both.
+        optional: true
+        example: 1 Microsoft Way, Redmond, WA
+      address_line:
+        type: string
+        description: Street address, for a structured query.
+        optional: true
+      locality:
+        type: string
+        description: City or town, for a structured query.
+        optional: true
+      admin_district:
+        type: string
+        description: State, province or region, for a structured query.
+        optional: true
+      postal_code:
+        type: string
+        description: Postal or ZIP code, for a structured query.
+        optional: true
+      country_region:
+        type: string
+        description: Two-letter country code, e.g. "US" or "GB".
+        optional: true
+      coordinates:
+        type: string
+        description: >-
+          Bias results toward this point, as "longitude,latitude". Longitude
+          first.
+        optional: true
+        example: -122.34,47.63
+      top:
+        type: integer
+        description: How many results to return, up to 20.
+        optional: true
+        minimum: 1
+        maximum: 20
+      view:
+        type: string
+        description: >-
+          Two-letter region code deciding how disputed borders are shown, e.g.
+          "US", "IN", "Auto".
+        optional: true
+      api_version:
+        type: string
+        description: Azure Maps Search API version.
+        optional: true
+        default: "2025-01-01"
+    output:
+      description: A GeoJSON FeatureCollection of matches, best first.
+      type: object
+      properties:
+        features: {type: array, description: "Each with geometry.coordinates (longitude, latitude), properties.address, properties.confidence and properties.matchCodes."}
+
+  reverse_geocode:
+    title: Turn coordinates into an address
+    description: >-
+      Find the address at a longitude and latitude. Coordinates are LONGITUDE
+      FIRST -- "-122.34,47.63" is Seattle; the same numbers reversed is a point
+      in the Southern Ocean, and the service will happily tell you nothing is
+      there.
+
+      `result_types` narrows what kind of place is returned: `Address` for a
+      street address, `PopulatedPlace` for the town, `CountryRegion` for the
+      country. Omit it for the most specific match available.
+    category: geocoding
+    read_only: true
+    notes: coordinates is longitude first, then latitude.
+    request:
+      method: GET
+      path: /reverseGeocode
+      query:
+        api-version: "${api_version}"
+        coordinates: "${coordinates}"
+        resultTypes: "${result_types}"
+        view: "${view}"
+    input:
+      coordinates:
+        type: string
+        description: The point as "longitude,latitude". Longitude first.
+        example: -122.34,47.63
+      result_types:
+        type: string
+        description: >-
+          Comma-separated place types to return -- Address, Neighborhood,
+          PopulatedPlace, Postcode1, AdminDivision1, AdminDivision2,
+          CountryRegion.
+        optional: true
+      view:
+        type: string
+        description: Two-letter region code deciding how disputed borders are shown.
+        optional: true
+      api_version:
+        type: string
+        description: Azure Maps Search API version.
+        optional: true
+        default: "2025-01-01"
+    output:
+      description: A GeoJSON FeatureCollection describing what is at that point.
+      type: object
+      properties:
+        features: {type: array, description: "Each with properties.address, properties.type and geometry."}
+
+  get_polygon:
+    title: Get the boundary of a place
+    description: >-
+      The polygon outlining a city, region or country, given a point inside it.
+      This is how you get an administrative boundary to draw or to test points
+      against, rather than just a centre point.
+
+      `result_type` says which level of boundary you want -- `locality` for a
+      city, `countryRegion` for a country -- and `resolution` trades detail
+      against payload size. `small` is enough for most display purposes;
+      `large` returns a polygon with a great many vertices.
+    category: geocoding
+    read_only: true
+    notes: coordinates is longitude first, then latitude.
+    request:
+      method: GET
+      path: /search/polygon
+      query:
+        api-version: "${api_version}"
+        coordinates: "${coordinates}"
+        resultType: "${result_type}"
+        resolution: "${resolution}"
+        view: "${view}"
+    input:
+      coordinates:
+        type: string
+        description: A point inside the place, as "longitude,latitude".
+        example: -122.34,47.63
+      result_type:
+        type: string
+        description: Which administrative level to return the boundary of.
+        optional: true
+        enum: [countryRegion, adminDistrict, adminDistrict2, postalCode, postalCode2, postalCode3, postalCode4, neighborhood, locality]
+      resolution:
+        type: string
+        description: How detailed the polygon is. small is enough for display; large is a lot of vertices.
+        optional: true
+        enum: [small, medium, large, huge]
+      view:
+        type: string
+        description: Two-letter region code deciding how disputed borders are shown.
+        optional: true
+      api_version:
+        type: string
+        description: Azure Maps Search API version.
+        optional: true
+        default: "2025-01-01"
+    output:
+      description: A GeoJSON FeatureCollection holding the boundary polygon.
+      type: object
+      properties:
+        geometry: {type: object, description: "The boundary as a GeoJSON Polygon or MultiPolygon."}
+        properties: {type: object, description: "The place the boundary belongs to."}
+
+  # -- routing ---------------------------------------------------------------
+
+  get_route_directions:
+    title: Get driving or walking directions
+    description: >-
+      Calculate a route between two or more points and return its distance,
+      travel time and turn-by-turn legs.
+
+      NOTE THE COORDINATE ORDER: this older endpoint takes `query` as
+      LATITUDE,longitude pairs separated by colons -- the opposite of the
+      geocoding endpoints above. "47.63,-122.34:47.61,-122.20" is Seattle to
+      Bellevue.
+
+      `travel_mode` changes the answer substantially: `car` uses roads and
+      traffic, `pedestrian` uses footpaths, `truck` respects weight and height
+      restrictions. Setting `traffic` to true uses live conditions, which makes
+      the travel time realistic and the result uncacheable.
+
+      `compute_travel_time_for` set to `all` adds a traffic-free baseline
+      alongside the live estimate, which is the honest way to say "this journey
+      is 12 minutes slower than usual".
+    category: routing
+    read_only: true
+    notes: query is latitude,longitude pairs -- the opposite order from the geocoding endpoints.
+    request:
+      method: GET
+      path: /route/directions/json
+      query:
+        api-version: "${api_version}"
+        query: "${query}"
+        travelMode: "${travel_mode}"
+        routeType: "${route_type}"
+        traffic: "${traffic}"
+        departAt: "${depart_at}"
+        arriveAt: "${arrive_at}"
+        avoid: "${avoid}"
+        computeTravelTimeFor: "${compute_travel_time_for}"
+        instructionsType: "${instructions_type}"
+    input:
+      query:
+        type: string
+        description: >-
+          Waypoints as "lat,lon:lat,lon", in LATITUDE,longitude order, colon
+          separated. At least two.
+        example: 47.63,-122.34:47.61,-122.20
+      travel_mode:
+        type: string
+        description: How the journey is made. Changes both the route and the time.
+        optional: true
+        enum: [car, truck, taxi, bus, van, motorcycle, bicycle, pedestrian]
+      route_type:
+        type: string
+        description: What to optimise for.
+        optional: true
+        enum: [fastest, shortest, eco, thrilling]
+      traffic:
+        type: boolean
+        description: Use live traffic conditions. Makes the time realistic and the result time-sensitive.
+        optional: true
+      depart_at:
+        type: string
+        description: >-
+          Departure time as ISO 8601, for a future journey. Mutually exclusive
+          with arrive_at.
+        optional: true
+      arrive_at:
+        type: string
+        description: Required arrival time as ISO 8601. Mutually exclusive with depart_at.
+        optional: true
+      avoid:
+        type: string
+        description: >-
+          Things to route around -- tollRoads, motorways, ferries,
+          unpavedRoads, carpools, alreadyUsedRoads, borderCrossings.
+        optional: true
+      compute_travel_time_for:
+        type: string
+        description: Set to all to get a traffic-free baseline alongside the live estimate.
+        optional: true
+        enum: [none, all]
+      instructions_type:
+        type: string
+        description: Include turn-by-turn guidance in the response, and in what form.
+        optional: true
+        enum: [coded, text, tagged]
+      api_version:
+        type: string
+        description: Azure Maps Route API version.
+        optional: true
+        default: "1.0"
+    output:
+      description: The route or routes, with summary and legs.
+      type: object
+      properties:
+        routes: {type: array, description: "Each with summary (lengthInMeters, travelTimeInSeconds, trafficDelayInSeconds) and legs holding the points and guidance."}
+
+  get_route_range:
+    title: Get the area reachable within a time or distance
+    description: >-
+      Calculate an isochrone -- the polygon covering everywhere reachable from a
+      point within a given time or distance budget. This answers "which
+      warehouses are within a 30-minute drive" in a way that a straight-line
+      radius cannot, because it follows real roads.
+
+      Give exactly one budget: `time_budget_in_sec`, `distance_budget_in_meters`
+      or `energy_budget_in_kwh`. `query` is LATITUDE,longitude, matching the
+      other route endpoints.
+
+      Large budgets are expensive to compute and return polygons with many
+      vertices.
+    category: routing
+    read_only: true
+    notes: query is latitude,longitude. Supply exactly one budget argument.
+    request:
+      method: GET
+      path: /route/range/json
+      query:
+        api-version: "${api_version}"
+        query: "${query}"
+        timeBudgetInSec: "${time_budget_in_sec}"
+        distanceBudgetInMeters: "${distance_budget_in_meters}"
+        travelMode: "${travel_mode}"
+        routeType: "${route_type}"
+        traffic: "${traffic}"
+        avoid: "${avoid}"
+    input:
+      query:
+        type: string
+        description: The origin as "latitude,longitude".
+        example: 47.63,-122.34
+      time_budget_in_sec:
+        type: integer
+        description: Travel time budget in seconds. Use this or distance_budget_in_meters.
+        optional: true
+        minimum: 1
+      distance_budget_in_meters:
+        type: integer
+        description: Travel distance budget in metres. Use this or time_budget_in_sec.
+        optional: true
+        minimum: 1
+      travel_mode:
+        type: string
+        description: How the journey is made.
+        optional: true
+        enum: [car, truck, taxi, bus, van, motorcycle, bicycle, pedestrian]
+      route_type:
+        type: string
+        description: What to optimise for.
+        optional: true
+        enum: [fastest, shortest, eco, thrilling]
+      traffic:
+        type: boolean
+        description: Use live traffic conditions.
+        optional: true
+      avoid:
+        type: string
+        description: Things to route around, e.g. tollRoads or motorways.
+        optional: true
+      api_version:
+        type: string
+        description: Azure Maps Route API version.
+        optional: true
+        default: "1.0"
+    output:
+      description: The reachable area as a polygon.
+      type: object
+      properties:
+        reachableRange: {type: object, description: "center and boundary -- the polygon of reachable points."}
+
+  # -- time zones ------------------------------------------------------------
+
+  get_timezone_by_coordinates:
+    title: Get the time zone at a point
+    description: >-
+      The IANA time zone at a longitude and latitude, with its current UTC
+      offset, whether daylight saving is in effect, and the local time.
+
+      `query` here is LATITUDE,longitude, matching the other 1.0-era endpoints.
+      Set `options` to `all` to get the transition dates as well, which is what
+      you need to schedule something correctly across a DST change rather than
+      guessing at the offset.
+    category: timezone
+    read_only: true
+    notes: query is latitude,longitude.
+    request:
+      method: GET
+      path: /timezone/byCoordinates/json
+      query:
+        api-version: "${api_version}"
+        query: "${query}"
+        options: "${options}"
+        timeStamp: "${timestamp}"
+    input:
+      query:
+        type: string
+        description: The point as "latitude,longitude".
+        example: 47.63,-122.34
+      options:
+        type: string
+        description: >-
+          none returns just the id; zoneInfo adds the zone details; transitions
+          adds DST transition dates; all returns everything.
+        optional: true
+        enum: [none, zoneInfo, transitions, all]
+      timestamp:
+        type: string
+        description: >-
+          The instant to evaluate the offset at, as ISO 8601. Defaults to now,
+          which matters across a DST boundary.
+        optional: true
+      api_version:
+        type: string
+        description: Azure Maps Timezone API version.
+        optional: true
+        default: "1.0"
+    output:
+      description: The time zone at that point.
+      type: object
+      properties:
+        TimeZones: {type: array, description: "Each with Id (the IANA name), ReferenceTime (offset, DST savings, local time) and optionally RepresentativePoint and TimeTransitions."}
+
+  get_timezone_by_id:
+    title: Get the current offset for a named time zone
+    description: >-
+      Resolve an IANA time zone name -- "Europe/London", "America/New_York" --
+      to its current UTC offset, daylight saving state and local time. Use it
+      when you already know the zone and need to convert a time correctly,
+      rather than assuming a fixed offset.
+    category: timezone
+    read_only: true
+    request:
+      method: GET
+      path: /timezone/byId/json
+      query:
+        api-version: "${api_version}"
+        query: "${timezone_id}"
+        options: "${options}"
+        timeStamp: "${timestamp}"
+    input:
+      timezone_id:
+        type: string
+        description: The IANA time zone name.
+        example: Europe/London
+      options:
+        type: string
+        description: How much detail to return.
+        optional: true
+        enum: [none, zoneInfo, transitions, all]
+      timestamp:
+        type: string
+        description: The instant to evaluate the offset at, as ISO 8601. Defaults to now.
+        optional: true
+      api_version:
+        type: string
+        description: Azure Maps Timezone API version.
+        optional: true
+        default: "1.0"
+    output:
+      description: The time zone's current state.
+      type: object
+      properties:
+        TimeZones: {type: array, description: "Each with Id, ReferenceTime (UtcOffset, DstSavings, WallTime) and optionally TimeTransitions."}
+
+  list_iana_timezones:
+    title: List every IANA time zone the service knows
+    description: >-
+      The complete IANA time zone list, with any aliases. Useful for validating
+      a zone name before storing it, and for resolving a deprecated alias
+      ("US/Pacific") to the current name ("America/Los_Angeles"). Takes no
+      arguments beyond the version.
+    category: timezone
+    read_only: true
+    request:
+      method: GET
+      path: /timezone/enumIana/json
+      query:
+        api-version: "${api_version}"
+    input:
+      api_version:
+        type: string
+        description: Azure Maps Timezone API version.
+        optional: true
+        default: "1.0"
+    output:
+      description: Every IANA time zone id.
+      type: array
+      items: {type: object, description: "Id, and aliasOf when the id is a deprecated alias."}
+
+  # -- weather ---------------------------------------------------------------
+
+  get_current_weather:
+    title: Get current weather conditions at a point
+    description: >-
+      Observed conditions at a location right now -- temperature, apparent
+      temperature, humidity, wind, visibility, precipitation and a phrase
+      describing it.
+
+      `query` is LATITUDE,longitude. `details` set to false returns a much
+      smaller payload with just the essentials, which is usually enough.
+    category: weather
+    read_only: true
+    notes: query is latitude,longitude. Uses the 1.1 API version, not 1.0.
+    request:
+      method: GET
+      path: /weather/currentConditions/json
+      query:
+        api-version: "${api_version}"
+        query: "${query}"
+        unit: "${unit}"
+        details: "${details}"
+        language: "${language}"
+    input:
+      query:
+        type: string
+        description: The point as "latitude,longitude".
+        example: 47.63,-122.34
+      unit:
+        type: string
+        description: metric returns Celsius and km/h; imperial returns Fahrenheit and mph.
+        optional: true
+        enum: [metric, imperial]
+      details:
+        type: boolean
+        description: False returns a much smaller response with only the essential fields.
+        optional: true
+      language:
+        type: string
+        description: Language for the descriptive phrases, e.g. "en-US".
+        optional: true
+      api_version:
+        type: string
+        description: Azure Maps Weather API version.
+        optional: true
+        default: "1.1"
+    output:
+      description: The current conditions.
+      type: object
+      properties:
+        results: {type: array, description: "One entry with temperature, realFeelTemperature, relativeHumidity, wind, visibility, phrase and dateTime."}
+
+  get_daily_forecast:
+    title: Get a daily weather forecast
+    description: >-
+      A day-by-day forecast for a point -- high and low temperature, conditions,
+      precipitation probability and wind, for up to 45 days depending on the
+      pricing tier.
+
+      `query` is LATITUDE,longitude. `duration` in days is capped by the tier:
+      1, 5, 10, 15, 25 and 45 are the valid values, and asking for more than the
+      tier allows is an error rather than a truncation.
+    category: weather
+    read_only: true
+    notes: query is latitude,longitude. Durations beyond the pricing tier's limit are rejected.
+    request:
+      method: GET
+      path: /weather/forecast/daily/json
+      query:
+        api-version: "${api_version}"
+        query: "${query}"
+        duration: "${duration}"
+        unit: "${unit}"
+        language: "${language}"
+    input:
+      query:
+        type: string
+        description: The point as "latitude,longitude".
+        example: 47.63,-122.34
+      duration:
+        type: integer
+        description: How many days to forecast. 1, 5, 10, 15, 25 or 45, subject to the pricing tier.
+        optional: true
+        enum: [1, 5, 10, 15, 25, 45]
+      unit:
+        type: string
+        description: metric or imperial.
+        optional: true
+        enum: [metric, imperial]
+      language:
+        type: string
+        description: Language for the descriptive phrases.
+        optional: true
+      api_version:
+        type: string
+        description: Azure Maps Weather API version.
+        optional: true
+        default: "1.1"
+    output:
+      description: The daily forecast.
+      type: object
+      properties:
+        summary: {type: object, description: "A phrase covering the whole period."}
+        forecasts: {type: array, description: "One entry per day with date, temperature min and max, day and night conditions, and precipitation probability."}
+
+  get_hourly_forecast:
+    title: Get an hourly weather forecast
+    description: >-
+      An hour-by-hour forecast for a point, for up to 240 hours depending on the
+      pricing tier. Finer than get_daily_forecast and the right choice for
+      anything scheduled within a day or two.
+
+      `query` is LATITUDE,longitude. Valid durations are 1, 12, 24, 72, 120 and
+      240 hours.
+    category: weather
+    read_only: true
+    notes: query is latitude,longitude. Durations beyond the pricing tier's limit are rejected.
+    request:
+      method: GET
+      path: /weather/forecast/hourly/json
+      query:
+        api-version: "${api_version}"
+        query: "${query}"
+        duration: "${duration}"
+        unit: "${unit}"
+        language: "${language}"
+    input:
+      query:
+        type: string
+        description: The point as "latitude,longitude".
+        example: 47.63,-122.34
+      duration:
+        type: integer
+        description: How many hours to forecast. 1, 12, 24, 72, 120 or 240, subject to the pricing tier.
+        optional: true
+        enum: [1, 12, 24, 72, 120, 240]
+      unit:
+        type: string
+        description: metric or imperial.
+        optional: true
+        enum: [metric, imperial]
+      language:
+        type: string
+        description: Language for the descriptive phrases.
+        optional: true
+      api_version:
+        type: string
+        description: Azure Maps Weather API version.
+        optional: true
+        default: "1.1"
+    output:
+      description: The hourly forecast.
+      type: object
+      properties:
+        forecasts: {type: array, description: "One entry per hour with date, temperature, phrase, precipitationProbability and wind."}
+
+  get_severe_weather_alerts:
+    title: Get severe weather alerts for a point
+    description: >-
+      Active government weather warnings covering a location -- storms, floods,
+      heat, whatever the national meteorological service has issued -- with each
+      alert's category, severity, effective window and description.
+
+      An empty `results` array means no alerts, which is the common case and not
+      an error. `query` is LATITUDE,longitude.
+    category: weather
+    read_only: true
+    notes: query is latitude,longitude. An empty result means no active alerts.
+    request:
+      method: GET
+      path: /weather/severeAlerts/json
+      query:
+        api-version: "${api_version}"
+        query: "${query}"
+        details: "${details}"
+        language: "${language}"
+    input:
+      query:
+        type: string
+        description: The point as "latitude,longitude".
+        example: 47.63,-122.34
+      details:
+        type: boolean
+        description: Include the full alert text as well as the summary.
+        optional: true
+      language:
+        type: string
+        description: Language for the alert text.
+        optional: true
+      api_version:
+        type: string
+        description: Azure Maps Weather API version.
+        optional: true
+        default: "1.1"
+    output:
+      description: Active severe weather alerts, or an empty list.
+      type: object
+      properties:
+        results: {type: array, description: "Each with countryCode, alertId, description, category, priority, class, level and alertAreas holding the effective window and text."}
+
+  # -- geolocation -----------------------------------------------------------
+
+  get_country_by_ip:
+    title: Look up the country for an IP address
+    description: >-
+      The ISO country code an IPv4 or IPv6 address is registered in. Country
+      only -- Azure Maps does not return a city or coordinates from an IP, and
+      any service that claims to is guessing.
+
+      Useful for compliance routing and coarse localisation. Not useful for
+      anything needing accuracy: VPNs, mobile carriers and cloud egress all
+      report the wrong country routinely.
+    category: geolocation
+    read_only: true
+    notes: Returns the country only, and IP-based location is unreliable behind VPNs and mobile networks.
+    request:
+      method: GET
+      path: /geolocation/ip/json
+      query:
+        api-version: "${api_version}"
+        ip: "${ip_address}"
+    input:
+      ip_address:
+        type: string
+        description: The IPv4 or IPv6 address to look up.
+        example: 203.0.113.5
+      api_version:
+        type: string
+        description: Azure Maps Geolocation API version.
+        optional: true
+        default: "1.0"
+    output:
+      description: The country the address is registered in.
+      type: object
+      properties:
+        countryRegion: {type: object, description: "isoCode, the two-letter country code."}
+        ipAddress: {type: string, description: "The address that was looked up."}

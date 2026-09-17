@@ -1,0 +1,1765 @@
+# Beamer tools -- changelog posts, feature requests, users and NPS.
+#
+# Beamer is a changelog and feedback widget. Three resources carry almost
+# everything:
+#
+#   * **posts** are changelog entries. They can be created unpublished
+#     (`publish: false`) and released later, and `send_push_notification`
+#     decides whether existing users are pinged. Publishing a post makes it
+#     visible in every embedded feed at once, so it is an outward-facing act;
+#   * **requests** are the feature-request board. Users vote on them and
+#     comment; `status` moves them through your roadmap;
+#   * **users** are the people the widget has seen, keyed either by your own
+#     `userId` or by Beamer's own `beamerId`. Segments are expressed as
+#     `filter` strings on both posts and users, which is how a post is shown
+#     to only part of the audience.
+#
+# Two API quirks that surprise people:
+#
+#   * **`title` and `content` are arrays, one entry per language**, paired
+#     positionally with `language` -- so a bilingual post sends
+#     `title: ["Hello", "Bonjour"]`, `language: ["EN", "FR"]`;
+#   * **user-scoped reads need the user identified.** `list_unread_posts` and
+#     the feed url take `userId`/`userEmail` and answer relative to that
+#     person; without them you get the anonymous view.
+#
+# The connection's base url has no version segment, so paths start at `/v0`.
+#
+# Docs: https://www.getbeamer.com/docs/
+
+connector_id: beamer
+display_name: Beamer
+docs_url: https://www.getbeamer.com/docs/
+
+tools:
+
+  # -- connection ----------------------------------------------------------
+
+  ping:
+    title: Check the API key
+    description: >-
+      Verify that the API key is accepted. The cheapest call there is, and the
+      one to run before blaming an endpoint for a 401.
+    category: account
+    request:
+      method: POST
+      path: /v0/ping
+    input: {}
+    output:
+      description: Confirmation that the key authenticated.
+      type: object
+
+  get_feed_url:
+    title: Get a feed URL
+    description: >-
+      Build the url of the standalone Beamer feed, optionally identified as one
+      user and filtered to a segment -- the link to send someone who should see
+      their own personalised changelog.
+    category: account
+    read_only: true
+    request:
+      method: GET
+      path: /v0/url
+      query:
+        language: "${language}"
+        filter: "${filter}"
+        forceFilter: "${force_filter}"
+        filterByUrl: "${filter_by_url}"
+        userId: "${user_id}"
+        userEmail: "${user_email}"
+        userFirstName: "${user_first_name}"
+        userLastName: "${user_last_name}"
+        theme: "${theme}"
+    input:
+      language:
+        type: string
+        description: Language code for the feed, e.g. "EN".
+        optional: true
+      filter:
+        type: string
+        description: Segment filter to apply to the feed's posts.
+        optional: true
+      force_filter:
+        type: string
+        description: Segment filter applied even to posts without a filter of their own.
+        optional: true
+      filter_by_url:
+        type: boolean
+        description: Restrict to posts targeted at the current page url.
+        optional: true
+      user_id:
+        type: string
+        description: Your own id for the viewer, so the feed is personalised.
+        optional: true
+      user_email:
+        type: string
+        description: The viewer's email address.
+        optional: true
+      user_first_name:
+        type: string
+        description: The viewer's first name.
+        optional: true
+      user_last_name:
+        type: string
+        description: The viewer's last name.
+        optional: true
+      theme:
+        type: string
+        description: Theme to render the feed with.
+        optional: true
+    output:
+      description: The feed url.
+      type: object
+
+  # -- posts ---------------------------------------------------------------
+
+  list_posts:
+    title: List changelog posts
+    description: >-
+      Read the changelog posts. `published`, `archived` and `expired` narrow to
+      the state you care about, `category` and `filter` to a kind or segment.
+      Note that `saveViews` counts a view against each post returned, so leave
+      it off for reporting.
+    category: posts
+    read_only: true
+    request:
+      method: GET
+      path: /v0/posts
+      query:
+        published: "${published}"
+        archived: "${archived}"
+        expired: "${expired}"
+        category: "${category}"
+        language: "${language}"
+        filter: "${filter}"
+        forceFilter: "${force_filter}"
+        filterUrl: "${filter_url}"
+        dateFrom: "${date_from}"
+        dateTo: "${date_to}"
+        userId: "${user_id}"
+        filterByUserId: "${filter_by_user_id}"
+        saveViews: "${save_views}"
+        ignoreFilters: "${ignore_filters}"
+        maxResults: "${max_results}"
+        page: "${page}"
+    input:
+      published:
+        type: boolean
+        description: Only published posts, or only unpublished ones.
+        optional: true
+      archived:
+        type: boolean
+        description: Only archived posts.
+        optional: true
+      expired:
+        type: boolean
+        description: Only posts past their due date.
+        optional: true
+      category:
+        type: string
+        description: Only posts in this category, e.g. "new", "improvement", "fix".
+        optional: true
+      language:
+        type: string
+        description: Return the given language's version of each post.
+        optional: true
+      filter:
+        type: string
+        description: Only posts targeted at this segment filter.
+        optional: true
+      force_filter:
+        type: string
+        description: Segment filter applied even to posts with no filter of their own.
+        optional: true
+      filter_url:
+        type: string
+        description: Only posts targeted at this page url.
+        optional: true
+      date_from:
+        type: string
+        description: Only posts dated on or after this date.
+        optional: true
+      date_to:
+        type: string
+        description: Only posts dated on or before this date.
+        optional: true
+      user_id:
+        type: string
+        description: Your own id for a user, to scope the results to what they would see.
+        optional: true
+      filter_by_user_id:
+        type: boolean
+        description: Apply the segment of the user named by `user_id`.
+        optional: true
+      save_views:
+        type: boolean
+        description: Count a view against each returned post. Leave off for reporting.
+        optional: true
+      ignore_filters:
+        type: boolean
+        description: Ignore segment filters entirely and return everything.
+        optional: true
+      max_results:
+        type: integer
+        description: Posts per page.
+        optional: true
+        minimum: 1
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: The matching posts.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          title: {type: string}
+          published: {type: boolean}
+
+  count_posts:
+    title: Count changelog posts
+    description: >-
+      Count posts matching the same filters as list_posts, without pulling the
+      posts themselves -- the cheap way to answer "how many unpublished posts
+      are there".
+    category: posts
+    read_only: true
+    request:
+      method: GET
+      path: /v0/posts/count
+      query:
+        published: "${published}"
+        archived: "${archived}"
+        expired: "${expired}"
+        category: "${category}"
+        language: "${language}"
+        filter: "${filter}"
+        filterUrl: "${filter_url}"
+        dateFrom: "${date_from}"
+        dateTo: "${date_to}"
+        ignoreFilters: "${ignore_filters}"
+    input:
+      published:
+        type: boolean
+        description: Only published posts.
+        optional: true
+      archived:
+        type: boolean
+        description: Only archived posts.
+        optional: true
+      expired:
+        type: boolean
+        description: Only expired posts.
+        optional: true
+      category:
+        type: string
+        description: Only posts in this category.
+        optional: true
+      language:
+        type: string
+        description: Language version to count.
+        optional: true
+      filter:
+        type: string
+        description: Only posts targeted at this segment filter.
+        optional: true
+      filter_url:
+        type: string
+        description: Only posts targeted at this page url.
+        optional: true
+      date_from:
+        type: string
+        description: Only posts on or after this date.
+        optional: true
+      date_to:
+        type: string
+        description: Only posts on or before this date.
+        optional: true
+      ignore_filters:
+        type: boolean
+        description: Ignore segment filters entirely.
+        optional: true
+    output:
+      description: The post count.
+      type: object
+
+  get_post:
+    title: Get a changelog post
+    description: Read one post by id, in the language you ask for.
+    category: posts
+    read_only: true
+    request:
+      method: GET
+      path: /v0/posts/${post_id}
+      query:
+        language: "${language}"
+        userId: "${user_id}"
+        userEmail: "${user_email}"
+        traceableLinks: "${traceable_links}"
+    input:
+      post_id:
+        type: integer
+        description: The post's id, from list_posts.
+      language:
+        type: string
+        description: Language version to return, e.g. "EN".
+        optional: true
+      user_id:
+        type: string
+        description: Your own id for a viewer, so the post is read in their context.
+        optional: true
+      user_email:
+        type: string
+        description: The viewer's email address.
+        optional: true
+      traceable_links:
+        type: boolean
+        description: Rewrite the post's links for click tracking.
+        optional: true
+    output:
+      description: The post.
+      type: object
+
+  create_post:
+    title: Create a changelog post
+    description: >-
+      Write a changelog post. `title` and `content` are **arrays**, one entry
+      per language, paired positionally with `language`. `publish: false`
+      keeps it as a draft; publishing makes it visible in every embedded feed
+      at once, and `send_push_notification` additionally pings existing users.
+      `filter` targets a segment; `filter_url` targets particular pages.
+    category: posts
+    request:
+      method: POST
+      path: /v0/posts
+      body:
+        title: "${title}"
+        content: "${content}"
+        language: "${language}"
+        category: "${category}"
+        publish: "${publish}"
+        pinned: "${pinned}"
+        archive: "${archive}"
+        showInWidget: "${show_in_widget}"
+        showInStandalone: "${show_in_standalone}"
+        linkUrl: "${link_url}"
+        linkText: "${link_text}"
+        linksInNewWindow: "${links_in_new_window}"
+        date: "${date}"
+        dueDate: "${due_date}"
+        filter: "${filter}"
+        filterUserId: "${filter_user_id}"
+        filterUrl: "${filter_url}"
+        enableFeedback: "${enable_feedback}"
+        enableReactions: "${enable_reactions}"
+        enableSocialShare: "${enable_social_share}"
+        autoOpen: "${auto_open}"
+        sendPushNotification: "${send_push_notification}"
+        userEmail: "${user_email}"
+    input:
+      title:
+        type: array
+        description: The post's title, one entry per language, aligned with `language`.
+        items: {type: string}
+      content:
+        type: array
+        description: The post's body (HTML allowed), one entry per language, aligned with `language`.
+        items: {type: string}
+      language:
+        type: array
+        description: Language codes for the entries in `title` and `content`, e.g. ["EN"].
+        optional: true
+        items: {type: string}
+      category:
+        type: string
+        description: Post category, e.g. "new", "improvement" or "fix".
+        optional: true
+      publish:
+        type: boolean
+        description: Publish immediately. False keeps it as a draft.
+        optional: true
+      pinned:
+        type: boolean
+        description: Pin the post to the top of the feed.
+        optional: true
+      archive:
+        type: boolean
+        description: Create the post already archived.
+        optional: true
+      show_in_widget:
+        type: boolean
+        description: Show the post in the embedded widget.
+        optional: true
+      show_in_standalone:
+        type: boolean
+        description: Show the post on the standalone changelog page.
+        optional: true
+      link_url:
+        type: string
+        description: Call-to-action url, one entry per language when several are used.
+        optional: true
+      link_text:
+        type: string
+        description: Call-to-action label.
+        optional: true
+      links_in_new_window:
+        type: boolean
+        description: Open the post's links in a new tab.
+        optional: true
+      date:
+        type: string
+        description: The date shown on the post.
+        optional: true
+      due_date:
+        type: string
+        description: When the post should expire out of the feed.
+        optional: true
+      filter:
+        type: string
+        description: Segment filter deciding who sees the post.
+        optional: true
+      filter_user_id:
+        type: string
+        description: Show the post only to this user id -- a single-user announcement.
+        optional: true
+      filter_url:
+        type: string
+        description: Show the post only on pages matching this url.
+        optional: true
+      enable_feedback:
+        type: boolean
+        description: Let readers leave feedback on the post.
+        optional: true
+      enable_reactions:
+        type: boolean
+        description: Let readers react to the post.
+        optional: true
+      enable_social_share:
+        type: boolean
+        description: Show social share buttons on the post.
+        optional: true
+      auto_open:
+        type: boolean
+        description: Open the feed automatically for users who have not seen this post.
+        optional: true
+      send_push_notification:
+        type: boolean
+        description: Push a notification to existing users about this post.
+        optional: true
+      user_email:
+        type: string
+        description: Email address to attribute the post to as its author.
+        optional: true
+    output:
+      description: The created post.
+      type: object
+
+  update_post:
+    title: Update a changelog post
+    description: >-
+      Replace a post's fields. Same array-per-language shape as create_post,
+      and setting `publish` to true on a draft releases it -- readers see the
+      change immediately.
+    category: posts
+    request:
+      method: PUT
+      path: /v0/posts/${post_id}
+      body:
+        title: "${title}"
+        content: "${content}"
+        language: "${language}"
+        category: "${category}"
+        publish: "${publish}"
+        pinned: "${pinned}"
+        archive: "${archive}"
+        linkUrl: "${link_url}"
+        linkText: "${link_text}"
+        date: "${date}"
+        dueDate: "${due_date}"
+        filter: "${filter}"
+        filterUrl: "${filter_url}"
+        sendPushNotification: "${send_push_notification}"
+    input:
+      post_id:
+        type: integer
+        description: The post's id.
+      title:
+        type: array
+        description: New title, one entry per language.
+        optional: true
+        items: {type: string}
+      content:
+        type: array
+        description: New body, one entry per language.
+        optional: true
+        items: {type: string}
+      language:
+        type: array
+        description: Language codes aligned with `title` and `content`.
+        optional: true
+        items: {type: string}
+      category:
+        type: string
+        description: New category.
+        optional: true
+      publish:
+        type: boolean
+        description: True releases a draft; false unpublishes.
+        optional: true
+      pinned:
+        type: boolean
+        description: Pin or unpin the post.
+        optional: true
+      archive:
+        type: boolean
+        description: Archive or unarchive the post.
+        optional: true
+      link_url:
+        type: string
+        description: New call-to-action url.
+        optional: true
+      link_text:
+        type: string
+        description: New call-to-action label.
+        optional: true
+      date:
+        type: string
+        description: New display date.
+        optional: true
+      due_date:
+        type: string
+        description: New expiry date.
+        optional: true
+      filter:
+        type: string
+        description: New segment filter.
+        optional: true
+      filter_url:
+        type: string
+        description: New page-url target.
+        optional: true
+      send_push_notification:
+        type: boolean
+        description: Push a notification about the update.
+        optional: true
+    output:
+      description: The updated post.
+      type: object
+
+  delete_post:
+    title: Delete a changelog post
+    description: >-
+      Delete a post along with its comments and reactions. Archiving it with
+      update_post is the reversible alternative.
+    category: posts
+    destructive: true
+    request:
+      method: DELETE
+      path: /v0/posts/${post_id}
+    input:
+      post_id:
+        type: integer
+        description: The post's id.
+    output:
+      description: Confirmation that the post was deleted.
+      type: object
+
+  list_unread_posts:
+    title: List a user's unread posts
+    description: >-
+      Read the posts one user has not seen -- what the widget would show them
+      on their next visit. `mark_as_read` clears the badge as a side effect, so
+      leave it off unless that is what you want.
+    category: posts
+    read_only: true
+    request:
+      method: GET
+      path: /v0/unread
+      query:
+        userId: "${user_id}"
+        userEmail: "${user_email}"
+        language: "${language}"
+        category: "${category}"
+        filter: "${filter}"
+        filterUrl: "${filter_url}"
+        dateFrom: "${date_from}"
+        markAsRead: "${mark_as_read}"
+        saveViews: "${save_views}"
+        maxResults: "${max_results}"
+        page: "${page}"
+    input:
+      user_id:
+        type: string
+        description: Your own id for the user. Use this or `user_email`.
+        optional: true
+      user_email:
+        type: string
+        description: The user's email address. Use this or `user_id`.
+        optional: true
+      language:
+        type: string
+        description: Language version to return.
+        optional: true
+      category:
+        type: string
+        description: Only posts in this category.
+        optional: true
+      filter:
+        type: string
+        description: Segment filter to apply.
+        optional: true
+      filter_url:
+        type: string
+        description: Only posts targeted at this page url.
+        optional: true
+      date_from:
+        type: string
+        description: Only posts dated on or after this date.
+        optional: true
+      mark_as_read:
+        type: boolean
+        description: Mark the returned posts as read, clearing the user's badge.
+        optional: true
+      save_views:
+        type: boolean
+        description: Count a view against each returned post.
+        optional: true
+      max_results:
+        type: integer
+        description: Posts per page.
+        optional: true
+        minimum: 1
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: The user's unread posts.
+      type: array
+      items: {type: object}
+
+  count_unread_posts:
+    title: Count a user's unread posts
+    description: >-
+      Count what one user has not read -- the number behind the widget's
+      badge -- without fetching the posts or marking anything read.
+    category: posts
+    read_only: true
+    request:
+      method: GET
+      path: /v0/unread/count
+      query:
+        userId: "${user_id}"
+        userEmail: "${user_email}"
+        language: "${language}"
+        category: "${category}"
+        filter: "${filter}"
+        filterUrl: "${filter_url}"
+        dateFrom: "${date_from}"
+        ignoreFilters: "${ignore_filters}"
+    input:
+      user_id:
+        type: string
+        description: Your own id for the user.
+        optional: true
+      user_email:
+        type: string
+        description: The user's email address.
+        optional: true
+      language:
+        type: string
+        description: Language version to count.
+        optional: true
+      category:
+        type: string
+        description: Only posts in this category.
+        optional: true
+      filter:
+        type: string
+        description: Segment filter to apply.
+        optional: true
+      filter_url:
+        type: string
+        description: Only posts targeted at this page url.
+        optional: true
+      date_from:
+        type: string
+        description: Only posts on or after this date.
+        optional: true
+      ignore_filters:
+        type: boolean
+        description: Ignore segment filters entirely.
+        optional: true
+    output:
+      description: The unread count for that user.
+      type: object
+
+  list_post_comments:
+    title: List a post's comments
+    description: Read the comments readers have left on one changelog post.
+    category: posts
+    read_only: true
+    request:
+      method: GET
+      path: /v0/posts/${post_id}/comments
+      query:
+        dateFrom: "${date_from}"
+        dateTo: "${date_to}"
+        language: "${language}"
+        search: "${search}"
+        maxResults: "${max_results}"
+        page: "${page}"
+    input:
+      post_id:
+        type: integer
+        description: The post's id.
+      date_from:
+        type: string
+        description: Only comments on or after this date.
+        optional: true
+      date_to:
+        type: string
+        description: Only comments on or before this date.
+        optional: true
+      language:
+        type: string
+        description: Only comments in this language.
+        optional: true
+      search:
+        type: string
+        description: Search text matched against the comments.
+        optional: true
+      max_results:
+        type: integer
+        description: Comments per page.
+        optional: true
+        minimum: 1
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: The post's comments.
+      type: array
+      items: {type: object}
+
+  create_post_comment:
+    title: Comment on a post
+    description: >-
+      Add a comment to a changelog post on a user's behalf. It appears
+      publicly in the feed under that person's name.
+    category: posts
+    request:
+      method: POST
+      path: /v0/posts/${post_id}/comments
+      body:
+        text: "${text}"
+        userId: "${user_id}"
+        userEmail: "${user_email}"
+        userFirstname: "${user_first_name}"
+        userLastname: "${user_last_name}"
+    input:
+      post_id:
+        type: integer
+        description: The post's id.
+      text:
+        type: string
+        description: The comment text.
+      user_id:
+        type: string
+        description: Your own id for the commenter.
+        optional: true
+      user_email:
+        type: string
+        description: The commenter's email address.
+        optional: true
+      user_first_name:
+        type: string
+        description: The commenter's first name.
+        optional: true
+      user_last_name:
+        type: string
+        description: The commenter's last name.
+        optional: true
+    output:
+      description: The created comment.
+      type: object
+
+  delete_post_comment:
+    title: Delete a post comment
+    description: Remove a comment from a changelog post. It disappears from the public feed.
+    category: posts
+    destructive: true
+    request:
+      method: DELETE
+      path: /v0/posts/${post_id}/comments/${comment_id}
+    input:
+      post_id:
+        type: integer
+        description: The post's id.
+      comment_id:
+        type: integer
+        description: The comment's id, from list_post_comments.
+    output:
+      description: Confirmation that the comment was deleted.
+      type: object
+
+  list_post_reactions:
+    title: List a post's reactions
+    description: >-
+      Read the reactions on a post and who left them, optionally narrowed to
+      one reaction type.
+    category: posts
+    read_only: true
+    request:
+      method: GET
+      path: /v0/posts/${post_id}/reactions
+      query:
+        reaction: "${reaction}"
+        dateFrom: "${date_from}"
+        dateTo: "${date_to}"
+        maxResults: "${max_results}"
+        page: "${page}"
+    input:
+      post_id:
+        type: integer
+        description: The post's id.
+      reaction:
+        type: string
+        description: Only this reaction type.
+        optional: true
+      date_from:
+        type: string
+        description: Only reactions on or after this date.
+        optional: true
+      date_to:
+        type: string
+        description: Only reactions on or before this date.
+        optional: true
+      max_results:
+        type: integer
+        description: Reactions per page.
+        optional: true
+        minimum: 1
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: The post's reactions.
+      type: array
+      items: {type: object}
+
+  create_post_reaction:
+    title: React to a post
+    description: Record a reaction on a changelog post on a user's behalf.
+    category: posts
+    request:
+      method: POST
+      path: /v0/posts/${post_id}/reactions
+      body:
+        reaction: "${reaction}"
+        userId: "${user_id}"
+        userEmail: "${user_email}"
+        userFirstname: "${user_first_name}"
+        userLastname: "${user_last_name}"
+    input:
+      post_id:
+        type: integer
+        description: The post's id.
+      reaction:
+        type: string
+        description: The reaction to record.
+      user_id:
+        type: string
+        description: Your own id for the reacting user.
+        optional: true
+      user_email:
+        type: string
+        description: The user's email address.
+        optional: true
+      user_first_name:
+        type: string
+        description: The user's first name.
+        optional: true
+      user_last_name:
+        type: string
+        description: The user's last name.
+        optional: true
+    output:
+      description: The created reaction.
+      type: object
+
+  # -- feature requests ----------------------------------------------------
+
+  list_feature_requests:
+    title: List feature requests
+    description: >-
+      Read the feature-request board. `status` follows your roadmap columns and
+      `visible` separates what users can see from what is internal; `search`
+      matches title and body.
+    category: requests
+    read_only: true
+    request:
+      method: GET
+      path: /v0/requests
+      query:
+        status: "${status}"
+        visible: "${visible}"
+        category: "${category}"
+        language: "${language}"
+        filters: "${filters}"
+        search: "${search}"
+        dateFrom: "${date_from}"
+        dateTo: "${date_to}"
+        maxResults: "${max_results}"
+        page: "${page}"
+    input:
+      status:
+        type: string
+        description: Only requests in this status, e.g. "planned" or "shipped".
+        optional: true
+      visible:
+        type: boolean
+        description: Only requests visible to users, or only internal ones.
+        optional: true
+      category:
+        type: string
+        description: Only requests in this category.
+        optional: true
+      language:
+        type: string
+        description: Only requests in this language.
+        optional: true
+      filters:
+        type: string
+        description: Segment filters the request is targeted at.
+        optional: true
+      search:
+        type: string
+        description: Search text matched against title and content.
+        optional: true
+      date_from:
+        type: string
+        description: Only requests on or after this date.
+        optional: true
+      date_to:
+        type: string
+        description: Only requests on or before this date.
+        optional: true
+      max_results:
+        type: integer
+        description: Requests per page.
+        optional: true
+        minimum: 1
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: The matching feature requests.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          title: {type: string}
+          votesCount: {type: integer}
+
+  count_feature_requests:
+    title: Count feature requests
+    description: >-
+      Count feature requests matching the same filters as
+      list_feature_requests, without pulling them.
+    category: requests
+    read_only: true
+    request:
+      method: GET
+      path: /v0/requests/count
+      query:
+        status: "${status}"
+        visible: "${visible}"
+        category: "${category}"
+        language: "${language}"
+        search: "${search}"
+        dateFrom: "${date_from}"
+        dateTo: "${date_to}"
+    input:
+      status:
+        type: string
+        description: Only requests in this status.
+        optional: true
+      visible:
+        type: boolean
+        description: Only user-visible or only internal requests.
+        optional: true
+      category:
+        type: string
+        description: Only requests in this category.
+        optional: true
+      language:
+        type: string
+        description: Only requests in this language.
+        optional: true
+      search:
+        type: string
+        description: Search text.
+        optional: true
+      date_from:
+        type: string
+        description: Only requests on or after this date.
+        optional: true
+      date_to:
+        type: string
+        description: Only requests on or before this date.
+        optional: true
+    output:
+      description: The request count.
+      type: object
+
+  get_feature_request:
+    title: Get a feature request
+    description: Read one feature request -- its title, body, status, vote count and category.
+    category: requests
+    read_only: true
+    request:
+      method: GET
+      path: /v0/requests/${feature_request_id}
+    input:
+      feature_request_id:
+        type: integer
+        description: The feature request's id, from list_feature_requests.
+    output:
+      description: The feature request.
+      type: object
+
+  create_feature_request:
+    title: Create a feature request
+    description: >-
+      Add an entry to the feature-request board, optionally on a user's behalf.
+      Like posts, `title` and `content` are arrays paired with `language`.
+      `visible: false` keeps it off the public board.
+    category: requests
+    request:
+      method: POST
+      path: /v0/requests
+      body:
+        title: "${title}"
+        content: "${content}"
+        language: "${language}"
+        visible: "${visible}"
+        category: "${category}"
+        status: "${status}"
+        notes: "${notes}"
+        filters: "${filters}"
+        votesCount: "${votes_count}"
+        date: "${date}"
+        userId: "${user_id}"
+        userEmail: "${user_email}"
+        userFirstname: "${user_first_name}"
+        userLastname: "${user_last_name}"
+        internalUserEmail: "${internal_user_email}"
+    input:
+      title:
+        type: array
+        description: The request's title, one entry per language.
+        items: {type: string}
+      content:
+        type: array
+        description: The request's body, one entry per language.
+        items: {type: string}
+      language:
+        type: array
+        description: Language codes aligned with `title` and `content`.
+        optional: true
+        items: {type: string}
+      visible:
+        type: boolean
+        description: Whether users can see the request on the board.
+        optional: true
+      category:
+        type: string
+        description: Category for the request.
+        optional: true
+      status:
+        type: string
+        description: Roadmap status to start it in.
+        optional: true
+      notes:
+        type: string
+        description: Internal notes, not shown to users.
+        optional: true
+      filters:
+        type: string
+        description: Segment filters the request is targeted at.
+        optional: true
+      votes_count:
+        type: integer
+        description: Starting vote count, for a request imported from elsewhere.
+        optional: true
+        minimum: 0
+      date:
+        type: string
+        description: Date to record on the request.
+        optional: true
+      user_id:
+        type: string
+        description: Your own id for the requesting user.
+        optional: true
+      user_email:
+        type: string
+        description: The requesting user's email address.
+        optional: true
+      user_first_name:
+        type: string
+        description: The requesting user's first name.
+        optional: true
+      user_last_name:
+        type: string
+        description: The requesting user's last name.
+        optional: true
+      internal_user_email:
+        type: string
+        description: Email of the team member filing this on a user's behalf.
+        optional: true
+    output:
+      description: The created feature request.
+      type: object
+
+  update_feature_request:
+    title: Update a feature request
+    description: >-
+      Change a feature request -- most often its `status`, which is how it
+      moves across the public roadmap, or `visible` to publish or hide it.
+    category: requests
+    request:
+      method: PUT
+      path: /v0/requests/${feature_request_id}
+      body:
+        title: "${title}"
+        content: "${content}"
+        language: "${language}"
+        visible: "${visible}"
+        category: "${category}"
+        status: "${status}"
+        notes: "${notes}"
+        votesCount: "${votes_count}"
+    input:
+      feature_request_id:
+        type: integer
+        description: The feature request's id.
+      title:
+        type: array
+        description: New title, one entry per language.
+        optional: true
+        items: {type: string}
+      content:
+        type: array
+        description: New body, one entry per language.
+        optional: true
+        items: {type: string}
+      language:
+        type: array
+        description: Language codes aligned with `title` and `content`.
+        optional: true
+        items: {type: string}
+      visible:
+        type: boolean
+        description: Show or hide the request on the public board.
+        optional: true
+      category:
+        type: string
+        description: New category.
+        optional: true
+      status:
+        type: string
+        description: New roadmap status.
+        optional: true
+      notes:
+        type: string
+        description: New internal notes.
+        optional: true
+      votes_count:
+        type: integer
+        description: Override the vote count.
+        optional: true
+        minimum: 0
+    output:
+      description: The updated feature request.
+      type: object
+
+  delete_feature_request:
+    title: Delete a feature request
+    description: >-
+      Delete a feature request with its votes and comments. Hiding it with
+      `visible: false` is the reversible alternative.
+    category: requests
+    destructive: true
+    request:
+      method: DELETE
+      path: /v0/requests/${feature_request_id}
+    input:
+      feature_request_id:
+        type: integer
+        description: The feature request's id.
+    output:
+      description: Confirmation that the request was deleted.
+      type: object
+
+  list_feature_request_comments:
+    title: List a feature request's comments
+    description: Read the discussion on one feature request, including internal comments.
+    category: requests
+    read_only: true
+    request:
+      method: GET
+      path: /v0/requests/${feature_request_id}/comments
+      query:
+        visible: "${visible}"
+        language: "${language}"
+        search: "${search}"
+        dateFrom: "${date_from}"
+        dateTo: "${date_to}"
+        maxResults: "${max_results}"
+        page: "${page}"
+    input:
+      feature_request_id:
+        type: integer
+        description: The feature request's id.
+      visible:
+        type: boolean
+        description: Only user-visible comments, or only internal ones.
+        optional: true
+      language:
+        type: string
+        description: Only comments in this language.
+        optional: true
+      search:
+        type: string
+        description: Search text matched against the comments.
+        optional: true
+      date_from:
+        type: string
+        description: Only comments on or after this date.
+        optional: true
+      date_to:
+        type: string
+        description: Only comments on or before this date.
+        optional: true
+      max_results:
+        type: integer
+        description: Comments per page.
+        optional: true
+        minimum: 1
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: The feature request's comments.
+      type: array
+      items: {type: object}
+
+  create_feature_request_comment:
+    title: Comment on a feature request
+    description: >-
+      Add a comment to a feature request. `visible` decides whether users see
+      it or it stays an internal note.
+    category: requests
+    request:
+      method: POST
+      path: /v0/requests/${feature_request_id}/comments
+      body:
+        text: "${text}"
+        visible: "${visible}"
+        userId: "${user_id}"
+        userEmail: "${user_email}"
+        userFirstname: "${user_first_name}"
+        userLastname: "${user_last_name}"
+    input:
+      feature_request_id:
+        type: integer
+        description: The feature request's id.
+      text:
+        type: string
+        description: The comment text.
+      visible:
+        type: boolean
+        description: Whether users can see the comment.
+        optional: true
+      user_id:
+        type: string
+        description: Your own id for the commenter.
+        optional: true
+      user_email:
+        type: string
+        description: The commenter's email address.
+        optional: true
+      user_first_name:
+        type: string
+        description: The commenter's first name.
+        optional: true
+      user_last_name:
+        type: string
+        description: The commenter's last name.
+        optional: true
+    output:
+      description: The created comment.
+      type: object
+
+  delete_feature_request_comment:
+    title: Delete a feature request comment
+    description: Remove a comment from a feature request; it disappears from the board.
+    category: requests
+    destructive: true
+    request:
+      method: DELETE
+      path: /v0/requests/${feature_request_id}/comments/${comment_id}
+    input:
+      feature_request_id:
+        type: integer
+        description: The feature request's id.
+      comment_id:
+        type: integer
+        description: The comment's id.
+    output:
+      description: Confirmation that the comment was deleted.
+      type: object
+
+  list_feature_request_votes:
+    title: List a feature request's votes
+    description: >-
+      Read who voted for a feature request -- the list behind the vote count,
+      and the people to tell when it ships.
+    category: requests
+    read_only: true
+    request:
+      method: GET
+      path: /v0/requests/${feature_request_id}/votes
+      query:
+        dateFrom: "${date_from}"
+        dateTo: "${date_to}"
+        maxResults: "${max_results}"
+        page: "${page}"
+    input:
+      feature_request_id:
+        type: integer
+        description: The feature request's id.
+      date_from:
+        type: string
+        description: Only votes on or after this date.
+        optional: true
+      date_to:
+        type: string
+        description: Only votes on or before this date.
+        optional: true
+      max_results:
+        type: integer
+        description: Votes per page.
+        optional: true
+        minimum: 1
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: The votes on that request.
+      type: array
+      items: {type: object}
+
+  create_feature_request_vote:
+    title: Vote for a feature request
+    description: Record a vote for a feature request on a user's behalf.
+    category: requests
+    request:
+      method: POST
+      path: /v0/requests/${feature_request_id}/votes
+      body:
+        userId: "${user_id}"
+        userEmail: "${user_email}"
+        userFirstname: "${user_first_name}"
+        userLastname: "${user_last_name}"
+    input:
+      feature_request_id:
+        type: integer
+        description: The feature request's id.
+      user_id:
+        type: string
+        description: Your own id for the voting user.
+        optional: true
+      user_email:
+        type: string
+        description: The voter's email address.
+        optional: true
+      user_first_name:
+        type: string
+        description: The voter's first name.
+        optional: true
+      user_last_name:
+        type: string
+        description: The voter's last name.
+        optional: true
+    output:
+      description: The recorded vote.
+      type: object
+
+  delete_feature_request_vote:
+    title: Remove a vote from a feature request
+    description: Withdraw one vote from a feature request, lowering its count.
+    category: requests
+    destructive: true
+    request:
+      method: DELETE
+      path: /v0/requests/${feature_request_id}/votes/${vote_id}
+    input:
+      feature_request_id:
+        type: integer
+        description: The feature request's id.
+      vote_id:
+        type: integer
+        description: The vote's id, from list_feature_request_votes.
+    output:
+      description: Confirmation that the vote was removed.
+      type: object
+
+  # -- users ---------------------------------------------------------------
+
+  list_users:
+    title: List users
+    description: >-
+      Read the users Beamer has seen, by your own `user_id`, Beamer's
+      `beamer_id` or email address. These are the people segment filters apply
+      to.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /v0/users
+      query:
+        userId: "${user_id}"
+        beamerId: "${beamer_id}"
+        userEmail: "${user_email}"
+        sort: "${sort}"
+        maxResults: "${max_results}"
+        page: "${page}"
+    input:
+      user_id:
+        type: string
+        description: Find the user with this id of your own.
+        optional: true
+      beamer_id:
+        type: string
+        description: Find the user with this Beamer-assigned id.
+        optional: true
+      user_email:
+        type: string
+        description: Find the user with this email address.
+        optional: true
+      sort:
+        type: string
+        description: Sort order for the results.
+        optional: true
+      max_results:
+        type: integer
+        description: Users per page.
+        optional: true
+        minimum: 1
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: The matching users.
+      type: array
+      items: {type: object}
+
+  create_user:
+    title: Create a user
+    description: >-
+      Register a user with Beamer, which is what lets posts be targeted at
+      them and unread counts be tracked. `filter` is the segment string that
+      decides which filtered posts they will see.
+    category: users
+    request:
+      method: POST
+      path: /v0/users
+      body:
+        userId: "${user_id}"
+        userEmail: "${user_email}"
+        userFirstName: "${user_first_name}"
+        userLastName: "${user_last_name}"
+        filter: "${filter}"
+        language: "${language}"
+        city: "${city}"
+        country: "${country}"
+    input:
+      user_id:
+        type: string
+        description: Your own id for the user.
+        optional: true
+      user_email:
+        type: string
+        description: The user's email address.
+        optional: true
+        format: email
+      user_first_name:
+        type: string
+        description: First name.
+        optional: true
+      user_last_name:
+        type: string
+        description: Last name.
+        optional: true
+      filter:
+        type: string
+        description: Segment filter string, deciding which targeted posts they see.
+        optional: true
+      language:
+        type: string
+        description: Preferred language code.
+        optional: true
+      city:
+        type: string
+        description: The user's city.
+        optional: true
+      country:
+        type: string
+        description: The user's country.
+        optional: true
+    output:
+      description: The created user.
+      type: object
+
+  update_user:
+    title: Update a user
+    description: >-
+      Change a user's details or segment. The user is picked by the query
+      identifiers -- `user_id`, `beamer_id` or `user_email` -- and the body
+      carries the new values.
+    category: users
+    request:
+      method: PUT
+      path: /v0/users
+      query:
+        userId: "${user_id}"
+        beamerId: "${beamer_id}"
+        userEmail: "${user_email}"
+      body:
+        userFirstName: "${user_first_name}"
+        userLastName: "${user_last_name}"
+        filter: "${filter}"
+        language: "${language}"
+        city: "${city}"
+        country: "${country}"
+    input:
+      user_id:
+        type: string
+        description: Identify the user by your own id.
+        optional: true
+      beamer_id:
+        type: string
+        description: Identify the user by their Beamer id.
+        optional: true
+      user_email:
+        type: string
+        description: Identify the user by email address.
+        optional: true
+      user_first_name:
+        type: string
+        description: New first name.
+        optional: true
+      user_last_name:
+        type: string
+        description: New last name.
+        optional: true
+      filter:
+        type: string
+        description: New segment filter string.
+        optional: true
+      language:
+        type: string
+        description: New preferred language.
+        optional: true
+      city:
+        type: string
+        description: New city.
+        optional: true
+      country:
+        type: string
+        description: New country.
+        optional: true
+    output:
+      description: The updated user.
+      type: object
+
+  delete_user:
+    title: Delete a user
+    description: >-
+      Delete a user identified by your id, their Beamer id or their email
+      address, along with their read state and votes. Irreversible.
+    category: users
+    destructive: true
+    request:
+      method: DELETE
+      path: /v0/users
+      query:
+        userId: "${user_id}"
+        beamerId: "${beamer_id}"
+        userEmail: "${user_email}"
+    input:
+      user_id:
+        type: string
+        description: Identify the user by your own id.
+        optional: true
+      beamer_id:
+        type: string
+        description: Identify the user by their Beamer id.
+        optional: true
+      user_email:
+        type: string
+        description: Identify the user by email address.
+        optional: true
+    output:
+      description: Confirmation that the user was deleted.
+      type: object
+
+  # -- NPS -----------------------------------------------------------------
+
+  list_nps_responses:
+    title: List NPS responses
+    description: >-
+      Read the NPS survey answers with their scores and comments. `score_from`
+      and `score_to` isolate promoters or detractors.
+    category: nps
+    read_only: true
+    request:
+      method: GET
+      path: /v0/nps
+      query:
+        scoreFrom: "${score_from}"
+        scoreTo: "${score_to}"
+        search: "${search}"
+        dateFrom: "${date_from}"
+        dateTo: "${date_to}"
+        maxResults: "${max_results}"
+        page: "${page}"
+    input:
+      score_from:
+        type: integer
+        description: Lowest score to include (0-10).
+        optional: true
+        minimum: 0
+        maximum: 10
+      score_to:
+        type: integer
+        description: Highest score to include (0-10).
+        optional: true
+        minimum: 0
+        maximum: 10
+      search:
+        type: string
+        description: Search text matched against the free-text comments.
+        optional: true
+      date_from:
+        type: string
+        description: Only responses on or after this date.
+        optional: true
+      date_to:
+        type: string
+        description: Only responses on or before this date.
+        optional: true
+      max_results:
+        type: integer
+        description: Responses per page.
+        optional: true
+        minimum: 1
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: The NPS responses.
+      type: array
+      items: {type: object}
+
+  count_nps_responses:
+    title: Count NPS responses
+    description: >-
+      Count NPS responses in a score band and date range -- the counts behind
+      an NPS calculation, without pulling every answer.
+    category: nps
+    read_only: true
+    request:
+      method: GET
+      path: /v0/nps/count
+      query:
+        scoreFrom: "${score_from}"
+        scoreTo: "${score_to}"
+        search: "${search}"
+        dateFrom: "${date_from}"
+        dateTo: "${date_to}"
+    input:
+      score_from:
+        type: integer
+        description: Lowest score to include (0-10).
+        optional: true
+        minimum: 0
+        maximum: 10
+      score_to:
+        type: integer
+        description: Highest score to include (0-10).
+        optional: true
+        minimum: 0
+        maximum: 10
+      search:
+        type: string
+        description: Search text matched against the comments.
+        optional: true
+      date_from:
+        type: string
+        description: Only responses on or after this date.
+        optional: true
+      date_to:
+        type: string
+        description: Only responses on or before this date.
+        optional: true
+    output:
+      description: The response count.
+      type: object
+
+  check_nps_eligibility:
+    title: Check whether a user should see the NPS survey
+    description: >-
+      Ask whether one user is due the NPS prompt, according to your survey
+      frequency settings. The check to make before rendering it yourself.
+    category: nps
+    read_only: true
+    request:
+      method: GET
+      path: /v0/nps/check
+      query:
+        userId: "${user_id}"
+        userEmail: "${user_email}"
+    input:
+      user_id:
+        type: string
+        description: Your own id for the user.
+        optional: true
+      user_email:
+        type: string
+        description: The user's email address.
+        optional: true
+    output:
+      description: Whether the user should be shown the survey.
+      type: object

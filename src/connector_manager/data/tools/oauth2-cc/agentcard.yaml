@@ -1,180 +1,166 @@
-# Agentcard tools -- GENERATED from the provider's OpenAPI specification.
+# Agentcard tools -- connect end users, verify their identity, fund their wallet
+# and issue one-time virtual cards for agent checkout.
 #
-#   source: https://docs.agentcard.sh/openapi.json
+# Every path, parameter and body field below comes from the OpenAPI description
+# Agentcard publishes at https://docs.agentcard.sh/openapi.json. The connection's
+# base url is https://api.agentcard.sh. There is one host: sandbox versus
+# production is decided by which client credential the connection holds.
 #
-# Every path, method, parameter and description below comes from that spec.
-# Nothing here is inferred: operations the spec did not describe well enough to
-# build a usable tool from were skipped rather than guessed at.
+# Two tokens are in play, and which one a tool needs is the first thing to know:
 #
-# This is a starting point, not a hand-authored pack. It has no scope
-# annotations, and it covers a representative slice of the API rather than the
-# whole surface. Replacing it with a researched pack is an improvement -- delete
-# the `generated` flag once you do.
+#   * the **platform token** is this connection's own client-credentials token.
+#     Every /api/v2 tool that names a user with user_id uses it, automatically;
+#   * the **member token** is a user's connection access_token, returned by
+#     verify_connect_code (or exchange_onboarding_attempt) and renewed with
+#     refresh_connection. It acts as that user. The buy_*, member card, flow
+#     status and member attachment tools send it instead of the platform token,
+#     so they take it as a member_token argument. It expires after an hour.
+#
+# The usual path for a user: start_connect sends a code, verify_connect_code
+# connects them (in sandbox the code is always 111111), record_consent stores
+# the authorization, then either attach their own card (start_card_attachment)
+# or verify identity (the kyc_* tools) and fund the wallet. Cards are then
+# created per purchase with create_card and closed after checkout.
+#
+# Money moves in these tools, and each one that moves it says so: create_card,
+# buy_confirm, create_funding_session, request_withdrawal. Reading an open card
+# with get_card notifies the member that its credentials were accessed, so read
+# it once, when ready to pay.
+#
+# Not covered: POST /api/v2/oauth/token, which the connection calls itself to
+# mint the platform token.
+#
+# Docs: https://docs.agentcard.sh
 
 connector_id: agentcard
 display_name: Agentcard
-docs_url: https://docs.agentcard.sh/openapi.json
-generated: true
-generated_from: https://docs.agentcard.sh/openapi.json
+docs_url: https://docs.agentcard.sh
 tools:
-  buy:
-    title: Buy
-    description: Buy One conversational endpoint that places real orders. Send the user's request as plain
-      text in ask; thread follow-ups with conversationid; place a shown cart by echoing its hash in confirm
-      (or an array of hashes for several carts). Money only moves on a confirm, and only for exactly the
-      cart the hash Calls POST /buy on Agentcard's API.
-    category: buy
-    request:
-      method: POST
-      path: /buy
-      body:
-        ask: ${ask}
-        conversation_id: ${conversation_id}
-        confirm: ${confirm}
-    input:
-      ask:
-        type: string
-        description: What the user wants, in plain language. Required unless the call is a confirm.
-        optional: true
-      conversation_id:
-        type: string
-        description: The thread to continue. A confirm always requires it.
-        optional: true
-      confirm:
-        type: string
-        description: A cart hash from a previous response (16 hex characters), or an array of hashes to
-          place several carts. An array confirm cannot carry an ask in the same call.
-        optional: true
-    output:
-      description: One turn of the purchase conversation, in the fixed envelope.
-      type: object
+
   introspect_credential:
-    title: Introspect credential
-    description: Introspect credential Returns the organization and mode your token acts as. Useful as
-      a health check and to confirm you're pointed at the right credential. Calls GET /api/v2 on Agentcard's
-      API.
-    category: api
+    title: Introspect the credential
+    description: >-
+      Read which organization and mode (sandbox or production) this connection's token acts
+      as. A cheap health check, and the way to confirm you are pointed at the right credential
+      before moving money.
+    category: account
+    read_only: true
     request:
       method: GET
       path: /api/v2
     input: {}
     output:
-      description: The organization and mode behind the token.
+      description: The organization and mode.
       type: object
-    read_only: true
-  member_attach_status:
-    title: Get the attachment (member token)
-    description: Get the attachment (member token) The member's latest attachment, with a fresh attachurl
-      while it is pending. Calls GET /api/v2/attach on Agentcard's API.
-    category: api
-    request:
-      method: GET
-      path: /api/v2/attach
-    input: {}
-    output:
-      description: The attachment.
-      type: object
-    read_only: true
-  member_cards_list:
-    title: List the member's cards
-    description: 'List the member''s cards The member''s wallet as this connection sees it: added cards
-      (attachments, pending included) and the cards created against them. Calls GET /api/v2/cards on Agentcard''s
-      API.'
-    category: api
-    request:
-      method: GET
-      path: /api/v2/cards
-    input: {}
-    output:
-      description: Added cards and created cards.
-      type: object
-    read_only: true
-  member_card_create:
-    title: Create a card
-    description: Create a card Create a one-time virtual card against the member's added card, then key
-      its credentials into your checkout and close it when you're done. Sandbox answers 201 with an open
-      test card. Production answers 202 approvalpending with an approvalurl the member confirms with a
-      passkey; retry with the SAME Id Calls POST /api/v2/cards on Agentcard's API.
-    category: api
+
+  start_connect:
+    title: Send a connect code
+    description: >-
+      Start connecting a user by sending a one-time code to their email or phone -- exactly
+      one of the two. The code is valid for 10 minutes and uses your branded connect email
+      when one is designed.
+    category: connect
+    destructive: true
     request:
       method: POST
-      path: /api/v2/cards
+      path: /api/v2/connect/start
       body:
-        amount_cents: ${amount_cents}
-        currency: ${currency}
-        connected_card_id: ${connected_card_id}
-        merchant: ${merchant}
-        description: ${description}
-        metadata: ${metadata}
+        email: ${email}
+        phone: ${phone}
+        external_user_id: ${external_user_id}
     input:
-      amount_cents:
-        type: integer
-        description: Exact amount in cents the card can spend, e.g. 2500 = $25.00.
-      currency:
+      email:
         type: string
-        description: The currency field of the request body.
+        description: The user's email address. Provide this or phone, not both.
         optional: true
-        enum:
-        - usd
-      connected_card_id:
+      phone:
         type: string
-        description: Draw on a specific added card. Omit to use the newest active one.
+        description: The user's phone number in E.164 format (e.g. +15551234567). Provide
+          this or email, not both.
         optional: true
-      merchant:
-        type: object
-        description: The merchant field of the request body.
-        optional: true
-      description:
+      external_user_id:
         type: string
-        description: The description field of the request body.
-        optional: true
-      metadata:
-        type: object
-        description: The metadata field of the request body.
+        description: Your own id for the user, stored on the attempt.
         optional: true
     output:
-      description: The card is open (sandbox, and frictionless production mints).
+      description: The connect attempt, with the connect_id verify_connect_code needs.
       type: object
-  member_flow_status:
-    title: Get the member flow status
-    description: 'Get the member flow status One read that answers "what should happen next for this member":
-      add a card, create a card, share an approval link, or fetch the open card. Authenticated with the
-      member''s connection token from Verify the code. Calls GET /api/v2/flow_status on Agentcard''s API.'
-    category: api
+
+  verify_connect_code:
+    title: Verify a connect code
+    description: >-
+      Check the code the user entered and connect them. Entering the code is the authorization.
+      Returns user.id plus the member access_token and refresh_token to store; the refresh
+      token rotates on every refresh. A code verifies once; in sandbox it is 111111.
+    category: connect
     request:
-      method: GET
-      path: /api/v2/flow_status
-    input: {}
+      method: POST
+      path: /api/v2/connect/verify
+      body:
+        connect_id: ${connect_id}
+        code: ${code}
+    input:
+      connect_id:
+        type: string
+        description: The id returned by /connect/start.
+      code:
+        type: string
+        description: The one-time code the user entered. Always 111111 in sandbox.
     output:
-      description: The flow status.
+      description: The user and the member token pair.
       type: object
-    read_only: true
-  kyc_get_status:
-    title: Get verification status
-    description: Get verification status Polls the current verification status — the alternative to the
-      identity.verification.updated webhook. Calls GET /api/v2/kyc on Agentcard's API.
-    category: api
+
+  record_consent:
+    title: Record consent
+    description: >-
+      Record that the user authorized your platform to act for them, with the terms version
+      they accepted. Idempotent per user, so a retry updates the same record.
+    category: connect
     request:
-      method: GET
-      path: /api/v2/kyc
-      query:
+      method: POST
+      path: /api/v2/connect/consent
+      body:
         user_id: ${user_id}
+        terms_version: ${terms_version}
     input:
       user_id:
         type: string
-        description: The connected user's id.
+        description: The connected user's id, from verify_connect_code.
+      terms_version:
+        type: string
+        description: Optional. The version of your terms the user accepted, stored for your
+          audit trail.
+        optional: true
     output:
-      description: The current status.
+      description: The consent record.
       type: object
-    read_only: true
-  create_v2_onboarding_attempts:
+
+  refresh_connection:
+    title: Refresh a connection
+    description: >-
+      Exchange a member refresh token for a new access and refresh token pair before the hour-long
+      access token expires. The old refresh token stops working -- replace it every time.
+    category: connect
+    request:
+      method: POST
+      path: /api/v2/connect/refresh
+      body:
+        refresh_token: ${refresh_token}
+    input:
+      refresh_token:
+        type: string
+        description: The refresh token from the most recent verify or refresh.
+    output:
+      description: The new member token pair.
+      type: object
+
+  start_onboarding_attempt:
     title: Start attested onboarding
-    description: 'Start attested onboarding Create an onboarding attempt for a phone number you already
-      hold and text the returned walleturl to the user. No Agentcard account exists yet: the user sees
-      the wallet instantly, and our one-time code fires exactly once, inside our page, at their first
-      money action. You never see or relay the code. Calls POST /api/v2/onboarding_attempts on Agentcard''s
-      API.'
-    category: api
+    description: >-
+      Onboard someone by a phone number you already hold, with no Agentcard account yet. Text
+      them the returned wallet_url; Agentcard sends its own code at their first money action,
+      so you never relay it. Collect the connection later with exchange_onboarding_attempt.
+    category: connect
     request:
       method: POST
       path: /api/v2/onboarding_attempts
@@ -184,22 +170,1101 @@ tools:
     input:
       phone:
         type: string
-        description: The user's phone. E.164 preferred; US local formats are normalized.
+        description: The person's phone; E.164 preferred, US local formats are normalized.
       external_user_id:
         type: string
-        description: Your own id for this person, echoed on connection.created and the exchange.
+        description: Your own id for the person, echoed on connection.created and the exchange.
         optional: true
     output:
-      description: The attempt. Text walleturl to the user; listen for connection.created, then exchange.
+      description: The attempt, with its id and wallet_url.
       type: object
-  platform_connect_create:
+
+  get_onboarding_attempt:
+    title: Get an onboarding attempt
+    description: >-
+      Check an onboarding attempt while waiting for connection.created: whether the person
+      has verified, whether the grant was already exchanged, and when the attempt expires.
+    category: connect
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/onboarding_attempts/${attempt_id}
+    input:
+      attempt_id:
+        type: string
+        description: Onboarding attempt id.
+    output:
+      description: The attempt's state.
+      type: object
+
+  exchange_onboarding_attempt:
+    title: Collect an onboarded connection
+    description: >-
+      Collect the connection once an onboarded person has verified -- the connection.created
+      webhook says when. Returns the same user.id and token pair verify_connect_code does,
+      and works once.
+    category: connect
+    request:
+      method: POST
+      path: /api/v2/onboarding_attempts/${attempt_id}/exchange
+    input:
+      attempt_id:
+        type: string
+        description: Onboarding attempt id.
+    output:
+      description: The user and the member token pair.
+      type: object
+
+  kyc_upload_front:
+    title: Upload the front of an ID
+    description: >-
+      Upload the front of the user's identity document as a base64 image -- the first step
+      of a verification. Check warnings in the response for actionable feedback.
+    category: kyc
+    request:
+      method: POST
+      path: /api/v2/kyc/documents/front
+      body:
+        user_id: ${user_id}
+        image: ${image}
+        mime_type: ${mime_type}
+        document_type: ${document_type}
+        issuing_country: ${issuing_country}
+        user_ip: ${user_ip}
+    input:
+      user_id:
+        type: string
+        description: The connected user's id, from verify_connect_code.
+      image:
+        type: string
+        description: The image, base64-encoded.
+      mime_type:
+        type: string
+        description: The image's MIME type, e.g. image/jpeg.
+        optional: true
+      document_type:
+        type: string
+        description: Document type hint; auto-detected when omitted.
+        optional: true
+        enum:
+        - drivers_license
+        - state_id
+        - passport
+      issuing_country:
+        type: string
+        description: ISO 3166-1 alpha-2 or alpha-3 code of the issuing country; defaults to
+          US.
+        optional: true
+      user_ip:
+        type: string
+        description: The end user's public IP address as your frontend saw it; private and
+          reserved addresses are rejected.
+        optional: true
+    output:
+      description: Receipt of the upload, with any warnings.
+      type: object
+
+  kyc_upload_back:
+    title: Upload the back of an ID
+    description: >-
+      Upload the back of the document. The response is the branch point: needs_information
+      means post required_fields with kyc_submit_information, requires_verification means
+      send the user to iframe_url for the face scan, rejected means start again with a different
+      document.
+    category: kyc
+    request:
+      method: POST
+      path: /api/v2/kyc/documents/back
+      body:
+        user_id: ${user_id}
+        image: ${image}
+        mime_type: ${mime_type}
+        document_type: ${document_type}
+        issuing_country: ${issuing_country}
+        user_ip: ${user_ip}
+    input:
+      user_id:
+        type: string
+        description: The connected user's id, from verify_connect_code.
+      image:
+        type: string
+        description: The image, base64-encoded.
+      mime_type:
+        type: string
+        description: The image's MIME type, e.g. image/jpeg.
+        optional: true
+      document_type:
+        type: string
+        description: Document type hint; auto-detected when omitted.
+        optional: true
+        enum:
+        - drivers_license
+        - state_id
+        - passport
+      issuing_country:
+        type: string
+        description: ISO 3166-1 alpha-2 or alpha-3 code of the issuing country; defaults to
+          US.
+        optional: true
+      user_ip:
+        type: string
+        description: The end user's public IP address as your frontend saw it; private and
+          reserved addresses are rejected.
+        optional: true
+    output:
+      description: 'The next step: needs_information, requires_verification or rejected.'
+      type: object
+
+  kyc_submit_information:
+    title: Submit KYC information
+    description: >-
+      Send the fields a needs_information response asked for, and only those. A fresh verification
+      then returns the iframe_url for the face scan; an imported one goes straight to review.
+    category: kyc
+    request:
+      method: POST
+      path: /api/v2/kyc/information
+      body:
+        user_id: ${user_id}
+        first_name: ${first_name}
+        last_name: ${last_name}
+        date_of_birth: ${date_of_birth}
+        national_id_number: ${national_id_number}
+        phone_number: ${phone_number}
+        address_line1: ${address_line1}
+        address_line2: ${address_line2}
+        address_city: ${address_city}
+        address_region: ${address_region}
+        address_postal_code: ${address_postal_code}
+        address_country: ${address_country}
+        user_ip: ${user_ip}
+    input:
+      user_id:
+        type: string
+        description: The connected user's id, from verify_connect_code.
+      first_name:
+        type: string
+        description: Legal first name.
+        optional: true
+      last_name:
+        type: string
+        description: Legal last name.
+        optional: true
+      date_of_birth:
+        type: string
+        description: ISO 8601 date, YYYY-MM-DD.
+        optional: true
+      national_id_number:
+        type: string
+        description: The user's national ID or tax identification number for the country that
+          issued their document — for US documents this is the SSN; for any other country
+          it is the national ID / tax number printed on (or associated with) the document.
+          Forwarded to the verification provider only; never stored by Agentcard.
+        optional: true
+      phone_number:
+        type: string
+        description: E.164 format with country code (e.g. +15551234567).
+        optional: true
+      address_line1:
+        type: string
+        description: Street address.
+        optional: true
+      address_line2:
+        type: string
+        description: Apartment, suite or unit.
+        optional: true
+      address_city:
+        type: string
+        description: City.
+        optional: true
+      address_region:
+        type: string
+        description: State, province, or region.
+        optional: true
+      address_postal_code:
+        type: string
+        description: Postal or ZIP code.
+        optional: true
+      address_country:
+        type: string
+        description: ISO 3166-1 alpha-2 country code (e.g. US).
+        optional: true
+      user_ip:
+        type: string
+        description: The end user's public IP address as your frontend saw it; private and
+          reserved addresses are rejected.
+        optional: true
+    output:
+      description: The next step in the verification.
+      type: object
+
+  kyc_get_status:
+    title: Get verification status
+    description: >-
+      Poll a user's identity verification status, as an alternative to the identity.verification.updated
+      webhook.
+    category: kyc
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/kyc
+      query:
+        user_id: ${user_id}
+    input:
+      user_id:
+        type: string
+        description: The connected user's id, from verify_connect_code.
+    output:
+      description: The verification status and any reason.
+      type: object
+
+  kyc_simulate:
+    title: Simulate a verification outcome
+    description: >-
+      Sandbox only: force a test verification to approved, rejected or requires_input, firing
+      the same webhook a real review would. Test verifications never finish on their own.
+    category: kyc
+    request:
+      method: POST
+      path: /api/v2/kyc/simulate
+      body:
+        user_id: ${user_id}
+        outcome: ${outcome}
+        reason: ${reason}
+    input:
+      user_id:
+        type: string
+        description: The connected user's id, from verify_connect_code.
+      outcome:
+        type: string
+        description: The verdict to apply. approved — verification succeeds. rejected — terminal
+          rejection. requires_input — a retryable bounce asking for new document photos.
+        enum:
+        - approved
+        - rejected
+        - requires_input
+      reason:
+        type: string
+        description: End-user-safe explanation carried on a non-approved outcome.
+        optional: true
+    output:
+      description: The simulated verification status.
+      type: object
+
+  kyc_import:
+    title: Import a Sumsub verification
+    description: >-
+      Reuse a verification already run on your own Sumsub account: send a single-use share
+      token generated for Agentcard's client id and the user skips document capture and the
+      face scan.
+    category: kyc
+    request:
+      method: POST
+      path: /api/v2/kyc/import
+      body:
+        user_id: ${user_id}
+        share_token: ${share_token}
+        user_ip: ${user_ip}
+    input:
+      user_id:
+        type: string
+        description: The connected user's id, from verify_connect_code.
+      share_token:
+        type: string
+        description: A Sumsub share token generated by your account for the Agentcard client
+          id (POST /resources/accessTokens/shareToken with forClientId). Single-use; expires
+          after its ttlInSecs.
+      user_ip:
+        type: string
+        description: The end user's public IP address as your frontend saw it; private and
+          reserved addresses are rejected.
+        optional: true
+    output:
+      description: The verification status after import.
+      type: object
+
+  get_wallet:
+    title: Get a user's wallet
+    description: >-
+      Read a connected user's wallet and current balance. The first read provisions the wallet.
+    category: wallet
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/wallet
+      query:
+        user_id: ${user_id}
+    input:
+      user_id:
+        type: string
+        description: The connected user's id, from verify_connect_code.
+    output:
+      description: The wallet and balance.
+      type: object
+
+  start_wallet_phone_verification:
+    title: Start phone verification
+    description: >-
+      Text the user a one-time code, required before funding; a verification stays fresh for
+      60 days. Pass phone_number only when the user has none on file.
+    category: wallet
+    destructive: true
+    request:
+      method: POST
+      path: /api/v2/wallet/phone/start
+      body:
+        user_id: ${user_id}
+        phone_number: ${phone_number}
+    input:
+      user_id:
+        type: string
+        description: The connected user's id, from verify_connect_code.
+      phone_number:
+        type: string
+        description: E.164 number (e.g. +14155550123). Used only when the user has no phone
+          on file. Numbers from prohibited countries return country_not_supported.
+        optional: true
+    output:
+      description: Confirmation the code was sent.
+      type: object
+
+  verify_wallet_phone:
+    title: Verify the phone code
+    description: >-
+      Check the code the user read back. On success funding sessions can be created for the
+      next 60 days.
+    category: wallet
+    request:
+      method: POST
+      path: /api/v2/wallet/phone/verify
+      body:
+        user_id: ${user_id}
+        code: ${code}
+        phone_number: ${phone_number}
+    input:
+      user_id:
+        type: string
+        description: The connected user's id, from verify_connect_code.
+      code:
+        type: string
+        description: The code the user received.
+      phone_number:
+        type: string
+        description: The number the code went to, only when you supplied it to start_wallet_phone_verification.
+        optional: true
+    output:
+      description: The phone verification result.
+      type: object
+
+  create_funding_session:
+    title: Create a funding session
+    description: >-
+      Create a single-use Apple Pay or Google Pay payment link, valid 30 minutes, that tops
+      up the user's wallet by the given amount. Needs a phone verification from the last 60
+      days. The hosted link type is safe to relay anywhere.
+    category: wallet
+    destructive: true
+    request:
+      method: POST
+      path: /api/v2/wallet/fund
+      body:
+        user_id: ${user_id}
+        amount_cents: ${amount_cents}
+        payment_method: ${payment_method}
+        link_type: ${link_type}
+    input:
+      user_id:
+        type: string
+        description: The connected user's id, from verify_connect_code.
+      amount_cents:
+        type: integer
+        description: Amount to fund, in USD cents.
+      payment_method:
+        type: string
+        description: google_pay with link_type "embedded" is accepted when the user's rail
+          returns the web checkout style; on web rails embedded is Apple Pay only (422 payment_method_not_supported).
+        optional: true
+        enum:
+        - apple_pay
+        - google_pay
+      link_type:
+        type: string
+        description: hosted returns an Agentcard-hosted payment page, safe to relay anywhere
+          (chat, email, QR); the underlying payment order is created only when the user opens
+          it, so unopened hosted sessions cost nothing. embedded creates a REAL payment order
+          immediately for rendering inside your own app; mint it only when the user initiates
+          payment, render it immediately, and never relay it through chat (link unfurlers
+          consume it).
+        optional: true
+        enum:
+        - hosted
+        - embedded
+    output:
+      description: The payment link and session id.
+      type: object
+
+  get_funding_session:
+    title: Get a funding session
+    description: >-
+      Poll a funding session until it completes; the payment status is refreshed from the
+      provider on each read.
+    category: wallet
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/wallet/fund/${session_id}
+    input:
+      session_id:
+        type: string
+        description: Funding session id.
+    output:
+      description: The funding session and its payment status.
+      type: object
+
+  create_withdrawal_recipient:
+    title: Save a bank destination
+    description: >-
+      Save a bank account the user can withdraw to. ACH needs routing_number, account_number
+      and account_type; international wire needs iban and swift_code, and some countries extra
+      keys in country_specific (ifsc, clabe, bsb) -- a validation error names any missing
+      one.
+    category: wallet
+    request:
+      method: POST
+      path: /api/v2/wallet/withdrawal-recipients
+      body:
+        user_id: ${user_id}
+        type: ${type}
+        beneficiary_name: ${beneficiary_name}
+        country_code: ${country_code}
+        nickname: ${nickname}
+        email: ${email}
+        routing_number: ${routing_number}
+        account_number: ${account_number}
+        account_type: ${account_type}
+        iban: ${iban}
+        swift_code: ${swift_code}
+        bank_name: ${bank_name}
+        address_line1: ${address_line1}
+        address_line2: ${address_line2}
+        city: ${city}
+        region: ${region}
+        postal_code: ${postal_code}
+        country_specific: ${country_specific}
+    input:
+      user_id:
+        type: string
+        description: The connected user's id, from verify_connect_code.
+      type:
+        type: string
+        description: ach or international_wire.
+        enum:
+        - ach
+        - international_wire
+      beneficiary_name:
+        type: string
+        description: The account holder's legal name.
+      country_code:
+        type: string
+        description: ISO 3166-1 alpha-2 country of the bank account.
+      nickname:
+        type: string
+        description: Label for the destination.
+        optional: true
+      email:
+        type: string
+        description: Beneficiary email.
+        optional: true
+      routing_number:
+        type: string
+        description: 'ACH: 9-digit ABA routing number.'
+        optional: true
+      account_number:
+        type: string
+        description: 'ACH: the account number.'
+        optional: true
+      account_type:
+        type: string
+        description: ACH only.
+        optional: true
+        enum:
+        - checking
+        - savings
+      iban:
+        type: string
+        description: 'International wire: the IBAN (spaces ok, normalized on save).'
+        optional: true
+      swift_code:
+        type: string
+        description: 'International wire: the SWIFT/BIC.'
+        optional: true
+      bank_name:
+        type: string
+        description: Bank name.
+        optional: true
+      address_line1:
+        type: string
+        description: Beneficiary street address.
+        optional: true
+      address_line2:
+        type: string
+        description: Apartment, suite or unit.
+        optional: true
+      city:
+        type: string
+        description: Beneficiary city.
+        optional: true
+      region:
+        type: string
+        description: State, province or region.
+        optional: true
+      postal_code:
+        type: string
+        description: Postal code.
+        optional: true
+      country_specific:
+        type: object
+        description: 'Country-specific banking fields, e.g. {"ifsc": "..."} for India or {"clabe":
+          "..."} for Mexico.'
+        optional: true
+    output:
+      description: The saved destination, masked.
+      type: object
+
+  list_withdrawal_recipients:
+    title: List bank destinations
+    description: >-
+      List the user's active saved bank destinations, masked. Removed ones never appear.
+    category: wallet
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/wallet/withdrawal-recipients
+      query:
+        user_id: ${user_id}
+    input:
+      user_id:
+        type: string
+        description: The connected user's id, from verify_connect_code.
+    output:
+      description: The saved destinations.
+      type: object
+
+  remove_withdrawal_recipient:
+    title: Remove a bank destination
+    description: >-
+      Remove a saved bank destination. Withdrawals already requested against it are unaffected.
+    category: wallet
+    destructive: true
+    request:
+      method: DELETE
+      path: /api/v2/wallet/withdrawal-recipients/${recipient_id}
+      query:
+        user_id: ${user_id}
+    input:
+      recipient_id:
+        type: string
+        description: The recipient id (wrec_...).
+      user_id:
+        type: string
+        description: The connected user's id, from verify_connect_code.
+    output:
+      description: Confirmation of the removal.
+      type: object
+
+  request_withdrawal:
+    title: Request a withdrawal
+    description: >-
+      Withdraw from the user's spendable balance, by wire to a saved bank destination (rail
+      bank) or as USDC on Base to an address (rail address). Processed by hand within 1-3
+      business days; the user is emailed.
+    category: wallet
+    destructive: true
+    request:
+      method: POST
+      path: /api/v2/wallet/withdrawals
+      body:
+        user_id: ${user_id}
+        amount_cents: ${amount_cents}
+        rail: ${rail}
+        recipient_id: ${recipient_id}
+        destination_address: ${destination_address}
+    input:
+      user_id:
+        type: string
+        description: The connected user's id, from verify_connect_code.
+      amount_cents:
+        type: integer
+        description: Amount in USD cents, 200 to 1000000.
+      rail:
+        type: string
+        description: bank (the default) or address.
+        optional: true
+        enum:
+        - bank
+        - address
+      recipient_id:
+        type: string
+        description: 'For the bank rail: the saved destination id (wrec_...).'
+        optional: true
+      destination_address:
+        type: string
+        description: 'Address rail: a 0x-prefixed address on Base to receive USDC. Agentcard-managed
+          addresses are rejected.'
+        optional: true
+    output:
+      description: The withdrawal request.
+      type: object
+
+  list_withdrawals:
+    title: List withdrawals
+    description: >-
+      List the user's 20 most recent withdrawals across both rails, newest first. completed
+      and rejected are terminal.
+    category: wallet
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/wallet/withdrawals
+      query:
+        user_id: ${user_id}
+    input:
+      user_id:
+        type: string
+        description: The connected user's id, from verify_connect_code.
+    output:
+      description: The withdrawals.
+      type: object
+
+  start_card_attachment:
+    title: Start a card attachment
+    description: >-
+      Start attaching the user's own card. Returns a hosted attach_url where they add it in
+      about a minute (a bank code, then a passkey); the card number never touches your servers.
+      Once attached, created cards draw on it.
+    category: cards
+    request:
+      method: POST
+      path: /api/v2/cards/add
+      body:
+        user_id: ${user_id}
+        display: ${display}
+        email: ${email}
+    input:
+      user_id:
+        type: string
+        description: The connected user's id, from verify_connect_code.
+      display:
+        type: string
+        description: How the attach page renders. hosted (default) is the full Agentcard-branded
+          page. headless strips it to just the checkout — no logo, backdrop, or copy — for
+          rendering inside your own UI.
+        optional: true
+        enum:
+        - hosted
+        - headless
+      email:
+        type: string
+        description: Email for the card network's verification code, needed when the user
+          signed in by phone only.
+        optional: true
+    output:
+      description: The attachment with its attach_url.
+      type: object
+
+  get_card_attachment:
+    title: Get a card attachment
+    description: >-
+      Read the user's latest attachment: pending while unfinished, active with card details,
+      or ineligible with a reason -- in which case fall back to wallet funding.
+    category: cards
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/cards/add
+      query:
+        user_id: ${user_id}
+    input:
+      user_id:
+        type: string
+        description: The connected user's id, from verify_connect_code.
+    output:
+      description: The attachment status.
+      type: object
+
+  cancel_card_attachment:
+    title: Cancel a card attachment
+    description: >-
+      Cancel a pending attachment, such as one whose bank verification stalled, so the user
+      can start afresh. Active cards belong to the member and cannot be removed this way.
+    category: cards
+    destructive: true
+    request:
+      method: DELETE
+      path: /api/v2/cards/add/${attachment_id}
+    input:
+      attachment_id:
+        type: string
+        description: The attachment id, from Start a card attachment or Get the attachment
+          status.
+    output:
+      description: Confirmation of the cancellation.
+      type: object
+
+  get_member_flow_status:
+    title: Get what a member should do next
+    description: >-
+      One read that says what should happen next for a member: add a card, create a card,
+      share an approval link, or fetch the open card. Poll this rather than get_card.
+    category: cards
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/flow_status
+      headers:
+        Authorization: Bearer ${member_token}
+    input:
+      member_token:
+        type: string
+        secret: true
+        description: The member's connection access_token from verify_connect_code, exchange_onboarding_attempt
+          or refresh_connection -- not the platform token. It lives one hour.
+    output:
+      description: The next step for the member.
+      type: object
+
+  list_member_cards:
+    title: List a member's cards
+    description: >-
+      List a member's added cards (attachments, pending included) and the one-time cards created
+      against them.
+    category: cards
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/cards
+      headers:
+        Authorization: Bearer ${member_token}
+    input:
+      member_token:
+        type: string
+        secret: true
+        description: The member's connection access_token from verify_connect_code, exchange_onboarding_attempt
+          or refresh_connection -- not the platform token. It lives one hour.
+    output:
+      description: The member's added and created cards.
+      type: object
+
+  create_card:
+    title: Create a one-time card
+    description: >-
+      Create a one-time virtual card for an exact amount against the member's added card.
+      Sandbox returns an open test card; production returns approval_pending with an approval_url
+      the member confirms by passkey -- retry with the same idempotency_key to resume. The
+      card closes after its first approved charge.
+    category: cards
+    destructive: true
+    request:
+      method: POST
+      path: /api/v2/cards
+      headers:
+        Idempotency-Key: ${idempotency_key}
+        Authorization: Bearer ${member_token}
+      body:
+        amount_cents: ${amount_cents}
+        currency: ${currency}
+        connected_card_id: ${connected_card_id}
+        merchant: ${merchant}
+        description: ${description}
+        metadata: ${metadata}
+    input:
+      idempotency_key:
+        type: string
+        description: Stable key for this purchase, such as your order id. Retries with the
+          same key resume the same card rather than creating another.
+      amount_cents:
+        type: integer
+        description: Exact amount in cents the card can spend, e.g. 2500 = $25.00.
+      currency:
+        type: string
+        description: Card currency; only usd.
+        optional: true
+        enum:
+        - usd
+      connected_card_id:
+        type: string
+        description: Draw on a specific added card. Omit to use the newest active one.
+        optional: true
+      merchant:
+        type: object
+        description: 'Where the card will be used: {name, url}.'
+        optional: true
+      description:
+        type: string
+        description: What the purchase is for.
+        optional: true
+      metadata:
+        type: object
+        description: Your own key-value data stored on the card.
+        optional: true
+      member_token:
+        type: string
+        secret: true
+        description: The member's connection access_token from verify_connect_code, exchange_onboarding_attempt
+          or refresh_connection -- not the platform token. It lives one hour.
+    output:
+      description: The card, open or pending approval.
+      type: object
+
+  get_card:
+    title: Get a card
+    description: >-
+      Read a card's authoritative state. While open it includes the number, expiry and CVC
+      to key into checkout, and every such read notifies the member -- fetch once, when ready
+      to pay.
+    category: cards
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/cards/${card_id}
+      headers:
+        Authorization: Bearer ${member_token}
+    input:
+      card_id:
+        type: string
+        description: Card id.
+      member_token:
+        type: string
+        secret: true
+        description: The member's connection access_token from verify_connect_code, exchange_onboarding_attempt
+          or refresh_connection -- not the platform token. It lives one hour.
+    output:
+      description: The card, with credentials while open.
+      type: object
+
+  close_card:
+    title: Close a card
+    description: >-
+      Close a card once checkout is done so it cannot be charged again. Idempotent.
+    category: cards
+    request:
+      method: POST
+      path: /api/v2/cards/${card_id}/close
+      headers:
+        Authorization: Bearer ${member_token}
+    input:
+      card_id:
+        type: string
+        description: Card id.
+      member_token:
+        type: string
+        secret: true
+        description: The member's connection access_token from verify_connect_code, exchange_onboarding_attempt
+          or refresh_connection -- not the platform token. It lives one hour.
+    output:
+      description: The closed card.
+      type: object
+
+  start_member_card_attachment:
+    title: Start a card attachment as the member
+    description: >-
+      The member-token form of start_card_attachment: returns the same hosted attach page,
+      authenticated as the member rather than naming them. In sandbox it seeds an instantly
+      active test card.
+    category: cards
+    request:
+      method: POST
+      path: /api/v2/attach
+      headers:
+        Authorization: Bearer ${member_token}
+    input:
+      member_token:
+        type: string
+        secret: true
+        description: The member's connection access_token from verify_connect_code, exchange_onboarding_attempt
+          or refresh_connection -- not the platform token. It lives one hour.
+    output:
+      description: The attachment with its attach_url.
+      type: object
+
+  get_member_card_attachment:
+    title: Get a card attachment as the member
+    description: >-
+      Read the member's latest attachment, with a fresh attach_url while it is still pending.
+    category: cards
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/attach
+      headers:
+        Authorization: Bearer ${member_token}
+    input:
+      member_token:
+        type: string
+        secret: true
+        description: The member's connection access_token from verify_connect_code, exchange_onboarding_attempt
+          or refresh_connection -- not the platform token. It lives one hour.
+    output:
+      description: The attachment status.
+      type: object
+
+  cancel_member_card_attachment:
+    title: Cancel a card attachment as the member
+    description: >-
+      Cancel a pending attachment as the member, e.g. one whose bank verification stalled;
+      the next add starts a fresh verification.
+    category: cards
+    destructive: true
+    request:
+      method: DELETE
+      path: /api/v2/attach/${attachment_id}
+      headers:
+        Authorization: Bearer ${member_token}
+    input:
+      attachment_id:
+        type: string
+        description: Attachment id.
+      member_token:
+        type: string
+        secret: true
+        description: The member's connection access_token from verify_connect_code, exchange_onboarding_attempt
+          or refresh_connection -- not the platform token. It lives one hour.
+    output:
+      description: Confirmation of the cancellation.
+      type: object
+
+  buy_ask:
+    title: Ask to buy something
+    description: >-
+      Tell Agentcard's shopping loop what the member wants in plain language, starting or
+      continuing a conversation. It searches merchants and replies with carts, each with a
+      hash. Nothing is charged here; buy_confirm places a cart.
+    category: buy
+    request:
+      method: POST
+      path: /buy
+      headers:
+        Authorization: Bearer ${member_token}
+      body:
+        ask: ${ask}
+        conversation_id: ${conversation_id}
+    input:
+      ask:
+        type: string
+        min_length: 1
+        description: What the member wants, in plain language.
+      conversation_id:
+        type: string
+        optional: true
+        description: Conversation to continue; omit to start a new one.
+      member_token:
+        type: string
+        secret: true
+        description: The member's connection access_token from verify_connect_code, exchange_onboarding_attempt
+          or refresh_connection -- not the platform token. It lives one hour.
+    output:
+      description: The loop's reply, carts with their hashes, and the conversation_id.
+      type: object
+
+  buy_confirm:
+    title: Place a cart
+    description: >-
+      Place one or more carts shown by buy_ask by echoing their hashes. Money moves here,
+      and only for exactly the carts named. With payment_source vault the member approves
+      on their device first: the reply carries an approval_url, then the same confirm completes.
+    category: buy
+    destructive: true
+    request:
+      method: POST
+      path: /buy
+      headers:
+        Authorization: Bearer ${member_token}
+      body:
+        conversation_id: ${conversation_id}
+        confirm: ${cart_hashes}
+        payment_source: ${payment_source}
+    input:
+      conversation_id:
+        type: string
+        description: The conversation the carts were shown in.
+      cart_hashes:
+        type: array
+        items:
+          type: string
+        min_length: 1
+        max_length: 8
+        description: Hashes (16 hex characters) of the carts to place.
+      payment_source:
+        type: string
+        optional: true
+        enum:
+        - vault
+        description: vault to pay with the member's own vaulted card, after device approval.
+      member_token:
+        type: string
+        secret: true
+        description: The member's connection access_token from verify_connect_code, exchange_onboarding_attempt
+          or refresh_connection -- not the platform token. It lives one hour.
+    output:
+      description: The placed orders, or an approval_url and decline code when approval is
+        needed.
+      type: object
+
+  list_buy_merchants:
+    title: List buy merchants
+    description: >-
+      List every merchant the shopping loop can place orders at, and whether this member still
+      needs to link an account there.
+    category: buy
+    read_only: true
+    request:
+      method: GET
+      path: /buy/merchants
+      headers:
+        Authorization: Bearer ${member_token}
+    input:
+      member_token:
+        type: string
+        secret: true
+        description: The member's connection access_token from verify_connect_code, exchange_onboarding_attempt
+          or refresh_connection -- not the platform token. It lives one hour.
+    output:
+      description: The merchants and link status.
+      type: object
+
+  get_buy_conversation:
+    title: Read a purchase conversation
+    description: >-
+      Read the server's view of a buy conversation -- whether a turn is still running, the
+      last checkout attempt and every order placed. Use it when a confirm's response never
+      arrived, before retrying.
+    category: buy
+    read_only: true
+    request:
+      method: GET
+      path: /buy/conversations/${conversation_id}
+      headers:
+        Authorization: Bearer ${member_token}
+    input:
+      conversation_id:
+        type: string
+        description: The conversation_id from buy_ask.
+      member_token:
+        type: string
+        secret: true
+        description: The member's connection access_token from verify_connect_code, exchange_onboarding_attempt
+          or refresh_connection -- not the platform token. It lives one hour.
+    output:
+      description: The conversation's state and orders.
+      type: object
+
+  create_platform_connect_session:
     title: Create a connect session
-    description: Create a connect session Starts a hosted "Connect with Agentcard" flow for a company
-      you're onboarding. Redirect the company to the returned url; when they finish, we redirect them
-      to your returnurl with a one-time code (plus your state) that you exchange for the connected organization's
-      API credentials. Requires client-cre Calls POST /api/v2/platform_connect_sessions on Agentcard's
-      API.
-    category: api
+    description: >-
+      Start a hosted Connect with Agentcard flow for a company you are onboarding. Redirect
+      them to the returned url; they come back to return_url with a one-time code and your
+      state, which exchange_platform_connect_code turns into their API credentials.
+    category: platform_connect
     request:
       method: POST
       path: /api/v2/platform_connect_sessions
@@ -209,14 +1274,75 @@ tools:
     input:
       return_url:
         type: string
-        description: Where we send the company when the flow completes. Must exactly match (origin + path)
-          a redirect URI registered on your OAuth client. https required; http://localhost is allowed
-          in test mode.
+        description: Where we send the company when the flow completes. Must exactly match
+          (origin + path) a redirect URI registered on your OAuth client. https required;
+          http://localhost is allowed in test mode.
       state:
         type: string
-        description: Opaque value echoed back on the redirect — bind it to the company's session on your
-          side to prevent CSRF.
+        description: Opaque value echoed back on the redirect — bind it to the company's session
+          on your side to prevent CSRF.
         optional: true
     output:
-      description: The session, including the hosted url to send the company to.
+      description: The session with its url.
+      type: object
+
+  get_platform_connect_session:
+    title: Get a connect session
+    description: >-
+      Poll a connect session; connected_organization_id appears once the company finishes.
+      The code itself only rides the redirect.
+    category: platform_connect
+    read_only: true
+    request:
+      method: GET
+      path: /api/v2/platform_connect_sessions/${session_id}
+    input:
+      session_id:
+        type: string
+        description: Connect session id.
+    output:
+      description: The session status.
+      type: object
+
+  exchange_platform_connect_session:
+    title: Exchange a session's code
+    description: >-
+      Exchange the redirect's one-time code for the connected organization's client_id and
+      client_secret, naming the session. Single use, within 10 minutes, by the same client
+      that created the session. Store the secret; it is not shown again.
+    category: platform_connect
+    request:
+      method: POST
+      path: /api/v2/platform_connect_sessions/${session_id}/exchange
+      body:
+        code: ${code}
+    input:
+      session_id:
+        type: string
+        description: Connect session id.
+      code:
+        type: string
+        description: The code query parameter from the redirect to your return_url.
+    output:
+      description: The connected organization's credentials.
+      type: object
+
+  exchange_platform_connect_code:
+    title: Exchange a connect code
+    description: >-
+      Exchange the redirect's one-time code for the connected organization's client_id and
+      client_secret, without tracking the session id -- the code resolves it. Single use,
+      within 10 minutes.
+    category: platform_connect
+    request:
+      method: POST
+      path: /api/v2/platform_connect_sessions/exchange
+      body:
+        code: ${code}
+    input:
+      code:
+        type: string
+        description: The code query parameter from the redirect to your return_url.
+    output:
+      description: The connected organization's credentials.
       type: object

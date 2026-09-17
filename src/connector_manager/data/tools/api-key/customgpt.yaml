@@ -1,0 +1,2468 @@
+# CustomGPT tools -- RAG agents over your own content.
+#
+# The vocabulary is the first thing to get straight, because the API and the
+# dashboard disagree:
+#
+#   * what the dashboard calls an **agent**, the API calls a **project**, and
+#     every path says `/projects/`. The tools below are named for the
+#     dashboard's word and the paths keep the API's;
+#   * a **page** is an indexed document, not a page of results;
+#   * a **task** is an agentic run with its own thread and file output --
+#     longer-lived than a chat message, and polled rather than awaited.
+#
+# Four things worth knowing before driving this:
+#
+#   * **updates are POST or PUT, never PATCH** on most resources. Changing an
+#     agent is `POST /projects/{id}`, not a PATCH, and PUT endpoints replace
+#     rather than merge -- an omitted field is cleared;
+#   * **indexing is asynchronous.** `create_agent` and `add_source` return
+#     before the content is searchable. Poll `get_agent_stats` (or the agent's
+#     `is_chat_active` flag) rather than asking a question straight away;
+#   * **everything is scoped to the active team.** `switch_team` changes which
+#     team subsequent calls see, so an agent list that comes back empty is
+#     often pointed at the wrong team rather than genuinely empty;
+#   * **labels are access control, not tags.** A label scopes which documents a
+#     given user's questions may retrieve, so deleting one can widen what an
+#     audience can see rather than merely losing a category.
+#
+# `send_message` is the call the product exists for. `send_chat_completion` is
+# the same retrieval behind an OpenAI-shaped request, so an existing OpenAI
+# client can be pointed here with a base-url change.
+#
+# Docs: https://docs.customgpt.ai/reference/i-api-homepage
+
+connector_id: customgpt
+display_name: CustomGPT
+docs_url: https://docs.customgpt.ai/reference/i-api-homepage
+
+tools:
+
+  list_agents:
+    title: List agents
+    description: >-
+      Every agent (CustomGPT calls them projects) on the account, with its id,
+      name and indexing state. The project id this returns is what almost
+      every other tool here takes.
+    category: agents
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects
+      query:
+        page: "${page}"
+        duration: "${duration}"
+        order: "${order}"
+        width: "${width}"
+        height: "${height}"
+        name: "${name}"
+    input:
+      page:
+        type: integer
+        description: Which page of agents to return.
+        optional: true
+        default: '1'
+      duration:
+        type: string
+        description: Time window the listing covers.
+        optional: true
+      order:
+        type: string
+        description: Sort direction.
+        optional: true
+        enum: [asc, desc]
+        default: desc
+      width:
+        type: integer
+        description: Chat widget width to report in the response.
+        optional: true
+      height:
+        type: integer
+        description: Chat widget height to report in the response.
+        optional: true
+      name:
+        type: string
+        description: Filter to agents whose name matches this text.
+        optional: true
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  create_agent:
+    title: Create an agent
+    description: >-
+      Create a new agent from a sitemap url or an uploaded file. Indexing runs
+      asynchronously afterwards, so the agent is not answerable until its
+      `is_chat_active` flag flips -- poll get_agent rather than chatting
+      immediately.
+    category: agents
+    request:
+      method: POST
+      path: /api/v1/projects
+      body: "${attributes}"
+    input:
+      attributes:
+        type: object
+        description: The agent to create -- `project_name` plus one of `sitemap_path` or `file_data_retension`, and the optional model and behaviour settings.
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  get_agent:
+    title: Get an agent
+    description: >-
+      One agent's details, including whether indexing has finished and the
+      agent is ready to answer questions. This is the flag to poll after
+      create_agent.
+    category: agents
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+    output:
+      description: The requested record.
+      type: object
+
+  update_agent:
+    title: Update an agent
+    description: >-
+      Change an agent's name, sitemap or core configuration. A POST, not a
+      PATCH -- CustomGPT uses POST for updates throughout. Changing the
+      sitemap triggers a re-index.
+    category: agents
+    request:
+      method: POST
+      path: /api/v1/projects/${project_id}
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      attributes:
+        type: object
+        description: The agent fields to change, e.g. `project_name` or `sitemap_path`.
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  delete_agent:
+    title: Delete an agent
+    description: >-
+      Delete an agent along with its indexed documents and conversation
+      history. Irreversible, and it takes every conversation and citation with
+      it.
+    category: agents
+    destructive: true
+    request:
+      method: DELETE
+      path: /api/v1/projects/${project_id}
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+    output:
+      description: Confirmation that the record was deleted.
+      type: object
+
+  replicate_agent:
+    title: Replicate an agent
+    description: >-
+      Copy an agent, its settings and its sources into a new agent. The safe
+      way to try a settings or persona change without disturbing an agent that
+      is live in front of customers.
+    category: agents
+    request:
+      method: POST
+      path: /api/v1/projects/${project_id}/replicate
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  get_agent_stats:
+    title: Get agent statistics
+    description: >-
+      Indexing and usage counters for one agent -- how many pages are indexed,
+      how many failed, how many queries it has answered. The first place to
+      look when an agent is answering "I don't know".
+    category: agents
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/stats
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+    output:
+      description: The requested record.
+      type: object
+
+  list_child_agents:
+    title: List child agents
+    description: >-
+      The agents assigned as children of this one. Child agents let a parent
+      route a question to a specialised agent instead of answering from one
+      large index.
+    category: agents
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/children
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  assign_child_agents:
+    title: Assign child agents
+    description: >-
+      Attach one or more agents as children of this one, so the parent can
+      route questions to them.
+    category: agents
+    request:
+      method: POST
+      path: /api/v1/projects/${project_id}/children
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      attributes:
+        type: object
+        description: The child agents to assign, as the ids the reference documents.
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  unassign_child_agents:
+    title: Unassign all child agents
+    description: >-
+      Detach every child agent from this one in a single call. The children
+      themselves are not deleted -- only the routing relationship goes.
+    category: agents
+    destructive: true
+    request:
+      method: DELETE
+      path: /api/v1/projects/${project_id}/children
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+    output:
+      description: Confirmation that the record was deleted.
+      type: object
+
+  unassign_child_agent:
+    title: Unassign one child agent
+    description: >-
+      Detach a single child agent from its parent, leaving the other children
+      in place. The child agent itself survives.
+    category: agents
+    destructive: true
+    request:
+      method: DELETE
+      path: /api/v1/projects/${project_id}/children/${child_project_id}
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      child_project_id:
+        type: integer
+        description: The child agent's project id.
+    output:
+      description: Confirmation that the record was deleted.
+      type: object
+
+  get_agent_settings:
+    title: Get agent settings
+    description: >-
+      The agent's full behaviour and appearance configuration -- persona,
+      model, response source, citation display, chat widget styling and
+      language.
+    category: settings
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/settings
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+    output:
+      description: The requested record.
+      type: object
+
+  update_agent_settings:
+    title: Update agent settings
+    description: >-
+      Change an agent's behaviour or appearance. This is where the persona
+      prompt, the model, `response_source` and citation visibility live -- the
+      settings that decide how the agent answers.
+    category: settings
+    request:
+      method: POST
+      path: /api/v1/projects/${project_id}/settings
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      attributes:
+        type: object
+        description: The settings fields to change, e.g. `chatbot_model`, `persona_instructions`, `response_source`.
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  list_persona_versions:
+    title: List persona versions
+    description: >-
+      Every saved version of the agent's persona prompt. Personas are
+      versioned, so a prompt change can be rolled back rather than rewritten
+      from memory.
+    category: settings
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/settings/personas
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  get_persona_version:
+    title: Get a persona version
+    description: >-
+      One saved persona version in full, so a previous prompt can be read
+      before deciding whether to reactivate it.
+    category: settings
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/settings/persona/${version}
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      version:
+        type: integer
+        description: The persona version number.
+    output:
+      description: The requested record.
+      type: object
+
+  activate_persona_version:
+    title: Activate a persona version
+    description: >-
+      Make a saved persona version the live one. Takes effect on the next
+      question the agent answers, so it changes customer-facing behaviour
+      immediately.
+    category: settings
+    request:
+      method: PUT
+      path: /api/v1/projects/${project_id}/settings/persona/activate/${version}
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      version:
+        type: integer
+        description: The persona version number.
+    output:
+      description: The record after the update.
+      type: object
+
+  list_sub_personas:
+    title: List sub-personas
+    description: >-
+      The sub-personas defined on one persona version. Sub-personas override
+      the base prompt for a particular topic or audience without forking the
+      whole persona.
+    category: settings
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/settings/persona/${version}/sub/personas
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      version:
+        type: integer
+        description: The persona version number.
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  update_sub_persona:
+    title: Update a sub-persona override
+    description: >-
+      Change one sub-persona's override on a persona version, leaving the base
+      prompt and the other sub-personas untouched.
+    category: settings
+    request:
+      method: PATCH
+      path: /api/v1/projects/${project_id}/settings/persona/${version}/sub/personas/${slug}
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      version:
+        type: integer
+        description: The persona version number.
+      slug:
+        type: string
+        description: The sub-persona's slug.
+      attributes:
+        type: object
+        description: The sub-persona fields to change.
+    output:
+      description: The record after the update.
+      type: object
+
+  delete_sub_persona:
+    title: Delete a sub-persona override
+    description: >-
+      Remove a sub-persona override so questions in its area fall back to the
+      base persona prompt.
+    category: settings
+    destructive: true
+    request:
+      method: DELETE
+      path: /api/v1/projects/${project_id}/settings/persona/${version}/sub/personas/${slug}
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      version:
+        type: integer
+        description: The persona version number.
+      slug:
+        type: string
+        description: The sub-persona's slug.
+    output:
+      description: Confirmation that the record was deleted.
+      type: object
+
+  get_deployment_settings:
+    title: Get deployment settings
+    description: >-
+      How the agent is exposed -- the embed widget, the shareable link, the
+      livechat integration and the domains allowed to load it.
+    category: settings
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/deployment
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+    output:
+      description: The requested record.
+      type: object
+
+  update_deployment_settings:
+    title: Update deployment settings
+    description: >-
+      Change one section of the deployment settings. Note this governs who can
+      reach the agent from the public internet, so widening the allowed
+      domains is a security-relevant change.
+    category: settings
+    request:
+      method: PATCH
+      path: /api/v1/projects/${project_id}/deployment/${section}
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      section:
+        type: string
+        description: Which section of the deployment settings to update.
+      attributes:
+        type: object
+        description: The fields to change within that deployment section.
+    output:
+      description: The record after the update.
+      type: object
+
+  list_documents:
+    title: List an agent's documents
+    description: >-
+      The pages and files indexed into one agent, with each one's crawl and
+      index status. `crawl_status` and `index_status` are what explain a
+      source that the agent never cites.
+    category: documents
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/pages
+      query:
+        page: "${page}"
+        duration: "${duration}"
+        order: "${order}"
+        crawl_status: "${crawl_status}"
+        index_status: "${index_status}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      page:
+        type: integer
+        description: Which page of documents to return.
+        optional: true
+        default: '1'
+      duration:
+        type: string
+        description: Time window the listing covers.
+        optional: true
+      order:
+        type: string
+        description: Sort direction.
+        optional: true
+        enum: [asc, desc]
+        default: desc
+      crawl_status:
+        type: string
+        description: Filter by crawl status.
+        optional: true
+      index_status:
+        type: string
+        description: Filter by index status.
+        optional: true
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  delete_document:
+    title: Delete a document
+    description: >-
+      Remove one document from the agent's index. The agent stops citing it on
+      the next question; existing conversations keep their old citations.
+    category: documents
+    destructive: true
+    request:
+      method: DELETE
+      path: /api/v1/projects/${project_id}/pages/${page_id}
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      page_id:
+        type: integer
+        description: The document (page) id, from list_documents.
+    output:
+      description: Confirmation that the record was deleted.
+      type: object
+
+  reindex_document:
+    title: Reindex a document
+    description: >-
+      Re-crawl and re-embed one document. The fix for a page whose content
+      changed, or one that failed indexing the first time.
+    category: documents
+    request:
+      method: POST
+      path: /api/v1/projects/${project_id}/pages/${page_id}/reindex
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      page_id:
+        type: integer
+        description: The document (page) id, from list_documents.
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  get_document_labels:
+    title: Get a document's labels
+    description: >-
+      The labels attached to one document. Labels are how retrieval is scoped
+      to a subset of the index for a particular user or audience.
+    category: documents
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/pages/${page_id}/labels
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      page_id:
+        type: integer
+        description: The document (page) id, from list_documents.
+    output:
+      description: The requested record.
+      type: object
+
+  replace_document_labels:
+    title: Replace a document's labels
+    description: >-
+      Set a document's labels wholesale. Anything not in the payload is
+      removed, so send the complete list rather than the additions.
+    category: documents
+    request:
+      method: PUT
+      path: /api/v1/projects/${project_id}/pages/${page_id}/labels
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      page_id:
+        type: integer
+        description: The document (page) id, from list_documents.
+      attributes:
+        type: object
+        description: The full replacement label list for the document.
+    output:
+      description: The record after the update.
+      type: object
+
+  get_document_metadata:
+    title: Get a document's metadata
+    description: >-
+      The title, url, description and custom metadata stored against one
+      document -- what the agent shows alongside a citation.
+    category: documents
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/pages/${page_id}/metadata
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      page_id:
+        type: integer
+        description: The document (page) id, from list_documents.
+    output:
+      description: The requested record.
+      type: object
+
+  update_document_metadata:
+    title: Update a document's metadata
+    description: >-
+      Change the title, url or description a document is cited under, without
+      re-crawling its content.
+    category: documents
+    request:
+      method: PUT
+      path: /api/v1/projects/${project_id}/pages/${page_id}/metadata
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      page_id:
+        type: integer
+        description: The document (page) id, from list_documents.
+      attributes:
+        type: object
+        description: The metadata fields to set on the document.
+    output:
+      description: The record after the update.
+      type: object
+
+  get_citation_source_preview:
+    title: Get a citation source preview
+    description: >-
+      A preview of the source behind a citation, for showing users what a
+      cited document contains without exposing the underlying file.
+    category: documents
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/preview/${id}
+    input:
+      id:
+        type: string
+        description: The citation source preview id.
+    output:
+      description: The requested record.
+      type: object
+
+  list_sources:
+    title: List an agent's sources
+    description: >-
+      The sitemaps, uploads and connected integrations feeding one agent's
+      index, with each one's sync settings and last run.
+    category: sources
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/sources
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  add_source:
+    title: Add a source
+    description: >-
+      Attach a new source -- a sitemap, a url or a connected integration -- to
+      an agent. Indexing starts asynchronously, so the content is not
+      answerable straight away.
+    category: sources
+    request:
+      method: POST
+      path: /api/v1/projects/${project_id}/sources
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      attributes:
+        type: object
+        description: The source to add, e.g. `sitemap_path` or the integration's configuration.
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  update_source:
+    title: Update a source's settings
+    description: >-
+      Change one source's sync schedule or configuration. A PUT, so send the
+      complete settings object rather than only the changed field.
+    category: sources
+    request:
+      method: PUT
+      path: /api/v1/projects/${project_id}/sources/${source_id}
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      source_id:
+        type: integer
+        description: The source id, from list_sources.
+      attributes:
+        type: object
+        description: The full replacement settings for the source.
+    output:
+      description: The record after the update.
+      type: object
+
+  delete_source:
+    title: Delete a source
+    description: >-
+      Remove a source and the documents it contributed from the agent's index.
+      The agent loses everything that source supplied.
+    category: sources
+    destructive: true
+    request:
+      method: DELETE
+      path: /api/v1/projects/${project_id}/sources/${source_id}
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      source_id:
+        type: integer
+        description: The source id, from list_sources.
+    output:
+      description: Confirmation that the record was deleted.
+      type: object
+
+  sync_source:
+    title: Trigger an instant source sync
+    description: >-
+      Re-sync one source immediately instead of waiting for its schedule. The
+      way to pick up content that changed since the last scheduled crawl.
+    category: sources
+    request:
+      method: PUT
+      path: /api/v1/projects/${project_id}/sources/${source_id}/instant/sync
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      source_id:
+        type: integer
+        description: The source id, from list_sources.
+      attributes:
+        type: object
+        description: Sync options, where the source type accepts any.
+    output:
+      description: The record after the update.
+      type: object
+
+  list_context_pages:
+    title: List webpage context pages
+    description: >-
+      The pages held as webpage context for contextual RAG -- content the
+      agent reads as page-level context rather than as retrieved chunks.
+    category: sources
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/contextual/rag/pages
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  delete_context_pages:
+    title: Delete webpage context pages
+    description: >-
+      Remove webpage context pages from the agent. The agent stops using them
+      as page context on the next question.
+    category: sources
+    destructive: true
+    request:
+      method: DELETE
+      path: /api/v1/projects/${project_id}/contextual/rag/pages
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+    output:
+      description: Confirmation that the record was deleted.
+      type: object
+
+  bulk_update_context_messages:
+    title: Bulk update page messages
+    description: >-
+      Update the contextual RAG messages for many pages at once, rather than
+      one call per page.
+    category: sources
+    request:
+      method: PATCH
+      path: /api/v1/projects/${project_id}/contextual/rag/messages
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      attributes:
+        type: object
+        description: The page-message updates to apply.
+    output:
+      description: The record after the update.
+      type: object
+
+  list_conversations:
+    title: List conversations
+    description: >-
+      The conversations held with one agent, with their session ids and
+      metadata. The session id is what every message tool below takes.
+    category: conversations
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/conversations
+      query:
+        page: "${page}"
+        duration: "${duration}"
+        order: "${order}"
+        userFilter: "${user_filter}"
+        name: "${name}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      page:
+        type: integer
+        description: Which page of conversations to return.
+        optional: true
+        default: '1'
+      duration:
+        type: string
+        description: Time window the listing covers.
+        optional: true
+      order:
+        type: string
+        description: Sort direction.
+        optional: true
+        enum: [asc, desc]
+        default: desc
+      user_filter:
+        type: string
+        description: Restrict to conversations belonging to one user.
+        optional: true
+      name:
+        type: string
+        description: Filter by conversation name.
+        optional: true
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  create_conversation:
+    title: Create a conversation
+    description: >-
+      Open a new conversation with an agent and get back the session id that
+      send_message needs. Every exchange belongs to a conversation; there is
+      no stateless chat endpoint apart from the OpenAI-compatible one.
+    category: conversations
+    request:
+      method: POST
+      path: /api/v1/projects/${project_id}/conversations
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      attributes:
+        type: object
+        description: The conversation to create, e.g. its `name` and an `external_id` linking it to your own system.
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  update_conversation:
+    title: Update a conversation
+    description: >-
+      Rename a conversation or change the metadata stored against it. Does not
+      alter the messages it holds.
+    category: conversations
+    request:
+      method: PUT
+      path: /api/v1/projects/${project_id}/conversations/${session_id}
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      session_id:
+        type: string
+        description: The conversation's session id, from list_conversations.
+      attributes:
+        type: object
+        description: The conversation fields to change.
+    output:
+      description: The record after the update.
+      type: object
+
+  delete_conversation:
+    title: Delete a conversation
+    description: >-
+      Delete a conversation and every message in it. Irreversible, and it
+      removes the record an analytics report was built from.
+    category: conversations
+    destructive: true
+    request:
+      method: DELETE
+      path: /api/v1/projects/${project_id}/conversations/${session_id}
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      session_id:
+        type: string
+        description: The conversation's session id, from list_conversations.
+    output:
+      description: Confirmation that the record was deleted.
+      type: object
+
+  export_conversation:
+    title: Export a conversation
+    description: >-
+      Export one conversation's full transcript, for archiving or for review
+      outside the CustomGPT dashboard.
+    category: conversations
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/conversations/${session_id}/export
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      session_id:
+        type: string
+        description: The conversation's session id, from list_conversations.
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  get_conversation_messages:
+    title: Get a conversation's messages
+    description: >-
+      The messages in one conversation, each with the agent's answer and the
+      citations it drew on. The `citations` ids here are what get_citation
+      takes.
+    category: conversations
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/conversations/${session_id}/messages
+      query:
+        page: "${page}"
+        order: "${order}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      session_id:
+        type: string
+        description: The conversation's session id, from list_conversations.
+      page:
+        type: integer
+        description: Which page of messages to return.
+        optional: true
+        default: '1'
+      order:
+        type: string
+        description: Sort direction.
+        optional: true
+        enum: [asc, desc]
+        default: desc
+    output:
+      description: The requested record.
+      type: object
+
+  send_message:
+    title: Send a message
+    description: >-
+      Ask the agent a question inside a conversation and get its answer plus
+      citations. This is the main call the whole product exists for. Set
+      `stream` false unless the caller can consume server-sent events.
+    category: conversations
+    request:
+      method: POST
+      path: /api/v1/projects/${project_id}/conversations/${session_id}/messages
+      query:
+        stream: "${stream}"
+        lang: "${lang}"
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      session_id:
+        type: string
+        description: The conversation's session id, from list_conversations.
+      stream:
+        type: boolean
+        description: Stream the answer as SSE instead of returning one body.
+        optional: true
+        default: 'False'
+      lang:
+        type: string
+        description: Language code to answer in.
+        optional: true
+      attributes:
+        type: object
+        description: The message -- `prompt` for the question, plus optional `custom_persona`, `response_source` and `chatbot_model` overrides.
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  send_chat_completion:
+    title: Send a message (OpenAI format)
+    description: >-
+      Ask the agent a question using the OpenAI chat-completions request and
+      response shape, so an existing OpenAI client can point at CustomGPT with
+      only a base-url change. Same retrieval behind it as send_message.
+    category: conversations
+    request:
+      method: POST
+      path: /api/v1/projects/${project_id}/chat/completions
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      attributes:
+        type: object
+        description: An OpenAI-shaped chat completion request -- `messages`, and optionally `stream` and `model`.
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  get_message:
+    title: Get one message
+    description: >-
+      A single message in a conversation, with its answer, citations and
+      metadata. Narrower than paging the whole conversation when you already
+      have the prompt id.
+    category: conversations
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/conversations/${session_id}/messages/${prompt_id}
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      session_id:
+        type: string
+        description: The conversation's session id, from list_conversations.
+      prompt_id:
+        type: integer
+        description: The message's prompt id, from get_conversation_messages.
+    output:
+      description: The requested record.
+      type: object
+
+  update_message_feedback:
+    title: Record feedback on a message
+    description: >-
+      Record a thumbs-up or thumbs-down on one answer. Feedback feeds the
+      analytics reports, which is how a badly-performing agent shows up.
+    category: conversations
+    request:
+      method: PUT
+      path: /api/v1/projects/${project_id}/conversations/${session_id}/messages/${prompt_id}/feedback
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      session_id:
+        type: string
+        description: The conversation's session id, from list_conversations.
+      prompt_id:
+        type: integer
+        description: The message's prompt id, from get_conversation_messages.
+      attributes:
+        type: object
+        description: The feedback to record, e.g. `reaction`.
+    output:
+      description: The record after the update.
+      type: object
+
+  get_message_claims:
+    title: Get a message's claims
+    description: >-
+      The individual factual claims CustomGPT extracted from one answer, each
+      tied to the source it came from. The building block behind the trust
+      score.
+    category: conversations
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/conversations/${session_id}/messages/${prompt_id}/claims
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      session_id:
+        type: string
+        description: The conversation's session id, from list_conversations.
+      prompt_id:
+        type: integer
+        description: The message's prompt id, from get_conversation_messages.
+    output:
+      description: The requested record.
+      type: object
+
+  get_message_trust_score:
+    title: Get a message's trust score
+    description: >-
+      CustomGPT's confidence that an answer is grounded in the agent's
+      sources. A low score is the signal that an answer drifted beyond what
+      the index supports.
+    category: conversations
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/conversations/${session_id}/messages/${prompt_id}/trust/score
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      session_id:
+        type: string
+        description: The conversation's session id, from list_conversations.
+      prompt_id:
+        type: integer
+        description: The message's prompt id, from get_conversation_messages.
+    output:
+      description: The requested record.
+      type: object
+
+  verify_message:
+    title: Verify a message's accuracy
+    description: >-
+      Run CustomGPT's accuracy check over one answer, re-testing its claims
+      against the agent's sources. Use it on answers a trust score has already
+      flagged.
+    category: conversations
+    request:
+      method: POST
+      path: /api/v1/projects/${project_id}/conversations/${session_id}/messages/${prompt_id}/verify
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      session_id:
+        type: string
+        description: The conversation's session id, from list_conversations.
+      prompt_id:
+        type: integer
+        description: The message's prompt id, from get_conversation_messages.
+      attributes:
+        type: object
+        description: Verification options, where the endpoint accepts any.
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  get_citation:
+    title: Get a citation's metadata
+    description: >-
+      The document behind one citation -- its title, url and page. This is how
+      a citation id from an answer becomes something a user can click.
+    category: conversations
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/citations/${citation_id}
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      citation_id:
+        type: integer
+        description: The citation id, taken from a message's `citations` array.
+    output:
+      description: The requested record.
+      type: object
+
+  list_tasks:
+    title: List tasks
+    description: >-
+      The agentic tasks running or completed on one agent. A task is a
+      longer-running job than a chat message, with its own message thread and
+      file output.
+    category: tasks
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/tasks
+      query:
+        page: "${page}"
+        order: "${order}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      page:
+        type: integer
+        description: Which page of tasks to return.
+        optional: true
+        default: '1'
+      order:
+        type: string
+        description: Sort direction.
+        optional: true
+        enum: [asc, desc]
+        default: desc
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  create_task:
+    title: Create a task
+    description: >-
+      Start an agentic task on an agent. Tasks run asynchronously -- poll
+      poll_task until it reports completion rather than expecting an answer in
+      this response.
+    category: tasks
+    request:
+      method: POST
+      path: /api/v1/projects/${project_id}/tasks
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      attributes:
+        type: object
+        description: The task to run, e.g. its `prompt` and any tools it may call.
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  poll_task:
+    title: Poll a task
+    description: >-
+      One task's current state and result. Poll this after create_task; a task
+      that requires a tool call reports that here and waits for
+      submit_tool_outputs.
+    category: tasks
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/tasks/${task_id}
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      task_id:
+        type: string
+        description: The task id, from list_tasks.
+    output:
+      description: The requested record.
+      type: object
+
+  update_task:
+    title: Update a task
+    description: >-
+      Change a task's configuration or metadata while it is still open.
+    category: tasks
+    request:
+      method: PUT
+      path: /api/v1/projects/${project_id}/tasks/${task_id}
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      task_id:
+        type: string
+        description: The task id, from list_tasks.
+      attributes:
+        type: object
+        description: The task fields to change.
+    output:
+      description: The record after the update.
+      type: object
+
+  delete_task:
+    title: Delete a task
+    description: >-
+      Delete a task and its message thread. Any files the task produced go
+      with it.
+    category: tasks
+    destructive: true
+    request:
+      method: DELETE
+      path: /api/v1/projects/${project_id}/tasks/${task_id}
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      task_id:
+        type: string
+        description: The task id, from list_tasks.
+    output:
+      description: Confirmation that the record was deleted.
+      type: object
+
+  export_task:
+    title: Export a task
+    description: >-
+      Export a task's full thread and output, for archiving or review outside
+      CustomGPT.
+    category: tasks
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/tasks/${task_id}/export
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      task_id:
+        type: string
+        description: The task id, from list_tasks.
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  list_task_messages:
+    title: List a task's messages
+    description: >-
+      The message thread inside one task -- the agent's reasoning steps, tool
+      calls and answers as the task progressed.
+    category: tasks
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/tasks/${task_id}/messages
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      task_id:
+        type: string
+        description: The task id, from list_tasks.
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  send_task_message:
+    title: Send a follow-up message to a task
+    description: >-
+      Add a follow-up instruction to a running task, so it continues with new
+      direction rather than being restarted.
+    category: tasks
+    request:
+      method: POST
+      path: /api/v1/projects/${project_id}/tasks/${task_id}/messages
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      task_id:
+        type: string
+        description: The task id, from list_tasks.
+      attributes:
+        type: object
+        description: The follow-up message, e.g. its `prompt`.
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  get_task_message:
+    title: Get one task message
+    description: >-
+      A single message from a task's thread, with its content and any files or
+      tool calls attached to it.
+    category: tasks
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/tasks/${task_id}/messages/${prompt_history_id}
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      task_id:
+        type: string
+        description: The task id, from list_tasks.
+      prompt_history_id:
+        type: integer
+        description: The task message's prompt history id.
+    output:
+      description: The requested record.
+      type: object
+
+  submit_tool_outputs:
+    title: Submit tool outputs to a task
+    description: >-
+      Return the results of the tool calls a task asked for, so it can carry
+      on. A task that reported a pending tool call stays blocked until this
+      arrives.
+    category: tasks
+    request:
+      method: POST
+      path: /api/v1/projects/${project_id}/tasks/${task_id}/tool/outputs
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      task_id:
+        type: string
+        description: The task id, from list_tasks.
+      attributes:
+        type: object
+        description: The tool outputs, keyed to the tool call ids the task reported.
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  list_task_message_files:
+    title: List a task message's files
+    description: >-
+      The files attached to one task message -- what the task produced or was
+      given at that step.
+    category: tasks
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/tasks/${task_id}/messages/${prompt_history_id}/files
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      task_id:
+        type: string
+        description: The task id, from list_tasks.
+      prompt_history_id:
+        type: integer
+        description: The task message's prompt history id.
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  download_task_message_file:
+    title: Download a task message's file
+    description: >-
+      Fetch the contents of one file attached to a task message. Returns the
+      file itself rather than JSON.
+    category: tasks
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/tasks/${task_id}/messages/${prompt_history_id}/files/${file_id}/download
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      task_id:
+        type: string
+        description: The task id, from list_tasks.
+      prompt_history_id:
+        type: integer
+        description: The task message's prompt history id.
+      file_id:
+        type: integer
+        description: The file id attached to a task message.
+    output:
+      description: The requested record.
+      type: object
+
+  delete_task_message_file:
+    title: Delete a task message's file
+    description: >-
+      Permanently remove one file from a task message. The task's thread keeps
+      the message; only the attachment goes.
+    category: tasks
+    destructive: true
+    request:
+      method: DELETE
+      path: /api/v1/projects/${project_id}/tasks/${task_id}/messages/${prompt_history_id}/files/${file_id}
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      task_id:
+        type: string
+        description: The task id, from list_tasks.
+      prompt_history_id:
+        type: integer
+        description: The task message's prompt history id.
+      file_id:
+        type: integer
+        description: The file id attached to a task message.
+    output:
+      description: Confirmation that the record was deleted.
+      type: object
+
+  list_agent_actions:
+    title: List an agent's actions
+    description: >-
+      The built-in and custom actions an agent may call while answering --
+      CustomGPT's tool surface, including MCP-backed custom actions.
+    category: actions
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/actions
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  create_custom_action:
+    title: Create a custom action (MCP)
+    description: >-
+      Register a custom action, typically backed by an MCP server, so the
+      agent can call an external system while answering. The agent gains a new
+      capability the moment this succeeds.
+    category: actions
+    request:
+      method: POST
+      path: /api/v1/projects/${project_id}/actions/custom
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      attributes:
+        type: object
+        description: The action definition, including its MCP server configuration.
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  update_custom_action:
+    title: Update a custom action
+    description: >-
+      Change a custom action's configuration. A PUT, so send the complete
+      definition rather than only the changed field.
+    category: actions
+    request:
+      method: PUT
+      path: /api/v1/projects/${project_id}/actions/custom/${action_key}
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      action_key:
+        type: string
+        description: The action's key, from list_agent_actions.
+      attributes:
+        type: object
+        description: The full replacement action definition.
+    output:
+      description: The record after the update.
+      type: object
+
+  delete_custom_action:
+    title: Delete a custom action
+    description: >-
+      Remove a custom action from the agent. The agent loses that capability
+      immediately, and answers relying on it start failing.
+    category: actions
+    destructive: true
+    request:
+      method: DELETE
+      path: /api/v1/projects/${project_id}/actions/custom/${action_key}
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      action_key:
+        type: string
+        description: The action's key, from list_agent_actions.
+    output:
+      description: Confirmation that the record was deleted.
+      type: object
+
+  update_builtin_action_settings:
+    title: Update a built-in action's settings
+    description: >-
+      Configure or disable one of CustomGPT's built-in actions for this agent,
+      without touching the custom ones.
+    category: actions
+    request:
+      method: PUT
+      path: /api/v1/projects/${project_id}/actions/builtin/${action_key}/settings
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      action_key:
+        type: string
+        description: The action's key, from list_agent_actions.
+      attributes:
+        type: object
+        description: The settings for that built-in action, typically including `enabled`.
+    output:
+      description: The record after the update.
+      type: object
+
+  list_labels:
+    title: List an agent's labels
+    description: >-
+      Every label defined on an agent. Labels scope retrieval to a subset of
+      the index, so one agent can answer different audiences from different
+      documents.
+    category: labels
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/labels
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  create_labels:
+    title: Create labels
+    description: >-
+      Define one or more labels on an agent, ready to attach to documents and
+      users.
+    category: labels
+    request:
+      method: POST
+      path: /api/v1/projects/${project_id}/labels
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      attributes:
+        type: object
+        description: The labels to create.
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  assign_users_to_label:
+    title: Assign users to a label
+    description: >-
+      Grant users access to the documents a label covers. This is the
+      access-control half of labels -- it decides which documents a given
+      user's questions can retrieve.
+    category: labels
+    request:
+      method: PUT
+      path: /api/v1/projects/${project_id}/labels
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      attributes:
+        type: object
+        description: The label and the users to assign to it.
+    output:
+      description: The record after the update.
+      type: object
+
+  get_label:
+    title: Get a label
+    description: >-
+      One label's details, including which users it has been assigned to.
+    category: labels
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/labels/${label_id}
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      label_id:
+        type: integer
+        description: The label id.
+    output:
+      description: The requested record.
+      type: object
+
+  update_label:
+    title: Rename a label
+    description: >-
+      Change a label's name. Its document and user assignments are unaffected.
+    category: labels
+    request:
+      method: PUT
+      path: /api/v1/projects/${project_id}/labels/${label_id}
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      label_id:
+        type: integer
+        description: The label id.
+      attributes:
+        type: object
+        description: The new label name.
+    output:
+      description: The record after the update.
+      type: object
+
+  delete_label:
+    title: Delete a label
+    description: >-
+      Delete a label. Documents carrying it lose the scoping, so content that
+      was restricted to one audience may become retrievable by everyone.
+    category: labels
+    destructive: true
+    request:
+      method: DELETE
+      path: /api/v1/projects/${project_id}/labels/${label_id}
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      label_id:
+        type: integer
+        description: The label id.
+    output:
+      description: Confirmation that the record was deleted.
+      type: object
+
+  remove_users_from_labels:
+    title: Remove users from labels
+    description: >-
+      Revoke users' access to labelled documents in bulk. The users keep their
+      team membership; only the label-scoped retrieval goes.
+    category: labels
+    destructive: true
+    request:
+      method: DELETE
+      path: /api/v1/projects/${project_id}/labels/users
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+    output:
+      description: Confirmation that the record was deleted.
+      type: object
+
+  get_customer_intelligence:
+    title: Get customer intelligence
+    description: >-
+      CustomGPT's analysis of what users are actually asking one agent --
+      themes, gaps and unanswered questions. The report that says which
+      documents the index is missing.
+    category: reports
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/reports/intelligence
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+    output:
+      description: The requested record.
+      type: object
+
+  get_traffic_report:
+    title: Get traffic analytics
+    description: >-
+      Traffic to one agent over time -- sessions and volume, for sizing usage
+      and spotting a drop.
+    category: reports
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/reports/traffic
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+    output:
+      description: The requested record.
+      type: object
+
+  get_queries_report:
+    title: Get query analytics
+    description: >-
+      Query volume and outcome for one agent, including how often it answered
+      versus failed to find an answer.
+    category: reports
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/reports/queries
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+    output:
+      description: The requested record.
+      type: object
+
+  get_conversations_report:
+    title: Get conversation analytics
+    description: >-
+      Conversation-level analytics for one agent -- length, resolution and
+      engagement, rather than per-query counts.
+    category: reports
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/reports/conversations
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+    output:
+      description: The requested record.
+      type: object
+
+  get_analysis_report:
+    title: Get analytics chart data
+    description: >-
+      The chart series behind the CustomGPT analytics dashboard, for
+      rebuilding those views in your own reporting.
+    category: reports
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/reports/analysis
+      query:
+        interval: "${interval}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      interval:
+        type: string
+        description: Bucket size for the series, e.g. daily or weekly.
+        optional: true
+    output:
+      description: The requested record.
+      type: object
+
+  export_leads:
+    title: Export leads
+    description: >-
+      The leads an agent captured through its lead form, with their contact
+      details and the conversation each came from.
+    category: reports
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/reports/leads
+      query:
+        page: "${page}"
+        duration: "${duration}"
+        order: "${order}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      page:
+        type: integer
+        description: Which page of leads to return.
+        optional: true
+        default: '1'
+      duration:
+        type: string
+        description: Time window the export covers.
+        optional: true
+      order:
+        type: string
+        description: Sort direction.
+        optional: true
+        enum: [asc, desc]
+        default: desc
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  export_conversation_leads:
+    title: Export a conversation's leads
+    description: >-
+      The lead data captured in one specific conversation, rather than across
+      the whole agent.
+    category: reports
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/reports/leads/${session_id}/export
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      session_id:
+        type: string
+        description: The conversation's session id, from list_conversations.
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  export_collated_lead:
+    title: Export a conversation's collated lead
+    description: >-
+      One conversation's lead information collated into a single record, ready
+      to push into a CRM.
+    category: reports
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/reports/leads/${session_id}/collated
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      session_id:
+        type: string
+        description: The conversation's session id, from list_conversations.
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  list_licenses:
+    title: List an agent's licenses
+    description: >-
+      The licenses issued for one agent. Licenses are how an agent is resold
+      or distributed to end customers under separate keys.
+    category: licenses
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/licenses
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  create_license:
+    title: Create a license
+    description: >-
+      Issue a new license for an agent, so a downstream customer can use it
+      under their own key.
+    category: licenses
+    request:
+      method: POST
+      path: /api/v1/projects/${project_id}/licenses
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      attributes:
+        type: object
+        description: The license to create, e.g. its `name`.
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  get_license:
+    title: Get a license
+    description: >-
+      One license's details, including its key and current status.
+    category: licenses
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}/licenses/${license_id}
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      license_id:
+        type: integer
+        description: The license id.
+    output:
+      description: The requested record.
+      type: object
+
+  update_license:
+    title: Update a license
+    description: >-
+      Change a license's name or status. Deactivating one cuts off the
+      downstream customer using it.
+    category: licenses
+    request:
+      method: PUT
+      path: /api/v1/projects/${project_id}/licenses/${license_id}
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      license_id:
+        type: integer
+        description: The license id.
+      attributes:
+        type: object
+        description: The license fields to change.
+    output:
+      description: The record after the update.
+      type: object
+
+  delete_license:
+    title: Delete a license
+    description: >-
+      Delete a license. Whoever was using its key loses access to the agent
+      immediately and irreversibly.
+    category: licenses
+    destructive: true
+    request:
+      method: DELETE
+      path: /api/v1/projects/${project_id}/licenses/${license_id}
+    input:
+      project_id:
+        type: integer
+        description: The agent (project) id, from list_agents.
+      license_id:
+        type: integer
+        description: The license id.
+    output:
+      description: Confirmation that the record was deleted.
+      type: object
+
+  get_current_user:
+    title: Get the current user
+    description: >-
+      The profile behind this API key, including which team is currently
+      active. The cheapest call that proves the credential works.
+    category: account
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/user
+    output:
+      description: The requested record.
+      type: object
+
+  update_current_user:
+    title: Update the current user's profile
+    description: >-
+      Change the authenticated user's own profile details -- name, and the
+      notification preferences the account carries.
+    category: account
+    request:
+      method: POST
+      path: /api/v1/user
+      body: "${attributes}"
+    input:
+      attributes:
+        type: object
+        description: The profile fields to change.
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  search_team_members:
+    title: Search team members
+    description: >-
+      Find team members by name or email, for resolving a person to the user
+      id the team tools take.
+    category: account
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/user/search/team/member
+      query:
+        q: "${q}"
+    input:
+      q:
+        type: string
+        description: The text to match against member names and emails.
+        optional: true
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  list_teams:
+    title: List teams
+    description: >-
+      Every team the authenticated user belongs to. Most other calls act on
+      whichever team is currently active.
+    category: teams
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/teams
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  update_team_name:
+    title: Update a team's name
+    description: >-
+      Rename the active team. Cosmetic only -- membership, agents and roles
+      are untouched by the change.
+    category: teams
+    request:
+      method: PUT
+      path: /api/v1/teams
+      body: "${attributes}"
+    input:
+      attributes:
+        type: object
+        description: The new team name.
+    output:
+      description: The record after the update.
+      type: object
+
+  switch_team:
+    title: Switch the active team
+    description: >-
+      Change which team subsequent calls act on. Worth knowing: agents and
+      reports are scoped to the active team, so a call that returns nothing
+      may simply be pointed at the wrong one.
+    category: teams
+    request:
+      method: POST
+      path: /api/v1/teams/${team_id}/switch
+    input:
+      team_id:
+        type: integer
+        description: The team id.
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  list_team_members:
+    title: List team members
+    description: >-
+      The people in the active team, with the role each holds.
+    category: teams
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/teams/members
+      query:
+        page: "${page}"
+    input:
+      page:
+        type: integer
+        description: Which page of members to return.
+        optional: true
+        default: '1'
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  update_team_member_role:
+    title: Change a team member's role
+    description: >-
+      Set the role a team member holds. Raising someone to an administrative
+      role gives them control over every agent in the team.
+    category: teams
+    request:
+      method: PUT
+      path: /api/v1/teams/members/${user_id}
+      body: "${attributes}"
+    input:
+      user_id:
+        type: integer
+        description: The team member's user id.
+      attributes:
+        type: object
+        description: The new role for the member.
+    output:
+      description: The record after the update.
+      type: object
+
+  remove_team_member:
+    title: Remove a team member
+    description: >-
+      Remove someone from the team. They lose access to every agent in it;
+      re-adding them means a fresh invitation.
+    category: teams
+    destructive: true
+    request:
+      method: DELETE
+      path: /api/v1/teams/members/${user_id}
+    input:
+      user_id:
+        type: integer
+        description: The team member's user id.
+    output:
+      description: Confirmation that the record was deleted.
+      type: object
+
+  list_invitations:
+    title: List pending invitations
+    description: >-
+      Invitations that have been sent but not yet accepted, with the role each
+      grants.
+    category: teams
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/teams/invitations
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  create_invitation:
+    title: Invite a new member
+    description: >-
+      Invite someone to the team at a given role. They become a member only
+      when they accept.
+    category: teams
+    request:
+      method: POST
+      path: /api/v1/teams/invitations
+      body: "${attributes}"
+    input:
+      attributes:
+        type: object
+        description: The invitation -- the invitee's `email` and the role they will hold.
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  resend_invitation:
+    title: Resend an invitation
+    description: >-
+      Send a pending invitation again, for the common case of an email that
+      never arrived.
+    category: teams
+    request:
+      method: POST
+      path: /api/v1/teams/invitations/${invitation_id}/resend
+    input:
+      invitation_id:
+        type: integer
+        description: The pending invitation's id.
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  cancel_invitation:
+    title: Cancel an invitation
+    description: >-
+      Revoke a pending invitation so its link stops working. Does nothing to
+      someone who already joined.
+    category: teams
+    destructive: true
+    request:
+      method: DELETE
+      path: /api/v1/teams/invitations/${invitation_id}
+    input:
+      invitation_id:
+        type: integer
+        description: The pending invitation's id.
+    output:
+      description: Confirmation that the record was deleted.
+      type: object
+
+  list_roles:
+    title: List roles
+    description: >-
+      The roles available in the team, built-in and custom, with the
+      permissions each carries.
+    category: teams
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/teams/roles
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  create_role:
+    title: Create a custom role
+    description: >-
+      Define a custom role with its own permission set, for granting narrower
+      access than the built-in roles allow.
+    category: teams
+    request:
+      method: POST
+      path: /api/v1/teams/roles
+      body: "${attributes}"
+    input:
+      attributes:
+        type: object
+        description: The role definition, including its name and permissions.
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  update_role:
+    title: Update a custom role
+    description: >-
+      Change a custom role's permissions. Everyone holding the role is
+      affected at once, so a narrowing change can cut off several people.
+    category: teams
+    request:
+      method: PUT
+      path: /api/v1/teams/roles/${role_id}
+      body: "${attributes}"
+    input:
+      role_id:
+        type: integer
+        description: The custom role id.
+      attributes:
+        type: object
+        description: The role fields to change.
+    output:
+      description: The record after the update.
+      type: object
+
+  delete_role:
+    title: Delete a custom role
+    description: >-
+      Delete a custom role. Members holding it fall back to whatever the
+      team's default grants, which may be more or less than they had.
+    category: teams
+    destructive: true
+    request:
+      method: DELETE
+      path: /api/v1/teams/roles/${role_id}
+    input:
+      role_id:
+        type: integer
+        description: The custom role id.
+    output:
+      description: Confirmation that the record was deleted.
+      type: object
+
+  get_account_limits:
+    title: Get account limits and usage
+    description: >-
+      The account's plan limits and how much of each has been used -- queries,
+      storage and agent count. Check this before a bulk import that might
+      exceed the plan.
+    category: billing
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/limits/usage
+    output:
+      description: The requested record.
+      type: object
+
+  get_billing_plan:
+    title: Get the current plan
+    description: >-
+      The plan the account is on, its price and what it includes.
+    category: billing
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/billing/plan
+    output:
+      description: The requested record.
+      type: object
+
+  list_payment_methods:
+    title: List payment methods
+    description: >-
+      The payment methods on file for the account, with their last four digits
+      and expiry.
+    category: billing
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/billing/payment/methods
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  list_invoices:
+    title: List invoices
+    description: >-
+      The account's billing history, with each invoice's amount, period and
+      status.
+    category: billing
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/billing/invoices
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  download_invoice:
+    title: Download an invoice
+    description: >-
+      Fetch one invoice as a file, for passing to finance or filing against an
+      expense claim.
+    category: billing
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/billing/invoices/${invoice_id}/download
+    input:
+      invoice_id:
+        type: string
+        description: The invoice id, from list_invoices.
+    output:
+      description: The requested record.
+      type: object

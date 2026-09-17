@@ -1,0 +1,389 @@
+# Customer.io tools -- the Data Pipelines (CDP) API.
+#
+# This connector points at Customer.io's *Pipelines* API (`cdp.customer.io` or
+# `cdp-eu.customer.io`), not the older Track or App APIs. It follows the
+# Segment spec, so the whole surface is seven write endpoints and there are no
+# reads at all -- you cannot list people or fetch an event back through it.
+#
+# Two things follow from that, and both surprise people:
+#
+#   * **there are no DELETE endpoints.** Deleting a person, suppressing them,
+#     removing a device or deleting an object are all done by calling
+#     `track_event` with a semantic event name -- `User Deleted`,
+#     `User Suppressed`, `Device Deleted`, `Object Deleted`,
+#     `Relationship Deleted`. They look like ordinary events and are not: they
+#     destroy data;
+#   * **identify merges, it does not replace.** Sending one trait leaves every
+#     other trait intact, so there is no way to clear an attribute by omitting
+#     it.
+#
+# A person is addressed by `userId` or, before they are known, by
+# `anonymousId`; `alias_profiles` is what stitches the two together once they
+# sign up, and that merge cannot be undone.
+#
+# Limits worth designing around: 3000 requests per 3 seconds, 32KB per call,
+# and 500KB per batch. A backfill belongs in `send_batch`, not in a loop.
+#
+# Docs: https://docs.customer.io/api/cdp/
+
+connector_id: customer-io
+display_name: Customer.io
+docs_url: https://docs.customer.io/api/cdp/
+
+tools:
+
+  identify_person:
+    title: Add or update a person
+    description: >-
+      Create or update a person and their traits. Traits are merged, not
+      replaced, so sending one attribute leaves the rest intact. This is the
+      call that makes someone addressable by a campaign.
+    category: people
+    request:
+      method: POST
+      path: /v1/identify
+      body:
+        traits: "${traits}"
+        userId: "${user_id}"
+        anonymousId: "${anonymous_id}"
+        timestamp: "${timestamp}"
+        context: "${context}"
+        integrations: "${integrations}"
+        messageId: "${message_id}"
+    input:
+      traits:
+        type: object
+        description: The person's attributes, merged into whatever is already stored.
+        optional: true
+      user_id:
+        type: string
+        description: Your own id for the person. Use this or `anonymousId`; a call with neither is rejected.
+        optional: true
+      anonymous_id:
+        type: string
+        description: A pre-identification id for someone you do not yet know. Merge it into a real profile later with alias_profiles.
+        optional: true
+      timestamp:
+        type: string
+        description: When the event happened, ISO 8601. Omit for now; set it when backfilling so the event lands in the right place in history.
+        optional: true
+      context:
+        type: object
+        description: Device, page, campaign and locale context, as the Segment-style context object.
+        optional: true
+      integrations:
+        type: object
+        description: Per-destination routing overrides, keyed by destination name.
+        optional: true
+      message_id:
+        type: string
+        description: Your own id for this call, used to deduplicate retries.
+        optional: true
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  track_event:
+    title: Track an event
+    description: >-
+      Record something a person did. Events are what trigger campaigns, so
+      this is the main write in a Customer.io integration. It is also how
+      deletions and suppressions are performed -- see the semantic event names
+      in the pack header.
+    category: events
+    request:
+      method: POST
+      path: /v1/track
+      body:
+        event: "${event}"
+        properties: "${properties}"
+        userId: "${user_id}"
+        anonymousId: "${anonymous_id}"
+        timestamp: "${timestamp}"
+        context: "${context}"
+        integrations: "${integrations}"
+        messageId: "${message_id}"
+    input:
+      event:
+        type: string
+        description: The event name, e.g. "Order Completed". Certain names are semantic -- see the pack header.
+      properties:
+        type: object
+        description: Properties describing the event.
+        optional: true
+      user_id:
+        type: string
+        description: Your own id for the person. Use this or `anonymousId`; a call with neither is rejected.
+        optional: true
+      anonymous_id:
+        type: string
+        description: A pre-identification id for someone you do not yet know. Merge it into a real profile later with alias_profiles.
+        optional: true
+      timestamp:
+        type: string
+        description: When the event happened, ISO 8601. Omit for now; set it when backfilling so the event lands in the right place in history.
+        optional: true
+      context:
+        type: object
+        description: Device, page, campaign and locale context, as the Segment-style context object.
+        optional: true
+      integrations:
+        type: object
+        description: Per-destination routing overrides, keyed by destination name.
+        optional: true
+      message_id:
+        type: string
+        description: Your own id for this call, used to deduplicate retries.
+        optional: true
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  track_page_view:
+    title: Track a page view
+    description: >-
+      Record that a person viewed a web page, with its name, url and referrer.
+      Distinct from a generic event so Customer.io can treat browsing
+      behaviour as its own signal.
+    category: events
+    request:
+      method: POST
+      path: /v1/page
+      body:
+        name: "${name}"
+        properties: "${properties}"
+        userId: "${user_id}"
+        anonymousId: "${anonymous_id}"
+        timestamp: "${timestamp}"
+        context: "${context}"
+        integrations: "${integrations}"
+        messageId: "${message_id}"
+    input:
+      name:
+        type: string
+        description: The page name.
+        optional: true
+      properties:
+        type: object
+        description: Page properties -- typically url, path, title and referrer.
+        optional: true
+      user_id:
+        type: string
+        description: Your own id for the person. Use this or `anonymousId`; a call with neither is rejected.
+        optional: true
+      anonymous_id:
+        type: string
+        description: A pre-identification id for someone you do not yet know. Merge it into a real profile later with alias_profiles.
+        optional: true
+      timestamp:
+        type: string
+        description: When the event happened, ISO 8601. Omit for now; set it when backfilling so the event lands in the right place in history.
+        optional: true
+      context:
+        type: object
+        description: Device, page, campaign and locale context, as the Segment-style context object.
+        optional: true
+      integrations:
+        type: object
+        description: Per-destination routing overrides, keyed by destination name.
+        optional: true
+      message_id:
+        type: string
+        description: Your own id for this call, used to deduplicate retries.
+        optional: true
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  track_screen_view:
+    title: Track a mobile screen view
+    description: >-
+      Record that a person viewed a screen in a mobile app. The mobile
+      counterpart of a page view.
+    category: events
+    request:
+      method: POST
+      path: /v1/screen
+      body:
+        name: "${name}"
+        properties: "${properties}"
+        userId: "${user_id}"
+        anonymousId: "${anonymous_id}"
+        timestamp: "${timestamp}"
+        context: "${context}"
+        integrations: "${integrations}"
+        messageId: "${message_id}"
+    input:
+      name:
+        type: string
+        description: The screen name.
+        optional: true
+      properties:
+        type: object
+        description: Screen properties.
+        optional: true
+      user_id:
+        type: string
+        description: Your own id for the person. Use this or `anonymousId`; a call with neither is rejected.
+        optional: true
+      anonymous_id:
+        type: string
+        description: A pre-identification id for someone you do not yet know. Merge it into a real profile later with alias_profiles.
+        optional: true
+      timestamp:
+        type: string
+        description: When the event happened, ISO 8601. Omit for now; set it when backfilling so the event lands in the right place in history.
+        optional: true
+      context:
+        type: object
+        description: Device, page, campaign and locale context, as the Segment-style context object.
+        optional: true
+      integrations:
+        type: object
+        description: Per-destination routing overrides, keyed by destination name.
+        optional: true
+      message_id:
+        type: string
+        description: Your own id for this call, used to deduplicate retries.
+        optional: true
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  group_object:
+    title: Create an object or relationship
+    description: >-
+      Associate a person with an object -- an account, a workspace, a
+      subscription -- and set that object's attributes. This is how
+      Customer.io models anything that is not a single person.
+    category: objects
+    request:
+      method: POST
+      path: /v1/group
+      body:
+        groupId: "${group_id}"
+        traits: "${traits}"
+        objectTypeId: "${object_type_id}"
+        userId: "${user_id}"
+        anonymousId: "${anonymous_id}"
+        timestamp: "${timestamp}"
+        context: "${context}"
+        integrations: "${integrations}"
+        messageId: "${message_id}"
+    input:
+      group_id:
+        type: string
+        description: The object's id.
+      traits:
+        type: object
+        description: The object's attributes.
+        optional: true
+      object_type_id:
+        type: string
+        description: Which object type this is, when the workspace defines several.
+        optional: true
+      user_id:
+        type: string
+        description: Your own id for the person. Use this or `anonymousId`; a call with neither is rejected.
+        optional: true
+      anonymous_id:
+        type: string
+        description: A pre-identification id for someone you do not yet know. Merge it into a real profile later with alias_profiles.
+        optional: true
+      timestamp:
+        type: string
+        description: When the event happened, ISO 8601. Omit for now; set it when backfilling so the event lands in the right place in history.
+        optional: true
+      context:
+        type: object
+        description: Device, page, campaign and locale context, as the Segment-style context object.
+        optional: true
+      integrations:
+        type: object
+        description: Per-destination routing overrides, keyed by destination name.
+        optional: true
+      message_id:
+        type: string
+        description: Your own id for this call, used to deduplicate retries.
+        optional: true
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  alias_profiles:
+    title: Merge two profiles
+    description: >-
+      Merge an anonymous profile into a known one, so behaviour recorded
+      before sign-up is attributed to the person afterwards. Merging is not
+      reversible -- the two histories become one.
+    category: people
+    destructive: true
+    request:
+      method: POST
+      path: /v1/alias
+      body:
+        previousId: "${previous_id}"
+        userId: "${user_id}"
+        anonymousId: "${anonymous_id}"
+        timestamp: "${timestamp}"
+        context: "${context}"
+        messageId: "${message_id}"
+    input:
+      previous_id:
+        type: string
+        description: The id being merged from, usually an anonymousId.
+      user_id:
+        type: string
+        description: The id being merged into.
+        optional: true
+      anonymous_id:
+        type: string
+        description: The anonymous id, when the merge is expressed that way round.
+        optional: true
+      timestamp:
+        type: string
+        description: When the merge happened, ISO 8601.
+        optional: true
+      context:
+        type: object
+        description: Device, page and campaign context.
+        optional: true
+      message_id:
+        type: string
+        description: Your own id for this call, used to deduplicate retries.
+        optional: true
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  send_batch:
+    title: Send a batch of calls
+    description: >-
+      Send many identify, track, page, screen and group calls in one request.
+      The batch may total 500KB with each individual call under 32KB. This is
+      how a backfill should be shaped -- one call per record will hit the rate
+      limit long before the batch endpoint does.
+    category: events
+    request:
+      method: POST
+      path: /v1/batch
+      body:
+        batch: "${batch}"
+        context: "${context}"
+        integrations: "${integrations}"
+    input:
+      batch:
+        type: array
+        description: The calls to send, each an object with a `type` of identify, track, page, screen or group plus that call's own fields.
+        items: {type: object}
+      context:
+        type: object
+        description: Context applied to every call in the batch.
+        optional: true
+      integrations:
+        type: object
+        description: Per-destination routing overrides for the whole batch.
+        optional: true
+    output:
+      description: The provider's response to the call.
+      type: object

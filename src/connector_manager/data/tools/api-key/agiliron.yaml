@@ -1,0 +1,3030 @@
+# Agiliron tools -- the Agiliron inventory, order management and CRM API (v4.0):
+# leads, accounts, contacts, potentials, events and tasks; products, categories,
+# inventory, bin locations, price books and sales channels; quotes, sales
+# orders, shipping, returns, purchase orders, receiving, transfers and work
+# orders; tickets, notes, attachments, metadata, custom views and settings.
+#
+# Every resource, method and path below comes from the OpenAPI definitions
+# Agiliron embeds in its API Center (https://api.agiliron.com), one per
+# resource, with request samples and filter rules from the matching guide
+# pages. The connection's base url is
+# https://{subdomain}.agiliron.net/agiliron/api-40 with the key in the apikey
+# header, so paths start at the resource name, e.g. /Leads.
+#
+# The same four habits hold across every resource:
+#
+#   * **reads filter with a mini language**: filter=Field,op,value, several
+#     joined with ;, where op is eq, neq, cs (contains), sw, ew, lt, le, ge, gt
+#     or bt (between, two values joined with |) and alternatives are joined with
+#     OR -- e.g. FirstName,eq,Robert;CreatedTime,bt,01-15-2020|01-31-2020. Dates
+#     are MM-DD-YYYY. customview names a saved view instead, and page pages the
+#     results;
+#   * **writes send Agiliron's wrapper document**: the record sits inside a
+#     container named for the resource, e.g. {"Leads": {"Lead": [{...}]}} or
+#     {"Potentials": {"Potential": {...}}}. Each create and update tool takes
+#     that document whole as data;
+#   * **updates replace the record.** Send every writable field as a read
+#     returned it, plus the unique key (id, email, code); fields left out are
+#     set to NULL;
+#   * **deletes take either the record's key in the path or a filter**, as
+#     Agiliron defines per resource -- and a filter delete removes everything it
+#     matches.
+#
+# Every tool sends Accept: application/json; without it Agiliron answers XML.
+# The Bulk-* tools queue work and return a batch id to poll with
+# get_batch_status.
+#
+# Docs: https://api.agiliron.com/reference
+
+connector_id: agiliron
+display_name: Agiliron
+docs_url: https://api.agiliron.com/reference
+tools:
+
+  list_leads:
+    title: List leads
+    description: >-
+      Read leads -- name, company, contact details, source, status and custom fields -- matching
+      a filter or custom view, a page at a time.
+    category: crm
+    read_only: true
+    request:
+      method: GET
+      path: /Leads
+      query:
+        filter: ${filter}
+        customview: ${customview}
+        page: ${page}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+        optional: true
+      customview:
+        type: string
+        description: Name of a saved custom view to read instead of filtering.
+        optional: true
+      page:
+        type: integer
+        description: Page of results to return.
+        optional: true
+    output:
+      description: Leads with TotalRecords and CurrentPage.
+      type: object
+
+  create_lead:
+    title: Create a lead
+    description: >-
+      Add a lead to Agiliron from a wrapper document.
+    category: crm
+    request:
+      method: POST
+      path: /Leads
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: 'The lead document in Agiliron''s wrapper format, e.g. {"Leads": {"Lead":
+          [{"FirstName": "...", "LastName": "...", "Company": "...", "Email": "...", "LeadCustomFields":
+          {"CustomField": [{"Name": "...", "Value": "..."}]}}]}}.'
+    output:
+      description: Agiliron's MCM response with the new record's id.
+      type: object
+
+  update_lead:
+    title: Update a lead
+    description: >-
+      Update a lead, identified by its unique key in the document. Every writable field must
+      be sent; omitted ones are set to NULL.
+    category: crm
+    request:
+      method: PUT
+      path: /Leads
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: 'The lead document in Agiliron''s wrapper format, e.g. {"Leads": {"Lead":
+          [{"FirstName": "...", "LastName": "...", "Company": "...", "Email": "...", "LeadCustomFields":
+          {"CustomField": [{"Name": "...", "Value": "..."}]}}]}}.'
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  delete_lead:
+    title: Delete a lead
+    description: >-
+      Permanently delete a lead from Agiliron, identified by its id or email address.
+    category: crm
+    destructive: true
+    request:
+      method: DELETE
+      path: /Leads/${lead_params}
+      headers:
+        Accept: application/json
+    input:
+      lead_params:
+        type: string
+        description: The lead's id or email address.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  list_accounts:
+    title: List accounts
+    description: >-
+      Read accounts -- customers and companies with billing, shipping and terms -- matching
+      a filter or custom view, a page at a time.
+    category: crm
+    read_only: true
+    request:
+      method: GET
+      path: /Accounts
+      query:
+        filter: ${filter}
+        customview: ${customview}
+        page: ${page}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+        optional: true
+      customview:
+        type: string
+        description: Name of a saved custom view to read instead of filtering.
+        optional: true
+      page:
+        type: integer
+        description: Page of results to return.
+        optional: true
+    output:
+      description: Accounts with TotalRecords and CurrentPage.
+      type: object
+
+  create_account:
+    title: Create an account
+    description: >-
+      Add an account to Agiliron from a wrapper document.
+    category: crm
+    request:
+      method: POST
+      path: /Accounts
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The account document in Agiliron's wrapper format, with the record inside
+          the resource's container object.
+    output:
+      description: Agiliron's MCM response with the new record's id.
+      type: object
+
+  update_account:
+    title: Update an account
+    description: >-
+      Update an account, identified by its unique key in the document. Every writable field
+      must be sent; omitted ones are set to NULL.
+    category: crm
+    request:
+      method: PUT
+      path: /Accounts
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The account document in Agiliron's wrapper format, with the record inside
+          the resource's container object.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  delete_account:
+    title: Delete an account
+    description: >-
+      Permanently delete an account from Agiliron, identified by its id, name, email or account
+      number.
+    category: crm
+    destructive: true
+    request:
+      method: DELETE
+      path: /Accounts/${account_params}
+      headers:
+        Accept: application/json
+    input:
+      account_params:
+        type: string
+        description: The account's id, name, email or account number.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  get_account_balance:
+    title: Get an account balance
+    description: >-
+      Read an account's outstanding balance and credit position.
+    category: crm
+    read_only: true
+    request:
+      method: GET
+      path: /AccountBalance/${account_id}
+      headers:
+        Accept: application/json
+    input:
+      account_id:
+        type: string
+        description: Account id.
+    output:
+      description: The account balance.
+      type: object
+
+  list_contacts:
+    title: List contacts
+    description: >-
+      Read contacts -- people at accounts with their contact details -- matching a filter
+      or custom view, a page at a time.
+    category: crm
+    read_only: true
+    request:
+      method: GET
+      path: /Contact
+      query:
+        filter: ${filter}
+        customview: ${customview}
+        page: ${page}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+        optional: true
+      customview:
+        type: string
+        description: Name of a saved custom view to read instead of filtering.
+        optional: true
+      page:
+        type: integer
+        description: Page of results to return.
+        optional: true
+    output:
+      description: Contacts with TotalRecords and CurrentPage.
+      type: object
+
+  create_contact:
+    title: Create a contact
+    description: >-
+      Add a contact to Agiliron from a wrapper document.
+    category: crm
+    request:
+      method: POST
+      path: /Contact
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The contact document in Agiliron's wrapper format, with the record inside
+          the resource's container object.
+    output:
+      description: Agiliron's MCM response with the new record's id.
+      type: object
+
+  update_contact:
+    title: Update a contact
+    description: >-
+      Update a contact, identified by its unique key in the document. Every writable field
+      must be sent; omitted ones are set to NULL.
+    category: crm
+    request:
+      method: PUT
+      path: /Contact
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The contact document in Agiliron's wrapper format, with the record inside
+          the resource's container object.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  delete_contact:
+    title: Delete a contact
+    description: >-
+      Permanently delete a contact from Agiliron, identified by its id, name or email address.
+    category: crm
+    destructive: true
+    request:
+      method: DELETE
+      path: /Contact/${contact_params}
+      headers:
+        Accept: application/json
+    input:
+      contact_params:
+        type: string
+        description: The contact's id, name or email address.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  list_potentials:
+    title: List potentials
+    description: >-
+      Read potentials -- sales opportunities with amount, stage and close date -- matching
+      a filter or custom view, a page at a time.
+    category: crm
+    read_only: true
+    request:
+      method: GET
+      path: /Potential
+      query:
+        filter: ${filter}
+        page: ${page}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+        optional: true
+      page:
+        type: integer
+        description: Page of results to return.
+        optional: true
+    output:
+      description: Potentials with TotalRecords and CurrentPage.
+      type: object
+
+  create_potential:
+    title: Create a potential
+    description: >-
+      Add a potential to Agiliron from a wrapper document.
+    category: crm
+    request:
+      method: POST
+      path: /Potential
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: 'The potential document in Agiliron''s wrapper format, e.g. {"Potentials":
+          {"Potential": {"PotentialName": "...", "Amount": "10.00", "AccountName": "...",
+          "SalesStage": "...", "ExpectedCloseDate": "MM-DD-YYYY"}}}.'
+    output:
+      description: Agiliron's MCM response with the new record's id.
+      type: object
+
+  update_potential:
+    title: Update a potential
+    description: >-
+      Update a potential, identified by its unique key in the document. Every writable field
+      must be sent; omitted ones are set to NULL.
+    category: crm
+    request:
+      method: PUT
+      path: /Potential
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: 'The potential document in Agiliron''s wrapper format, e.g. {"Potentials":
+          {"Potential": {"PotentialName": "...", "Amount": "10.00", "AccountName": "...",
+          "SalesStage": "...", "ExpectedCloseDate": "MM-DD-YYYY"}}}.'
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  delete_potentials:
+    title: Delete potentials
+    description: >-
+      Delete every potential matching a filter, e.g. PotentialId,eq,3422. Be precise: all
+      matches are removed.
+    category: crm
+    destructive: true
+    request:
+      method: DELETE
+      path: /Potential
+      query:
+        filter: ${filter}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  list_events:
+    title: List events
+    description: >-
+      Read events -- calendar events -- matching a filter or custom view, a page at a time.
+    category: activities
+    read_only: true
+    request:
+      method: GET
+      path: /Event
+      query:
+        filter: ${filter}
+        customview: ${customview}
+        page: ${page}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+        optional: true
+      customview:
+        type: string
+        description: Name of a saved custom view to read instead of filtering.
+        optional: true
+      page:
+        type: integer
+        description: Page of results to return.
+        optional: true
+    output:
+      description: Events with TotalRecords and CurrentPage.
+      type: object
+
+  create_event:
+    title: Create an event
+    description: >-
+      Add an event to Agiliron from a wrapper document.
+    category: activities
+    request:
+      method: POST
+      path: /Event
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The event document in Agiliron's wrapper format, with the record inside
+          the resource's container object.
+    output:
+      description: Agiliron's MCM response with the new record's id.
+      type: object
+
+  update_event:
+    title: Update an event
+    description: >-
+      Update an event, identified by its unique key in the document. Every writable field
+      must be sent; omitted ones are set to NULL.
+    category: activities
+    request:
+      method: PUT
+      path: /Event
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The event document in Agiliron's wrapper format, with the record inside
+          the resource's container object.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  delete_event:
+    title: Delete an event
+    description: >-
+      Permanently delete an event from Agiliron, identified by its id or subject.
+    category: activities
+    destructive: true
+    request:
+      method: DELETE
+      path: /Event/${event_params}
+      headers:
+        Accept: application/json
+    input:
+      event_params:
+        type: string
+        description: The event's id or subject.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  list_tasks:
+    title: List tasks
+    description: >-
+      Read tasks -- to-dos with due dates and assignees -- matching a filter or custom view,
+      a page at a time.
+    category: activities
+    read_only: true
+    request:
+      method: GET
+      path: /Task
+      query:
+        filter: ${filter}
+        customview: ${customview}
+        page: ${page}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+        optional: true
+      customview:
+        type: string
+        description: Name of a saved custom view to read instead of filtering.
+        optional: true
+      page:
+        type: integer
+        description: Page of results to return.
+        optional: true
+    output:
+      description: Tasks with TotalRecords and CurrentPage.
+      type: object
+
+  create_task:
+    title: Create a task
+    description: >-
+      Add a task to Agiliron from a wrapper document.
+    category: activities
+    request:
+      method: POST
+      path: /Task
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The task document in Agiliron's wrapper format, with the record inside
+          the resource's container object.
+    output:
+      description: Agiliron's MCM response with the new record's id.
+      type: object
+
+  update_task:
+    title: Update a task
+    description: >-
+      Update a task, identified by its unique key in the document. Every writable field must
+      be sent; omitted ones are set to NULL.
+    category: activities
+    request:
+      method: PUT
+      path: /Task
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The task document in Agiliron's wrapper format, with the record inside
+          the resource's container object.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  delete_task:
+    title: Delete a task
+    description: >-
+      Permanently delete a task from Agiliron, identified by its id or subject.
+    category: activities
+    destructive: true
+    request:
+      method: DELETE
+      path: /Task/${task_params}
+      headers:
+        Accept: application/json
+    input:
+      task_params:
+        type: string
+        description: The task's id or subject.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  list_tickets:
+    title: List tickets
+    description: >-
+      Read tickets -- support tickets -- matching a filter or custom view, a page at a time.
+    category: support
+    read_only: true
+    request:
+      method: GET
+      path: /Ticket
+      query:
+        filter: ${filter}
+        customview: ${customview}
+        page: ${page}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+        optional: true
+      customview:
+        type: string
+        description: Name of a saved custom view to read instead of filtering.
+        optional: true
+      page:
+        type: integer
+        description: Page of results to return.
+        optional: true
+    output:
+      description: Tickets with TotalRecords and CurrentPage.
+      type: object
+
+  create_ticket:
+    title: Create a ticket
+    description: >-
+      Add a ticket to Agiliron from a wrapper document.
+    category: support
+    request:
+      method: POST
+      path: /Ticket
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: 'The ticket document in Agiliron''s wrapper format, e.g. {"Tickets":
+          {"Ticket": {...}}}.'
+    output:
+      description: Agiliron's MCM response with the new record's id.
+      type: object
+
+  update_ticket:
+    title: Update a ticket
+    description: >-
+      Update a ticket, identified by its unique key in the document. Every writable field
+      must be sent; omitted ones are set to NULL.
+    category: support
+    request:
+      method: PUT
+      path: /Ticket
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: 'The ticket document in Agiliron''s wrapper format, e.g. {"Tickets":
+          {"Ticket": {...}}}.'
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  delete_ticket:
+    title: Delete a ticket
+    description: >-
+      Permanently delete a ticket from Agiliron, identified by its id or title.
+    category: support
+    destructive: true
+    request:
+      method: DELETE
+      path: /Ticket/${ticket_params}
+      headers:
+        Accept: application/json
+    input:
+      ticket_params:
+        type: string
+        description: The ticket's id or title.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  list_notes:
+    title: List notes
+    description: >-
+      Read notes -- notes attached to records -- matching a filter or custom view, a page
+      at a time.
+    category: activities
+    read_only: true
+    request:
+      method: GET
+      path: /Notes
+      query:
+        filter: ${filter}
+        page: ${page}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+        optional: true
+      page:
+        type: integer
+        description: Page of results to return.
+        optional: true
+    output:
+      description: Notes with TotalRecords and CurrentPage.
+      type: object
+
+  create_note:
+    title: Create a note
+    description: >-
+      Add a note to Agiliron from a wrapper document.
+    category: activities
+    request:
+      method: POST
+      path: /Notes
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: 'The note document in Agiliron''s wrapper format, e.g. {"Notes": {"Note":
+          {...}}}.'
+    output:
+      description: Agiliron's MCM response with the new record's id.
+      type: object
+
+  update_note:
+    title: Update a note
+    description: >-
+      Update a note, identified by its unique key in the document. Every writable field must
+      be sent; omitted ones are set to NULL.
+    category: activities
+    request:
+      method: PUT
+      path: /Notes
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: 'The note document in Agiliron''s wrapper format, e.g. {"Notes": {"Note":
+          {...}}}.'
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  delete_notes:
+    title: Delete notes
+    description: >-
+      Delete every note matching a filter, e.g. NotesId,eq,3422. Be precise: all matches are
+      removed.
+    category: activities
+    destructive: true
+    request:
+      method: DELETE
+      path: /Notes
+      query:
+        filter: ${filter}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  list_attachments:
+    title: List attachments
+    description: >-
+      Read attachments -- files attached to records -- matching a filter or custom view, a
+      page at a time.
+    category: activities
+    read_only: true
+    request:
+      method: GET
+      path: /Attachment
+      query:
+        filter: ${filter}
+        page: ${page}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+        optional: true
+      page:
+        type: integer
+        description: Page of results to return.
+        optional: true
+    output:
+      description: Attachments with TotalRecords and CurrentPage.
+      type: object
+
+  create_attachment:
+    title: Create an attachment
+    description: >-
+      Add an attachment to Agiliron from a wrapper document.
+    category: activities
+    request:
+      method: POST
+      path: /Attachment
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: 'The attachment document in Agiliron''s wrapper format, e.g. {"Attachments":
+          {"Attachment": {...}}}.'
+    output:
+      description: Agiliron's MCM response with the new record's id.
+      type: object
+
+  update_attachment:
+    title: Update an attachment
+    description: >-
+      Update an attachment, identified by its unique key in the document. Every writable field
+      must be sent; omitted ones are set to NULL.
+    category: activities
+    request:
+      method: PUT
+      path: /Attachment
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: 'The attachment document in Agiliron''s wrapper format, e.g. {"Attachments":
+          {"Attachment": {...}}}.'
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  delete_attachment:
+    title: Delete an attachment
+    description: >-
+      Permanently delete an attachment from Agiliron, identified by its id or name.
+    category: activities
+    destructive: true
+    request:
+      method: DELETE
+      path: /Attachment/${attachment_params}
+      headers:
+        Accept: application/json
+    input:
+      attachment_params:
+        type: string
+        description: The attachment's id or name.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  list_vendors:
+    title: List vendors
+    description: >-
+      Read vendors -- suppliers with contact details and terms -- matching a filter or custom
+      view, a page at a time.
+    category: purchasing
+    read_only: true
+    request:
+      method: GET
+      path: /Vendor
+      query:
+        filter: ${filter}
+        customview: ${customview}
+        page: ${page}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+        optional: true
+      customview:
+        type: string
+        description: Name of a saved custom view to read instead of filtering.
+        optional: true
+      page:
+        type: integer
+        description: Page of results to return.
+        optional: true
+    output:
+      description: Vendors with TotalRecords and CurrentPage.
+      type: object
+
+  create_vendor:
+    title: Create a vendor
+    description: >-
+      Add a vendor to Agiliron from a wrapper document.
+    category: purchasing
+    request:
+      method: POST
+      path: /Vendor
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The vendor document in Agiliron's wrapper format, with the record inside
+          the resource's container object.
+    output:
+      description: Agiliron's MCM response with the new record's id.
+      type: object
+
+  update_vendor:
+    title: Update a vendor
+    description: >-
+      Update a vendor, identified by its unique key in the document. Every writable field
+      must be sent; omitted ones are set to NULL.
+    category: purchasing
+    request:
+      method: PUT
+      path: /Vendor
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The vendor document in Agiliron's wrapper format, with the record inside
+          the resource's container object.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  delete_vendor:
+    title: Delete a vendor
+    description: >-
+      Permanently delete a vendor from Agiliron, identified by its id, name or email address.
+    category: purchasing
+    destructive: true
+    request:
+      method: DELETE
+      path: /Vendor/${vendor_params}
+      headers:
+        Accept: application/json
+    input:
+      vendor_params:
+        type: string
+        description: The vendor's id, name or email address.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  list_products:
+    title: List products
+    description: >-
+      Read products -- items with codes, pricing, stock and variants -- matching a filter
+      or custom view, a page at a time.
+    category: products
+    read_only: true
+    request:
+      method: GET
+      path: /Products
+      query:
+        filter: ${filter}
+        customview: ${customview}
+        page: ${page}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+        optional: true
+      customview:
+        type: string
+        description: Name of a saved custom view to read instead of filtering.
+        optional: true
+      page:
+        type: integer
+        description: Page of results to return.
+        optional: true
+    output:
+      description: Products with TotalRecords and CurrentPage.
+      type: object
+
+  create_product:
+    title: Create a product
+    description: >-
+      Add a product to Agiliron from a wrapper document.
+    category: products
+    request:
+      method: POST
+      path: /Products
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The product document in Agiliron's wrapper format, with the record inside
+          the resource's container object.
+    output:
+      description: Agiliron's MCM response with the new record's id.
+      type: object
+
+  update_product:
+    title: Update a product
+    description: >-
+      Update a product, identified by its unique key in the document. Every writable field
+      must be sent; omitted ones are set to NULL.
+    category: products
+    request:
+      method: PUT
+      path: /Products
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The product document in Agiliron's wrapper format, with the record inside
+          the resource's container object.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  delete_product:
+    title: Delete a product
+    description: >-
+      Permanently delete a product from Agiliron, identified by its product code.
+    category: products
+    destructive: true
+    request:
+      method: DELETE
+      path: /Products/${product_code}
+      headers:
+        Accept: application/json
+    input:
+      product_code:
+        type: string
+        description: The product's product code.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  list_product_categories:
+    title: List product categories
+    description: >-
+      Read product categories -- the product category tree -- matching a filter or custom
+      view, a page at a time.
+    category: products
+    read_only: true
+    request:
+      method: GET
+      path: /ProductsCategory
+      query:
+        filter: ${filter}
+        page: ${page}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+        optional: true
+      page:
+        type: integer
+        description: Page of results to return.
+        optional: true
+    output:
+      description: Product Categories with TotalRecords and CurrentPage.
+      type: object
+
+  create_product_category:
+    title: Create a product category
+    description: >-
+      Add a product category to Agiliron from a wrapper document.
+    category: products
+    request:
+      method: POST
+      path: /ProductsCategory
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The product category document in Agiliron's wrapper format, with the
+          record inside the resource's container object.
+    output:
+      description: Agiliron's MCM response with the new record's id.
+      type: object
+
+  update_product_category:
+    title: Update a product category
+    description: >-
+      Update a product category, identified by its unique key in the document. Every writable
+      field must be sent; omitted ones are set to NULL.
+    category: products
+    request:
+      method: PUT
+      path: /ProductsCategory
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The product category document in Agiliron's wrapper format, with the
+          record inside the resource's container object.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  delete_product_categories:
+    title: Delete product categories
+    description: >-
+      Delete the product categories named in a wrapper document.
+    category: products
+    destructive: true
+    request:
+      method: DELETE
+      path: /ProductsCategory
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The product categories to delete document in Agiliron's wrapper format,
+          with the record inside the resource's container object.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  get_product_inventory:
+    title: Get a product's inventory
+    description: >-
+      Read a product's stock by location, optionally filtered.
+    category: inventory
+    read_only: true
+    request:
+      method: GET
+      path: /ProductsInventory/${product_code}
+      query:
+        filter: ${filter}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+        optional: true
+      product_code:
+        type: string
+        description: Product code.
+    output:
+      description: Inventory by location.
+      type: object
+
+  add_product_inventory:
+    title: Add product inventory
+    description: >-
+      Add on-hand stock for products at stock locations.
+    category: inventory
+    request:
+      method: POST
+      path: /ProductsInventory
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The product inventory document in Agiliron's wrapper format, with the
+          record inside the resource's container object.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  get_product_pricebooks:
+    title: Get a product's price books
+    description: >-
+      Read the price books a product is in with its price in each.
+    category: pricing
+    read_only: true
+    request:
+      method: GET
+      path: /ProductsPriceBook/${product_code}
+      query:
+        filter: ${filter}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+        optional: true
+      product_code:
+        type: string
+        description: Product code.
+    output:
+      description: The product's price book entries.
+      type: object
+
+  add_product_to_pricebook:
+    title: Add a product to a price book
+    description: >-
+      Put products into price books with their prices.
+    category: pricing
+    request:
+      method: POST
+      path: /ProductsPriceBook
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The product price book document in Agiliron's wrapper format, with the
+          record inside the resource's container object.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  get_product_vendor_pricebook:
+    title: Get a product's vendor prices
+    description: >-
+      Read what each vendor charges for a product.
+    category: purchasing
+    read_only: true
+    request:
+      method: GET
+      path: /ProductsVendorPricebook/${product_code}
+      query:
+        filter: ${filter}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+        optional: true
+      product_code:
+        type: string
+        description: Product code.
+    output:
+      description: Vendor price book entries.
+      type: object
+
+  add_product_vendor_pricebook:
+    title: Add vendor prices for a product
+    description: >-
+      Record what vendors charge for products, for purchasing.
+    category: purchasing
+    request:
+      method: POST
+      path: /ProductsVendorPricebook
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The product vendor price book document in Agiliron's wrapper format,
+          with the record inside the resource's container object.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  list_product_bin_locations:
+    title: List product bin locations
+    description: >-
+      Read product bin locations -- product stock by warehouse bin -- matching a filter or
+      custom view, a page at a time.
+    category: inventory
+    read_only: true
+    request:
+      method: GET
+      path: /ProductsBinLocations
+      query:
+        filter: ${filter}
+        page: ${page}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+        optional: true
+      page:
+        type: integer
+        description: Page of results to return.
+        optional: true
+    output:
+      description: Product Bin Locations with TotalRecords and CurrentPage.
+      type: object
+
+  create_product_bin_location:
+    title: Create a product bin location
+    description: >-
+      Add a product bin location to Agiliron from a wrapper document.
+    category: inventory
+    request:
+      method: POST
+      path: /ProductsBinLocations
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: 'The product bin location document in Agiliron''s wrapper format, e.g.
+          {"ProductsBinLocations": {"ProductsBinLocation": {...}}}.'
+    output:
+      description: Agiliron's MCM response with the new record's id.
+      type: object
+
+  update_product_bin_location:
+    title: Update a product bin location
+    description: >-
+      Update a product bin location, identified by its unique key in the document. Every writable
+      field must be sent; omitted ones are set to NULL.
+    category: inventory
+    request:
+      method: PUT
+      path: /ProductsBinLocations
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: 'The product bin location document in Agiliron''s wrapper format, e.g.
+          {"ProductsBinLocations": {"ProductsBinLocation": {...}}}.'
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  delete_product_bin_locations:
+    title: Delete product bin locations
+    description: >-
+      Delete every product bin location matching a filter, e.g. ProductCode,eq,TNP;StockLocation,eq,OAK.
+      Be precise: all matches are removed.
+    category: inventory
+    destructive: true
+    request:
+      method: DELETE
+      path: /ProductsBinLocations
+      query:
+        filter: ${filter}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  list_price_books:
+    title: List price books
+    description: >-
+      Read price books -- named price lists -- matching a filter or custom view, a page at
+      a time.
+    category: pricing
+    read_only: true
+    request:
+      method: GET
+      path: /PriceBook
+      query:
+        filter: ${filter}
+        customview: ${customview}
+        page: ${page}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+        optional: true
+      customview:
+        type: string
+        description: Name of a saved custom view to read instead of filtering.
+        optional: true
+      page:
+        type: integer
+        description: Page of results to return.
+        optional: true
+    output:
+      description: Price Books with TotalRecords and CurrentPage.
+      type: object
+
+  create_price_book:
+    title: Create a price book
+    description: >-
+      Add a price book to Agiliron from a wrapper document.
+    category: pricing
+    request:
+      method: POST
+      path: /PriceBook
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: 'The price book document in Agiliron''s wrapper format, e.g. {"PriceBooks":
+          {"PriceBook": {...}}}.'
+    output:
+      description: Agiliron's MCM response with the new record's id.
+      type: object
+
+  update_price_book:
+    title: Update a price book
+    description: >-
+      Update a price book, identified by its unique key in the document. Every writable field
+      must be sent; omitted ones are set to NULL.
+    category: pricing
+    request:
+      method: PUT
+      path: /PriceBook
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: 'The price book document in Agiliron''s wrapper format, e.g. {"PriceBooks":
+          {"PriceBook": {...}}}.'
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  delete_price_books:
+    title: Delete price books
+    description: >-
+      Delete every price book matching a filter, e.g. PriceBookName,eq,Wholesale. Be precise:
+      all matches are removed.
+    category: pricing
+    destructive: true
+    request:
+      method: DELETE
+      path: /PriceBook
+      query:
+        filter: ${filter}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  get_inventory_adjustments:
+    title: Get inventory adjustments
+    description: >-
+      Read the stock adjustments made to a product.
+    category: inventory
+    read_only: true
+    request:
+      method: GET
+      path: /InventoryAdjustment/${product_code}
+      query:
+        filter: ${filter}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+        optional: true
+      product_code:
+        type: string
+        description: Product code.
+    output:
+      description: Inventory adjustments.
+      type: object
+
+  adjust_inventory:
+    title: Adjust inventory
+    description: >-
+      Record a stock adjustment -- counts, write-offs or corrections -- which changes on-hand
+      quantities.
+    category: inventory
+    destructive: true
+    request:
+      method: POST
+      path: /InventoryAdjustment
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The inventory adjustment document in Agiliron's wrapper format, with
+          the record inside the resource's container object.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  list_inventory_transfers:
+    title: List inventory transfers
+    description: >-
+      Read inventory transfers -- stock moves between locations -- matching a filter or custom
+      view, a page at a time.
+    category: inventory
+    read_only: true
+    request:
+      method: GET
+      path: /InventoryTransfer
+      query:
+        filter: ${filter}
+        page: ${page}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+        optional: true
+      page:
+        type: integer
+        description: Page of results to return.
+        optional: true
+    output:
+      description: Inventory Transfers with TotalRecords and CurrentPage.
+      type: object
+
+  create_inventory_transfer:
+    title: Create an inventory transfer
+    description: >-
+      Add an inventory transfer to Agiliron from a wrapper document.
+    category: inventory
+    request:
+      method: POST
+      path: /InventoryTransfer
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The inventory transfer document in Agiliron's wrapper format, with the
+          record inside the resource's container object.
+    output:
+      description: Agiliron's MCM response with the new record's id.
+      type: object
+
+  update_inventory_transfer:
+    title: Update an inventory transfer
+    description: >-
+      Update an inventory transfer, identified by its unique key in the document. Every writable
+      field must be sent; omitted ones are set to NULL.
+    category: inventory
+    request:
+      method: PUT
+      path: /InventoryTransfer
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The inventory transfer document in Agiliron's wrapper format, with the
+          record inside the resource's container object.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  delete_inventory_transfer:
+    title: Delete an inventory transfer
+    description: >-
+      Permanently delete an inventory transfer from Agiliron, identified by its order number
+      or order id.
+    category: inventory
+    destructive: true
+    request:
+      method: DELETE
+      path: /InventoryTransfer/${order_params}
+      headers:
+        Accept: application/json
+    input:
+      order_params:
+        type: string
+        description: The inventory transfer's order number or order id.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  transfer_between_bins:
+    title: Transfer stock between bins
+    description: >-
+      Move stock from one bin to another within a location.
+    category: inventory
+    destructive: true
+    request:
+      method: POST
+      path: /BinTransfer
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: 'The bin transfer document in Agiliron''s wrapper format, e.g. {"BinTransfers":
+          {"BinTransfer": {...}}}.'
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  list_channels:
+    title: List sales channels
+    description: >-
+      List the sales channels (marketplaces and web stores) connected to Agiliron.
+    category: channels
+    read_only: true
+    request:
+      method: GET
+      path: /Channels
+      headers:
+        Accept: application/json
+    input: {}
+    output:
+      description: The channels.
+      type: object
+
+  get_product_channels:
+    title: Get a product's channels
+    description: >-
+      Read which channels a product is listed on and its listing details.
+    category: channels
+    read_only: true
+    request:
+      method: GET
+      path: /Channels/${product_code}
+      headers:
+        Accept: application/json
+    input:
+      product_code:
+        type: string
+        description: Product code.
+    output:
+      description: The product's channel listings.
+      type: object
+
+  add_product_to_channel:
+    title: List a product on a channel
+    description: >-
+      Add a product listing to a sales channel.
+    category: channels
+    request:
+      method: POST
+      path: /Channels/${channel_name}
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      channel_name:
+        type: string
+        description: Channel name.
+      data:
+        type: object
+        description: The channel product document in Agiliron's wrapper format, with the record
+          inside the resource's container object.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  update_channel_product:
+    title: Update a channel listing
+    description: >-
+      Change a product's listing on a sales channel.
+    category: channels
+    request:
+      method: PUT
+      path: /Channels/${channel_name}
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      channel_name:
+        type: string
+        description: Channel name.
+      data:
+        type: object
+        description: The channel product document in Agiliron's wrapper format, with the record
+          inside the resource's container object.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  delete_channel_product:
+    title: Remove a product from a channel
+    description: >-
+      Delist a product from a sales channel; the product itself stays.
+    category: channels
+    destructive: true
+    request:
+      method: DELETE
+      path: /Channels/${channel_name}/${product_code}
+      headers:
+        Accept: application/json
+    input:
+      channel_name:
+        type: string
+        description: Channel name.
+      product_code:
+        type: string
+        description: Product code.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  sync_channel:
+    title: Sync pricing or inventory to channels
+    description: >-
+      Push product pricing or inventory from Agiliron to the connected channels now.
+    category: channels
+    request:
+      method: POST
+      path: /ChannelsSync/${sync_type}
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      sync_type:
+        type: string
+        description: ProductPricing or ProductInventory.
+      data:
+        type: object
+        description: The channel sync document in Agiliron's wrapper format, with the record
+          inside the resource's container object.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  list_quotes:
+    title: List quotes
+    description: >-
+      Read quotes -- sales quotes with line items -- matching a filter or custom view, a page
+      at a time.
+    category: sales
+    read_only: true
+    request:
+      method: GET
+      path: /Quote
+      query:
+        filter: ${filter}
+        customview: ${customview}
+        page: ${page}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+        optional: true
+      customview:
+        type: string
+        description: Name of a saved custom view to read instead of filtering.
+        optional: true
+      page:
+        type: integer
+        description: Page of results to return.
+        optional: true
+    output:
+      description: Quotes with TotalRecords and CurrentPage.
+      type: object
+
+  create_quote:
+    title: Create a quote
+    description: >-
+      Add a quote to Agiliron from a wrapper document.
+    category: sales
+    request:
+      method: POST
+      path: /Quote
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The quote document in Agiliron's wrapper format, with the record inside
+          the resource's container object.
+    output:
+      description: Agiliron's MCM response with the new record's id.
+      type: object
+
+  update_quote:
+    title: Update a quote
+    description: >-
+      Update a quote, identified by its unique key in the document. Every writable field must
+      be sent; omitted ones are set to NULL.
+    category: sales
+    request:
+      method: PUT
+      path: /Quote
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The quote document in Agiliron's wrapper format, with the record inside
+          the resource's container object.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  delete_quotes:
+    title: Delete quotes
+    description: >-
+      Delete every quote matching a filter, e.g. QuoteId,eq,3422. Be precise: all matches
+      are removed.
+    category: sales
+    destructive: true
+    request:
+      method: DELETE
+      path: /Quote
+      query:
+        filter: ${filter}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  list_sales_orders:
+    title: List sales orders
+    description: >-
+      Read sales orders -- orders with status, line items and delivery location -- matching
+      a filter or custom view, a page at a time.
+    category: sales
+    read_only: true
+    request:
+      method: GET
+      path: /SalesOrder
+      query:
+        filter: ${filter}
+        customview: ${customview}
+        page: ${page}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+        optional: true
+      customview:
+        type: string
+        description: Name of a saved custom view to read instead of filtering.
+        optional: true
+      page:
+        type: integer
+        description: Page of results to return.
+        optional: true
+    output:
+      description: Sales Orders with TotalRecords and CurrentPage.
+      type: object
+
+  create_sales_order:
+    title: Create a sales order
+    description: >-
+      Add a sales order to Agiliron from a wrapper document.
+    category: sales
+    request:
+      method: POST
+      path: /SalesOrder
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The sales order document in Agiliron's wrapper format, with the record
+          inside the resource's container object.
+    output:
+      description: Agiliron's MCM response with the new record's id.
+      type: object
+
+  update_sales_order:
+    title: Update a sales order
+    description: >-
+      Update a sales order, identified by its unique key in the document. Every writable field
+      must be sent; omitted ones are set to NULL.
+    category: sales
+    request:
+      method: PUT
+      path: /SalesOrder
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The sales order document in Agiliron's wrapper format, with the record
+          inside the resource's container object.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  delete_sales_orders:
+    title: Delete sales orders
+    description: >-
+      Delete every sales order matching a filter, e.g. OrderNo,eq,1596. Be precise: all matches
+      are removed.
+    category: sales
+    destructive: true
+    request:
+      method: DELETE
+      path: /SalesOrder
+      query:
+        filter: ${filter}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  list_shipments:
+    title: List shipments
+    description: >-
+      Read shipments of sales orders matching a filter or custom view.
+    category: sales
+    read_only: true
+    request:
+      method: GET
+      path: /Shipping
+      query:
+        filter: ${filter}
+        customview: ${customview}
+        page: ${page}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+        optional: true
+      customview:
+        type: string
+        description: Name of a saved custom view.
+        optional: true
+      page:
+        type: integer
+        description: Page of results to return.
+        optional: true
+    output:
+      description: Shipments.
+      type: object
+
+  ship_sales_order:
+    title: Ship a sales order
+    description: >-
+      Ship all or part of a sales order: date, carrier, method, tracking, cost and per-line
+      quantities (serialized and lot products need OrderDetails). Can also send the order
+      to ShipStation.
+    category: sales
+    destructive: true
+    request:
+      method: PUT
+      path: /Shipping
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: 'The shipping document in Agiliron''s wrapper format, e.g. {"Shipping":
+          {"ShippingDate": "MM-DD-YYYY", "OrderNo": "...", "ShippingCarrier": "...", "TrackingNumber":
+          "...", "OrderDetails": {"OD": [{"ProductCode": "...", "ProductsQuantityShipped":
+          "3", "OrderLineNo": "0"}]}}}.'
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  list_shipment_transactions:
+    title: List shipment transactions
+    description: >-
+      Read the stock movements recorded by shipments.
+    category: sales
+    read_only: true
+    request:
+      method: GET
+      path: /ShipmentTransaction
+      query:
+        filter: ${filter}
+        page: ${page}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+        optional: true
+      page:
+        type: integer
+        description: Page of results to return.
+        optional: true
+    output:
+      description: Shipment transactions.
+      type: object
+
+  list_sales_returns:
+    title: List sales returns
+    description: >-
+      Read sales returns -- customer returns (RMAs) -- matching a filter or custom view, a
+      page at a time.
+    category: sales
+    read_only: true
+    request:
+      method: GET
+      path: /SalesReturn
+      query:
+        filter: ${filter}
+        customview: ${customview}
+        page: ${page}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+        optional: true
+      customview:
+        type: string
+        description: Name of a saved custom view to read instead of filtering.
+        optional: true
+      page:
+        type: integer
+        description: Page of results to return.
+        optional: true
+    output:
+      description: Sales Returns with TotalRecords and CurrentPage.
+      type: object
+
+  create_sales_return:
+    title: Create a sales return
+    description: >-
+      Add a sales return to Agiliron from a wrapper document.
+    category: sales
+    request:
+      method: POST
+      path: /SalesReturn
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: 'The sales return document in Agiliron''s wrapper format, e.g. {"SalesReturns":
+          {"Order": {...}}}.'
+    output:
+      description: Agiliron's MCM response with the new record's id.
+      type: object
+
+  update_sales_return:
+    title: Update a sales return
+    description: >-
+      Update a sales return, identified by its unique key in the document. Every writable
+      field must be sent; omitted ones are set to NULL.
+    category: sales
+    request:
+      method: PUT
+      path: /SalesReturn
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: 'The sales return document in Agiliron''s wrapper format, e.g. {"SalesReturns":
+          {"Order": {...}}}.'
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  delete_sales_returns:
+    title: Delete sales returns
+    description: >-
+      Delete every sales return matching a filter, e.g. OrderNo,eq,1596. Be precise: all matches
+      are removed.
+    category: sales
+    destructive: true
+    request:
+      method: DELETE
+      path: /SalesReturn
+      query:
+        filter: ${filter}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  list_purchase_orders:
+    title: List purchase orders
+    description: >-
+      Read purchase orders -- orders placed with vendors -- matching a filter or custom view,
+      a page at a time.
+    category: purchasing
+    read_only: true
+    request:
+      method: GET
+      path: /PurchaseOrder
+      query:
+        filter: ${filter}
+        customview: ${customview}
+        page: ${page}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+        optional: true
+      customview:
+        type: string
+        description: Name of a saved custom view to read instead of filtering.
+        optional: true
+      page:
+        type: integer
+        description: Page of results to return.
+        optional: true
+    output:
+      description: Purchase Orders with TotalRecords and CurrentPage.
+      type: object
+
+  create_purchase_order:
+    title: Create a purchase order
+    description: >-
+      Add a purchase order to Agiliron from a wrapper document.
+    category: purchasing
+    request:
+      method: POST
+      path: /PurchaseOrder
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The purchase order document in Agiliron's wrapper format, with the record
+          inside the resource's container object.
+    output:
+      description: Agiliron's MCM response with the new record's id.
+      type: object
+
+  update_purchase_order:
+    title: Update a purchase order
+    description: >-
+      Update a purchase order, identified by its unique key in the document. Every writable
+      field must be sent; omitted ones are set to NULL.
+    category: purchasing
+    request:
+      method: PUT
+      path: /PurchaseOrder
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The purchase order document in Agiliron's wrapper format, with the record
+          inside the resource's container object.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  delete_purchase_orders:
+    title: Delete purchase orders
+    description: >-
+      Delete every purchase order matching a filter, e.g. OrderNo,eq,1596. Be precise: all
+      matches are removed.
+    category: purchasing
+    destructive: true
+    request:
+      method: DELETE
+      path: /PurchaseOrder
+      query:
+        filter: ${filter}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  list_purchase_returns:
+    title: List purchase returns
+    description: >-
+      Read purchase returns -- goods returned to vendors -- matching a filter or custom view,
+      a page at a time.
+    category: purchasing
+    read_only: true
+    request:
+      method: GET
+      path: /PurchaseReturn
+      query:
+        filter: ${filter}
+        customview: ${customview}
+        page: ${page}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+        optional: true
+      customview:
+        type: string
+        description: Name of a saved custom view to read instead of filtering.
+        optional: true
+      page:
+        type: integer
+        description: Page of results to return.
+        optional: true
+    output:
+      description: Purchase Returns with TotalRecords and CurrentPage.
+      type: object
+
+  create_purchase_return:
+    title: Create a purchase return
+    description: >-
+      Add a purchase return to Agiliron from a wrapper document.
+    category: purchasing
+    request:
+      method: POST
+      path: /PurchaseReturn
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The purchase return document in Agiliron's wrapper format, with the record
+          inside the resource's container object.
+    output:
+      description: Agiliron's MCM response with the new record's id.
+      type: object
+
+  update_purchase_return:
+    title: Update a purchase return
+    description: >-
+      Update a purchase return, identified by its unique key in the document. Every writable
+      field must be sent; omitted ones are set to NULL.
+    category: purchasing
+    request:
+      method: PUT
+      path: /PurchaseReturn
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The purchase return document in Agiliron's wrapper format, with the record
+          inside the resource's container object.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  delete_purchase_returns:
+    title: Delete purchase returns
+    description: >-
+      Delete every purchase return matching a filter, e.g. OrderNo,eq,1596. Be precise: all
+      matches are removed.
+    category: purchasing
+    destructive: true
+    request:
+      method: DELETE
+      path: /PurchaseReturn
+      query:
+        filter: ${filter}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  receive_order:
+    title: Receive a purchase order or return
+    description: >-
+      Receive stock against a purchase order or sales return: date, order number and per-line
+      quantities. Changes on-hand inventory.
+    category: purchasing
+    destructive: true
+    request:
+      method: PUT
+      path: /Receiving
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: 'The receiving document in Agiliron''s wrapper format, e.g. {"Receiving":
+          {"ReceivedDate": "MM-DD-YYYY", "OrderNo": "...", ...}}.'
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  list_received_transactions:
+    title: List received transactions
+    description: >-
+      Read the stock movements recorded by receiving.
+    category: purchasing
+    read_only: true
+    request:
+      method: GET
+      path: /ReceivedTransaction
+      query:
+        filter: ${filter}
+        page: ${page}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+        optional: true
+      page:
+        type: integer
+        description: Page of results to return.
+        optional: true
+    output:
+      description: Received transactions.
+      type: object
+
+  list_work_orders:
+    title: List work orders
+    description: >-
+      Read work orders -- assembly and production jobs -- matching a filter or custom view,
+      a page at a time.
+    category: production
+    read_only: true
+    request:
+      method: GET
+      path: /WorkOrders
+      query:
+        filter: ${filter}
+        customview: ${customview}
+        page: ${page}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+        optional: true
+      customview:
+        type: string
+        description: Name of a saved custom view to read instead of filtering.
+        optional: true
+      page:
+        type: integer
+        description: Page of results to return.
+        optional: true
+    output:
+      description: Work Orders with TotalRecords and CurrentPage.
+      type: object
+
+  create_work_order:
+    title: Create a work order
+    description: >-
+      Add a work order to Agiliron from a wrapper document.
+    category: production
+    request:
+      method: POST
+      path: /WorkOrders
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: 'The work order document in Agiliron''s wrapper format, e.g. {"WorkOrders":
+          {"WorkOrder": {...}}}.'
+    output:
+      description: Agiliron's MCM response with the new record's id.
+      type: object
+
+  update_work_order:
+    title: Update a work order
+    description: >-
+      Update a work order, identified by its unique key in the document. Every writable field
+      must be sent; omitted ones are set to NULL.
+    category: production
+    request:
+      method: PUT
+      path: /WorkOrders
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: 'The work order document in Agiliron''s wrapper format, e.g. {"WorkOrders":
+          {"WorkOrder": {...}}}.'
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  delete_work_orders:
+    title: Delete work orders
+    description: >-
+      Delete every work order matching a filter, e.g. WorkOrderId,eq,3422. Be precise: all
+      matches are removed.
+    category: production
+    destructive: true
+    request:
+      method: DELETE
+      path: /WorkOrders
+      query:
+        filter: ${filter}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  bulk_create_leads:
+    title: Bulk-create leads
+    description: >-
+      Create many leads in one queued batch. Poll get_batch_status with the returned batch
+      id.
+    category: bulk
+    destructive: true
+    request:
+      method: POST
+      path: /Bulk-Leads
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The leads document in Agiliron's wrapper format, with the record inside
+          the resource's container object.
+    output:
+      description: The batch id and queue status.
+      type: object
+
+  bulk_update_leads:
+    title: Bulk-update leads
+    description: >-
+      Update many leads in one queued batch; each record needs every writable field. Poll
+      get_batch_status with the returned batch id.
+    category: bulk
+    request:
+      method: PUT
+      path: /Bulk-Leads
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The leads document in Agiliron's wrapper format, with the record inside
+          the resource's container object.
+    output:
+      description: The batch id and queue status.
+      type: object
+
+  bulk_delete_leads:
+    title: Bulk-delete leads
+    description: >-
+      Delete many leads in one queued batch. Poll get_batch_status with the returned batch
+      id.
+    category: bulk
+    destructive: true
+    request:
+      method: DELETE
+      path: /Bulk-Leads
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The leads to delete document in Agiliron's wrapper format, with the record
+          inside the resource's container object.
+    output:
+      description: The batch id and queue status.
+      type: object
+
+  bulk_create_accounts:
+    title: Bulk-create accounts
+    description: >-
+      Create many accounts in one queued batch. Poll get_batch_status with the returned batch
+      id.
+    category: bulk
+    destructive: true
+    request:
+      method: POST
+      path: /Bulk-Accounts
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The accounts document in Agiliron's wrapper format, with the record inside
+          the resource's container object.
+    output:
+      description: The batch id and queue status.
+      type: object
+
+  bulk_update_account_credits:
+    title: Bulk-update account credits
+    description: >-
+      Update the credit of many accounts in one queued batch. Poll get_batch_status with the
+      returned batch id.
+    category: bulk
+    request:
+      method: PUT
+      path: /Bulk-Account-Credits
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The account credits document in Agiliron's wrapper format, with the record
+          inside the resource's container object.
+    output:
+      description: The batch id and queue status.
+      type: object
+
+  bulk_create_contacts:
+    title: Bulk-create contacts
+    description: >-
+      Create many contacts in one queued batch. Poll get_batch_status with the returned batch
+      id.
+    category: bulk
+    destructive: true
+    request:
+      method: POST
+      path: /Bulk-Contacts
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The contacts document in Agiliron's wrapper format, with the record inside
+          the resource's container object.
+    output:
+      description: The batch id and queue status.
+      type: object
+
+  bulk_create_products:
+    title: Bulk-create products
+    description: >-
+      Create many products in one queued batch. Poll get_batch_status with the returned batch
+      id.
+    category: bulk
+    destructive: true
+    request:
+      method: POST
+      path: /Bulk-Products
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The products document in Agiliron's wrapper format, with the record inside
+          the resource's container object.
+    output:
+      description: The batch id and queue status.
+      type: object
+
+  bulk_update_products:
+    title: Bulk-update products
+    description: >-
+      Update many products in one queued batch. Poll get_batch_status with the returned batch
+      id.
+    category: bulk
+    request:
+      method: PUT
+      path: /Bulk-Products
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The products document in Agiliron's wrapper format, with the record inside
+          the resource's container object.
+    output:
+      description: The batch id and queue status.
+      type: object
+
+  bulk_delete_products:
+    title: Bulk-delete products
+    description: >-
+      Delete many products in one queued batch. Poll get_batch_status with the returned batch
+      id.
+    category: bulk
+    destructive: true
+    request:
+      method: DELETE
+      path: /Bulk-Products
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The products to delete document in Agiliron's wrapper format, with the
+          record inside the resource's container object.
+    output:
+      description: The batch id and queue status.
+      type: object
+
+  bulk_add_product_inventory:
+    title: Bulk-add product inventory
+    description: >-
+      Add stock for many products in one queued batch. Poll get_batch_status with the returned
+      batch id.
+    category: bulk
+    destructive: true
+    request:
+      method: POST
+      path: /Bulk-ProductsInventory
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The product inventory document in Agiliron's wrapper format, with the
+          record inside the resource's container object.
+    output:
+      description: The batch id and queue status.
+      type: object
+
+  bulk_add_product_pricebooks:
+    title: Bulk-add product price books
+    description: >-
+      Put many products into price books in one queued batch. Poll get_batch_status with the
+      returned batch id.
+    category: bulk
+    destructive: true
+    request:
+      method: POST
+      path: /Bulk-ProductsPriceBook
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The product price books document in Agiliron's wrapper format, with the
+          record inside the resource's container object.
+    output:
+      description: The batch id and queue status.
+      type: object
+
+  bulk_create_quotes:
+    title: Bulk-create quotes
+    description: >-
+      Create many quotes in one queued batch. Poll get_batch_status with the returned batch
+      id.
+    category: bulk
+    destructive: true
+    request:
+      method: POST
+      path: /Bulk-Quote
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: 'The quotes document in Agiliron''s wrapper format, e.g. {"Quotes": {"Quote":
+          [{...}, {...}]}}.'
+    output:
+      description: The batch id and queue status.
+      type: object
+
+  bulk_create_sales_orders:
+    title: Bulk-create sales orders
+    description: >-
+      Create many sales orders in one queued batch. Poll get_batch_status with the returned
+      batch id.
+    category: bulk
+    destructive: true
+    request:
+      method: POST
+      path: /Bulk-SalesOrder
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The sales orders document in Agiliron's wrapper format, with the record
+          inside the resource's container object.
+    output:
+      description: The batch id and queue status.
+      type: object
+
+  bulk_update_sales_orders:
+    title: Bulk-update sales orders
+    description: >-
+      Update many sales orders in one queued batch. Poll get_batch_status with the returned
+      batch id.
+    category: bulk
+    request:
+      method: PUT
+      path: /Bulk-SalesOrder
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The sales orders document in Agiliron's wrapper format, with the record
+          inside the resource's container object.
+    output:
+      description: The batch id and queue status.
+      type: object
+
+  bulk_delete_sales_orders:
+    title: Bulk-delete sales orders
+    description: >-
+      Delete many sales orders in one queued batch. Poll get_batch_status with the returned
+      batch id.
+    category: bulk
+    destructive: true
+    request:
+      method: DELETE
+      path: /Bulk-SalesOrder
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The sales orders to delete document in Agiliron's wrapper format, with
+          the record inside the resource's container object.
+    output:
+      description: The batch id and queue status.
+      type: object
+
+  bulk_add_products_to_channel:
+    title: Bulk-list products on a channel
+    description: >-
+      List many products on a sales channel in one queued batch. Poll get_batch_status with
+      the returned batch id.
+    category: bulk
+    request:
+      method: POST
+      path: /Bulk-Channels/${channel_name}
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      channel_name:
+        type: string
+        description: Channel name.
+      data:
+        type: object
+        description: The channel products document in Agiliron's wrapper format, with the
+          record inside the resource's container object.
+    output:
+      description: The batch id and queue status.
+      type: object
+
+  get_batch_status:
+    title: Get a batch's status
+    description: >-
+      Check a Bulk-* batch: whether it has run and how many records succeeded or failed.
+    category: bulk
+    read_only: true
+    request:
+      method: GET
+      path: /BatchStatus/${batch_id}
+      headers:
+        Accept: application/json
+    input:
+      batch_id:
+        type: string
+        description: Batch id from a bulk tool.
+    output:
+      description: The batch status and results.
+      type: object
+
+  list_metadata:
+    title: List metadata
+    description: >-
+      Read metadata -- custom metadata stored on records -- matching a filter or custom view,
+      a page at a time.
+    category: configuration
+    read_only: true
+    request:
+      method: GET
+      path: /MetaData
+      query:
+        filter: ${filter}
+        page: ${page}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+        optional: true
+      page:
+        type: integer
+        description: Page of results to return.
+        optional: true
+    output:
+      description: Metadata with TotalRecords and CurrentPage.
+      type: object
+
+  create_metadata_record:
+    title: Create a metadata record
+    description: >-
+      Add a metadata record to Agiliron from a wrapper document.
+    category: configuration
+    request:
+      method: POST
+      path: /MetaData
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The metadata record document in Agiliron's wrapper format, with the record
+          inside the resource's container object.
+    output:
+      description: Agiliron's MCM response with the new record's id.
+      type: object
+
+  update_metadata_record:
+    title: Update a metadata record
+    description: >-
+      Update a metadata record, identified by its unique key in the document. Every writable
+      field must be sent; omitted ones are set to NULL.
+    category: configuration
+    request:
+      method: PUT
+      path: /MetaData
+      headers:
+        Accept: application/json
+      body: ${data}
+    input:
+      data:
+        type: object
+        description: The metadata record document in Agiliron's wrapper format, with the record
+          inside the resource's container object.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  delete_metadata:
+    title: Delete metadata
+    description: >-
+      Delete the metadata records matching a filter.
+    category: configuration
+    destructive: true
+    request:
+      method: DELETE
+      path: /MetaData
+      query:
+        filter: ${filter}
+      headers:
+        Accept: application/json
+    input:
+      filter:
+        type: string
+        description: Filter as Field,op,value, joined with ; -- ops eq, neq, cs, sw, ew, lt,
+          le, ge, gt, bt (values joined with |); OR between alternatives. Dates MM-DD-YYYY.
+    output:
+      description: Agiliron's MCM response.
+      type: object
+
+  list_custom_views:
+    title: List custom views
+    description: >-
+      List the saved custom views for a module, whose names the list tools accept as customview.
+    category: configuration
+    read_only: true
+    request:
+      method: GET
+      path: /CustomView
+      query:
+        module: ${module}
+      headers:
+        Accept: application/json
+    input:
+      module:
+        type: string
+        description: Module whose views to list, e.g. Leads, SalesOrder.
+        optional: true
+    output:
+      description: Custom views.
+      type: object
+
+  get_settings:
+    title: Get settings
+    description: >-
+      Read an Agiliron setting for a module, such as the currency configuration.
+    category: configuration
+    read_only: true
+    request:
+      method: GET
+      path: /Settings
+      query:
+        settingName: ${setting_name}
+        module: ${module}
+      headers:
+        Accept: application/json
+    input:
+      setting_name:
+        type: string
+        description: Setting to read, e.g. CurrencyConfiguration.
+        optional: true
+      module:
+        type: string
+        description: Module the setting belongs to.
+        optional: true
+    output:
+      description: The setting's values.
+      type: object

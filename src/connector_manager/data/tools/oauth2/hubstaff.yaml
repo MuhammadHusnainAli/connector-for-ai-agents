@@ -1,0 +1,5636 @@
+# Hubstaff tools -- time tracking, workforce and payroll.
+#
+# The whole API is v2 and the connection's base url stops at the host, so every
+# path here starts with /v2. Four things shape how these tools fit together:
+#
+#   * **almost everything is scoped to an organization.** `list_organizations`
+#     is the first call after `get_current_user`; the organization id it
+#     returns is what most other tools take. A few resources -- tasks, teams,
+#     clients, notes -- are also addressable directly by their own id once you
+#     have it;
+#   * **paging is id-based, not offset-based.** Pass the previous response's
+#     `pagination.next_page_start_id` as `page_start_id`. There is no page
+#     number, and re-requesting with the same id is how you resume rather than
+#     skip;
+#   * **an activity is a ten-minute slot, a daily activity is a rollup.** The
+#     `/activities` endpoints return raw slots with keyboard, mouse and overall
+#     activity percentages and require a `time_slot` window; `/activities/daily`
+#     returns per-user, per-project totals by day. Use the rollups for
+#     reporting -- summing raw slots over a long range is far more expensive
+#     and gives the same answer;
+#   * **the `/updates` variants are what an incremental sync should poll.**
+#     They filter on when Hubstaff last *changed* a record rather than when the
+#     work happened, so back-dated entries and manager edits show up. A sync
+#     built on `time_slot` alone will silently miss both.
+#
+# Two limits worth knowing before writing:
+#
+#   * **`create_time_entry` cannot create time that needs approval.** Where an
+#     organization requires approval for manual time, the API refuses and the
+#     entry has to go through the manual time request flow -- list, then
+#     `update_manual_time_request_status` to approve;
+#   * **`update_*_members` and `update_team_projects` are bulk writes.** One
+#     call re-states the whole membership, so a payload that omits someone
+#     removes them. They are not incremental adds.
+#
+# Screenshots, locations and app/url usage are personal monitoring data about
+# named individuals. The tools are here because the API has them; how the
+# results are handled is a matter for whoever runs the integration.
+#
+# Docs: https://developer.hubstaff.com/
+
+connector_id: hubstaff
+display_name: Hubstaff
+docs_url: https://developer.hubstaff.com/
+
+tools:
+
+  get_current_user:
+    title: Get the authenticated user
+    description: >-
+      The user the access token belongs to, with their id and email. Start
+      here: the user id it returns is what the time-entry tools take, and it
+      confirms the token is live.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /v2/users/me
+    output:
+      description: 'The requested record.'
+      type: object
+
+  get_user:
+    title: Get a user
+    description: >-
+      One user by id -- name, email and account details. Use it to resolve the
+      user ids that come back on activities, timesheets and notes into people.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /v2/users/${user_id}
+    input:
+      user_id:
+        type: integer
+        description: 'The member''s user id, from list_organization_members or get_current_user.'
+    output:
+      description: 'The requested record.'
+      type: object
+
+  list_organizations:
+    title: List organizations
+    description: >-
+      The organizations this token can reach. Almost everything else in
+      Hubstaff hangs off an organization id, so this is usually the first call
+      after get_current_user.
+    category: organizations
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+    input:
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  create_organization:
+    title: Create an organization
+    description: >-
+      Create a new organization. Rarely what an integration wants -- most work
+      happens inside an organization that already exists.
+    category: organizations
+    request:
+      method: POST
+      path: /v2/organizations
+      body: "${attributes}"
+    input:
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record as Hubstaff stores it after the call.'
+      type: object
+
+  get_organization:
+    title: Get an organization
+    description: >-
+      One organization by id, with its name, status and settings. Useful for
+      confirming which account an integration is pointed at before it writes
+      anything.
+    category: organizations
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+    output:
+      description: 'The requested record.'
+      type: object
+
+  update_organization_metadata:
+    title: Update an organization's metadata
+    description: >-
+      Attach your own key/value metadata to an organization. Metadata is a
+      free-form side channel for your system's ids; it does not change any
+      Hubstaff behaviour.
+    category: organizations
+    request:
+      method: PUT
+      path: /v2/organizations/${organization_id}/update_metadata
+      body: "${attributes}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  list_organization_seats:
+    title: Get an organization's seat counts
+    description: >-
+      How many seats the organization has and how many are in use. Check this
+      before adding members -- Hubstaff rejects an invite that would exceed
+      the plan.
+    category: organizations
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/seats
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_work_break_projects:
+    title: List work break projects
+    description: >-
+      The projects an organization uses to record paid breaks. Time logged
+      against these is break time rather than project work, which matters when
+      totalling productive hours.
+    category: organizations
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/work_break_projects
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'project_ids[]': "${project_ids}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      project_ids:
+        type: array
+        description: 'Only these project ids.'
+        optional: true
+        items: {type: integer}
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_organization_members:
+    title: List an organization's members
+    description: >-
+      Page through an organization's members with their roles and, optionally,
+      their profiles, projects and limits. This is where the user ids for
+      every per-user query come from.
+    category: members
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/members
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include: "${include}"
+        include_removed: "${include_removed}"
+        'user_ids[]': "${user_ids}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+      include_removed:
+        type: boolean
+        description: 'Include records for removed members.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  add_organization_members:
+    title: Add members to an organization
+    description: >-
+      Add one or more people to an organization at a given membership role.
+      Consumes seats, so check list_organization_seats first if the plan is
+      close to full.
+    category: members
+    request:
+      method: POST
+      path: /v2/organizations/${organization_id}/members
+      body: "${attributes}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record as Hubstaff stores it after the call.'
+      type: object
+
+  update_organization_members:
+    title: Update an organization's members
+    description: >-
+      Change membership roles or remove members in bulk. A bulk write -- one
+      call can affect many people, so build the payload deliberately rather
+      than looping.
+    category: members
+    request:
+      method: PUT
+      path: /v2/organizations/${organization_id}/update_members
+      body: "${attributes}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  list_project_members:
+    title: List a project's members
+    description: >-
+      Who is assigned to one project and in what role. `direct_only`
+      distinguishes people assigned to the project itself from those who reach
+      it through a team.
+    category: members
+    read_only: true
+    request:
+      method: GET
+      path: /v2/projects/${project_id}/members
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include: "${include}"
+        include_removed: "${include_removed}"
+        'user_ids[]': "${user_ids}"
+    input:
+      project_id:
+        type: integer
+        description: 'The project id.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+      include_removed:
+        type: boolean
+        description: 'Include records for removed members.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  update_project_members:
+    title: Update a project's members
+    description: >-
+      Add, remove or re-role people on one project in bulk. Removing someone
+      stops them tracking further time to the project but leaves their past
+      time intact.
+    category: members
+    request:
+      method: PUT
+      path: /v2/projects/${project_id}/update_members
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: 'The project id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  list_team_members:
+    title: List a team's members
+    description: >-
+      The members of one team. Teams are how Hubstaff grants project access to
+      groups rather than individuals, so this explains project access that no
+      direct assignment accounts for.
+    category: members
+    read_only: true
+    request:
+      method: GET
+      path: /v2/teams/${team_id}/members
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include: "${include}"
+    input:
+      team_id:
+        type: integer
+        description: 'The team id.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  update_team_members:
+    title: Update a team's members
+    description: >-
+      Change one team's membership in bulk. Because teams carry project
+      access, adding someone here can grant them several projects at once.
+    category: members
+    request:
+      method: PUT
+      path: /v2/teams/${team_id}/update_members
+      body: "${attributes}"
+    input:
+      team_id:
+        type: integer
+        description: 'The team id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  list_organization_projects:
+    title: List an organization's projects
+    description: >-
+      Page through an organization's projects with their status and billing
+      settings. Archived projects are excluded unless the status filter asks
+      for them.
+    category: projects
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/projects
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include: "${include}"
+        'project_ids[]': "${project_ids}"
+        status: "${organization_status}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+      project_ids:
+        type: array
+        description: 'Only these project ids.'
+        optional: true
+        items: {type: integer}
+      organization_status:
+        type: string
+        description: 'Filter by record status, e.g. active or archived.'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  create_project:
+    title: Create a project
+    description: >-
+      Create a project in an organization. Members still need assigning
+      afterwards with update_project_members before anyone can track time to
+      it.
+    category: projects
+    request:
+      method: POST
+      path: /v2/organizations/${organization_id}/projects
+      body: "${attributes}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record as Hubstaff stores it after the call.'
+      type: object
+
+  get_project:
+    title: Get a project
+    description: >-
+      One project by id, with its name, status, client and billing
+      configuration. The quickest check of whether a project is still active
+      before logging time against it.
+    category: projects
+    read_only: true
+    request:
+      method: GET
+      path: /v2/projects/${project_id}
+    input:
+      project_id:
+        type: integer
+        description: 'The project id.'
+    output:
+      description: 'The requested record.'
+      type: object
+
+  update_project:
+    title: Update a project
+    description: >-
+      Change a project's name, status, client or billing settings. Setting the
+      status to archived stops new time being tracked but preserves everything
+      already recorded.
+    category: projects
+    request:
+      method: PUT
+      path: /v2/projects/${project_id}
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: 'The project id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  update_project_metadata:
+    title: Update a project's metadata
+    description: >-
+      Attach your own key/value metadata to a project -- typically the id this
+      project has in your own system, so later syncs can match without a name
+      lookup.
+    category: projects
+    request:
+      method: PUT
+      path: /v2/projects/${project_id}/update_metadata
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: 'The project id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  list_organization_tasks:
+    title: List an organization's tasks
+    description: >-
+      Every task across an organization's projects, filterable by status,
+      assignee and project. `only_global_todos` narrows to the
+      organization-wide to-do list rather than project tasks.
+    category: tasks
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/tasks
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include: "${include}"
+        status: "${status}"
+        'user_ids[]': "${user_ids}"
+        'project_ids[]': "${project_ids}"
+        'global_todo_ids[]': "${global_todo_ids}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+      status:
+        type: string
+        description: 'Filter by status.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      project_ids:
+        type: array
+        description: 'Only these project ids.'
+        optional: true
+        items: {type: integer}
+      global_todo_ids:
+        type: array
+        description: 'Only these global to-do ids.'
+        optional: true
+        items: {type: integer}
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_project_tasks:
+    title: List a project's tasks
+    description: >-
+      The tasks on one project, filterable by status and assignee. Task ids
+      from here are what time entries and activities reference.
+    category: tasks
+    read_only: true
+    request:
+      method: GET
+      path: /v2/projects/${project_id}/tasks
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include: "${include}"
+        status: "${status}"
+        'user_ids[]': "${user_ids}"
+        'global_todo_ids[]': "${global_todo_ids}"
+    input:
+      project_id:
+        type: integer
+        description: 'The project id.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+      status:
+        type: string
+        description: 'Filter by status.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      global_todo_ids:
+        type: array
+        description: 'Only these global to-do ids.'
+        optional: true
+        items: {type: integer}
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  create_task:
+    title: Create a task
+    description: >-
+      Create a task on a project so time can be tracked against something more
+      specific than the project itself.
+    category: tasks
+    request:
+      method: POST
+      path: /v2/projects/${project_id}/tasks
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: 'The project id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record as Hubstaff stores it after the call.'
+      type: object
+
+  get_task:
+    title: Get a task
+    description: >-
+      One task by id, with its summary, status, assignee and project. Use it
+      to resolve the task ids that appear on activities and time entries.
+    category: tasks
+    read_only: true
+    request:
+      method: GET
+      path: /v2/tasks/${task_id}
+    input:
+      task_id:
+        type: integer
+        description: 'The task id.'
+    output:
+      description: 'The requested record.'
+      type: object
+
+  update_task:
+    title: Update a task
+    description: >-
+      Change a task's summary, status or assignee. Completing a task does not
+      stop time already tracked to it from counting.
+    category: tasks
+    request:
+      method: PUT
+      path: /v2/tasks/${task_id}
+      body: "${attributes}"
+    input:
+      task_id:
+        type: integer
+        description: 'The task id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  delete_task:
+    title: Delete a task
+    description: >-
+      Delete a task. Time already tracked against it does not disappear but
+      loses its task association, which quietly changes how per-task reports
+      add up.
+    category: tasks
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/tasks/${task_id}
+    input:
+      task_id:
+        type: integer
+        description: 'The task id.'
+    output:
+      description: 'Confirmation that the record was deleted.'
+      type: object
+
+  update_task_metadata:
+    title: Update a task's metadata
+    description: >-
+      Attach your own key/value metadata to a task, typically the id it
+      carries in the issue tracker it came from.
+    category: tasks
+    request:
+      method: PUT
+      path: /v2/tasks/${task_id}/update_metadata
+      body: "${attributes}"
+    input:
+      task_id:
+        type: integer
+        description: 'The task id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  list_integration_tasks:
+    title: List an integration's tasks
+    description: >-
+      Tasks synced in from one connected integration, filterable by the remote
+      ids they carry. This is how to line Hubstaff tasks up with the Jira or
+      Asana issues they mirror.
+    category: tasks
+    read_only: true
+    request:
+      method: GET
+      path: /v2/integrations/${integration_id}/tasks
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include: "${include}"
+        status: "${status}"
+        'user_ids[]': "${user_ids}"
+        'project_ids[]': "${project_ids}"
+    input:
+      integration_id:
+        type: integer
+        description: 'The integration id, from list_organization_integrations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+      status:
+        type: string
+        description: 'Filter by status.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      project_ids:
+        type: array
+        description: 'Only these project ids.'
+        optional: true
+        items: {type: integer}
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_global_todos:
+    title: List global to-dos
+    description: >-
+      The organization-wide to-do items, which sit outside any single project
+      and can have time tracked against them like tasks.
+    category: todos
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/global_todos
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  create_global_todo:
+    title: Create a global to-do
+    description: >-
+      Create an organization-wide to-do item, for work that does not belong to
+      a particular project.
+    category: todos
+    request:
+      method: POST
+      path: /v2/organizations/${organization_id}/global_todos
+      body: "${attributes}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record as Hubstaff stores it after the call.'
+      type: object
+
+  update_global_todo:
+    title: Update a global to-do
+    description: >-
+      Change a global to-do's text or status. Time already tracked to it is
+      unaffected.
+    category: todos
+    request:
+      method: PUT
+      path: /v2/organizations/${organization_id}/global_todos/${id}
+      body: "${attributes}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      id:
+        type: integer
+        description: 'The global to-do id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  delete_global_todo:
+    title: Delete a global to-do
+    description: >-
+      Delete a global to-do item. Time tracked to it loses its association, so
+      per-to-do totals change afterwards.
+    category: todos
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/organizations/${organization_id}/global_todos/${id}
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      id:
+        type: integer
+        description: 'The global to-do id.'
+    output:
+      description: 'Confirmation that the record was deleted.'
+      type: object
+
+  list_organization_activities:
+    title: List an organization's activities
+    description: >-
+      Raw tracked-time activities across an organization, each a ten-minute
+      slot with its keyboard, mouse and overall activity percentages. Requires
+      a time_slot window; this is the finest-grained view of what was tracked.
+    category: activities
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/activities
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'time_slot[start]': "${time_slot_start}"
+        'time_slot[stop]': "${time_slot_stop}"
+        'user_ids[]': "${user_ids}"
+        'task_ids[]': "${task_ids}"
+        'global_todo_ids[]': "${global_todo_ids}"
+        'project_ids[]': "${project_ids}"
+        include: "${include}"
+        time_zone: "${time_zone}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      time_slot_start:
+        type: string
+        description: 'Start of the tracked-time window, ISO 8601.'
+        optional: true
+      time_slot_stop:
+        type: string
+        description: 'End of the tracked-time window, ISO 8601.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      task_ids:
+        type: array
+        description: 'Only these task ids.'
+        optional: true
+        items: {type: integer}
+      global_todo_ids:
+        type: array
+        description: 'Only these global to-do ids.'
+        optional: true
+        items: {type: integer}
+      project_ids:
+        type: array
+        description: 'Only these project ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+      time_zone:
+        type: string
+        description: 'Time zone to aggregate daily figures in. Defaults to the organization''s.'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_organization_activity_updates:
+    title: List changed activities
+    description: >-
+      Activities by when Hubstaff last changed them rather than when they were
+      tracked. This is the endpoint an incremental sync should poll -- edited
+      and back-dated entries appear here and would be missed by a time_slot
+      query.
+    category: activities
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/activities/updates
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'updated[start]': "${updated_start}"
+        'updated[stop]': "${updated_stop}"
+        'user_ids[]': "${user_ids}"
+        'task_ids[]': "${task_ids}"
+        'global_todo_ids[]': "${global_todo_ids}"
+        'project_ids[]': "${project_ids}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      updated_start:
+        type: string
+        description: 'Only records changed at or after this instant, ISO 8601.'
+        optional: true
+      updated_stop:
+        type: string
+        description: 'Only records changed at or before this instant, ISO 8601.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      task_ids:
+        type: array
+        description: 'Only these task ids.'
+        optional: true
+        items: {type: integer}
+      global_todo_ids:
+        type: array
+        description: 'Only these global to-do ids.'
+        optional: true
+        items: {type: integer}
+      project_ids:
+        type: array
+        description: 'Only these project ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_organization_daily_activities:
+    title: List daily activity totals
+    description: >-
+      Per-user, per-project totals rolled up by day, in the organization's
+      time zone. Far cheaper than summing raw activities when you only need
+      report-style figures.
+    category: activities
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/activities/daily
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'date[start]': "${date_start}"
+        'date[stop]': "${date_stop}"
+        'user_ids[]': "${user_ids}"
+        'task_ids[]': "${task_ids}"
+        'project_ids[]': "${project_ids}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      date_start:
+        type: string
+        description: 'First date to cover, YYYY-MM-DD.'
+        optional: true
+      date_stop:
+        type: string
+        description: 'Last date to cover, YYYY-MM-DD.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      task_ids:
+        type: array
+        description: 'Only these task ids.'
+        optional: true
+        items: {type: integer}
+      project_ids:
+        type: array
+        description: 'Only these project ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_organization_daily_activity_updates:
+    title: List changed daily activity totals
+    description: >-
+      Daily activity totals by when they last changed, for incrementally
+      syncing report figures that a back-dated edit would otherwise silently
+      invalidate.
+    category: activities
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/activities/daily/updates
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'updated[start]': "${updated_start}"
+        'updated[stop]': "${updated_stop}"
+        'user_ids[]': "${user_ids}"
+        'task_ids[]': "${task_ids}"
+        'project_ids[]': "${project_ids}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      updated_start:
+        type: string
+        description: 'Only records changed at or after this instant, ISO 8601.'
+        optional: true
+      updated_stop:
+        type: string
+        description: 'Only records changed at or before this instant, ISO 8601.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      task_ids:
+        type: array
+        description: 'Only these task ids.'
+        optional: true
+        items: {type: integer}
+      project_ids:
+        type: array
+        description: 'Only these project ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_organization_last_activities:
+    title: List members' most recent activity
+    description: >-
+      Each member's latest tracked activity -- the closest thing Hubstaff
+      offers to "who is working right now" without polling the full activity
+      feed.
+    category: activities
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/last_activities
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include_removed: "${include_removed}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include_removed:
+        type: boolean
+        description: 'Include records for removed members.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_project_activities:
+    title: List a project's activities
+    description: >-
+      Raw tracked-time activities for one project within a time_slot window,
+      with per-slot activity percentages.
+    category: activities
+    read_only: true
+    request:
+      method: GET
+      path: /v2/projects/${project_id}/activities
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'time_slot[start]': "${time_slot_start}"
+        'time_slot[stop]': "${time_slot_stop}"
+        'user_ids[]': "${user_ids}"
+        'task_ids[]': "${task_ids}"
+        'global_todo_ids[]': "${global_todo_ids}"
+        include: "${include}"
+        time_zone: "${time_zone}"
+    input:
+      project_id:
+        type: integer
+        description: 'The project id.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      time_slot_start:
+        type: string
+        description: 'Start of the tracked-time window, ISO 8601.'
+        optional: true
+      time_slot_stop:
+        type: string
+        description: 'End of the tracked-time window, ISO 8601.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      task_ids:
+        type: array
+        description: 'Only these task ids.'
+        optional: true
+        items: {type: integer}
+      global_todo_ids:
+        type: array
+        description: 'Only these global to-do ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+      time_zone:
+        type: string
+        description: 'Time zone to aggregate daily figures in. Defaults to the organization''s.'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_project_activity_updates:
+    title: List a project's changed activities
+    description: >-
+      One project's activities by when Hubstaff last changed them -- the
+      incremental-sync counterpart to the time_slot query.
+    category: activities
+    read_only: true
+    request:
+      method: GET
+      path: /v2/projects/${project_id}/activities/updates
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'updated[start]': "${updated_start}"
+        'updated[stop]': "${updated_stop}"
+        'user_ids[]': "${user_ids}"
+        'task_ids[]': "${task_ids}"
+        'global_todo_ids[]': "${global_todo_ids}"
+        include: "${include}"
+    input:
+      project_id:
+        type: integer
+        description: 'The project id.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      updated_start:
+        type: string
+        description: 'Only records changed at or after this instant, ISO 8601.'
+        optional: true
+      updated_stop:
+        type: string
+        description: 'Only records changed at or before this instant, ISO 8601.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      task_ids:
+        type: array
+        description: 'Only these task ids.'
+        optional: true
+        items: {type: integer}
+      global_todo_ids:
+        type: array
+        description: 'Only these global to-do ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_project_daily_activities:
+    title: List a project's daily activity totals
+    description: >-
+      Daily rolled-up activity totals for one project, per user and per day.
+    category: activities
+    read_only: true
+    request:
+      method: GET
+      path: /v2/projects/${project_id}/activities/daily
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'date[start]': "${date_start}"
+        'date[stop]': "${date_stop}"
+        'user_ids[]': "${user_ids}"
+        'task_ids[]': "${task_ids}"
+        include: "${include}"
+    input:
+      project_id:
+        type: integer
+        description: 'The project id.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      date_start:
+        type: string
+        description: 'First date to cover, YYYY-MM-DD.'
+        optional: true
+      date_stop:
+        type: string
+        description: 'Last date to cover, YYYY-MM-DD.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      task_ids:
+        type: array
+        description: 'Only these task ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_project_daily_activity_updates:
+    title: List a project's changed daily totals
+    description: >-
+      One project's daily activity totals by when they last changed, for
+      incremental report syncing.
+    category: activities
+    read_only: true
+    request:
+      method: GET
+      path: /v2/projects/${project_id}/activities/daily/updates
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'updated[start]': "${updated_start}"
+        'updated[stop]': "${updated_stop}"
+        'user_ids[]': "${user_ids}"
+        'task_ids[]': "${task_ids}"
+        include: "${include}"
+    input:
+      project_id:
+        type: integer
+        description: 'The project id.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      updated_start:
+        type: string
+        description: 'Only records changed at or after this instant, ISO 8601.'
+        optional: true
+      updated_stop:
+        type: string
+        description: 'Only records changed at or before this instant, ISO 8601.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      task_ids:
+        type: array
+        description: 'Only these task ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_project_last_activities:
+    title: List a project's most recent activity
+    description: >-
+      The latest tracked activity per member on one project -- who last worked
+      on it, and when.
+    category: activities
+    read_only: true
+    request:
+      method: GET
+      path: /v2/projects/${project_id}/last_activities
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include_removed: "${include_removed}"
+        include: "${include}"
+    input:
+      project_id:
+        type: integer
+        description: 'The project id.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include_removed:
+        type: boolean
+        description: 'Include records for removed members.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  create_time_entry:
+    title: Create a manual time entry
+    description: >-
+      Log time manually for a user against a project, and optionally a task.
+      `tracked` is a number of seconds and `start_time` is ISO 8601. Note the
+      limit: entries that would need approval cannot be created through the
+      API -- those must go through the manual time request flow.
+    category: time
+    request:
+      method: POST
+      path: /v2/users/${user_id}/time_entries
+      body:
+        project_id: "${project_id}"
+        start_time: "${start_time}"
+        tracked: "${tracked}"
+        task_id: "${task_id}"
+        note: "${note}"
+        billable: "${billable}"
+    input:
+      user_id:
+        type: integer
+        description: 'The member''s user id, from list_organization_members or get_current_user.'
+      project_id:
+        type: integer
+        description: 'The project to log the time against.'
+      start_time:
+        type: string
+        description: 'When the work started, ISO 8601.'
+      tracked:
+        type: integer
+        description: 'How many seconds to log.'
+      task_id:
+        type: integer
+        description: 'The task within the project, if the time belongs to one.'
+        optional: true
+      note:
+        type: string
+        description: 'Why the time is being added. Required by default; an organization can make it optional in its Require Reason setting.'
+        optional: true
+      billable:
+        type: boolean
+        description: 'Whether the time is billable. Defaults to the project''s setting.'
+        optional: true
+    output:
+      description: 'The record as Hubstaff stores it after the call.'
+      type: object
+
+  list_organization_timesheets:
+    title: List timesheets
+    description: >-
+      Timesheets for an organization over a date range, with their approval
+      status. This is the payroll-facing view -- approved, pending and
+      rejected -- as opposed to the raw activity feed.
+    category: time
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/timesheets
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'date[start]': "${date_start}"
+        'date[stop]': "${date_stop}"
+        status: "${status}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      date_start:
+        type: string
+        description: 'First date to cover, YYYY-MM-DD.'
+        optional: true
+      date_stop:
+        type: string
+        description: 'Last date to cover, YYYY-MM-DD.'
+        optional: true
+      status:
+        type: string
+        description: 'Filter by status.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  update_timesheet:
+    title: Update a timesheet
+    description: >-
+      Change a timesheet, typically to approve or reject it. Approval is what
+      releases the hours to payroll, so this is a consequential write rather
+      than a cosmetic one.
+    category: time
+    request:
+      method: PUT
+      path: /v2/timesheets/${timesheet_id}
+      body: "${attributes}"
+    input:
+      timesheet_id:
+        type: integer
+        description: 'The timesheet id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  list_organization_time_edit_logs:
+    title: List an organization's time edit logs
+    description: >-
+      An audit trail of who changed tracked time, when, and from what to what.
+      The place to look when totals move without new work being done.
+    category: time
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/time_edit_logs
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'date[start]': "${date_start}"
+        'date[stop]': "${date_stop}"
+        'user_ids[]': "${user_ids}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      date_start:
+        type: string
+        description: 'First date to cover, YYYY-MM-DD.'
+        optional: true
+      date_stop:
+        type: string
+        description: 'Last date to cover, YYYY-MM-DD.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_project_time_edit_logs:
+    title: List a project's time edit logs
+    description: >-
+      The audit trail of tracked-time changes on one project -- who edited
+      what, and when.
+    category: time
+    read_only: true
+    request:
+      method: GET
+      path: /v2/projects/${project_id}/time_edit_logs
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'date[start]': "${date_start}"
+        'date[stop]': "${date_stop}"
+        'user_ids[]': "${user_ids}"
+        include: "${include}"
+    input:
+      project_id:
+        type: integer
+        description: 'The project id.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      date_start:
+        type: string
+        description: 'First date to cover, YYYY-MM-DD.'
+        optional: true
+      date_stop:
+        type: string
+        description: 'Last date to cover, YYYY-MM-DD.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_manual_time_requests:
+    title: List manual time requests
+    description: >-
+      Requests from members to add time they did not track live, with their
+      approval status. This is the queue that create_time_entry deliberately
+      cannot bypass.
+    category: time
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/manual_time_requests
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'date[start]': "${date_start}"
+        'date[stop]': "${date_stop}"
+        status: "${status}"
+        'user_ids[]': "${user_ids}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      date_start:
+        type: string
+        description: 'First date to cover, YYYY-MM-DD.'
+        optional: true
+      date_stop:
+        type: string
+        description: 'Last date to cover, YYYY-MM-DD.'
+        optional: true
+      status:
+        type: string
+        description: 'Filter by status.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  get_manual_time_request:
+    title: Get a manual time request
+    description: >-
+      One manual time request, with the time claimed, the reason given and its
+      current status.
+    category: time
+    read_only: true
+    request:
+      method: GET
+      path: /v2/manual_time_requests/${manual_time_request_id}
+    input:
+      manual_time_request_id:
+        type: integer
+        description: 'The manual time request id.'
+    output:
+      description: 'The requested record.'
+      type: object
+
+  update_manual_time_request_status:
+    title: Approve or deny a manual time request
+    description: >-
+      Approve or deny a manual time request. Approving writes the claimed
+      hours into the member's tracked time, so it changes both reports and
+      payroll.
+    category: time
+    request:
+      method: PUT
+      path: /v2/manual_time_requests/${manual_time_request_id}/status
+      body: "${attributes}"
+    input:
+      manual_time_request_id:
+        type: integer
+        description: 'The manual time request id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  list_organization_screenshots:
+    title: List an organization's screenshots
+    description: >-
+      Screenshots captured during tracked time in a time_slot window, with the
+      urls to fetch each image. Personal monitoring data -- handle the urls
+      accordingly.
+    category: monitoring
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/screenshots
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'time_slot[start]': "${time_slot_start}"
+        'time_slot[stop]': "${time_slot_stop}"
+        'user_ids[]': "${user_ids}"
+        'project_ids[]': "${project_ids}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      time_slot_start:
+        type: string
+        description: 'Start of the tracked-time window, ISO 8601.'
+        optional: true
+      time_slot_stop:
+        type: string
+        description: 'End of the tracked-time window, ISO 8601.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      project_ids:
+        type: array
+        description: 'Only these project ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  get_organization_screenshot:
+    title: Get a screenshot
+    description: >-
+      One screenshot by id, with its capture time, the activity slot it
+      belongs to and its image url.
+    category: monitoring
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/screenshots/${screenshot_id}
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      screenshot_id:
+        type: integer
+        description: 'The screenshot id.'
+    output:
+      description: 'The requested record.'
+      type: object
+
+  list_project_screenshots:
+    title: List a project's screenshots
+    description: >-
+      Screenshots captured while tracking one project, within a time_slot
+      window.
+    category: monitoring
+    read_only: true
+    request:
+      method: GET
+      path: /v2/projects/${project_id}/screenshots
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'time_slot[start]': "${time_slot_start}"
+        'time_slot[stop]': "${time_slot_stop}"
+        'user_ids[]': "${user_ids}"
+        include: "${include}"
+    input:
+      project_id:
+        type: integer
+        description: 'The project id.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      time_slot_start:
+        type: string
+        description: 'Start of the tracked-time window, ISO 8601.'
+        optional: true
+      time_slot_stop:
+        type: string
+        description: 'End of the tracked-time window, ISO 8601.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  get_project_screenshot:
+    title: Get a project's screenshot
+    description: >-
+      One screenshot from a project by id, with its capture time and image
+      url.
+    category: monitoring
+    read_only: true
+    request:
+      method: GET
+      path: /v2/projects/${project_id}/screenshots/${screenshot_id}
+    input:
+      project_id:
+        type: integer
+        description: 'The project id.'
+      screenshot_id:
+        type: integer
+        description: 'The screenshot id.'
+    output:
+      description: 'The requested record.'
+      type: object
+
+  get_screenshot_settings:
+    title: Get screenshot settings
+    description: >-
+      How screenshot capture is configured for an organization -- frequency,
+      blurring and whether members may delete their own. Read this before
+      interpreting gaps in the screenshot feed.
+    category: monitoring
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/screenshot_settings
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+    output:
+      description: 'The requested record.'
+      type: object
+
+  update_screenshot_settings:
+    title: Update screenshot settings
+    description: >-
+      Change an organization's screenshot capture policy. This affects what is
+      recorded about every member, so it is a privacy-relevant setting rather
+      than a display preference.
+    category: monitoring
+    request:
+      method: PUT
+      path: /v2/organizations/${organization_id}/screenshot_settings
+      body: "${attributes}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  list_organization_notes:
+    title: List an organization's notes
+    description: >-
+      The notes members attach to their tracked time, within a time_slot
+      window -- the human explanation of what a block of tracked time was
+      actually for.
+    category: monitoring
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/notes
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'time_slot[start]': "${time_slot_start}"
+        'time_slot[stop]': "${time_slot_stop}"
+        'user_ids[]': "${user_ids}"
+        'task_ids[]': "${task_ids}"
+        'project_ids[]': "${project_ids}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      time_slot_start:
+        type: string
+        description: 'Start of the tracked-time window, ISO 8601.'
+        optional: true
+      time_slot_stop:
+        type: string
+        description: 'End of the tracked-time window, ISO 8601.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      task_ids:
+        type: array
+        description: 'Only these task ids.'
+        optional: true
+        items: {type: integer}
+      project_ids:
+        type: array
+        description: 'Only these project ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_project_notes:
+    title: List a project's notes
+    description: >-
+      The notes attached to tracked time on one project, within a time_slot
+      window.
+    category: monitoring
+    read_only: true
+    request:
+      method: GET
+      path: /v2/projects/${project_id}/notes
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'time_slot[start]': "${time_slot_start}"
+        'time_slot[stop]': "${time_slot_stop}"
+        'user_ids[]': "${user_ids}"
+        'task_ids[]': "${task_ids}"
+        include: "${include}"
+    input:
+      project_id:
+        type: integer
+        description: 'The project id.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      time_slot_start:
+        type: string
+        description: 'Start of the tracked-time window, ISO 8601.'
+        optional: true
+      time_slot_stop:
+        type: string
+        description: 'End of the tracked-time window, ISO 8601.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      task_ids:
+        type: array
+        description: 'Only these task ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  get_note:
+    title: Get a note
+    description: >-
+      One note by id, with its text, its author and the time slot it belongs
+      to.
+    category: monitoring
+    read_only: true
+    request:
+      method: GET
+      path: /v2/notes/${note_id}
+    input:
+      note_id:
+        type: integer
+        description: 'The note id.'
+    output:
+      description: 'The requested record.'
+      type: object
+
+  list_tracking_states:
+    title: List members' tracking states
+    description: >-
+      Whether each member is currently tracking, idle or stopped. The live
+      status view, as opposed to the historical activity feed.
+    category: monitoring
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/tracking_states
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'user_ids[]': "${user_ids}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  get_app_and_url_tracking_settings:
+    title: Get app and URL tracking settings
+    description: >-
+      Whether apps and urls are recorded for each member, and at what detail.
+      Explains why app and url data is present for some members and absent for
+      others.
+    category: monitoring
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/app_and_url_tracking_settings
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+    output:
+      description: 'The requested record.'
+      type: object
+
+  update_app_and_url_tracking_settings:
+    title: Update app and URL tracking settings
+    description: >-
+      Change whether apps and urls are recorded for members. Another
+      privacy-relevant setting -- it changes what is collected, not just what
+      is shown.
+    category: monitoring
+    request:
+      method: PUT
+      path: /v2/organizations/${organization_id}/app_and_url_tracking_settings
+      body: "${attributes}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  list_ignored_user_matches:
+    title: List ignored user matches
+    description: >-
+      Which local machine accounts the silent app has been told to ignore, as
+      concrete matches rather than patterns.
+    category: monitoring
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/silent_app/ignored_user_matches
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_ignored_user_patterns:
+    title: List ignored user patterns
+    description: >-
+      The patterns the silent app uses to decide which local machine accounts
+      to ignore -- the rules behind the matches.
+    category: monitoring
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/silent_app/ignored_user_patterns
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_unusual_activities:
+    title: List unusual activities
+    description: >-
+      Activity Hubstaff Insights has flagged as anomalous. Signals for review
+      rather than conclusions -- they warrant a look, not an accusation.
+    category: insights
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/insights/unusual_activities
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'date[start]': "${date_start}"
+        'date[stop]': "${date_stop}"
+        'user_ids[]': "${user_ids}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      date_start:
+        type: string
+        description: 'First date to cover, YYYY-MM-DD.'
+        optional: true
+      date_stop:
+        type: string
+        description: 'Last date to cover, YYYY-MM-DD.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_activity_insights:
+    title: List activity insights
+    description: >-
+      Aggregate activity levels across the organization over a date range, as
+      Hubstaff Insights computes them. Requires a date range; figures are
+      aggregated in the organization's time zone.
+    category: insights
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/insights/activity
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'date[start]': "${date_start}"
+        'date[stop]': "${date_stop}"
+        'user_ids[]': "${user_ids}"
+        'project_ids[]': "${project_ids}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      date_start:
+        type: string
+        description: 'First date to cover, YYYY-MM-DD.'
+        optional: true
+      date_stop:
+        type: string
+        description: 'Last date to cover, YYYY-MM-DD.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      project_ids:
+        type: array
+        description: 'Only these project ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_focus_time_insights:
+    title: List focus time insights
+    description: >-
+      How much uninterrupted focus time members had, as opposed to time
+      fragmented across tools and meetings. Requires a date range; figures are
+      aggregated in the organization's time zone.
+    category: insights
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/insights/focus_time
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'date[start]': "${date_start}"
+        'date[stop]': "${date_stop}"
+        'user_ids[]': "${user_ids}"
+        'project_ids[]': "${project_ids}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      date_start:
+        type: string
+        description: 'First date to cover, YYYY-MM-DD.'
+        optional: true
+      date_stop:
+        type: string
+        description: 'Last date to cover, YYYY-MM-DD.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      project_ids:
+        type: array
+        description: 'Only these project ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_idle_time_insights:
+    title: List idle time insights
+    description: >-
+      Time tracked but idle, broken down per member and day -- the gap between
+      hours logged and hours worked. Requires a date range; figures are
+      aggregated in the organization's time zone.
+    category: insights
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/insights/idle_time
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'date[start]': "${date_start}"
+        'date[stop]': "${date_stop}"
+        'user_ids[]': "${user_ids}"
+        'project_ids[]': "${project_ids}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      date_start:
+        type: string
+        description: 'First date to cover, YYYY-MM-DD.'
+        optional: true
+      date_stop:
+        type: string
+        description: 'Last date to cover, YYYY-MM-DD.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      project_ids:
+        type: array
+        description: 'Only these project ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_meetings_insights:
+    title: List meeting insights
+    description: >-
+      How much of members' tracked time went to meetings, which is usually the
+      largest single drag on focus time. Requires a date range; figures are
+      aggregated in the organization's time zone.
+    category: insights
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/insights/meetings
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'date[start]': "${date_start}"
+        'date[stop]': "${date_stop}"
+        'user_ids[]': "${user_ids}"
+        'project_ids[]': "${project_ids}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      date_start:
+        type: string
+        description: 'First date to cover, YYYY-MM-DD.'
+        optional: true
+      date_stop:
+        type: string
+        description: 'Last date to cover, YYYY-MM-DD.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      project_ids:
+        type: array
+        description: 'Only these project ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_work_time_classification_insights:
+    title: List work time classification insights
+    description: >-
+      Tracked time split into Hubstaff's work classifications, so productive,
+      neutral and unproductive time can be compared over a range. Requires a
+      date range; figures are aggregated in the organization's time zone.
+    category: insights
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/insights/work_time_classification
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'date[start]': "${date_start}"
+        'date[stop]': "${date_stop}"
+        'user_ids[]': "${user_ids}"
+        'project_ids[]': "${project_ids}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      date_start:
+        type: string
+        description: 'First date to cover, YYYY-MM-DD.'
+        optional: true
+      date_stop:
+        type: string
+        description: 'Last date to cover, YYYY-MM-DD.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      project_ids:
+        type: array
+        description: 'Only these project ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_tool_categories:
+    title: List tool categories
+    description: >-
+      The categories Hubstaff sorts apps and websites into. The vocabulary
+      behind every tool-usage and classification figure.
+    category: insights
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/insights/tool_categories
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_tool_classifications:
+    title: List tool classifications
+    description: >-
+      How each app and website is classified for this organization --
+      productive, unproductive or neutral. Classifications are
+      per-organization, so the same tool can be judged differently elsewhere.
+    category: insights
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/insights/tool_classifications
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  update_tool_classifications:
+    title: Update tool classifications
+    description: >-
+      Reclassify apps and websites for the organization. This retroactively
+      changes what past productivity figures mean, so expect historical
+      reports to move.
+    category: insights
+    request:
+      method: PATCH
+      path: /v2/organizations/${organization_id}/insights/tool_classifications
+      body: "${attributes}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  list_organization_tool_usages:
+    title: List an organization's tool usage
+    description: >-
+      Which apps and websites members used during tracked time, within a
+      time_slot window.
+    category: insights
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/tool_usages
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'time_slot[start]': "${time_slot_start}"
+        'time_slot[stop]': "${time_slot_stop}"
+        'user_ids[]': "${user_ids}"
+        'project_ids[]': "${project_ids}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      time_slot_start:
+        type: string
+        description: 'Start of the tracked-time window, ISO 8601.'
+        optional: true
+      time_slot_stop:
+        type: string
+        description: 'End of the tracked-time window, ISO 8601.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      project_ids:
+        type: array
+        description: 'Only these project ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_organization_daily_tool_usages:
+    title: List daily tool usage totals
+    description: >-
+      App and website usage rolled up by day, which is the cheap way to chart
+      tool usage over a long range.
+    category: insights
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/tool_usages/daily
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'date[start]': "${date_start}"
+        'date[stop]': "${date_stop}"
+        'user_ids[]': "${user_ids}"
+        'project_ids[]': "${project_ids}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      date_start:
+        type: string
+        description: 'First date to cover, YYYY-MM-DD.'
+        optional: true
+      date_stop:
+        type: string
+        description: 'Last date to cover, YYYY-MM-DD.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      project_ids:
+        type: array
+        description: 'Only these project ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_project_tool_usages:
+    title: List a project's tool usage
+    description: >-
+      Apps and websites used while tracking one project, within a time_slot
+      window.
+    category: insights
+    read_only: true
+    request:
+      method: GET
+      path: /v2/projects/${project_id}/tool_usages
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'time_slot[start]': "${time_slot_start}"
+        'time_slot[stop]': "${time_slot_stop}"
+        'user_ids[]': "${user_ids}"
+        include: "${include}"
+    input:
+      project_id:
+        type: integer
+        description: 'The project id.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      time_slot_start:
+        type: string
+        description: 'Start of the tracked-time window, ISO 8601.'
+        optional: true
+      time_slot_stop:
+        type: string
+        description: 'End of the tracked-time window, ISO 8601.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_project_daily_tool_usages:
+    title: List a project's daily tool usage
+    description: >-
+      One project's app and website usage rolled up by day.
+    category: insights
+    read_only: true
+    request:
+      method: GET
+      path: /v2/projects/${project_id}/tool_usages/daily
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'date[start]': "${date_start}"
+        'date[stop]': "${date_stop}"
+        'user_ids[]': "${user_ids}"
+        include: "${include}"
+    input:
+      project_id:
+        type: integer
+        description: 'The project id.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      date_start:
+        type: string
+        description: 'First date to cover, YYYY-MM-DD.'
+        optional: true
+      date_stop:
+        type: string
+        description: 'Last date to cover, YYYY-MM-DD.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_smart_notification_rules:
+    title: List smart notification rules
+    description: >-
+      The rules that decide when Hubstaff Insights raises a smart notification
+      -- the conditions behind the alerts.
+    category: insights
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/insights/smart_notification_rules
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  create_smart_notification_rule:
+    title: Create a smart notification rule
+    description: >-
+      Create a rule that raises a smart notification when its condition is
+      met. New rules fire against future activity, not retroactively.
+    category: insights
+    request:
+      method: POST
+      path: /v2/organizations/${organization_id}/insights/smart_notification_rules
+      body: "${attributes}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record as Hubstaff stores it after the call.'
+      type: object
+
+  get_smart_notification_rule:
+    title: Get a smart notification rule
+    description: >-
+      One smart notification rule by id, with its condition and whether it is
+      currently enabled.
+    category: insights
+    read_only: true
+    request:
+      method: GET
+      path: /v2/insights/smart_notification_rules/${rule_id}
+    input:
+      rule_id:
+        type: integer
+        description: 'The smart notification rule id.'
+    output:
+      description: 'The requested record.'
+      type: object
+
+  update_smart_notification_rule:
+    title: Update a smart notification rule
+    description: >-
+      Change a smart notification rule's condition or settings. To only pause
+      it, prefer toggle_smart_notification_rule.
+    category: insights
+    request:
+      method: PUT
+      path: /v2/insights/smart_notification_rules/${rule_id}
+      body: "${attributes}"
+    input:
+      rule_id:
+        type: integer
+        description: 'The smart notification rule id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  toggle_smart_notification_rule:
+    title: Enable or disable a smart notification rule
+    description: >-
+      Flip a rule between enabled and disabled without editing its condition
+      -- the reversible way to silence a noisy alert.
+    category: insights
+    request:
+      method: PATCH
+      path: /v2/insights/smart_notification_rules/${rule_id}/toggle_status
+      body: "${attributes}"
+    input:
+      rule_id:
+        type: integer
+        description: 'The smart notification rule id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  delete_smart_notification_rule:
+    title: Delete a smart notification rule
+    description: >-
+      Delete a smart notification rule permanently. Disabling it is usually
+      the better move, since a deleted rule's configuration cannot be
+      recovered.
+    category: insights
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/insights/smart_notification_rules/${rule_id}
+    input:
+      rule_id:
+        type: integer
+        description: 'The smart notification rule id.'
+    output:
+      description: 'Confirmation that the record was deleted.'
+      type: object
+
+  list_smart_notifications:
+    title: List smart notifications
+    description: >-
+      The notifications the rules have actually raised, with what triggered
+      each one.
+    category: insights
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/insights/smart_notifications
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'date[start]': "${date_start}"
+        'date[stop]': "${date_stop}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      date_start:
+        type: string
+        description: 'First date to cover, YYYY-MM-DD.'
+        optional: true
+      date_stop:
+        type: string
+        description: 'Last date to cover, YYYY-MM-DD.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_organization_teams:
+    title: List an organization's teams
+    description: >-
+      The teams in an organization. Teams grant project access to groups, so a
+      member's project list often comes from here rather than from direct
+      assignment.
+    category: teams
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/teams
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  create_team:
+    title: Create a team
+    description: >-
+      Create a team in an organization. It starts with no members and no
+      projects -- add both with the update_team_members and
+      update_team_projects tools.
+    category: teams
+    request:
+      method: POST
+      path: /v2/organizations/${organization_id}/teams
+      body: "${attributes}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record as Hubstaff stores it after the call.'
+      type: object
+
+  get_team:
+    title: Get a team
+    description: >-
+      One team by id, with its name and settings.
+    category: teams
+    read_only: true
+    request:
+      method: GET
+      path: /v2/teams/${team_id}
+    input:
+      team_id:
+        type: integer
+        description: 'The team id.'
+    output:
+      description: 'The requested record.'
+      type: object
+
+  update_team:
+    title: Update a team
+    description: >-
+      Change a team's name or settings. Membership and project assignment are
+      separate calls.
+    category: teams
+    request:
+      method: PUT
+      path: /v2/teams/${team_id}
+      body: "${attributes}"
+    input:
+      team_id:
+        type: integer
+        description: 'The team id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  delete_team:
+    title: Delete a team
+    description: >-
+      Delete a team. Its members lose whatever project access the team granted
+      them, which can silently cut people off from projects they were working
+      on.
+    category: teams
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/teams/${team_id}
+    input:
+      team_id:
+        type: integer
+        description: 'The team id.'
+    output:
+      description: 'Confirmation that the record was deleted.'
+      type: object
+
+  list_team_projects:
+    title: List a team's projects
+    description: >-
+      The projects one team can reach -- the access this team confers on all
+      of its members.
+    category: teams
+    read_only: true
+    request:
+      method: GET
+      path: /v2/teams/${team_id}/projects
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include: "${include}"
+    input:
+      team_id:
+        type: integer
+        description: 'The team id.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  update_team_projects:
+    title: Update a team's projects
+    description: >-
+      Change which projects a team can reach. Every member of the team gains
+      or loses that access at once.
+    category: teams
+    request:
+      method: PUT
+      path: /v2/teams/${team_id}/update_projects
+      body: "${attributes}"
+    input:
+      team_id:
+        type: integer
+        description: 'The team id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  update_team_metadata:
+    title: Update a team's metadata
+    description: >-
+      Attach your own key/value metadata to a team, typically the id it holds
+      in your own directory.
+    category: teams
+    request:
+      method: PUT
+      path: /v2/teams/${team_id}/update_metadata
+      body: "${attributes}"
+    input:
+      team_id:
+        type: integer
+        description: 'The team id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  list_organization_clients:
+    title: List an organization's clients
+    description: >-
+      The clients projects are billed to, with their status. Client ids from
+      here appear on projects, budgets and client invoices.
+    category: clients
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/clients
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include: "${include}"
+        status: "${organization_status}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+      organization_status:
+        type: string
+        description: 'Filter by record status, e.g. active or archived.'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  create_client:
+    title: Create a client
+    description: >-
+      Create a client an organization's projects can be billed to.
+    category: clients
+    request:
+      method: POST
+      path: /v2/organizations/${organization_id}/clients
+      body: "${attributes}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record as Hubstaff stores it after the call.'
+      type: object
+
+  get_client:
+    title: Get a client
+    description: >-
+      One client by id, with their name, status and contact details.
+    category: clients
+    read_only: true
+    request:
+      method: GET
+      path: /v2/clients/${client_id}
+    input:
+      client_id:
+        type: integer
+        description: 'The client id.'
+    output:
+      description: 'The requested record.'
+      type: object
+
+  update_client:
+    title: Update a client
+    description: >-
+      Change a client's name, status or contact details. Archiving a client
+      does not archive their projects.
+    category: clients
+    request:
+      method: PUT
+      path: /v2/clients/${client_id}
+      body: "${attributes}"
+    input:
+      client_id:
+        type: integer
+        description: 'The client id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  update_client_metadata:
+    title: Update a client's metadata
+    description: >-
+      Attach your own key/value metadata to a client, typically their id in
+      your billing or CRM system.
+    category: clients
+    request:
+      method: PUT
+      path: /v2/clients/${client_id}/update_metadata
+      body: "${attributes}"
+    input:
+      client_id:
+        type: integer
+        description: 'The client id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  list_client_invoices:
+    title: List client invoices
+    description: >-
+      Invoices raised to clients, with their amounts and status. The
+      billing-out side, as opposed to team payments, which is what the
+      organization pays its own people.
+    category: billing
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/client_invoices
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'date[start]': "${date_start}"
+        'date[stop]': "${date_stop}"
+        status: "${status}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      date_start:
+        type: string
+        description: 'First date to cover, YYYY-MM-DD.'
+        optional: true
+      date_stop:
+        type: string
+        description: 'Last date to cover, YYYY-MM-DD.'
+        optional: true
+      status:
+        type: string
+        description: 'Filter by status.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_team_invoices:
+    title: List team invoices
+    description: >-
+      Invoices raised by members for their own work -- the contractor-facing
+      counterpart to client invoices.
+    category: billing
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/team_invoices
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'date[start]': "${date_start}"
+        'date[stop]': "${date_stop}"
+        status: "${status}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      date_start:
+        type: string
+        description: 'First date to cover, YYYY-MM-DD.'
+        optional: true
+      date_stop:
+        type: string
+        description: 'Last date to cover, YYYY-MM-DD.'
+        optional: true
+      status:
+        type: string
+        description: 'Filter by status.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_team_payments:
+    title: List team payments
+    description: >-
+      Payments made to members, with amounts, dates and the period each
+      covers. This is what actually left the organization, as opposed to what
+      was invoiced.
+    category: billing
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/team_payments
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'date[start]': "${date_start}"
+        'date[stop]': "${date_stop}"
+        'user_ids[]': "${user_ids}"
+        status: "${status}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      date_start:
+        type: string
+        description: 'First date to cover, YYYY-MM-DD.'
+        optional: true
+      date_stop:
+        type: string
+        description: 'Last date to cover, YYYY-MM-DD.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      status:
+        type: string
+        description: 'Filter by status.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  get_team_payment:
+    title: Get a team payment
+    description: >-
+      One payment to a member by id, with its amount, status and the work
+      period it covers.
+    category: billing
+    read_only: true
+    request:
+      method: GET
+      path: /v2/team_payments/${team_payment_id}
+    input:
+      team_payment_id:
+        type: integer
+        description: 'The team payment id.'
+    output:
+      description: 'The requested record.'
+      type: object
+
+  list_organization_budget_histories:
+    title: List an organization's budget history
+    description: >-
+      How budgets have changed across the organization over time. A history
+      rather than a current state -- the latest entry is the budget in force
+      now.
+    category: budgets
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/budget_histories
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_project_budget_histories:
+    title: List a project's budget history
+    description: >-
+      How one project's budget has changed over time, including who changed it
+      and when.
+    category: budgets
+    read_only: true
+    request:
+      method: GET
+      path: /v2/projects/${project_id}/budget_histories
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include: "${include}"
+    input:
+      project_id:
+        type: integer
+        description: 'The project id.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_client_budget_histories:
+    title: List a client's budget history
+    description: >-
+      How one client's budget has changed over time, across all of their
+      projects.
+    category: budgets
+    read_only: true
+    request:
+      method: GET
+      path: /v2/clients/${client_id}/budget_histories
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include: "${include}"
+    input:
+      client_id:
+        type: integer
+        description: 'The client id.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  get_budget_history:
+    title: Get a budget history entry
+    description: >-
+      One budget history entry by id -- what the budget became, when, and at
+      whose hand.
+    category: budgets
+    read_only: true
+    request:
+      method: GET
+      path: /v2/budget_histories/${budget_history_id}
+    input:
+      budget_history_id:
+        type: integer
+        description: 'The budget history entry id.'
+    output:
+      description: 'The requested record.'
+      type: object
+
+  list_organization_limit_histories:
+    title: List an organization's limit history
+    description: >-
+      How work-hour limits have changed over time. Limits cap how much time
+      members may track, so this explains why tracking stopped for someone.
+    category: limits
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/limit_histories
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  get_limit_history:
+    title: Get a limit history entry
+    description: >-
+      One work-hour limit history entry by id -- what the limit became, and
+      when it took effect.
+    category: limits
+    read_only: true
+    request:
+      method: GET
+      path: /v2/limit_histories/${limit_history_id}
+    input:
+      limit_history_id:
+        type: integer
+        description: 'The limit history entry id.'
+    output:
+      description: 'The requested record.'
+      type: object
+
+  list_project_member_limits:
+    title: List a project's member limits
+    description: >-
+      Per-member time limits on one project -- how many hours each person may
+      track to it.
+    category: limits
+    read_only: true
+    request:
+      method: GET
+      path: /v2/projects/${project_id}/member_limits
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include: "${include}"
+    input:
+      project_id:
+        type: integer
+        description: 'The project id.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  create_project_member_limit:
+    title: Create a project member limit
+    description: >-
+      Cap how much time one member may track to a project. Once the cap is
+      hit, their tracker stops for that project.
+    category: limits
+    request:
+      method: POST
+      path: /v2/projects/${project_id}/member_limits
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: 'The project id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record as Hubstaff stores it after the call.'
+      type: object
+
+  get_project_member_limit:
+    title: Get a project member limit
+    description: >-
+      One per-member project limit by id, with the cap and who it applies to.
+    category: limits
+    read_only: true
+    request:
+      method: GET
+      path: /v2/projects/${project_id}/member_limits/${member_limit_id}
+    input:
+      project_id:
+        type: integer
+        description: 'The project id.'
+      member_limit_id:
+        type: integer
+        description: 'The member limit id.'
+    output:
+      description: 'The requested record.'
+      type: object
+
+  update_project_member_limit:
+    title: Update a project member limit
+    description: >-
+      Change a per-member time cap on a project. Lowering it below hours
+      already tracked stops that member immediately.
+    category: limits
+    request:
+      method: PUT
+      path: /v2/projects/${project_id}/member_limits/${member_limit_id}
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: 'The project id.'
+      member_limit_id:
+        type: integer
+        description: 'The member limit id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  delete_project_member_limit:
+    title: Delete a project member limit
+    description: >-
+      Remove a per-member time cap from a project, letting that member track
+      without a ceiling again.
+    category: limits
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/projects/${project_id}/member_limits/${member_limit_id}
+    input:
+      project_id:
+        type: integer
+        description: 'The project id.'
+      member_limit_id:
+        type: integer
+        description: 'The member limit id.'
+    output:
+      description: 'Confirmation that the record was deleted.'
+      type: object
+
+  list_organization_rates:
+    title: List an organization's rates
+    description: >-
+      The pay and bill rates configured across the organization -- what drives
+      every currency figure in payments and invoices.
+    category: billing
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/rates
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_time_off_policies:
+    title: List time off policies
+    description: >-
+      The organization's time off policies -- accrual rules, entitlements and
+      who each applies to.
+    category: time-off
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/time_off_policies
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  create_time_off_policy:
+    title: Create a time off policy
+    description: >-
+      Create a time off policy with its accrual and entitlement rules. Members
+      are attached to it separately.
+    category: time-off
+    request:
+      method: POST
+      path: /v2/organizations/${organization_id}/time_off_policies
+      body: "${attributes}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record as Hubstaff stores it after the call.'
+      type: object
+
+  list_user_time_off_policies:
+    title: List members' time off policies
+    description: >-
+      Which policy each member falls under. The join between people and
+      policies, which neither list alone provides.
+    category: time-off
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/time_off_policies/user_policies
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'user_ids[]': "${user_ids}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  get_time_off_policy:
+    title: Get a time off policy
+    description: >-
+      One time off policy by id, with its accrual rules and entitlements.
+    category: time-off
+    read_only: true
+    request:
+      method: GET
+      path: /v2/time_off_policies/${time_off_policy_id}
+    input:
+      time_off_policy_id:
+        type: integer
+        description: 'The time off policy id.'
+    output:
+      description: 'The requested record.'
+      type: object
+
+  update_time_off_policy:
+    title: Update a time off policy
+    description: >-
+      Change a time off policy's rules. Accrual changes can move existing
+      balances, so check list_time_off_balances afterwards.
+    category: time-off
+    request:
+      method: PUT
+      path: /v2/time_off_policies/${time_off_policy_id}
+      body: "${attributes}"
+    input:
+      time_off_policy_id:
+        type: integer
+        description: 'The time off policy id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  archive_time_off_policy:
+    title: Archive a time off policy
+    description: >-
+      Archive a policy so it stops applying to new requests, while leaving
+      history intact. Reversible with restore_time_off_policy.
+    category: time-off
+    request:
+      method: POST
+      path: /v2/time_off_policies/${time_off_policy_id}/archive
+    input:
+      time_off_policy_id:
+        type: integer
+        description: 'The time off policy id.'
+    output:
+      description: 'The record in its new state.'
+      type: object
+
+  restore_time_off_policy:
+    title: Restore a time off policy
+    description: >-
+      Bring an archived time off policy back into force, so it applies to
+      requests again.
+    category: time-off
+    request:
+      method: POST
+      path: /v2/time_off_policies/${time_off_policy_id}/restore
+    input:
+      time_off_policy_id:
+        type: integer
+        description: 'The time off policy id.'
+    output:
+      description: 'The record in its new state.'
+      type: object
+
+  delete_time_off_policy:
+    title: Delete a time off policy
+    description: >-
+      Delete a time off policy outright. Archiving is almost always the right
+      call instead, since deletion loses the policy's history.
+    category: time-off
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/time_off_policies/${time_off_policy_id}
+    input:
+      time_off_policy_id:
+        type: integer
+        description: 'The time off policy id.'
+    output:
+      description: 'Confirmation that the record was deleted.'
+      type: object
+
+  list_time_off_requests:
+    title: List time off requests
+    description: >-
+      Members' time off requests with their dates and approval status -- the
+      queue a manager works through.
+    category: time-off
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/time_off_requests
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'date[start]': "${date_start}"
+        'date[stop]': "${date_stop}"
+        status: "${status}"
+        'user_ids[]': "${user_ids}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      date_start:
+        type: string
+        description: 'First date to cover, YYYY-MM-DD.'
+        optional: true
+      date_stop:
+        type: string
+        description: 'Last date to cover, YYYY-MM-DD.'
+        optional: true
+      status:
+        type: string
+        description: 'Filter by status.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  create_time_off_request:
+    title: Create a time off request
+    description: >-
+      Raise a time off request for a member. It enters the approval queue
+      rather than being granted outright.
+    category: time-off
+    request:
+      method: POST
+      path: /v2/organizations/${organization_id}/time_off_requests
+      body: "${attributes}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record as Hubstaff stores it after the call.'
+      type: object
+
+  get_time_off_request:
+    title: Get a time off request
+    description: >-
+      One time off request by id, with its dates, policy and current status.
+    category: time-off
+    read_only: true
+    request:
+      method: GET
+      path: /v2/time_off_requests/${time_off_request_id}
+    input:
+      time_off_request_id:
+        type: integer
+        description: 'The time off request id.'
+    output:
+      description: 'The requested record.'
+      type: object
+
+  update_time_off_request:
+    title: Update a time off request
+    description: >-
+      Change a pending time off request's dates or details. To approve or deny
+      it, use update_time_off_request_status instead.
+    category: time-off
+    request:
+      method: PUT
+      path: /v2/time_off_requests/${time_off_request_id}
+      body: "${attributes}"
+    input:
+      time_off_request_id:
+        type: integer
+        description: 'The time off request id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  update_time_off_request_status:
+    title: Approve or deny a time off request
+    description: >-
+      Approve or deny a time off request. Approving draws the time down from
+      the member's balance under their policy.
+    category: time-off
+    request:
+      method: PUT
+      path: /v2/time_off_requests/${time_off_request_id}/status
+      body: "${attributes}"
+    input:
+      time_off_request_id:
+        type: integer
+        description: 'The time off request id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  delete_time_off_request:
+    title: Delete a time off request
+    description: >-
+      Delete a time off request. If it had been approved, the time is returned
+      to the member's balance.
+    category: time-off
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/time_off_requests/${time_off_request_id}
+    input:
+      time_off_request_id:
+        type: integer
+        description: 'The time off request id.'
+    output:
+      description: 'Confirmation that the record was deleted.'
+      type: object
+
+  list_time_off_balances:
+    title: List time off balances
+    description: >-
+      How much time off each member has accrued and used under their policy --
+      the number a request is checked against.
+    category: time-off
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/time_off_balances
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'user_ids[]': "${user_ids}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  create_time_off_balance_adjustment:
+    title: Adjust a time off balance
+    description: >-
+      Manually adjust a member's time off balance, for carry-over, corrections
+      or one-off grants outside the accrual rules.
+    category: time-off
+    request:
+      method: POST
+      path: /v2/organizations/${organization_id}/time_off_balances
+      body: "${attributes}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record as Hubstaff stores it after the call.'
+      type: object
+
+  list_holidays:
+    title: List holidays
+    description: >-
+      The organization's holiday calendar. Holidays are not deducted from time
+      off balances, which is why a member's absence can be legitimate without
+      a request.
+    category: time-off
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/holidays
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_overtime_policies:
+    title: List overtime policies
+    description: >-
+      The overtime policies in force -- the thresholds past which tracked time
+      counts as overtime.
+    category: time-off
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/overtime_policies
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  create_overtime_policy:
+    title: Create an overtime policy
+    description: >-
+      Create an overtime policy with its thresholds and multipliers.
+    category: time-off
+    request:
+      method: POST
+      path: /v2/organizations/${organization_id}/overtime_policies
+      body: "${attributes}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record as Hubstaff stores it after the call.'
+      type: object
+
+  get_overtime_policy:
+    title: Get an overtime policy
+    description: >-
+      One overtime policy by id, with its thresholds and how it treats time
+      past them.
+    category: time-off
+    read_only: true
+    request:
+      method: GET
+      path: /v2/overtime_policies/${overtime_policy_id}
+    input:
+      overtime_policy_id:
+        type: integer
+        description: 'The overtime policy id.'
+    output:
+      description: 'The requested record.'
+      type: object
+
+  update_overtime_policy:
+    title: Update an overtime policy
+    description: >-
+      Change an overtime policy's thresholds. This changes how existing
+      tracked time is classified, so pay figures can move.
+    category: time-off
+    request:
+      method: PUT
+      path: /v2/overtime_policies/${overtime_policy_id}
+      body: "${attributes}"
+    input:
+      overtime_policy_id:
+        type: integer
+        description: 'The overtime policy id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  archive_overtime_policy:
+    title: Archive an overtime policy
+    description: >-
+      Archive an overtime policy so it stops applying, while keeping its
+      history. Reversible with restore_overtime_policy.
+    category: time-off
+    request:
+      method: POST
+      path: /v2/overtime_policies/${overtime_policy_id}/archive
+    input:
+      overtime_policy_id:
+        type: integer
+        description: 'The overtime policy id.'
+    output:
+      description: 'The record in its new state.'
+      type: object
+
+  restore_overtime_policy:
+    title: Restore an overtime policy
+    description: >-
+      Bring an archived overtime policy back into force.
+    category: time-off
+    request:
+      method: POST
+      path: /v2/overtime_policies/${overtime_policy_id}/restore
+    input:
+      overtime_policy_id:
+        type: integer
+        description: 'The overtime policy id.'
+    output:
+      description: 'The record in its new state.'
+      type: object
+
+  list_attendance_schedules:
+    title: List attendance schedules
+    description: >-
+      The shift schedules members are expected to work. Attendance shifts are
+      judged against these, so an unexplained lateness usually starts here.
+    category: attendance
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/attendance_schedules
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  create_attendance_schedule:
+    title: Create an attendance schedule
+    description: >-
+      Create a shift schedule setting the hours members are expected to work.
+    category: attendance
+    request:
+      method: POST
+      path: /v2/organizations/${organization_id}/attendance_schedules
+      body: "${attributes}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record as Hubstaff stores it after the call.'
+      type: object
+
+  update_attendance_schedule:
+    title: Update an attendance schedule
+    description: >-
+      Change a shift schedule's expected hours. Past shifts are re-evaluated
+      against the new schedule, so historical attendance can shift.
+    category: attendance
+    request:
+      method: PUT
+      path: /v2/attendance_schedules/${attendance_schedule_id}
+      body: "${attributes}"
+    input:
+      attendance_schedule_id:
+        type: integer
+        description: 'The attendance schedule id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  list_attendance_shifts:
+    title: List attendance shifts
+    description: >-
+      Actual shifts worked against the schedule, with lateness and absence
+      flags -- the attendance record itself.
+    category: attendance
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/attendance_shifts
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'date[start]': "${date_start}"
+        'date[stop]': "${date_stop}"
+        'user_ids[]': "${user_ids}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      date_start:
+        type: string
+        description: 'First date to cover, YYYY-MM-DD.'
+        optional: true
+      date_stop:
+        type: string
+        description: 'Last date to cover, YYYY-MM-DD.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_job_sites:
+    title: List job sites
+    description: >-
+      The geofenced job sites an organization tracks against, with their
+      coordinates and radii.
+    category: job-sites
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/job_sites
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  create_job_site:
+    title: Create a job site
+    description: >-
+      Create a geofenced job site. Rules controlling what its geofence does
+      are attached separately.
+    category: job-sites
+    request:
+      method: POST
+      path: /v2/organizations/${organization_id}/job_sites
+      body: "${attributes}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record as Hubstaff stores it after the call.'
+      type: object
+
+  get_job_site:
+    title: Get a job site
+    description: >-
+      One job site by id, with its location, radius and rules.
+    category: job-sites
+    read_only: true
+    request:
+      method: GET
+      path: /v2/job_sites/${job_site_id}
+    input:
+      job_site_id:
+        type: integer
+        description: 'The job site id.'
+    output:
+      description: 'The requested record.'
+      type: object
+
+  update_job_site:
+    title: Update a job site
+    description: >-
+      Change a job site's name, location or radius. Moving a geofence changes
+      which past visits fall inside it.
+    category: job-sites
+    request:
+      method: PUT
+      path: /v2/job_sites/${job_site_id}
+      body: "${attributes}"
+    input:
+      job_site_id:
+        type: integer
+        description: 'The job site id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  add_job_site_rules:
+    title: Add rules to a job site
+    description: >-
+      Add geofence rules to a job site -- for example auto-starting tracking
+      on arrival -- without disturbing the rules already there.
+    category: job-sites
+    request:
+      method: PUT
+      path: /v2/job_sites/${job_site_id}/add_rules
+      body: "${attributes}"
+    input:
+      job_site_id:
+        type: integer
+        description: 'The job site id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  update_job_site_rules:
+    title: Replace a job site's rules
+    description: >-
+      Replace a job site's geofence rules wholesale. Anything not in the
+      payload is dropped, which is the difference from add_job_site_rules.
+    category: job-sites
+    request:
+      method: PUT
+      path: /v2/job_sites/${job_site_id}/update_rules
+      body: "${attributes}"
+    input:
+      job_site_id:
+        type: integer
+        description: 'The job site id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  remove_job_site_rules:
+    title: Remove rules from a job site
+    description: >-
+      Remove specific geofence rules from a job site, leaving the rest in
+      place.
+    category: job-sites
+    request:
+      method: PUT
+      path: /v2/job_sites/${job_site_id}/remove_rules
+      body: "${attributes}"
+    input:
+      job_site_id:
+        type: integer
+        description: 'The job site id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  list_job_site_visits:
+    title: List job site visits
+    description: >-
+      Recorded arrivals at and departures from job sites, within a date range.
+    category: job-sites
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/job_site_visits
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'date[start]': "${date_start}"
+        'date[stop]': "${date_stop}"
+        'user_ids[]': "${user_ids}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      date_start:
+        type: string
+        description: 'First date to cover, YYYY-MM-DD.'
+        optional: true
+      date_stop:
+        type: string
+        description: 'Last date to cover, YYYY-MM-DD.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_passive_job_site_visits:
+    title: List passive job site visits
+    description: >-
+      Job site visits detected from background location rather than active
+      tracking -- presence Hubstaff inferred without the member starting a
+      timer.
+    category: job-sites
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/passive_job_site_visits
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'date[start]': "${date_start}"
+        'date[stop]': "${date_stop}"
+        'user_ids[]': "${user_ids}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      date_start:
+        type: string
+        description: 'First date to cover, YYYY-MM-DD.'
+        optional: true
+      date_stop:
+        type: string
+        description: 'Last date to cover, YYYY-MM-DD.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_job_types:
+    title: List job types
+    description: >-
+      The job types an organization categorises work by, used to label job
+      sites and visits.
+    category: job-sites
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/job_types
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_organization_locations:
+    title: List an organization's locations
+    description: >-
+      GPS locations recorded while members tracked time. Personal location
+      data -- handle it as such.
+    category: locations
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/locations
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'date[start]': "${date_start}"
+        'date[stop]': "${date_stop}"
+        'user_ids[]': "${user_ids}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      date_start:
+        type: string
+        description: 'First date to cover, YYYY-MM-DD.'
+        optional: true
+      date_stop:
+        type: string
+        description: 'Last date to cover, YYYY-MM-DD.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_project_locations:
+    title: List a project's locations
+    description: >-
+      GPS locations recorded while members tracked time on one project.
+    category: locations
+    read_only: true
+    request:
+      method: GET
+      path: /v2/projects/${project_id}/locations
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'date[start]': "${date_start}"
+        'date[stop]': "${date_stop}"
+        'user_ids[]': "${user_ids}"
+        include: "${include}"
+    input:
+      project_id:
+        type: integer
+        description: 'The project id.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      date_start:
+        type: string
+        description: 'First date to cover, YYYY-MM-DD.'
+        optional: true
+      date_stop:
+        type: string
+        description: 'Last date to cover, YYYY-MM-DD.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_network_locations:
+    title: List network locations
+    description: >-
+      The named networks used to tell office work from remote work, by
+      matching the member's network against these definitions.
+    category: locations
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/insights/network_locations
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  create_network_location:
+    title: Create a network location
+    description: >-
+      Define a network that marks work as being done from a particular place,
+      such as an office.
+    category: locations
+    request:
+      method: POST
+      path: /v2/organizations/${organization_id}/insights/network_locations
+      body: "${attributes}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record as Hubstaff stores it after the call.'
+      type: object
+
+  get_network_location:
+    title: Get a network location
+    description: >-
+      One network location definition by id, with the network it matches on.
+    category: locations
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/insights/network_locations/${location_id}
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      location_id:
+        type: integer
+        description: 'The network location id.'
+    output:
+      description: 'The requested record.'
+      type: object
+
+  update_network_location:
+    title: Update a network location
+    description: >-
+      Change a network location's name or matching rule. Past work is
+      reclassified against the new rule.
+    category: locations
+    request:
+      method: PATCH
+      path: /v2/organizations/${organization_id}/insights/network_locations/${location_id}
+      body: "${attributes}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      location_id:
+        type: integer
+        description: 'The network location id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  delete_network_location:
+    title: Delete a network location
+    description: >-
+      Delete a network location definition. Work previously matched to it
+      becomes unclassified.
+    category: locations
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/organizations/${organization_id}/insights/network_locations/${location_id}
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      location_id:
+        type: integer
+        description: 'The network location id.'
+    output:
+      description: 'Confirmation that the record was deleted.'
+      type: object
+
+  list_invites:
+    title: List invites
+    description: >-
+      Pending and past invitations to join an organization, with their status.
+    category: invites
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/invites
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include: "${include}"
+        status: "${status}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+      status:
+        type: string
+        description: 'Filter by status.'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  create_invite:
+    title: Invite someone to an organization
+    description: >-
+      Invite one person to join an organization at a given role. They consume
+      a seat only once they accept.
+    category: invites
+    request:
+      method: POST
+      path: /v2/organizations/${organization_id}/invites
+      body: "${attributes}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record as Hubstaff stores it after the call.'
+      type: object
+
+  create_bulk_invites:
+    title: Invite several people at once
+    description: >-
+      Send many invitations in one call. Check list_organization_seats first
+      -- a bulk invite that overruns the plan fails as a whole.
+    category: invites
+    request:
+      method: POST
+      path: /v2/organizations/${organization_id}/invites/bulk
+      body: "${attributes}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record as Hubstaff stores it after the call.'
+      type: object
+
+  get_invite:
+    title: Get an invite
+    description: >-
+      One invitation by id, with the address it went to, the role it grants
+      and its status.
+    category: invites
+    read_only: true
+    request:
+      method: GET
+      path: /v2/invites/${invite_id}
+    input:
+      invite_id:
+        type: integer
+        description: 'The invite id.'
+    output:
+      description: 'The requested record.'
+      type: object
+
+  update_invite:
+    title: Update an invite
+    description: >-
+      Change a pending invitation, typically the role it will grant on
+      acceptance.
+    category: invites
+    request:
+      method: PUT
+      path: /v2/invites/${invite_id}
+      body: "${attributes}"
+    input:
+      invite_id:
+        type: integer
+        description: 'The invite id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  delete_invite:
+    title: Revoke an invite
+    description: >-
+      Cancel a pending invitation so its link stops working. Does nothing to
+      someone who has already joined.
+    category: invites
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/invites/${invite_id}
+    input:
+      invite_id:
+        type: integer
+        description: 'The invite id.'
+    output:
+      description: 'Confirmation that the record was deleted.'
+      type: object
+
+  list_invite_links:
+    title: List invite links
+    description: >-
+      Shareable join links for an organization. Unlike an invite, a link is
+      not tied to one address, so anyone holding it can join.
+    category: invites
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/invite_links
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  create_invite_link:
+    title: Create an invite link
+    description: >-
+      Create a shareable join link. Treat the returned url as a credential --
+      whoever holds it can join the organization.
+    category: invites
+    request:
+      method: POST
+      path: /v2/organizations/${organization_id}/invite_links
+      body: "${attributes}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record as Hubstaff stores it after the call.'
+      type: object
+
+  get_invite_link:
+    title: Get an invite link
+    description: >-
+      One invite link by id, with its settings and how many times it has been
+      used.
+    category: invites
+    read_only: true
+    request:
+      method: GET
+      path: /v2/invite_links/${invite_link_id}
+    input:
+      invite_link_id:
+        type: integer
+        description: 'The invite link id.'
+    output:
+      description: 'The requested record.'
+      type: object
+
+  update_invite_link:
+    title: Update an invite link
+    description: >-
+      Change an invite link's role or expiry. Shortening the expiry is the
+      gentler alternative to deleting a link that has been shared too widely.
+    category: invites
+    request:
+      method: PUT
+      path: /v2/invite_links/${invite_link_id}
+      body: "${attributes}"
+    input:
+      invite_link_id:
+        type: integer
+        description: 'The invite link id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record after the update.'
+      type: object
+
+  delete_invite_link:
+    title: Delete an invite link
+    description: >-
+      Delete a shareable join link so it stops working. The right response to
+      a link that has leaked.
+    category: invites
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/invite_links/${invite_link_id}
+    input:
+      invite_link_id:
+        type: integer
+        description: 'The invite link id.'
+    output:
+      description: 'Confirmation that the record was deleted.'
+      type: object
+
+  list_organization_integrations:
+    title: List an organization's integrations
+    description: >-
+      The third-party integrations connected to an organization. Their ids are
+      what the task and link tools below take.
+    category: integrations
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/integrations
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_integration_project_links:
+    title: List an integration's project links
+    description: >-
+      How one integration's remote projects map onto Hubstaff projects -- the
+      join that makes synced tasks land in the right place.
+    category: integrations
+    read_only: true
+    request:
+      method: GET
+      path: /v2/integrations/${integration_id}/project_links
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include: "${include}"
+    input:
+      integration_id:
+        type: integer
+        description: 'The integration id, from list_organization_integrations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_integration_user_links:
+    title: List an integration's user links
+    description: >-
+      How one integration's remote users map onto Hubstaff members. An
+      unmapped user is why their synced tasks arrive unassigned.
+    category: integrations
+    read_only: true
+    request:
+      method: GET
+      path: /v2/integrations/${integration_id}/user_links
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include: "${include}"
+    input:
+      integration_id:
+        type: integer
+        description: 'The integration id, from list_organization_integrations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_project_integration_links:
+    title: List a project's integration links
+    description: >-
+      Which integrations one project is linked to, from the project's side
+      rather than the integration's.
+    category: integrations
+    read_only: true
+    request:
+      method: GET
+      path: /v2/projects/${project_id}/integration_links
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        include: "${include}"
+    input:
+      project_id:
+        type: integer
+        description: 'The project id.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  list_audit_log_entries:
+    title: List audit log entries
+    description: >-
+      Who changed what in the organization's settings, and when. The record to
+      reach for when a setting changed and nobody remembers doing it.
+    category: audit
+    read_only: true
+    request:
+      method: GET
+      path: /v2/organizations/${organization_id}/audit_log_entries
+      query:
+        page_start_id: "${page_start_id}"
+        page_limit: "${page_limit}"
+        'date[start]': "${date_start}"
+        'date[stop]': "${date_stop}"
+        'user_ids[]': "${user_ids}"
+        include: "${include}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      page_start_id:
+        type: integer
+        description: 'Id to start the page from, taken from the previous response''s pagination.next_page_start_id.'
+        optional: true
+      page_limit:
+        type: integer
+        description: 'How many records per page.'
+        optional: true
+      date_start:
+        type: string
+        description: 'First date to cover, YYYY-MM-DD.'
+        optional: true
+      date_stop:
+        type: string
+        description: 'Last date to cover, YYYY-MM-DD.'
+        optional: true
+      user_ids:
+        type: array
+        description: 'Only these user ids.'
+        optional: true
+        items: {type: integer}
+      include:
+        type: string
+        description: 'Comma-separated related records to embed, e.g. "users,projects".'
+        optional: true
+    output:
+      description: 'A page of matching records, with a `pagination` object carrying `next_page_start_id` when more remain.'
+      type: object
+
+  create_organization_webhook:
+    title: Create an organization webhook
+    description: >-
+      Subscribe a url to an organization's events. Newly created webhooks may
+      need activating before they deliver.
+    category: webhooks
+    request:
+      method: POST
+      path: /v2/organizations/${organization_id}/webhooks
+      body: "${attributes}"
+    input:
+      organization_id:
+        type: integer
+        description: 'The organization id, from list_organizations.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record as Hubstaff stores it after the call.'
+      type: object
+
+  create_project_webhook:
+    title: Create a project webhook
+    description: >-
+      Subscribe a url to one project's events, rather than the whole
+      organization's.
+    category: webhooks
+    request:
+      method: POST
+      path: /v2/projects/${project_id}/webhooks
+      body: "${attributes}"
+    input:
+      project_id:
+        type: integer
+        description: 'The project id.'
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record as Hubstaff stores it after the call.'
+      type: object
+
+  create_user_webhook:
+    title: Create a webhook for the current user
+    description: >-
+      Subscribe a url to events for the authenticated user only -- the
+      narrowest webhook scope Hubstaff offers.
+    category: webhooks
+    request:
+      method: POST
+      path: /v2/users/me/webhooks
+      body: "${attributes}"
+    input:
+      attributes:
+        type: object
+        description: 'The request payload, as flat top-level fields matching the resource''s documented attributes. See the endpoint''s reference page under https://developer.hubstaff.com/ for the exact fields.'
+    output:
+      description: 'The record as Hubstaff stores it after the call.'
+      type: object
+
+  get_webhook:
+    title: Get a webhook
+    description: >-
+      One webhook by id, with its target url, the events it listens for and
+      whether it is active.
+    category: webhooks
+    read_only: true
+    request:
+      method: GET
+      path: /v2/webhooks/${webhook_id}
+    input:
+      webhook_id:
+        type: integer
+        description: 'The webhook id.'
+    output:
+      description: 'The requested record.'
+      type: object
+
+  activate_webhook:
+    title: Activate a webhook
+    description: >-
+      Activate a webhook so it starts delivering. Events that occurred while
+      it was inactive are not replayed.
+    category: webhooks
+    request:
+      method: POST
+      path: /v2/webhooks/${webhook_id}/activate
+    input:
+      webhook_id:
+        type: integer
+        description: 'The webhook id.'
+    output:
+      description: 'The record in its new state.'
+      type: object
+
+  delete_webhook:
+    title: Delete a webhook
+    description: >-
+      Delete a webhook subscription. Deliveries stop immediately and nothing
+      is queued for later.
+    category: webhooks
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/webhooks/${webhook_id}
+    input:
+      webhook_id:
+        type: integer
+        description: 'The webhook id.'
+    output:
+      description: 'Confirmation that the record was deleted.'
+      type: object

@@ -53,6 +53,22 @@ def test_now_and_random_helpers() -> None:
     assert len(interpolate("${random}", {})) == 36
 
 
+def test_rfc_1123_dates_use_english_names_whatever_the_locale() -> None:
+    """Azure's `x-ms-date` and friends want "Mon, 04 Mar 2024 05:06:07 GMT".
+
+    `MMM` used to render as "03M": the token table rewrote `MM` first, leaving a
+    stray `M`. Day and month names are spelled out rather than taken from
+    strftime's `%a`/`%b`, which follow the process locale.
+    """
+    stamp = {"now": "2024-03-04T05:06:07Z"}
+    assert interpolate("${now:ddd, DD MMM YYYY HH:mm:ss} GMT", stamp) == (
+        "Mon, 04 Mar 2024 05:06:07 GMT"
+    )
+    assert interpolate("${now:MMM}", stamp) == "Mar"
+    # The tokens it used to shadow still work.
+    assert interpolate("${now:YYYY-MM-DD}", stamp) == "2024-03-04"
+
+
 def test_strip_helpers() -> None:
     assert strip_credential("${credentials.clientId}") == "${clientId}"
     assert strip_step_response("${step1.token}") == "${token}"

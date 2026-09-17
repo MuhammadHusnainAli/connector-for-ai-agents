@@ -1,0 +1,1693 @@
+# Azure App Service tools -- Microsoft.Web in Azure Resource Manager.
+#
+# The control plane for web apps, function apps and the App Service plans they
+# run on. It is not the running application: there are no request logs or
+# console here, though get_publishing_profile_xml and list_publishing_credentials
+# return the credentials the deployment and Kudu endpoints want.
+#
+# The connection authenticates as a service principal (client credentials
+# against Microsoft Entra ID, scope https://management.azure.com/.default) and
+# carries the tenant and subscription, so the subscription is filled in from the
+# connection rather than passed per call.
+#
+# Microsoft.Web has three conventions that surprise people:
+#
+#   * Reading secrets is a POST. App settings, connection strings, publishing
+#     credentials and function keys all come back from POST .../list endpoints,
+#     because they return secrets and ARM does not put those in a GET response.
+#     That is why list_app_settings is not marked read-only.
+#   * Writing app settings is a full replace. update_app_settings PUTs the
+#     whole collection -- read it with list_app_settings, merge your change in,
+#     and send everything back, or the settings you omit are deleted.
+#   * A deployment slot is a site in its own right. Every site tool here has a
+#     slot equivalent in the API under /slots/{slot}; this pack exposes the
+#     production site plus the slot listing and the swap, which is what
+#     automation actually needs.
+#
+# Docs: https://learn.microsoft.com/rest/api/appservice/
+
+connector_id: azure-app-service
+display_name: Azure App Service
+docs_url: https://learn.microsoft.com/rest/api/appservice/
+
+tools:
+
+  list_web_apps:
+    title: List web apps in the subscription
+    description: >-
+      List every App Service site in the subscription -- web apps, function
+      apps and containerised apps alike -- with each one's default hostname,
+      state, App Service plan and runtime. The place to start when the resource
+      group is not already known.
+    category: apps
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/providers/Microsoft.Web/sites
+      query:
+        api-version: "${api_version}"
+    input:
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: Every site in the subscription.
+      type: array
+      items: {type: object, description: "id, name, kind, location and properties (state, defaultHostName, serverFarmId, httpsOnly, enabled)."}
+      response_path: value
+
+  list_web_apps_by_resource_group:
+    title: List web apps in a resource group
+    description: >-
+      List the App Service sites in one resource group with their state,
+      hostnames and plans. Cheaper and more precise than scanning the whole
+      subscription when the group is known.
+    category: apps
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Name of the resource group.
+        example: web-rg
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The sites in the resource group.
+      type: array
+      items: {type: object, description: "id, name, kind and properties."}
+      response_path: value
+
+  get_web_app:
+    title: Get a web app
+    description: >-
+      Read one site's ARM resource -- its state (Running or Stopped), default
+      and custom hostnames, App Service plan, outbound IP addresses, HTTPS-only
+      flag, identity and availability state. Runtime settings such as the stack
+      and always-on live in get_configuration, not here.
+    category: apps
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the site is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the web app or function app.
+        example: contoso-web
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The site resource.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        kind: {type: string, description: "app, functionapp, app,linux and so on."}
+        identity: {type: object}
+        properties: {type: object, description: "state, defaultHostName, hostNames, serverFarmId, httpsOnly, outboundIpAddresses, siteConfig."}
+
+  create_or_update_web_app:
+    title: Create or replace a web app
+    description: >-
+      Create a site, or replace an existing one's definition. A full PUT --
+      read the site with get_web_app, amend it, and send it back, or properties
+      you omit are reset. server_farm_id points at the App Service plan the site
+      runs on and is required on create; kind decides whether this is a web app
+      ("app"), a Linux web app ("app,linux") or a function app ("functionapp").
+    category: apps
+    request:
+      method: PUT
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}
+      query:
+        api-version: "${api_version}"
+      body:
+        location: "${location}"
+        kind: "${kind}"
+        tags: "${tags}"
+        identity: "${identity}"
+        properties:
+          serverFarmId: "${server_farm_id}"
+          siteConfig: "${site_config}"
+          httpsOnly: "${https_only}"
+          enabled: "${enabled}"
+          clientAffinityEnabled: "${client_affinity_enabled}"
+          virtualNetworkSubnetId: "${virtual_network_subnet_id}"
+          publicNetworkAccess: "${public_network_access}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group to create the site in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the site -- becomes the first label of its azurewebsites.net hostname, so it must be globally unique.
+        example: contoso-web
+      location:
+        type: string
+        description: Azure region for the site. Must match its App Service plan's region.
+        example: westeurope
+      server_farm_id:
+        type: string
+        description: Full ARM id of the App Service plan the site runs on.
+        example: /subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/web-rg/providers/Microsoft.Web/serverfarms/contoso-plan
+      kind:
+        type: string
+        description: 'Site kind -- "app", "app,linux", "functionapp", "functionapp,linux".'
+        optional: true
+        example: app,linux
+      site_config:
+        type: object
+        description: >-
+          Runtime configuration -- linuxFxVersion or netFrameworkVersion,
+          alwaysOn, appSettings, http20Enabled, minTlsVersion, healthCheckPath.
+        optional: true
+        example: {linuxFxVersion: "PYTHON|3.12", alwaysOn: true}
+      https_only:
+        type: boolean
+        description: Redirect every HTTP request to HTTPS.
+        optional: true
+      enabled:
+        type: boolean
+        description: Whether the site serves traffic at all.
+        optional: true
+      client_affinity_enabled:
+        type: boolean
+        description: Pin a client to one instance with the ARR affinity cookie.
+        optional: true
+      virtual_network_subnet_id:
+        type: string
+        description: ARM id of the subnet to integrate the site's outbound traffic with.
+        optional: true
+      public_network_access:
+        type: string
+        description: Whether the site answers on its public hostname at all.
+        optional: true
+        enum: [Enabled, Disabled]
+      identity:
+        type: object
+        description: 'Managed identity for the site, e.g. {"type": "SystemAssigned"}.'
+        optional: true
+      tags:
+        type: object
+        description: Resource tags as key/value pairs.
+        optional: true
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The site resource as stored.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        properties: {type: object}
+
+  update_web_app:
+    title: Update a web app
+    description: >-
+      Merge changes into an existing site -- retag it, move it to another App
+      Service plan, toggle HTTPS-only or enabled. Unlike the PUT form this
+      leaves untouched properties alone, which makes it the right tool for a
+      live site.
+    category: apps
+    request:
+      method: PATCH
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}
+      query:
+        api-version: "${api_version}"
+      body:
+        tags: "${tags}"
+        properties:
+          serverFarmId: "${server_farm_id}"
+          httpsOnly: "${https_only}"
+          enabled: "${enabled}"
+          clientAffinityEnabled: "${client_affinity_enabled}"
+          siteConfig: "${site_config}"
+          publicNetworkAccess: "${public_network_access}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the site is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the site to update.
+        example: contoso-web
+      server_farm_id:
+        type: string
+        description: ARM id of a different App Service plan to move the site onto.
+        optional: true
+      https_only:
+        type: boolean
+        description: Redirect every HTTP request to HTTPS.
+        optional: true
+      enabled:
+        type: boolean
+        description: Whether the site serves traffic at all.
+        optional: true
+      client_affinity_enabled:
+        type: boolean
+        description: Pin a client to one instance with the ARR affinity cookie.
+        optional: true
+      site_config:
+        type: object
+        description: Runtime configuration changes to merge in.
+        optional: true
+      public_network_access:
+        type: string
+        description: Whether the site answers on its public hostname.
+        optional: true
+        enum: [Enabled, Disabled]
+      tags:
+        type: object
+        description: Replacement resource tags as key/value pairs.
+        optional: true
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The site resource after the merge.
+      type: object
+      properties:
+        id: {type: string}
+        properties: {type: object}
+
+  delete_web_app:
+    title: Delete a web app
+    description: >-
+      Delete a site along with its slots, configuration and deployment history.
+      Pass delete_empty_server_farm to also remove its App Service plan if
+      nothing else is left on it. Not recoverable -- confirm the name with
+      get_web_app first.
+    category: apps
+    destructive: true
+    request:
+      method: DELETE
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}
+      query:
+        api-version: "${api_version}"
+        deleteMetrics: "${delete_metrics}"
+        deleteEmptyServerFarm: "${delete_empty_server_farm}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the site is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the site to delete.
+        example: contoso-web
+      delete_metrics:
+        type: boolean
+        description: Also delete the site's historical metrics.
+        optional: true
+      delete_empty_server_farm:
+        type: boolean
+        description: Also delete the App Service plan if this was the last site on it.
+        optional: true
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: Empty -- 200 when deleted, 204 when the site was already gone.
+      type: object
+
+  start_web_app:
+    title: Start a web app
+    description: >-
+      Start a stopped site so it serves traffic again. Takes effect within
+      seconds; the first request afterwards still pays cold-start unless
+      always-on is enabled in the site configuration.
+    category: apps
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/start
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the site is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the site to start.
+        example: contoso-web
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: Empty on success -- the service answers 204 No Content.
+      type: object
+
+  stop_web_app:
+    title: Stop a web app
+    description: >-
+      Stop a site so it serves nothing and returns 403 to callers. The App
+      Service plan keeps charging -- billing is per plan, not per site -- so
+      this takes an app offline rather than saving money.
+    category: apps
+    destructive: true
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/stop
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the site is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the site to stop.
+        example: contoso-web
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: Empty on success -- the service answers 204 No Content.
+      type: object
+
+  restart_web_app:
+    title: Restart a web app
+    description: >-
+      Recycle the site's worker processes. Pass soft_restart to reload
+      configuration without dropping in-flight requests, or synchronous to have
+      the call wait until the restart has finished rather than returning at
+      once.
+    category: apps
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/restart
+      query:
+        api-version: "${api_version}"
+        softRestart: "${soft_restart}"
+        synchronous: "${synchronous}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the site is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the site to restart.
+        example: contoso-web
+      soft_restart:
+        type: boolean
+        description: Reload configuration without interrupting in-flight requests.
+        optional: true
+      synchronous:
+        type: boolean
+        description: Wait for the restart to complete before returning.
+        optional: true
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: Empty on success -- the service answers 204 No Content.
+      type: object
+
+  list_app_settings:
+    title: Get a web app's app settings
+    description: >-
+      Return the site's application settings -- the environment variables the
+      app reads at runtime, including connection secrets and Key Vault
+      references. A POST because the values are secrets. Read this before
+      update_app_settings, which replaces the whole collection.
+    category: configuration
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/config/appsettings/list
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the site is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the site.
+        example: contoso-web
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The site's app settings as a name/value map.
+      type: object
+      properties:
+        properties: {type: object, description: "Every app setting, keyed by name."}
+
+  update_app_settings:
+    title: Replace a web app's app settings
+    description: >-
+      Write the site's application settings. This replaces the entire
+      collection, so any setting missing from properties is deleted -- always
+      call list_app_settings first, merge your change into what comes back, and
+      send the whole map. Changing settings restarts the app.
+    category: configuration
+    request:
+      method: PUT
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/config/appsettings
+      query:
+        api-version: "${api_version}"
+      body:
+        properties: "${settings}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the site is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the site.
+        example: contoso-web
+      settings:
+        type: object
+        description: >-
+          The complete set of app settings as a name/value map. Anything absent
+          is removed, so send everything list_app_settings returned plus your
+          change.
+        example: {WEBSITE_RUN_FROM_PACKAGE: "1", API_BASE_URL: https://api.example.com}
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The app settings as stored after the write.
+      type: object
+      properties:
+        properties: {type: object}
+
+  list_connection_strings:
+    title: Get a web app's connection strings
+    description: >-
+      Return the site's connection strings with their values and types
+      (SQLAzure, Custom, PostgreSQL and so on). A POST because the values are
+      secrets. These are separate from app settings and are surfaced to the app
+      with a type-specific prefix.
+    category: configuration
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/config/connectionstrings/list
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the site is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the site.
+        example: contoso-web
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The site's connection strings, keyed by name.
+      type: object
+      properties:
+        properties: {type: object, description: "Each entry with value and type."}
+
+  update_connection_strings:
+    title: Replace a web app's connection strings
+    description: >-
+      Write the site's connection strings. Like app settings this replaces the
+      whole collection, so read list_connection_strings first and send
+      everything back. Each entry is an object with value and type.
+    category: configuration
+    request:
+      method: PUT
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/config/connectionstrings
+      query:
+        api-version: "${api_version}"
+      body:
+        properties: "${connection_strings}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the site is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the site.
+        example: contoso-web
+      connection_strings:
+        type: object
+        description: >-
+          The complete set of connection strings, keyed by name, each an object
+          with value and type. Anything absent is removed.
+        example: {Primary: {value: "Server=...;Database=...", type: SQLAzure}}
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The connection strings as stored after the write.
+      type: object
+      properties:
+        properties: {type: object}
+
+  get_configuration:
+    title: Get a web app's runtime configuration
+    description: >-
+      Read the site's runtime settings -- the language stack (linuxFxVersion,
+      netFrameworkVersion), always-on, the startup command, health check path,
+      minimum TLS version, HTTP/2, CORS rules, IP restrictions and worker
+      count. This is the configuration that decides how the app runs, as
+      opposed to the ARM resource that decides where it lives.
+    category: configuration
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/config/web
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the site is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the site.
+        example: contoso-web
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The site's runtime configuration.
+      type: object
+      properties:
+        properties: {type: object, description: "linuxFxVersion, alwaysOn, appCommandLine, healthCheckPath, minTlsVersion, http20Enabled, cors, ipSecurityRestrictions, numberOfWorkers."}
+
+  update_configuration:
+    title: Update a web app's runtime configuration
+    description: >-
+      Merge changes into the site's runtime settings -- change the language
+      stack, turn always-on on, set a startup command or a health check path,
+      tighten the minimum TLS version. A PATCH, so untouched settings are left
+      alone. Most changes restart the app.
+    category: configuration
+    request:
+      method: PATCH
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/config/web
+      query:
+        api-version: "${api_version}"
+      body:
+        properties: "${configuration}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the site is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the site.
+        example: contoso-web
+      configuration:
+        type: object
+        description: >-
+          Runtime settings to merge in, e.g. {"alwaysOn": true,
+          "linuxFxVersion": "PYTHON|3.12", "healthCheckPath": "/healthz"}.
+        example: {alwaysOn: true, healthCheckPath: /healthz}
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The runtime configuration after the merge.
+      type: object
+      properties:
+        properties: {type: object}
+
+  get_diagnostic_logs_configuration:
+    title: Get a web app's logging configuration
+    description: >-
+      Read where and at what level the site writes application logs, HTTP logs
+      and failed-request traces -- filesystem, blob storage, or off. The first
+      thing to check when logs are not appearing.
+    category: configuration
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/config/logs
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the site is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the site.
+        example: contoso-web
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The site's logging configuration.
+      type: object
+      properties:
+        properties: {type: object, description: "applicationLogs, httpLogs, failedRequestsTracing and detailedErrorMessages."}
+
+  update_diagnostic_logs_configuration:
+    title: Update a web app's logging configuration
+    description: >-
+      Turn application logging, HTTP logging or failed-request tracing on or
+      off and choose where they go. Filesystem application logging switches
+      itself off after twelve hours by design, so use blob storage for anything
+      you need to keep.
+    category: configuration
+    request:
+      method: PUT
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/config/logs
+      query:
+        api-version: "${api_version}"
+      body:
+        properties: "${logs_configuration}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the site is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the site.
+        example: contoso-web
+      logs_configuration:
+        type: object
+        description: >-
+          Logging settings, with applicationLogs, httpLogs,
+          failedRequestsTracing and detailedErrorMessages blocks.
+        example: {applicationLogs: {fileSystem: {level: Information}}, httpLogs: {fileSystem: {enabled: true, retentionInMb: 35}}}
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The logging configuration as stored.
+      type: object
+      properties:
+        properties: {type: object}
+
+  list_publishing_credentials:
+    title: Get a web app's publishing credentials
+    description: >-
+      Return the site's SCM (Kudu) username and password -- the credentials for
+      git deployment, the Kudu REST API and the advanced tools console. A POST
+      because it returns a secret. These are disabled on sites where basic
+      publishing credentials have been turned off.
+    category: deployment
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/config/publishingcredentials/list
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the site is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the site.
+        example: contoso-web
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The site's SCM credentials and git deployment url.
+      type: object
+      properties:
+        name: {type: string}
+        properties: {type: object, description: "publishingUserName, publishingPassword and scmUri."}
+
+  get_publishing_profile_xml:
+    title: Get a web app's publish profile
+    description: >-
+      Return the site's publish profile as XML -- the file Visual Studio, the
+      Azure CLI and the GitHub Actions deploy action all consume. It contains
+      the deployment credentials in clear text, so treat the response as a
+      secret.
+    category: deployment
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/publishxml
+      query:
+        api-version: "${api_version}"
+      body:
+        format: "${format}"
+        includeDisasterRecoveryEndpoints: "${include_disaster_recovery_endpoints}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the site is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the site.
+        example: contoso-web
+      format:
+        type: string
+        description: Profile format to return.
+        optional: true
+        enum: [FileZilla3, WebDeploy, Ftp]
+      include_disaster_recovery_endpoints:
+        type: boolean
+        description: Include the secondary region endpoints in the profile.
+        optional: true
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The publish profile, as an XML document containing deployment credentials.
+      type: string
+
+  list_deployments:
+    title: List a web app's deployments
+    description: >-
+      List the site's deployment history, newest first -- each with its id,
+      status, author, deployment message and whether it is the currently active
+      one. The audit trail for "what is actually running".
+    category: deployment
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/deployments
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the site is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the site.
+        example: contoso-web
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The site's deployments, newest first.
+      type: array
+      items: {type: object, description: "id, name and properties (status, message, author, deployer, active, start_time, end_time)."}
+      response_path: value
+
+  get_deployment:
+    title: Get one deployment
+    description: >-
+      Read a single deployment by id, with its status, the commit message and
+      author, and the timestamps for when it started and finished. Use it to
+      confirm which build is live after a release.
+    category: deployment
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/deployments/${deployment_id}
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the site is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the site.
+        example: contoso-web
+      deployment_id:
+        type: string
+        description: Id of the deployment, from list_deployments.
+        example: 4a2f1c8e9b
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The deployment record.
+      type: object
+      properties:
+        id: {type: string}
+        properties: {type: object}
+
+  list_slots:
+    title: List a web app's deployment slots
+    description: >-
+      List the site's deployment slots -- the parallel copies of the app used
+      for staging -- each with its own hostname, state and configuration. Slots
+      are what make a zero-downtime release possible via swap_slot.
+    category: slots
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/slots
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the site is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the production site.
+        example: contoso-web
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The site's deployment slots.
+      type: array
+      items: {type: object, description: "id, name (app/slot) and properties (state, defaultHostName, serverFarmId)."}
+      response_path: value
+
+  get_slot:
+    title: Get a deployment slot
+    description: >-
+      Read one deployment slot as a site resource in its own right -- its
+      hostname, state, plan and configuration. Use it to confirm a staging slot
+      is healthy before swapping it into production.
+    category: slots
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/slots/${slot_name}
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the site is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the production site.
+        example: contoso-web
+      slot_name:
+        type: string
+        description: Name of the slot.
+        example: staging
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The slot as a site resource.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        properties: {type: object}
+
+  swap_slot:
+    title: Swap a deployment slot into production
+    description: >-
+      Swap a slot with production, which is how App Service does a zero-downtime
+      release: the staging slot is warmed up, then the routing is exchanged.
+      Pass preserve_vnet to keep each site's virtual network settings in place
+      rather than swapping those too. Slot-sticky settings stay where they are;
+      everything else moves.
+    category: slots
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/slotsswap
+      query:
+        api-version: "${api_version}"
+      body:
+        targetSlot: "${target_slot}"
+        preserveVnet: "${preserve_vnet}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the site is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the production site.
+        example: contoso-web
+      target_slot:
+        type: string
+        description: Slot to swap into production, e.g. staging.
+        example: staging
+      preserve_vnet:
+        type: boolean
+        description: Keep each site's virtual network configuration where it is instead of swapping it.
+        optional: true
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: Empty; the swap runs asynchronously and reports through the location header.
+      type: object
+
+  list_functions:
+    title: List a function app's functions
+    description: >-
+      List the functions in a function app, each with its trigger bindings,
+      script path, invoke url template and whether it is disabled. Returns an
+      empty list on an ordinary web app.
+    category: functions
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/functions
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the function app is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the function app.
+        example: contoso-functions
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The functions in the app.
+      type: array
+      items: {type: object, description: "id, name and properties (config with bindings, script_href, invoke_url_template, isDisabled)."}
+      response_path: value
+
+  get_function:
+    title: Get one function
+    description: >-
+      Read a single function's definition -- its bindings, script location,
+      invoke url template and disabled state. Use it to work out what a
+      function is triggered by before calling it.
+    category: functions
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/functions/${function_name}
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the function app is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the function app.
+        example: contoso-functions
+      function_name:
+        type: string
+        description: Name of the function.
+        example: HttpTrigger1
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The function's definition.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        properties: {type: object}
+
+  list_function_keys:
+    title: Get a function's access keys
+    description: >-
+      Return the keys that authorise calls to one HTTP-triggered function.
+      These go in the x-functions-key header or the code query parameter. A POST
+      because the values are secrets.
+    category: functions
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/functions/${function_name}/listkeys
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the function app is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the function app.
+        example: contoso-functions
+      function_name:
+        type: string
+        description: Name of the function.
+        example: HttpTrigger1
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The function's keys, keyed by name.
+      type: object
+      properties:
+        default: {type: string, description: "The function's default access key."}
+
+  list_host_keys:
+    title: Get a function app's host keys
+    description: >-
+      Return the function app's host-level keys -- the master key, which can
+      invoke anything and manage the app, and the default host key, which works
+      across every function. The master key is effectively an admin credential,
+      so handle the response accordingly.
+    category: functions
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/host/default/listkeys
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the function app is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the function app.
+        example: contoso-functions
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The app's host keys.
+      type: object
+      properties:
+        masterKey: {type: string, description: "Admin-level key; can invoke and manage everything."}
+        functionKeys: {type: object}
+        systemKeys: {type: object}
+
+  list_processes:
+    title: List a web app's running processes
+    description: >-
+      List the worker processes running on the site, each with its process id,
+      name, memory and CPU usage and start time. The closest thing this API has
+      to a live look at what the app is doing.
+    category: diagnostics
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/processes
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the site is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the site.
+        example: contoso-web
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The site's running processes.
+      type: array
+      items: {type: object, description: "id, name and properties (start_time, total_cpu_time, private_memory, thread_count)."}
+      response_path: value
+
+  list_custom_hostname_bindings:
+    title: List a web app's hostname bindings
+    description: >-
+      List the hostnames bound to the site, each with its SSL state and the
+      certificate thumbprint serving it. Where to look when a custom domain is
+      serving the wrong certificate or none at all.
+    category: networking
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/hostNameBindings
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the site is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the site.
+        example: contoso-web
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The hostnames bound to the site.
+      type: array
+      items: {type: object, description: "name and properties (hostNameType, sslState, thumbprint, customHostNameDnsRecordType)."}
+      response_path: value
+
+  get_source_control:
+    title: Get a web app's source control configuration
+    description: >-
+      Read where the site deploys from -- the repository url, branch, and
+      whether continuous deployment and the App Service build service are
+      enabled. Empty on a site deployed by zip push or container image instead.
+    category: deployment
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/sourcecontrols/web
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the site is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the site.
+        example: contoso-web
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The site's source control configuration.
+      type: object
+      properties:
+        properties: {type: object, description: "repoUrl, branch, isManualIntegration, deploymentRollbackEnabled, isGitHubAction."}
+
+  update_source_control:
+    title: Connect a web app to a repository
+    description: >-
+      Point the site at a git repository and branch for deployment. With
+      is_manual_integration false, App Service sets up a webhook so every push
+      to the branch deploys -- which means this call can start shipping code
+      automatically.
+    category: deployment
+    request:
+      method: PUT
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/sourcecontrols/web
+      query:
+        api-version: "${api_version}"
+      body:
+        properties:
+          repoUrl: "${repo_url}"
+          branch: "${branch}"
+          isManualIntegration: "${is_manual_integration}"
+          deploymentRollbackEnabled: "${deployment_rollback_enabled}"
+          isGitHubAction: "${is_github_action}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the site is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the site.
+        example: contoso-web
+      repo_url:
+        type: string
+        description: Repository url to deploy from.
+        format: uri
+        example: https://github.com/contoso/web
+      branch:
+        type: string
+        description: Branch to deploy. Defaults to the repository's default branch.
+        optional: true
+        example: main
+      is_manual_integration:
+        type: boolean
+        description: True to require a manual sync; false to deploy on every push via a webhook.
+        optional: true
+      deployment_rollback_enabled:
+        type: boolean
+        description: Allow rolling back to a previous deployment.
+        optional: true
+      is_github_action:
+        type: boolean
+        description: Set when a GitHub Actions workflow, not App Service, does the building.
+        optional: true
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The source control configuration as stored.
+      type: object
+      properties:
+        properties: {type: object}
+
+  sync_repository:
+    title: Trigger a deployment from the repository
+    description: >-
+      Pull and deploy the configured branch now. This is the manual trigger for
+      a site set up with is_manual_integration -- it deploys whatever the branch
+      currently holds, so it ships code.
+    category: deployment
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/sync
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the site is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the site to deploy.
+        example: contoso-web
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: Empty on success -- the service answers 204 No Content.
+      type: object
+
+  list_backups:
+    title: List a web app's backups
+    description: >-
+      List the backups taken of the site, each with its status, size, the blob
+      it was written to and which databases it included. Read this before a
+      restore to find the backup id you want.
+    category: backups
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/sites/${app_name}/backups
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the site is in.
+        example: web-rg
+      app_name:
+        type: string
+        description: Name of the site.
+        example: contoso-web
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The site's backups.
+      type: array
+      items: {type: object, description: "id, name and properties (status, sizeInBytes, created, storageAccountUrl, databases)."}
+      response_path: value
+
+  list_app_service_plans:
+    title: List App Service plans
+    description: >-
+      List the App Service plans in the subscription with each one's SKU,
+      worker size, instance count, operating system and how many sites it
+      hosts. Plans are what App Service actually bills for.
+    category: plans
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/providers/Microsoft.Web/serverfarms
+      query:
+        api-version: "${api_version}"
+        detailed: "${detailed}"
+    input:
+      detailed:
+        type: boolean
+        description: Include each plan's site count and other computed properties.
+        optional: true
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: Every App Service plan in the subscription.
+      type: array
+      items: {type: object, description: "id, name, location, sku and properties (numberOfSites, status, reserved, maximumNumberOfWorkers)."}
+      response_path: value
+
+  get_app_service_plan:
+    title: Get an App Service plan
+    description: >-
+      Read one plan's SKU and tier, instance count, operating system
+      (reserved true means Linux), zone redundancy and how many sites run on
+      it. Check this before adding a site, since the plan sets the resource
+      ceiling every site on it shares.
+    category: plans
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/serverfarms/${plan_name}
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the plan is in.
+        example: web-rg
+      plan_name:
+        type: string
+        description: Name of the App Service plan.
+        example: contoso-plan
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The App Service plan resource.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        sku: {type: object, description: "name, tier, size, family and capacity."}
+        properties: {type: object, description: "numberOfSites, status, reserved, zoneRedundant, perSiteScaling."}
+
+  create_or_update_app_service_plan:
+    title: Create or scale an App Service plan
+    description: >-
+      Create a plan, or change an existing one's tier or instance count --
+      which is how App Service scales up (a bigger sku) and out (more capacity).
+      Every site on the plan is affected. Set reserved true for a Linux plan;
+      it cannot be changed afterwards.
+    category: plans
+    request:
+      method: PUT
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/serverfarms/${plan_name}
+      query:
+        api-version: "${api_version}"
+      body:
+        location: "${location}"
+        tags: "${tags}"
+        kind: "${kind}"
+        sku:
+          name: "${sku_name}"
+          tier: "${sku_tier}"
+          capacity: "${capacity}"
+        properties:
+          reserved: "${reserved}"
+          perSiteScaling: "${per_site_scaling}"
+          zoneRedundant: "${zone_redundant}"
+          maximumElasticWorkerCount: "${maximum_elastic_worker_count}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group to create the plan in.
+        example: web-rg
+      plan_name:
+        type: string
+        description: Name of the App Service plan.
+        example: contoso-plan
+      location:
+        type: string
+        description: Azure region for the plan, e.g. westeurope.
+        example: westeurope
+      sku_name:
+        type: string
+        description: 'SKU code, e.g. F1, B1, S1, P1v3, EP1 for Elastic Premium, Y1 for Consumption.'
+        example: P1v3
+      sku_tier:
+        type: string
+        description: 'Tier name matching the SKU, e.g. Free, Basic, Standard, PremiumV3.'
+        optional: true
+        example: PremiumV3
+      capacity:
+        type: integer
+        description: Number of instances to run. This is how the plan scales out.
+        optional: true
+        minimum: 0
+      reserved:
+        type: boolean
+        description: True for a Linux plan, false for Windows. Immutable after creation.
+        optional: true
+      kind:
+        type: string
+        description: 'Plan kind -- "app", "linux", "elastic" or "functionapp".'
+        optional: true
+      per_site_scaling:
+        type: boolean
+        description: Let each site on the plan scale independently rather than together.
+        optional: true
+      zone_redundant:
+        type: boolean
+        description: Spread instances across availability zones. Needs at least three instances.
+        optional: true
+      maximum_elastic_worker_count:
+        type: integer
+        description: Instance ceiling for an Elastic Premium plan.
+        optional: true
+        minimum: 1
+      tags:
+        type: object
+        description: Resource tags as key/value pairs.
+        optional: true
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The plan resource as stored.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        sku: {type: object}
+        properties: {type: object}
+
+  delete_app_service_plan:
+    title: Delete an App Service plan
+    description: >-
+      Delete an App Service plan. The call fails while any site still runs on
+      it, so move or delete those first -- check numberOfSites with
+      get_app_service_plan.
+    category: plans
+    destructive: true
+    request:
+      method: DELETE
+      path: /subscriptions/${connectionConfig.subscriptionId}/resourceGroups/${resource_group}/providers/Microsoft.Web/serverfarms/${plan_name}
+      query:
+        api-version: "${api_version}"
+    input:
+      resource_group:
+        type: string
+        description: Resource group the plan is in.
+        example: web-rg
+      plan_name:
+        type: string
+        description: Name of the plan to delete.
+        example: contoso-plan
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: Empty -- 200 when deleted, 204 when the plan was already gone.
+      type: object
+
+  check_name_availability:
+    title: Check whether a site name is free
+    description: >-
+      Ask whether a proposed site name can be used. Site names are globally
+      unique because they become the azurewebsites.net hostname, so check
+      before create_or_update_web_app rather than after it fails.
+    category: apps
+    request:
+      method: POST
+      path: /subscriptions/${connectionConfig.subscriptionId}/providers/Microsoft.Web/checknameavailability
+      query:
+        api-version: "${api_version}"
+      body:
+        name: "${name}"
+        type: "${type}"
+        isFqdn: "${is_fqdn}"
+    input:
+      name:
+        type: string
+        description: The site name to test.
+        example: contoso-web
+      type:
+        type: string
+        description: Resource type the name is for.
+        optional: true
+        default: Site
+        enum: [Site, Slot, HostingEnvironment, PublishingUser, Microsoft.Web/sites]
+      is_fqdn:
+        type: boolean
+        description: Set when name is a fully qualified domain name rather than a bare site name.
+        optional: true
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: Whether the name is free, and why not when it is taken.
+      type: object
+      properties:
+        nameAvailable: {type: boolean}
+        reason: {type: string}
+        message: {type: string}
+
+  list_geo_regions:
+    title: List regions App Service is available in
+    description: >-
+      List the Azure regions App Service serves, optionally narrowed to those
+      offering a particular SKU or Linux workers. Use it to find a valid
+      location before creating a plan.
+    category: reference
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/providers/Microsoft.Web/geoRegions
+      query:
+        api-version: "${api_version}"
+        sku: "${sku}"
+        linuxWorkersEnabled: "${linux_workers_enabled}"
+    input:
+      sku:
+        type: string
+        description: 'Only return regions offering this SKU, e.g. PremiumV3.'
+        optional: true
+      linux_workers_enabled:
+        type: boolean
+        description: Only return regions that offer Linux workers.
+        optional: true
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The regions App Service is available in.
+      type: array
+      items: {type: object, description: "name and properties (displayName, orgDomain)."}
+      response_path: value
+
+  list_web_app_stacks:
+    title: List available runtime stacks
+    description: >-
+      List the language runtimes App Service supports, with each version's
+      settings, whether it is a preview, and when it goes out of support. This
+      is where a valid linuxFxVersion or netFrameworkVersion value comes from.
+    category: reference
+    read_only: true
+    request:
+      method: GET
+      path: /providers/Microsoft.Web/webAppStacks
+      query:
+        api-version: "${api_version}"
+        stackOsType: "${stack_os_type}"
+    input:
+      stack_os_type:
+        type: string
+        description: Narrow to the stacks available on one operating system.
+        optional: true
+        enum: [Windows, Linux, All]
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The supported runtime stacks and their versions.
+      type: array
+      items: {type: object, description: "name, displayText and properties.majorVersions with minorVersions and runtime settings."}
+      response_path: value
+
+  list_certificates:
+    title: List App Service certificates
+    description: >-
+      List the certificates in the subscription available to App Service, with
+      each one's subject, thumbprint, issuer and expiry. The place to check
+      when a custom domain's TLS certificate is about to lapse.
+    category: networking
+    read_only: true
+    request:
+      method: GET
+      path: /subscriptions/${connectionConfig.subscriptionId}/providers/Microsoft.Web/certificates
+      query:
+        api-version: "${api_version}"
+    input:
+      api_version:
+        type: string
+        description: Microsoft.Web ARM API version to call.
+        optional: true
+        default: "2026-07-15"
+    output:
+      description: The certificates available to App Service in the subscription.
+      type: array
+      items: {type: object, description: "id, name, location and properties (subjectName, thumbprint, issuer, issueDate, expirationDate, hostNames)."}
+      response_path: value

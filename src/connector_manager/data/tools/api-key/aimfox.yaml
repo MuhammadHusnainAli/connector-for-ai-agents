@@ -1,0 +1,1920 @@
+# Aimfox tools -- LinkedIn outreach automation: sender accounts,
+# campaigns and their audiences, leads, labels and notes, the LinkedIn inbox,
+# message templates, blacklists, analytics and webhooks, plus the agency routes for workspaces, seats and white-label logins.
+#
+# Aimfox publishes its reference as an interactive collection at
+# https://docs.aimfox.com/ rather than an OpenAPI file. Every path, parameter and
+# body field below is taken from that collection (72 requests). All 69 JSON requests are here. POST /accounts/:account_id/conversations/upload-file, POST /accounts/:account_id/conversations/send-audio and its per-conversation twin are left out: they take multipart file uploads, which these JSON tools cannot send.
+#
+# The connection's base url is https://api.aimfox.com/api, so paths start at /v2.
+# The API key is a bearer token. A normal workspace key reaches everything except the agency tools (list_workspaces, create_workspace, the workspace token and seat tools and generate_client_login_token), which need the agency's master key.
+#
+# What to know:
+#
+#   * **everything acts through a LinkedIn account.** list_accounts gives the
+#     account ids that conversations, lead custom variables and limits are
+#     scoped to; campaigns and leads belong to the workspace;
+#   * **people are identified three ways**: a LinkedIn profile URL (to add to a
+#     campaign or blacklist), a URN such as ACoAAAK-hCcB... (to remove one, or
+#     read custom variables) and a numeric lead id (for lead details, labels and
+#     notes);
+#   * **messages go out on LinkedIn for real.** start_conversation with several
+#     recipients creates one group conversation, not individual messages;
+#   * **weekly limits protect the account.** set_account_limits takes 1-1000
+#     per week; Aimfox recommends 50-200 to avoid LinkedIn restrictions;
+#   * lead search takes the same filter body on search_leads,
+#     search_lead_facets and count_leads.
+#
+# Docs: https://docs.aimfox.com/
+
+connector_id: aimfox
+display_name: Aimfox
+docs_url: https://docs.aimfox.com/
+tools:
+
+  list_workspaces:
+    title: List workspaces
+    description: >-
+      List every workspace under the agency's master API key. Needs the master key.
+    category: agency
+    read_only: true
+    request:
+      method: GET
+      path: /v2/workspaces
+    input: {}
+    output:
+      description: The workspaces.
+      type: object
+
+  create_workspace:
+    title: Create a workspace
+    description: >-
+      Create a new client workspace under the agency. Needs the master key.
+    category: agency
+    request:
+      method: POST
+      path: /v2/workspaces
+      body:
+        name: ${name}
+    input:
+      name:
+        type: string
+        description: Workspace name.
+    output:
+      description: The created workspace.
+      type: object
+
+  list_workspace_tokens:
+    title: List workspace tokens
+    description: >-
+      List the API tokens of one workspace. Needs the master key.
+    category: agency
+    read_only: true
+    request:
+      method: GET
+      path: /v2/workspaces/${workspace_id}/tokens
+    input:
+      workspace_id:
+        type: string
+        description: Workspace id (UUID).
+    output:
+      description: The workspace's tokens.
+      type: object
+
+  create_workspace_token:
+    title: Create a workspace token
+    description: >-
+      Create an API token for one workspace, read-only or with write access. Needs the master
+      key.
+    category: agency
+    request:
+      method: POST
+      path: /v2/workspaces/${workspace_id}/tokens
+      body:
+        name: ${name}
+        write: ${write}
+    input:
+      workspace_id:
+        type: string
+        description: Workspace id (UUID).
+      name:
+        type: string
+        description: Token name.
+      write:
+        type: boolean
+        description: True for a token that can write, false for read-only.
+        optional: true
+    output:
+      description: The token.
+      type: object
+
+  set_workspace_lifetime_seats:
+    title: Set a workspace's lifetime seats
+    description: >-
+      Set how many lifetime-deal seats a workspace has. The count replaces the current total
+      rather than adding to it. Needs the master key.
+    category: agency
+    destructive: true
+    request:
+      method: POST
+      path: /v2/workspaces/${workspace_id}/seats/lifetime
+      body:
+        count: ${count}
+        source: ${source}
+    input:
+      workspace_id:
+        type: string
+        description: Workspace id (UUID).
+      count:
+        type: integer
+        description: Total lifetime seats the workspace should have -- this replaces the count,
+          it does not add to it.
+      source:
+        type: string
+        description: Seat source; ltd.
+        optional: true
+        enum:
+        - ltd
+    output:
+      description: The workspace's seats.
+      type: object
+
+  set_workspace_agency_seats:
+    title: Set a workspace's agency seats
+    description: >-
+      Set how many Agency plan seats a workspace has. The count replaces the current total
+      rather than adding to it. Needs the master key.
+    category: agency
+    destructive: true
+    request:
+      method: POST
+      path: /v2/workspaces/${workspace_id}/seats/agency
+      body:
+        count: ${count}
+        source: ${source}
+    input:
+      workspace_id:
+        type: string
+        description: Workspace id (UUID).
+      count:
+        type: integer
+        description: Total agency seats the workspace should have -- this replaces the count,
+          it does not add to it.
+      source:
+        type: string
+        description: Seat source; agency.
+        optional: true
+        enum:
+        - agency
+    output:
+      description: The workspace's seats.
+      type: object
+
+  generate_client_login_token:
+    title: Generate a client login token
+    description: >-
+      Generate a login token for an existing white-label client by email, to append to your
+      white-label URL as #token. 404 if no such client. Needs the master key.
+    category: agency
+    request:
+      method: POST
+      path: /v2/clients/token
+      body:
+        email: ${email}
+    input:
+      email:
+        type: string
+        description: Email of an existing client.
+    output:
+      description: The login token.
+      type: object
+
+  create_client:
+    title: Create a client
+    description: >-
+      Create a white-label client user, optionally without sending them the login email.
+    category: white_label
+    request:
+      method: POST
+      path: /v2/clients
+      body:
+        email: ${email}
+        first_name: ${first_name}
+        last_name: ${last_name}
+        skip_login_email: ${skip_login_email}
+    input:
+      email:
+        type: string
+        description: Client email.
+      first_name:
+        type: string
+        description: First name.
+        optional: true
+      last_name:
+        type: string
+        description: Last name.
+        optional: true
+      skip_login_email:
+        type: boolean
+        description: True not to email the client a login link.
+        optional: true
+    output:
+      description: The created client.
+      type: object
+
+  generate_login_token:
+    title: Generate a login token
+    description: >-
+      Generate a token that logs a user straight into your white-label app (append it as #token),
+      either to connect a new LinkedIn account or to re-login an existing one.
+    category: white_label
+    request:
+      method: POST
+      path: /v2/token
+      body:
+        account_id: ${account_id}
+    input:
+      account_id:
+        type: string
+        description: Account to re-login; omit to generate a token for connecting a new account.
+        optional: true
+    output:
+      description: The login token.
+      type: object
+
+  list_accounts:
+    title: List accounts
+    description: >-
+      List the LinkedIn sender accounts connected to the workspace, with their ids and status.
+    category: accounts
+    read_only: true
+    request:
+      method: GET
+      path: /v2/accounts
+    input: {}
+    output:
+      description: The accounts.
+      type: object
+
+  get_account:
+    title: Get an account
+    description: >-
+      Read one connected LinkedIn account's profile and connection state.
+    category: accounts
+    read_only: true
+    request:
+      method: GET
+      path: /v2/accounts/${account_id}/profile
+    input:
+      account_id:
+        type: string
+        description: LinkedIn account id, from list_accounts.
+    output:
+      description: The account.
+      type: object
+
+  get_account_limits:
+    title: Get account limits
+    description: >-
+      Read an account's weekly limits for connection requests and InMails.
+    category: accounts
+    read_only: true
+    request:
+      method: GET
+      path: /v2/accounts/${account_id}/limits
+    input:
+      account_id:
+        type: string
+        description: LinkedIn account id, from list_accounts.
+    output:
+      description: The weekly limits.
+      type: object
+
+  set_account_limits:
+    title: Set account limits
+    description: >-
+      Change an account's weekly connection-request and InMail limits (1-1000 each; 50-200
+      is safest against LinkedIn restrictions).
+    category: accounts
+    request:
+      method: PATCH
+      path: /v2/accounts/${account_id}/limits
+      body:
+        connect: ${connect}
+        inmail: ${inmail}
+    input:
+      account_id:
+        type: string
+        description: LinkedIn account id, from list_accounts.
+      connect:
+        type: integer
+        description: Connection requests per week, 1-1000.
+        optional: true
+      inmail:
+        type: integer
+        description: InMails per week, 1-1000.
+        optional: true
+    output:
+      description: The new limits.
+      type: object
+
+  get_account_file:
+    title: Download a LinkedIn file
+    description: >-
+      Fetch a LinkedIn file -- an attachment or image from a message -- through an account
+      and stream it back. The response is the raw file, not JSON.
+    category: accounts
+    read_only: true
+    request:
+      method: GET
+      path: /v2/accounts/${account_id}/file
+      query:
+        url: ${url}
+    input:
+      url:
+        type: string
+        description: LinkedIn file URL, e.g. a message attachment. The tool percent-encodes
+          it.
+      account_id:
+        type: string
+        description: LinkedIn account id, from list_accounts.
+    output:
+      description: The raw file bytes.
+      type: string
+
+  list_recent_leads:
+    title: List recent leads
+    description: >-
+      List the leads most recently gained across the workspace's campaigns and accounts.
+    category: analytics
+    read_only: true
+    request:
+      method: GET
+      path: /v2/analytics/recent-leads
+    input: {}
+    output:
+      description: Recent leads.
+      type: object
+
+  list_interactions:
+    title: List interactions
+    description: >-
+      Chart the workspace's interactions -- views, connection requests, acceptances, messages,
+      replies, InMails -- over a period in hourly or daily buckets, optionally for some accounts
+      or one campaign.
+    category: analytics
+    read_only: true
+    request:
+      method: GET
+      path: /v2/analytics/interactions
+      query:
+        from: ${from}
+        to: ${to}
+        bucket: ${bucket}
+        account_ids: ${account_ids}
+        campaign_id: ${campaign_id}
+    input:
+      from:
+        type: integer
+        description: Start, UNIX milliseconds.
+      to:
+        type: integer
+        description: End, UNIX milliseconds.
+      bucket:
+        type: string
+        description: Grouping interval.
+        optional: true
+        enum:
+        - 1 hour
+        - 1 day
+      account_ids:
+        type: string
+        description: Account ids as a JSON array, e.g. ["123345678"]; omit for every account.
+        optional: true
+      campaign_id:
+        type: string
+        description: Only interactions from this campaign.
+        optional: true
+    output:
+      description: Interaction counts per bucket.
+      type: object
+
+  list_blacklisted_profiles:
+    title: List blacklisted profiles
+    description: >-
+      List the LinkedIn profiles no campaign may target.
+    category: blacklist
+    read_only: true
+    request:
+      method: GET
+      path: /v2/blacklist
+    input: {}
+    output:
+      description: Blacklisted profiles.
+      type: object
+
+  blacklist_profiles:
+    title: Blacklist profiles by URL
+    description: >-
+      Stop every campaign from targeting the given LinkedIn profiles.
+    category: blacklist
+    request:
+      method: POST
+      path: /v2/blacklist
+      body:
+        urls: ${urls}
+    input:
+      urls:
+        type: array
+        description: LinkedIn profile URLs.
+        items:
+          type: string
+    output:
+      description: Confirmation.
+      type: object
+
+  blacklist_profile:
+    title: Blacklist a profile by URN
+    description: >-
+      Stop every campaign from targeting one LinkedIn profile, by its URN.
+    category: blacklist
+    request:
+      method: POST
+      path: /v2/blacklist/${urn}
+    input:
+      urn:
+        type: string
+        description: Profile URN, e.g. ACoAAAK-hCcB6RvA71OCuRk-JHYpV6FFKIjbxpY.
+    output:
+      description: Confirmation.
+      type: object
+
+  remove_blacklisted_profile:
+    title: Remove a profile from the blacklist
+    description: >-
+      Allow campaigns to target a blacklisted profile again.
+    category: blacklist
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/blacklist/${urn}
+    input:
+      urn:
+        type: string
+        description: Profile URN.
+    output:
+      description: Confirmation.
+      type: object
+
+  list_blacklisted_companies:
+    title: List blacklisted companies
+    description: >-
+      List the LinkedIn companies whose employees no campaign may target.
+    category: blacklist
+    read_only: true
+    request:
+      method: GET
+      path: /v2/blacklist-companies
+    input: {}
+    output:
+      description: Blacklisted companies.
+      type: object
+
+  blacklist_companies:
+    title: Blacklist companies
+    description: >-
+      Stop campaigns from targeting people at the given LinkedIn companies.
+    category: blacklist
+    request:
+      method: POST
+      path: /v2/blacklist-companies
+      body:
+        companies: ${companies}
+    input:
+      companies:
+        type: array
+        description: LinkedIn company page URLs.
+        items:
+          type: string
+    output:
+      description: Confirmation.
+      type: object
+
+  remove_blacklisted_company:
+    title: Remove a company from the blacklist
+    description: >-
+      Allow campaigns to target people at a blacklisted company again.
+    category: blacklist
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/blacklist-companies/${company_urn}
+    input:
+      company_urn:
+        type: string
+        description: Company URN, e.g. 2568197.
+    output:
+      description: Confirmation.
+      type: object
+
+  list_campaigns:
+    title: List campaigns
+    description: >-
+      List the workspace's campaigns with their state, type and settings, optionally inbound
+      or outbound only, or only those accepting added profiles.
+    category: campaigns
+    read_only: true
+    request:
+      method: GET
+      path: /v2/campaigns
+      query:
+        outreach_type: ${outreach_type}
+        accepts_profiles: ${accepts_profiles}
+    input:
+      outreach_type:
+        type: string
+        description: inbound or outbound.
+        optional: true
+        enum:
+        - inbound
+        - outbound
+      accepts_profiles:
+        type: boolean
+        description: True for only campaigns that accept added LinkedIn profiles.
+        optional: true
+    output:
+      description: The campaigns.
+      type: object
+
+  create_campaign:
+    title: Create a campaign
+    description: >-
+      Create a connect, InMail or drip (inbound) campaign with its senders and exclusion rules.
+      Only the shell is created; the audience, schedule and flow are set up in the Aimfox
+      dashboard.
+    category: campaigns
+    request:
+      method: POST
+      path: /v2/campaigns
+      body:
+        outreach_type: ${outreach_type}
+        name: ${name}
+        type: ${type}
+        audience_size: ${audience_size}
+        account_ids: ${account_ids}
+        uses_connection_note: ${uses_connection_note}
+        inmail_optimization: ${inmail_optimization}
+        no_pfp: ${no_pfp}
+        exclude_active_targets: ${exclude_active_targets}
+        exclude_previous_targets: ${exclude_previous_targets}
+    input:
+      outreach_type:
+        type: string
+        description: connect sends connection requests, inmail sends InMails, drip messages
+          existing 1st-degree connections (the only inbound type).
+        enum:
+        - connect
+        - inmail
+        - drip
+      name:
+        type: string
+        description: Campaign name.
+        optional: true
+      type:
+        type: string
+        description: Audience source, e.g. list.
+        optional: true
+      audience_size:
+        type: integer
+        description: Maximum audience size.
+        optional: true
+      account_ids:
+        type: array
+        description: Sender account ids.
+        optional: true
+        items:
+          type: string
+      uses_connection_note:
+        type: boolean
+        description: True to send a note with connection requests.
+        optional: true
+      inmail_optimization:
+        type: boolean
+        description: True to send InMails the most credit-efficient way, e.g. free to Open
+          Profiles.
+        optional: true
+      no_pfp:
+        type: boolean
+        description: True to exclude profiles without a picture.
+        optional: true
+      exclude_active_targets:
+        type: boolean
+        description: True to exclude profiles targeted by another active campaign.
+        optional: true
+      exclude_previous_targets:
+        type: boolean
+        description: True to exclude profiles targeted by earlier campaigns.
+        optional: true
+    output:
+      description: The created campaign.
+      type: object
+
+  get_campaign:
+    title: Get a campaign
+    description: >-
+      Read one campaign's settings, state and associated data.
+    category: campaigns
+    read_only: true
+    request:
+      method: GET
+      path: /v2/campaigns/${campaign_id}
+    input:
+      campaign_id:
+        type: string
+        description: Campaign id (UUID).
+    output:
+      description: The campaign.
+      type: object
+
+  update_campaign:
+    title: Update a campaign
+    description: >-
+      Rename, start, resume or pause a campaign, change its target count or exclusion rules.
+      Setting ACTIVE starts real LinkedIn outreach.
+    category: campaigns
+    destructive: true
+    request:
+      method: PATCH
+      path: /v2/campaigns/${campaign_id}
+      body:
+        name: ${name}
+        state: ${state}
+        target_count: ${target_count}
+        exclude_active_targets: ${exclude_active_targets}
+        exclude_previous_targets: ${exclude_previous_targets}
+    input:
+      campaign_id:
+        type: string
+        description: Campaign id (UUID).
+      name:
+        type: string
+        description: Campaign name.
+        optional: true
+      state:
+        type: string
+        description: ACTIVE to start or resume, PAUSED to pause.
+        optional: true
+        enum:
+        - ACTIVE
+        - PAUSED
+      target_count:
+        type: integer
+        description: Targets to reach.
+        optional: true
+      exclude_active_targets:
+        type: boolean
+        description: True to exclude profiles targeted by another active campaign.
+        optional: true
+      exclude_previous_targets:
+        type: boolean
+        description: True to exclude profiles targeted by earlier campaigns.
+        optional: true
+    output:
+      description: The updated campaign.
+      type: object
+
+  delete_campaign:
+    title: Delete a campaign
+    description: >-
+      Permanently delete a campaign and stop all of its outreach.
+    category: campaigns
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/campaigns/${campaign_id}
+    input:
+      campaign_id:
+        type: string
+        description: Campaign id (UUID).
+    output:
+      description: Confirmation.
+      type: object
+
+  get_campaign_metrics:
+    title: Get campaign metrics
+    description: >-
+      Read a campaign's interaction metrics: views, requests, acceptances, messages, replies
+      and rates.
+    category: campaigns
+    read_only: true
+    request:
+      method: GET
+      path: /v2/campaigns/${campaign_id}/metrics
+    input:
+      campaign_id:
+        type: string
+        description: Campaign id (UUID).
+    output:
+      description: The metrics.
+      type: object
+
+  get_campaign_audience:
+    title: Get a campaign's audience
+    description: >-
+      List the LinkedIn profiles in a campaign and each one's state.
+    category: campaigns
+    read_only: true
+    request:
+      method: GET
+      path: /v2/campaigns/${campaign_id}/audience
+    input:
+      campaign_id:
+        type: string
+        description: Campaign id (UUID).
+    output:
+      description: The audience.
+      type: object
+
+  add_profile_to_campaign:
+    title: Add a profile to a campaign
+    description: >-
+      Add one LinkedIn profile to a campaign by URL. Fails with a reason such as locked (in
+      another campaign), blocked, alreadyConnected or noPFP. Not for group or event message
+      campaigns.
+    category: campaigns
+    request:
+      method: POST
+      path: /v2/campaigns/${campaign_id}/audience
+      body:
+        profile_url: ${profile_url}
+    input:
+      campaign_id:
+        type: string
+        description: Campaign id (UUID).
+      profile_url:
+        type: string
+        description: LinkedIn profile URL.
+    output:
+      description: Confirmation.
+      type: object
+
+  add_profiles_to_campaign:
+    title: Add profiles with custom variables
+    description: >-
+      Add several LinkedIn profiles to a campaign, each with custom variables for personalization.
+      Returns which were added and why others failed.
+    category: campaigns
+    request:
+      method: POST
+      path: /v2/campaigns/${campaign_id}/audience/multiple
+      body:
+        profiles: ${profiles}
+        type: ${type}
+    input:
+      campaign_id:
+        type: string
+        description: Campaign id (UUID).
+      profiles:
+        type: array
+        description: 'Profiles, each {profile_url, custom_variables: {name: value}}.'
+        items:
+          type: object
+      type:
+        type: string
+        description: How profiles are identified; profile_url.
+        optional: true
+        enum:
+        - profile_url
+    output:
+      description: Added profiles, failures and reasons.
+      type: object
+
+  remove_profile_from_campaign:
+    title: Remove a profile from a campaign
+    description: >-
+      Remove a profile from a campaign by URN or public identifier (the part after /in/ in
+      its URL).
+    category: campaigns
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/campaigns/${campaign_id}/audience/${urn}
+    input:
+      campaign_id:
+        type: string
+        description: Campaign id (UUID).
+      urn:
+        type: string
+        description: Profile URN or public identifier.
+    output:
+      description: Confirmation.
+      type: object
+
+  get_campaign_custom_variables:
+    title: Get campaign custom variables
+    description: >-
+      List the custom variables defined across a campaign's targets.
+    category: campaigns
+    read_only: true
+    request:
+      method: GET
+      path: /v2/campaigns/${campaign_id}/custom-variables
+    input:
+      campaign_id:
+        type: string
+        description: Campaign id (UUID).
+    output:
+      description: The custom variables.
+      type: object
+
+  get_campaign_target_custom_variables:
+    title: Get a target's custom variables
+    description: >-
+      Read the custom variables set for one target in a campaign.
+    category: campaigns
+    read_only: true
+    request:
+      method: GET
+      path: /v2/campaigns/${campaign_id}/custom-variables/${urn}
+    input:
+      campaign_id:
+        type: string
+        description: Campaign id (UUID).
+      urn:
+        type: string
+        description: Target profile URN.
+    output:
+      description: The target's variables.
+      type: object
+
+  set_campaign_target_custom_variables:
+    title: Set targets' custom variables
+    description: >-
+      Set custom variables on campaign targets by URN, for use in message templates.
+    category: campaigns
+    request:
+      method: POST
+      path: /v2/campaigns/${campaign_id}/custom-variables
+      body:
+        custom_variables: ${custom_variables}
+    input:
+      campaign_id:
+        type: string
+        description: Campaign id (UUID).
+      custom_variables:
+        type: array
+        description: 'Per-target variables, each {target_urn, variables: {NAME: value}}.'
+        items:
+          type: object
+    output:
+      description: Confirmation.
+      type: object
+
+  list_labels:
+    title: List labels
+    description: >-
+      List the workspace's lead labels with their colours.
+    category: labels
+    read_only: true
+    request:
+      method: GET
+      path: /v2/labels
+    input: {}
+    output:
+      description: The labels.
+      type: object
+
+  create_label:
+    title: Create a label
+    description: >-
+      Create a label for tagging leads, with one of six colours.
+    category: labels
+    request:
+      method: POST
+      path: /v2/labels
+      body:
+        name: ${name}
+        color: ${color}
+    input:
+      name:
+        type: string
+        description: Label name.
+      color:
+        type: string
+        description: quaternary (gray), secondary (purple), danger (red), yellow, info (blue)
+          or success (green).
+        optional: true
+        enum:
+        - quaternary
+        - secondary
+        - danger
+        - yellow
+        - info
+        - success
+    output:
+      description: The created label.
+      type: object
+
+  update_label:
+    title: Update a label
+    description: >-
+      Rename or recolour a lead label; leads carrying it keep it.
+    category: labels
+    request:
+      method: PATCH
+      path: /v2/labels/${label_id}
+      body:
+        name: ${name}
+        color: ${color}
+    input:
+      label_id:
+        type: string
+        description: Label id (UUID).
+      name:
+        type: string
+        description: Label name.
+        optional: true
+      color:
+        type: string
+        description: quaternary, secondary, danger, yellow, info or success.
+        optional: true
+        enum:
+        - quaternary
+        - secondary
+        - danger
+        - yellow
+        - info
+        - success
+    output:
+      description: The updated label.
+      type: object
+
+  delete_label:
+    title: Delete a label
+    description: >-
+      Delete a lead label, removing it from every lead.
+    category: labels
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/labels/${label_id}
+    input:
+      label_id:
+        type: string
+        description: Label id (UUID).
+    output:
+      description: Confirmation.
+      type: object
+
+  search_leads:
+    title: Search leads
+    description: >-
+      Search the workspace's leads by keywords, companies, education, skills, languages, locations,
+      labels, origin and owning account, paged with start and count.
+    category: leads
+    read_only: true
+    request:
+      method: POST
+      path: /v2/leads:search
+      query:
+        start: ${start}
+        count: ${count}
+      body:
+        keywords: ${keywords}
+        current_companies: ${current_companies}
+        past_companies: ${past_companies}
+        education: ${education}
+        interests: ${interests}
+        labels: ${labels}
+        languages: ${languages}
+        locations: ${locations}
+        origins: ${origins}
+        skills: ${skills}
+        lead_of: ${lead_of}
+        optimize: ${optimize}
+    input:
+      start:
+        type: integer
+        description: Results to skip.
+        optional: true
+      count:
+        type: integer
+        description: Results to return (default 20).
+        optional: true
+      keywords:
+        type: string
+        description: Free-text keywords.
+        optional: true
+      current_companies:
+        type: array
+        description: Current company names or URNs.
+        optional: true
+        items:
+          type: string
+      past_companies:
+        type: array
+        description: Past company names or URNs.
+        optional: true
+        items:
+          type: string
+      education:
+        type: array
+        description: Schools.
+        optional: true
+        items:
+          type: string
+      interests:
+        type: array
+        description: Interests.
+        optional: true
+        items:
+          type: string
+      labels:
+        type: array
+        description: Label ids the lead must carry.
+        optional: true
+        items:
+          type: string
+      languages:
+        type: array
+        description: Languages.
+        optional: true
+        items:
+          type: string
+      locations:
+        type: array
+        description: Locations.
+        optional: true
+        items:
+          type: string
+      origins:
+        type: array
+        description: Where the lead came from, e.g. campaign ids.
+        optional: true
+        items:
+          type: string
+      skills:
+        type: array
+        description: Skills.
+        optional: true
+        items:
+          type: string
+      lead_of:
+        type: array
+        description: Account ids whose leads to search.
+        optional: true
+        items:
+          type: string
+      optimize:
+        type: boolean
+        description: True to let Aimfox optimize the search.
+        optional: true
+    output:
+      description: Matching leads.
+      type: object
+
+  search_lead_facets:
+    title: Get lead search facets
+    description: >-
+      Count the values of one facet -- lead_of, origins, current_companies, past_companies,
+      locations, labels, interests, skills or languages -- across leads matching the filters.
+    category: leads
+    read_only: true
+    request:
+      method: POST
+      path: /v2/leads:search/facets/${name}
+      body:
+        keywords: ${keywords}
+        current_companies: ${current_companies}
+        past_companies: ${past_companies}
+        education: ${education}
+        interests: ${interests}
+        labels: ${labels}
+        languages: ${languages}
+        locations: ${locations}
+        origins: ${origins}
+        skills: ${skills}
+        lead_of: ${lead_of}
+        optimize: ${optimize}
+    input:
+      name:
+        type: string
+        description: 'Facet: lead_of, origins, current_companies, past_companies, locations,
+          labels, interests, skills or languages.'
+      keywords:
+        type: string
+        description: Free-text keywords.
+        optional: true
+      current_companies:
+        type: array
+        description: Current company names or URNs.
+        optional: true
+        items:
+          type: string
+      past_companies:
+        type: array
+        description: Past company names or URNs.
+        optional: true
+        items:
+          type: string
+      education:
+        type: array
+        description: Schools.
+        optional: true
+        items:
+          type: string
+      interests:
+        type: array
+        description: Interests.
+        optional: true
+        items:
+          type: string
+      labels:
+        type: array
+        description: Label ids the lead must carry.
+        optional: true
+        items:
+          type: string
+      languages:
+        type: array
+        description: Languages.
+        optional: true
+        items:
+          type: string
+      locations:
+        type: array
+        description: Locations.
+        optional: true
+        items:
+          type: string
+      origins:
+        type: array
+        description: Where the lead came from, e.g. campaign ids.
+        optional: true
+        items:
+          type: string
+      skills:
+        type: array
+        description: Skills.
+        optional: true
+        items:
+          type: string
+      lead_of:
+        type: array
+        description: Account ids whose leads to search.
+        optional: true
+        items:
+          type: string
+      optimize:
+        type: boolean
+        description: True to let Aimfox optimize the search.
+        optional: true
+    output:
+      description: Facet values with counts.
+      type: object
+
+  count_leads:
+    title: Count leads
+    description: >-
+      Count the leads matching the search filters without returning them.
+    category: leads
+    read_only: true
+    request:
+      method: POST
+      path: /v2/leads:search/total
+      body:
+        keywords: ${keywords}
+        current_companies: ${current_companies}
+        past_companies: ${past_companies}
+        education: ${education}
+        interests: ${interests}
+        labels: ${labels}
+        languages: ${languages}
+        locations: ${locations}
+        origins: ${origins}
+        skills: ${skills}
+        lead_of: ${lead_of}
+        optimize: ${optimize}
+    input:
+      keywords:
+        type: string
+        description: Free-text keywords.
+        optional: true
+      current_companies:
+        type: array
+        description: Current company names or URNs.
+        optional: true
+        items:
+          type: string
+      past_companies:
+        type: array
+        description: Past company names or URNs.
+        optional: true
+        items:
+          type: string
+      education:
+        type: array
+        description: Schools.
+        optional: true
+        items:
+          type: string
+      interests:
+        type: array
+        description: Interests.
+        optional: true
+        items:
+          type: string
+      labels:
+        type: array
+        description: Label ids the lead must carry.
+        optional: true
+        items:
+          type: string
+      languages:
+        type: array
+        description: Languages.
+        optional: true
+        items:
+          type: string
+      locations:
+        type: array
+        description: Locations.
+        optional: true
+        items:
+          type: string
+      origins:
+        type: array
+        description: Where the lead came from, e.g. campaign ids.
+        optional: true
+        items:
+          type: string
+      skills:
+        type: array
+        description: Skills.
+        optional: true
+        items:
+          type: string
+      lead_of:
+        type: array
+        description: Account ids whose leads to search.
+        optional: true
+        items:
+          type: string
+      optimize:
+        type: boolean
+        description: True to let Aimfox optimize the search.
+        optional: true
+    output:
+      description: The total.
+      type: object
+
+  get_lead:
+    title: Get a lead
+    description: >-
+      Read everything Aimfox holds on a lead: profile, experience, contact details, labels
+      and campaign history.
+    category: leads
+    read_only: true
+    request:
+      method: GET
+      path: /v2/leads/${lead_id}
+    input:
+      lead_id:
+        type: string
+        description: Lead id.
+    output:
+      description: The lead.
+      type: object
+
+  get_lead_custom_variables:
+    title: Get a lead's custom variables
+    description: >-
+      Read the custom variables set for a lead under one account.
+    category: leads
+    read_only: true
+    request:
+      method: GET
+      path: /v2/accounts/${account_id}/leads/${lead_urn}/custom-variables
+    input:
+      account_id:
+        type: string
+        description: LinkedIn account id, from list_accounts.
+      lead_urn:
+        type: string
+        description: Lead URN.
+    output:
+      description: The lead's variables.
+      type: object
+
+  add_label_to_lead:
+    title: Label a lead
+    description: >-
+      Add one of the workspace's labels to a lead, e.g. to mark it qualified.
+    category: leads
+    request:
+      method: POST
+      path: /v2/leads/${lead_id}/labels/${label_id}
+    input:
+      lead_id:
+        type: string
+        description: Lead id.
+      label_id:
+        type: string
+        description: Label id (UUID).
+    output:
+      description: Confirmation.
+      type: object
+
+  remove_label_from_lead:
+    title: Remove a label from a lead
+    description: >-
+      Take a label off a lead; the label itself stays in the workspace.
+    category: leads
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/leads/${lead_id}/labels/${label_id}
+    input:
+      lead_id:
+        type: string
+        description: Lead id.
+      label_id:
+        type: string
+        description: Label id (UUID).
+    output:
+      description: Confirmation.
+      type: object
+
+  list_lead_notes:
+    title: List a lead's notes
+    description: >-
+      List the notes written on a lead, with their text and timestamps.
+    category: leads
+    read_only: true
+    request:
+      method: GET
+      path: /v2/leads/${lead_id}/notes
+    input:
+      lead_id:
+        type: string
+        description: Lead id.
+    output:
+      description: The notes.
+      type: object
+
+  create_lead_note:
+    title: Add a note to a lead
+    description: >-
+      Add a free-text note to a lead, visible to the workspace.
+    category: leads
+    request:
+      method: POST
+      path: /v2/leads/${lead_id}/notes
+      body:
+        text: ${text}
+    input:
+      lead_id:
+        type: string
+        description: Lead id.
+      text:
+        type: string
+        description: Note text.
+    output:
+      description: The created note.
+      type: object
+
+  update_lead_note:
+    title: Update a lead note
+    description: >-
+      Replace the text of an existing note on a lead.
+    category: leads
+    request:
+      method: PATCH
+      path: /v2/leads/${lead_id}/notes/${note_id}
+      body:
+        text: ${text}
+    input:
+      lead_id:
+        type: string
+        description: Lead id.
+      note_id:
+        type: string
+        description: Note id (UUID).
+      text:
+        type: string
+        description: New note text.
+    output:
+      description: The updated note.
+      type: object
+
+  delete_lead_note:
+    title: Delete a lead note
+    description: >-
+      Delete a note from a lead permanently; it cannot be restored.
+    category: leads
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/leads/${lead_id}/notes/${note_id}
+    input:
+      lead_id:
+        type: string
+        description: Lead id.
+      note_id:
+        type: string
+        description: Note id (UUID).
+    output:
+      description: Confirmation.
+      type: object
+
+  list_conversations:
+    title: List conversations
+    description: >-
+      List LinkedIn conversations across the workspace's accounts, newest first, optionally
+      only unread, only campaign conversations, or from given campaigns. Page with before.
+    category: conversations
+    read_only: true
+    request:
+      method: GET
+      path: /v2/conversations
+      query:
+        in_app: ${in_app}
+        before: ${before}
+        campaigns: ${campaigns}
+        unread: ${unread}
+    input:
+      in_app:
+        type: boolean
+        description: True for only Aimfox campaign conversations, false for all -- overriding
+          the workspace privacy setting.
+        optional: true
+      before:
+        type: integer
+        description: Only conversations before this UNIX millisecond timestamp, for paging.
+        optional: true
+      campaigns:
+        type: string
+        description: Campaign ids as a JSON array, e.g. ["da858e34-..."].
+        optional: true
+      unread:
+        type: boolean
+        description: True for only unread conversations.
+        optional: true
+    output:
+      description: Conversations.
+      type: object
+
+  get_conversation:
+    title: Get a conversation
+    description: >-
+      Read a conversation's participants and messages.
+    category: conversations
+    read_only: true
+    request:
+      method: GET
+      path: /v2/accounts/${account_id}/conversations/${conversation_urn}
+    input:
+      account_id:
+        type: string
+        description: LinkedIn account id, from list_accounts.
+      conversation_urn:
+        type: string
+        description: Conversation URN.
+    output:
+      description: The conversation.
+      type: object
+
+  get_lead_conversation:
+    title: Find a lead's conversation
+    description: >-
+      Look up the URN of an account's conversation with a lead, to read it or reply.
+    category: conversations
+    read_only: true
+    request:
+      method: GET
+      path: /v2/accounts/${account_id}/leads/${lead_id}/conversation
+    input:
+      account_id:
+        type: string
+        description: LinkedIn account id, from list_accounts.
+      lead_id:
+        type: string
+        description: Lead id.
+    output:
+      description: The conversation URN.
+      type: object
+
+  start_conversation:
+    title: Start a conversation
+    description: >-
+      Send a LinkedIn message to one or more people from an account. Several recipients form
+      one group chat; an existing conversation with the recipient is reused.
+    category: conversations
+    destructive: true
+    request:
+      method: POST
+      path: /v2/accounts/${account_id}/conversations
+      body:
+        message: ${message}
+        recipients: ${recipients}
+        recipient_urns: ${recipient_urns}
+        file_identifiers: ${file_identifiers}
+    input:
+      account_id:
+        type: string
+        description: LinkedIn account id, from list_accounts.
+      message:
+        type: string
+        description: Message text. Give message, file_identifiers or both.
+        optional: true
+      recipients:
+        type: array
+        description: Recipient account ids; several make one group conversation. Use this
+          or recipient_urns.
+        optional: true
+        items:
+          type: string
+      recipient_urns:
+        type: array
+        description: Recipient URNs; use this or recipients.
+        optional: true
+        items:
+          type: string
+      file_identifiers:
+        type: array
+        description: Single-use ids of files uploaded in the Aimfox app or API.
+        optional: true
+        items:
+          type: string
+    output:
+      description: The conversation and message.
+      type: object
+
+  send_message:
+    title: Send a message
+    description: >-
+      Reply in an existing LinkedIn conversation. The message is sent immediately.
+    category: conversations
+    destructive: true
+    request:
+      method: POST
+      path: /v2/accounts/${account_id}/conversations/${conversation_urn}
+      body:
+        message: ${message}
+        file_identifiers: ${file_identifiers}
+    input:
+      account_id:
+        type: string
+        description: LinkedIn account id, from list_accounts.
+      conversation_urn:
+        type: string
+        description: Conversation URN.
+      message:
+        type: string
+        description: Message text. Give message, file_identifiers or both.
+        optional: true
+      file_identifiers:
+        type: array
+        description: Single-use ids of uploaded files to attach.
+        optional: true
+        items:
+          type: string
+    output:
+      description: The sent message.
+      type: object
+
+  mark_conversation_read:
+    title: Mark a conversation read
+    description: >-
+      Mark a LinkedIn conversation as seen, clearing its unread state.
+    category: conversations
+    request:
+      method: POST
+      path: /v2/accounts/${account_id}/conversations/${conversation_urn}/mark-as-read
+    input:
+      account_id:
+        type: string
+        description: LinkedIn account id, from list_accounts.
+      conversation_urn:
+        type: string
+        description: Conversation URN.
+    output:
+      description: Confirmation.
+      type: object
+
+  react_to_message:
+    title: React to a message
+    description: >-
+      Add an emoji reaction to a message, or remove one with unreact.
+    category: conversations
+    request:
+      method: POST
+      path: /v2/accounts/${account_id}/conversations/${conversation_urn}/messages/${message_id}/react
+      body:
+        emoji: ${emoji}
+        unreact: ${unreact}
+    input:
+      account_id:
+        type: string
+        description: LinkedIn account id, from list_accounts.
+      conversation_urn:
+        type: string
+        description: Conversation URN.
+      message_id:
+        type: string
+        description: Message id.
+      emoji:
+        type: string
+        description: The emoji character.
+      unreact:
+        type: boolean
+        description: True to remove the reaction instead.
+        optional: true
+    output:
+      description: Confirmation.
+      type: object
+
+  edit_message:
+    title: Edit a message
+    description: >-
+      Edit the text of a message the account sent.
+    category: conversations
+    request:
+      method: PATCH
+      path: /v2/accounts/${account_id}/conversations/${conversation_urn}/messages/${message_id}
+      body:
+        message: ${message}
+    input:
+      account_id:
+        type: string
+        description: LinkedIn account id, from list_accounts.
+      conversation_urn:
+        type: string
+        description: Conversation URN.
+      message_id:
+        type: string
+        description: Message id.
+      message:
+        type: string
+        description: New message text.
+    output:
+      description: The edited message.
+      type: object
+
+  delete_message:
+    title: Delete a message
+    description: >-
+      Delete a message the account sent, for everyone in the conversation.
+    category: conversations
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/accounts/${account_id}/conversations/${conversation_urn}/messages/${message_id}
+    input:
+      account_id:
+        type: string
+        description: LinkedIn account id, from list_accounts.
+      conversation_urn:
+        type: string
+        description: Conversation URN.
+      message_id:
+        type: string
+        description: Message id.
+    output:
+      description: Confirmation.
+      type: object
+
+  list_templates:
+    title: List templates
+    description: >-
+      List the workspace's connection-note, message and InMail templates with usage details.
+    category: templates
+    read_only: true
+    request:
+      method: GET
+      path: /v2/templates
+    input: {}
+    output:
+      description: The templates.
+      type: object
+
+  get_template:
+    title: Get a template
+    description: >-
+      Read one template's type, text, subject and AI setting.
+    category: templates
+    read_only: true
+    request:
+      method: GET
+      path: /v2/templates/${template_id}
+    input:
+      template_id:
+        type: string
+        description: Template id (UUID).
+    output:
+      description: The template.
+      type: object
+
+  create_template:
+    title: Create a template
+    description: >-
+      Create a connection note, message or InMail template (InMail takes a subject), optionally
+      AI-personalized.
+    category: templates
+    request:
+      method: POST
+      path: /v2/templates
+      body:
+        type: ${type}
+        name: ${name}
+        message: ${message}
+        subject: ${subject}
+        ai: ${ai}
+    input:
+      type:
+        type: string
+        description: NOTE_TEMPLATE (connection note), MESSAGE_TEMPLATE or INMAIL_TEMPLATE.
+        enum:
+        - NOTE_TEMPLATE
+        - MESSAGE_TEMPLATE
+        - INMAIL_TEMPLATE
+      name:
+        type: string
+        description: Template name.
+      message:
+        type: string
+        description: Template text; may use variables such as {{first_name}}.
+      subject:
+        type: string
+        description: Subject line, for INMAIL_TEMPLATE only.
+        optional: true
+      ai:
+        type: boolean
+        description: True to have Aimfox personalize the text with AI.
+        optional: true
+    output:
+      description: The created template.
+      type: object
+
+  update_template:
+    title: Update a template
+    description: >-
+      Change a template's name, text, subject or AI setting.
+    category: templates
+    request:
+      method: PATCH
+      path: /v2/templates/${template_id}
+      body:
+        name: ${name}
+        message: ${message}
+        subject: ${subject}
+        ai: ${ai}
+    input:
+      template_id:
+        type: string
+        description: Template id (UUID).
+      name:
+        type: string
+        description: Template name.
+        optional: true
+      message:
+        type: string
+        description: Template text; may use variables such as {{first_name}}.
+        optional: true
+      subject:
+        type: string
+        description: Subject line, for INMAIL_TEMPLATE only.
+        optional: true
+      ai:
+        type: boolean
+        description: True to have Aimfox personalize the text with AI.
+        optional: true
+    output:
+      description: The updated template.
+      type: object
+
+  delete_template:
+    title: Delete a template
+    description: >-
+      Delete a message, note or InMail template from the workspace.
+    category: templates
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/templates/${template_id}
+    input:
+      template_id:
+        type: string
+        description: Template id (UUID).
+    output:
+      description: Confirmation.
+      type: object
+
+  list_webhooks:
+    title: List webhooks
+    description: >-
+      List the workspace's webhooks with their URLs and events.
+    category: webhooks
+    read_only: true
+    request:
+      method: GET
+      path: /v2/webhooks
+    input: {}
+    output:
+      description: The webhooks.
+      type: object
+
+  create_webhook:
+    title: Create a webhook
+    description: >-
+      Send Aimfox events -- account logins, connections, replies, label changes, campaign
+      starts and ends -- to a URL.
+    category: webhooks
+    request:
+      method: POST
+      path: /v2/webhooks
+      body:
+        name: ${name}
+        url: ${url}
+        events: ${events}
+        integration: ${integration}
+    input:
+      name:
+        type: string
+        description: Webhook name.
+      url:
+        type: string
+        description: HTTPS endpoint that receives the events.
+      events:
+        type: array
+        description: 'Events: account_logged_in, account_logged_out, new_connection, view,
+          connect, accepted, inmail, message, new_reply, reply, inmail_reply, lead_label_added,
+          campaign_ended, campaign_created, campaign_started, inbox_event, campaign_reply.'
+        items:
+          type: string
+      integration:
+        type: boolean
+        description: Always false for API-created webhooks.
+        optional: true
+    output:
+      description: The created webhook.
+      type: object
+
+  update_webhook:
+    title: Update a webhook
+    description: >-
+      Change a webhook's name, URL, events or the headers sent with deliveries.
+    category: webhooks
+    request:
+      method: PATCH
+      path: /v2/webhooks/${webhook_id}
+      body:
+        name: ${name}
+        url: ${url}
+        events: ${events}
+        headers: ${headers}
+    input:
+      webhook_id:
+        type: string
+        description: Webhook id (UUID).
+      name:
+        type: string
+        description: Webhook name.
+        optional: true
+      url:
+        type: string
+        description: HTTPS endpoint.
+        optional: true
+      events:
+        type: array
+        description: 'Events: account_logged_in, account_logged_out, new_connection, view,
+          connect, accepted, inmail, message, new_reply, reply, inmail_reply, lead_label_added,
+          campaign_ended, campaign_created, campaign_started, inbox_event, campaign_reply.'
+        optional: true
+        items:
+          type: string
+      headers:
+        type: object
+        description: 'Extra headers Aimfox sends with each delivery, e.g. {Authorization:
+          Bearer ...}.'
+        optional: true
+    output:
+      description: The updated webhook.
+      type: object
+
+  delete_webhook:
+    title: Delete a webhook
+    description: >-
+      Delete a webhook; its URL stops receiving events.
+    category: webhooks
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/webhooks/${webhook_id}
+    input:
+      webhook_id:
+        type: string
+        description: Webhook id (UUID).
+    output:
+      description: Confirmation.
+      type: object

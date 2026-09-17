@@ -1,0 +1,244 @@
+# Hullo tools.
+#
+# Hullo is business SMS: an account holds *members* (opted-in phone numbers
+# carrying named attributes), and messages go to those members. Two things
+# shape every tool here:
+#
+#   * **the phone number is the primary key.** There is no member id -- every
+#     per-member path is keyed on the number in international form with no
+#     leading `+` or zeros ("447700912345"). Get it wrong and the call 404s
+#     rather than creating anything;
+#   * **opt-in is the provider's gate, not this package's.** `send_message`
+#     is rejected for a member who has not confirmed, and `upsert_member` on
+#     an unknown number does not create a messageable member -- it sends that
+#     number an opt-in text and waits for a "yes". So the useful order is
+#     upsert -> wait for confirmation -> send.
+#
+# `attributes` values are always *arrays* of strings, even for a single value,
+# and every attribute name must already exist on the account -- `list_attributes`
+# is what says which, and with what allowed list items.
+#
+# The connection's base url already ends in /api/endpoints, so paths here start
+# at /account, /messages, /members and /attributes.
+#
+# Docs: https://app.hullo.me/docs/index.html
+
+connector_id: hullo
+display_name: Hullo
+docs_url: https://app.hullo.me/docs/index.html
+
+tools:
+
+  get_account:
+    title: Get the account behind the API key
+    description: >-
+      Return the name recorded for the API key this connection uses. The
+      cheapest way to confirm the credential still works and to show which
+      Hullo account an agent is about to message from.
+    category: account
+    read_only: true
+    request:
+      method: GET
+      path: /account
+    output:
+      description: The account the API key belongs to.
+      type: object
+      properties:
+        name: {type: string, description: "The name given to the API key in the Hullo application."}
+
+  list_attributes:
+    title: List the account's attributes
+    description: >-
+      List the attribute definitions configured on the account -- the only
+      names `upsert_member` may set. Each carries its type, its edit type and,
+      for list attributes, the exact `listItems` a member value must come from.
+      Call this before writing member attributes rather than guessing names.
+    category: attributes
+    read_only: true
+    request:
+      method: GET
+      path: /attributes
+    output:
+      description: Every attribute an account member record may carry.
+      type: array
+      items:
+        type: object
+        properties:
+          name: {type: string, description: "Attribute name, e.g. \"Location\"."}
+          type: {type: string}
+          displayOrder: {type: integer}
+          editType: {type: string}
+          listItems: {type: array, description: "Allowed values, when the attribute is a list."}
+
+  send_message:
+    title: Send a message to a member
+    description: >-
+      Send an SMS to one opted-in member. The member must have confirmed their
+      opt-in or the call is rejected -- this does not create members. Messages
+      over 160 GSM characters are split into 140-character parts and billed per
+      part; any character outside GSM 03.38 switches the whole message to
+      unicode and shortens those limits further.
+    category: messages
+    destructive: true
+    request:
+      method: POST
+      path: /messages
+      body:
+        phoneNumber: "${phone_number}"
+        messageText: "${message_text}"
+        issueDate: "${issue_date}"
+    input:
+      phone_number:
+        type: string
+        description: The member's phone number in international form without a leading + or 0, e.g. "447700912345".
+        example: "447700912345"
+        max_length: 15
+      message_text:
+        type: string
+        description: The text to send, 1-640 characters.
+        max_length: 640
+      issue_date:
+        type: string
+        description: When to issue the message, ISO 8601. Must be at least two minutes in the future; omit to send now.
+        optional: true
+        format: date-time
+    output:
+      description: The submitted message, with the id Hullo assigned it.
+      type: object
+      properties:
+        id: {type: string}
+        issueDate: {type: string}
+        phoneNumber: {type: string}
+        messageText: {type: string}
+        deliveryStatus: {type: string}
+
+  list_messages:
+    title: List a member's messages
+    description: >-
+      The messages sent to and received from one member, newest first. Inbound
+      replies are flagged `inbound: true`, which is how to read a conversation
+      rather than only what was sent.
+    category: messages
+    read_only: true
+    request:
+      method: GET
+      path: /messages/${phone_number}
+      query:
+        limit: "${limit}"
+    input:
+      phone_number:
+        type: string
+        description: The member's phone number in international form without a leading + or 0.
+        example: "447700912345"
+        max_length: 15
+      limit:
+        type: integer
+        description: How many messages to return.
+        optional: true
+        default: 50
+        minimum: 1
+    output:
+      description: The member's messages, newest first.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          issueDate: {type: string}
+          messageText: {type: string}
+          inbound: {type: boolean, description: "True when the member sent it."}
+          deliveryStatus: {type: string}
+
+  upsert_member:
+    title: Add or update a member
+    description: >-
+      Create a member or update the record of an existing one. A number Hullo
+      has not seen is sent an opt-in text and only becomes messageable once the
+      person replies "yes" -- so this does not, on its own, make a number
+      reachable by `send_message`. Attribute names must already exist on the
+      account (see `list_attributes`) and every value is an array of strings.
+    category: members
+    request:
+      method: POST
+      path: /members
+      body:
+        phoneNumber: "${phone_number}"
+        attributes: "${attributes}"
+        fullName: "${full_name}"
+        groups: "${groups}"
+    input:
+      phone_number:
+        type: string
+        description: The member's phone number in international form without a leading + or 0.
+        example: "447700912345"
+        max_length: 15
+      attributes:
+        type: object
+        description: 'Attribute values keyed by attribute name, each an array of strings, e.g. {"Location": ["London"]}.'
+        example: {Location: [London]}
+      full_name:
+        type: string
+        description: The member's name as "<forename> <surname>".
+        optional: true
+        max_length: 250
+      groups:
+        type: array
+        description: Group names this member belongs to.
+        optional: true
+        items: {type: string}
+    output:
+      description: The member record as Hullo now stores it.
+      type: object
+      properties:
+        phoneNumber: {type: string}
+        fullName: {type: string}
+        registrationDate: {type: string}
+        attributes: {type: object}
+        groups: {type: array}
+
+  get_member:
+    title: Get a member
+    description: >-
+      The record Hullo holds for one member -- name, registration date, groups
+      and every attribute value set through the API or the application.
+    category: members
+    read_only: true
+    request:
+      method: GET
+      path: /members/${phone_number}
+    input:
+      phone_number:
+        type: string
+        description: The member's phone number in international form without a leading + or 0.
+        example: "447700912345"
+        max_length: 15
+    output:
+      description: The member record.
+      type: object
+      properties:
+        phoneNumber: {type: string}
+        fullName: {type: string}
+        registrationDate: {type: string}
+        attributes: {type: object}
+        groups: {type: array}
+
+  opt_out_member:
+    title: Opt a member out
+    description: >-
+      Opt the member out of the member store. This deletes their record and any
+      pending messages queued for them, and drops them out of every campaign.
+      It cannot be undone from the API -- the person has to opt in again.
+    category: members
+    destructive: true
+    request:
+      method: POST
+      path: /members/${phone_number}/optout
+    input:
+      phone_number:
+        type: string
+        description: The member's phone number in international form without a leading + or 0.
+        example: "447700912345"
+        max_length: 15
+    output:
+      description: Empty on success; the member and their pending messages are gone.
+      type: object

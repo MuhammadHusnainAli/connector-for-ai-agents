@@ -21,6 +21,7 @@ form you can run against a file you are still editing.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -33,6 +34,8 @@ from connector_manager.tools.models import PARAM_TYPES, TOOL_NAME_RE, Tool, Tool
 from connector_manager.tools.registry import ToolRegistry, load_pack  # noqa: E402
 
 TOOLS_DIR = REPO_ROOT / "src" / "connector_manager" / "data" / "tools"
+
+WHOLE_PATH = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}")
 
 METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE"})
 
@@ -225,7 +228,10 @@ def _check_tool(tool: Tool, where: str) -> list[str]:
     request = tool.request
     if request.method not in METHODS:
         problems.append(f"{name}: method {request.method}")
-    if not request.path.startswith("/"):
+    # A path that is exactly one placeholder holds a whole path the caller
+    # supplies -- the raw escape-hatch shape -- so it has no leading slash of
+    # its own to check.
+    if not request.path.startswith("/") and not WHOLE_PATH.fullmatch(request.path):
         problems.append(f"{name}: path {request.path!r} must start with /")
     if request.encoding not in ("json", "form"):
         problems.append(f"{name}: encoding {request.encoding!r}")

@@ -1,0 +1,1155 @@
+# Back Market seller (BackMarket Merchant API) tools.
+#
+# The connection carries the platform (`www.backmarket.fr`, `preprod.…`, and
+# so on) in the base url, so every path below starts at `/ws`. Preprod hosts
+# are a real sandbox: point the connection at one before driving anything that
+# moves money or stock.
+#
+# What you need to know before using these:
+#
+#   * **an order is a bag of orderlines, and state lives on the line.**
+#     `list_orders` filters on the *order* state (0 new, 10 pending payment, 1
+#     paid, 3 shipping, 8/9 holds); `update_order` sets the state of *one
+#     orderline* -- accept (2), ship (3), cancel (4) or refund (5/6) -- and
+#     shipping to state 3 requires `tracking_number`. The legal transitions are
+#     1 → 2 or 4, then 2 → 3 or 5, then 3 → 6, and nothing moves backwards;
+#   * **listings are addressed by Back Market's `listingId`,** which
+#     `list_listings` returns; your own SKU is a field on it, not the key;
+#   * **bulk catalogue changes go through a CSV import.** `import_catalogue`
+#     takes the CSV *as a string* and answers with a task id -- poll `get_task`
+#     until it finishes. Single-listing edits do not need it;
+#   * **BuyBack is the trade-in side of the marketplace** and a separate
+#     lifecycle: an order arrives NEW, you validate it, counter-offer, or
+#     suspend it with a reason id from `list_buyback_suspend_reasons`;
+#   * **Care is after-sales.** A care folder ("SAV") is opened against an
+#     orderline; `create_refund` on it is money leaving, and item transfer
+#     records the device going back to the customer.
+#
+# Endpoints that only accept `multipart/form-data` -- posting a message or a
+# photo on a care folder, uploading a customer invoice, making a counteroffer
+# with proof files -- are deliberately absent: this package sends JSON and
+# form-urlencoded bodies, so a tool for them would fail at call time.
+#
+# Docs: https://api.backmarket.dev
+
+connector_id: back-market
+display_name: Back Market
+docs_url: https://api.backmarket.dev
+
+tools:
+
+  # -- catalogue -----------------------------------------------------------
+
+  get_category_tree:
+    title: Get the category tree
+    description: >-
+      Read Back Market's whole category taxonomy. Listings are created against
+      a category id, so this is where a new product's category comes from.
+    category: catalogue
+    read_only: true
+    request:
+      method: GET
+      path: /ws/category/tree
+    input: {}
+    output:
+      description: The category tree, each node with its id, name and children.
+      type: object
+
+  get_category_branch:
+    title: Get one branch of the category tree
+    description: >-
+      Read a single category and everything beneath it, which is far cheaper
+      than pulling the whole tree when you already know roughly where you are.
+    category: catalogue
+    read_only: true
+    request:
+      method: GET
+      path: /ws/category/tree/${category_id}
+    input:
+      category_id:
+        type: string
+        description: The category id to read, from get_category_tree.
+    output:
+      description: The category and its descendants.
+      type: object
+
+  list_listings:
+    title: List your listings
+    description: >-
+      Read the listings on your seller account -- price, stock, publication
+      state and shipping options. Filter by `publication_state` to find what is
+      offline, or by quantity to find what is out of stock.
+    category: listings
+    read_only: true
+    request:
+      method: GET
+      path: /ws/listings
+      headers:
+        Accept-Language: "${market}"
+      query:
+        publication_state: "${publication_state}"
+        min_quantity: "${min_quantity}"
+        max_quantity: "${max_quantity}"
+        page: "${page}"
+        page-size: "${page_size}"
+    input:
+      publication_state:
+        type: integer
+        description: >-
+          Only listings in this publication state -- 0 offline, 1 online, and
+          2-4 the intermediate states Back Market uses while validating.
+        optional: true
+        enum: [0, 1, 2, 3, 4]
+      min_quantity:
+        type: integer
+        description: Only listings with at least this much stock.
+        optional: true
+        minimum: 0
+      max_quantity:
+        type: integer
+        description: Only listings with at most this much stock -- 0 finds what is sold out.
+        optional: true
+        minimum: 0
+      page:
+        type: integer
+        description: Page number, starting at 1.
+        optional: true
+        minimum: 1
+      page_size:
+        type: integer
+        description: Listings per page. Defaults to 10.
+        optional: true
+        minimum: 1
+      market:
+        type: string
+        description: >-
+          Market whose prices and filters apply, as an Accept-Language value
+          such as "fr-fr" or "en-us". Defaults to the connection's country.
+        optional: true
+        example: fr-fr
+    output:
+      description: A page of listings.
+      type: object
+      properties:
+        results: {type: array, description: "The listings on this page."}
+        count: {type: integer}
+
+  get_listing:
+    title: Get a listing
+    description: Read one listing by its Back Market id -- price, stock, warranty and shipping options.
+    category: listings
+    read_only: true
+    request:
+      method: GET
+      path: /ws/listings/${listing_id}
+    input:
+      listing_id:
+        type: string
+        description: The listing's Back Market id, from list_listings.
+    output:
+      description: The listing.
+      type: object
+
+  get_listing_details:
+    title: Get listing details
+    description: >-
+      Read the detailed view of your listings, which carries the product and
+      publication information the plain listing view leaves out.
+    category: listings
+    read_only: true
+    request:
+      method: GET
+      path: /ws/listings/detail
+    input: {}
+    output:
+      description: The detailed listing records.
+      type: object
+
+  update_listing:
+    title: Update a listing
+    description: >-
+      Change one listing's price, stock, warranty, comment or shipping options.
+      `price` is in the listing's currency; `quantity` is absolute stock, not a
+      delta, so sending 0 takes the listing out of stock. `min_price` only
+      matters when BackPricer is enabled on the account.
+    category: listings
+    request:
+      method: POST
+      path: /ws/listings/${listing_id}
+      body:
+        price: "${price}"
+        currency: "${currency}"
+        quantity: "${quantity}"
+        comment: "${comment}"
+        warranty_delay: "${warranty_delay}"
+        min_price: "${min_price}"
+        shipper_1: "${shipper}"
+        shipper_display_1: "${shipper_display}"
+        shipping_delay_1: "${shipping_delay}"
+        shipping_price_1: "${shipping_price}"
+    input:
+      listing_id:
+        type: string
+        description: The listing's Back Market id.
+      price:
+        type: string
+        description: New price in `currency`, as a decimal string such as "249.99".
+        optional: true
+      currency:
+        type: string
+        description: ISO 4217 code for `price`. Required when `price` is sent.
+        optional: true
+        example: EUR
+      quantity:
+        type: integer
+        description: Absolute available stock. 0 takes the listing out of stock.
+        optional: true
+        minimum: 0
+      comment:
+        type: string
+        description: Public comment on the listing, up to 500 characters.
+        optional: true
+        max_length: 500
+      warranty_delay:
+        type: integer
+        description: Warranty length in months. Back Market requires at least 12.
+        optional: true
+        minimum: 12
+      min_price:
+        type: string
+        description: Lowest price BackPricer may drop to, as a decimal string.
+        optional: true
+      shipper:
+        type: string
+        description: Carrier for the first shipping option.
+        optional: true
+      shipper_display:
+        type: string
+        description: Carrier name shown to the customer for the first shipping option.
+        optional: true
+      shipping_delay:
+        type: integer
+        description: Expected shipping delay for the first option, in hours.
+        optional: true
+        minimum: 0
+      shipping_price:
+        type: string
+        description: Price of the first shipping option, in the listing's currency.
+        optional: true
+    output:
+      description: The updated listing.
+      type: object
+
+  import_catalogue:
+    title: Import a catalogue CSV
+    description: >-
+      Create or update products and listings in bulk by posting a CSV as a
+      string. Back Market queues the import and answers with a task id -- poll
+      get_task until it reports finished, since nothing has changed until then.
+      For a single listing, update_listing is immediate and simpler.
+    category: listings
+    request:
+      method: POST
+      path: /ws/listings
+      headers:
+        Accept-Language: "${market}"
+      body:
+        catalog: "${catalog}"
+        quotechar: "${quotechar}"
+        delimiter: "${delimiter}"
+        encoding: "${encoding}"
+    input:
+      catalog:
+        type: string
+        description: The whole CSV file content, as one string including its header row.
+      quotechar:
+        type: string
+        description: Quote character used in the CSV, usually a double quote.
+        example: '"'
+      delimiter:
+        type: string
+        description: Column delimiter used in the CSV, e.g. ";" or ",".
+        example: ";"
+      encoding:
+        type: string
+        description: Character encoding of the CSV, e.g. "utf-8".
+        example: utf-8
+      market:
+        type: string
+        description: Market the import applies to, as an Accept-Language value.
+        optional: true
+        example: fr-fr
+    output:
+      description: The queued import task, whose id get_task polls.
+      type: object
+
+  get_task:
+    title: Get a batch task
+    description: >-
+      Read the state of a queued batch task -- a catalogue import, typically --
+      including its progress and any per-row errors. Poll this rather than
+      assuming an import succeeded.
+    category: listings
+    read_only: true
+    request:
+      method: GET
+      path: /ws/tasks/${task_id}
+    input:
+      task_id:
+        type: string
+        description: The task id returned by import_catalogue.
+    output:
+      description: The task, with its status and errors.
+      type: object
+
+  # -- orders --------------------------------------------------------------
+
+  list_orders:
+    title: List orders
+    description: >-
+      Read your orders, newest pages first. Filter `state` to 1 to find orders
+      whose lines are paid and waiting for you to accept or cancel -- the
+      queue that actually needs action. `date_modification` is the right filter
+      for an incremental sync.
+    category: orders
+    read_only: true
+    request:
+      method: GET
+      path: /ws/orders
+      query:
+        date_creation: "${date_creation}"
+        date_modification: "${date_modification}"
+        country_code: "${country_code}"
+        state: "${state}"
+        page: "${page}"
+        page-size: "${page_size}"
+    input:
+      date_creation:
+        type: string
+        description: Only orders created at or after this RFC 3339 timestamp.
+        optional: true
+        example: "2026-01-01T00:00:00Z"
+      date_modification:
+        type: string
+        description: Only orders modified at or after this RFC 3339 timestamp.
+        optional: true
+      country_code:
+        type: string
+        description: Only orders from this market, e.g. "fr-fr" or "en-us".
+        optional: true
+        enum: [fr-fr, fr-be, es-es, de-de, de-at, it-it, ja-jp, en-au, en-gb, en-us,
+               nl-nl, pt-pt, en-ie, el-gr, sk-sk, sv-se]
+      state:
+        type: integer
+        description: >-
+          Only orders in this state -- 0 new (payment being verified, do not
+          ship), 10 pending payment, 1 paid and awaiting your acceptance, 3
+          shipping in progress, 8 and 9 holds.
+        optional: true
+        enum: [0, 10, 1, 3, 8, 9]
+      page:
+        type: integer
+        description: Page number, starting at 1.
+        optional: true
+        minimum: 1
+      page_size:
+        type: integer
+        description: Orders per page. Defaults to 10.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of orders, each with its orderlines.
+      type: object
+      properties:
+        results: {type: array}
+        count: {type: integer}
+
+  get_order:
+    title: Get an order
+    description: >-
+      Read one order in full -- customer, shipping address and every orderline
+      with its state, price and SKU.
+    category: orders
+    read_only: true
+    request:
+      method: GET
+      path: /ws/orders/${order_id}
+    input:
+      order_id:
+        type: integer
+        description: The order's numeric id, from list_orders.
+    output:
+      description: The order and its orderlines.
+      type: object
+
+  update_order:
+    title: Move an orderline to a new state
+    description: >-
+      Accept, ship, cancel or refund one orderline. `new_state` is 2 to accept,
+      3 to ship (which requires `tracking_number` and normally `shipper`), 4 to
+      cancel a paid line, 5 to refund before shipping and 6 to refund after.
+      `sku` picks which line of the order you mean. Cancelling and refunding
+      reach the customer and cannot be undone.
+    category: orders
+    destructive: true
+    request:
+      method: POST
+      path: /ws/orders/${order_id}
+      body:
+        order_id: "${order_id}"
+        new_state: "${new_state}"
+        sku: "${sku}"
+        tracking_number: "${tracking_number}"
+        tracking_url: "${tracking_url}"
+        shipper: "${shipper}"
+        date_shipping: "${date_shipping}"
+        imei: "${imei}"
+        serial_number: "${serial_number}"
+        vat_type: "${vat_type}"
+        return_reason: "${return_reason}"
+        return_message: "${return_message}"
+    input:
+      order_id:
+        type: integer
+        description: The order's numeric id. Sent in both the url and the body, as Back Market requires.
+      new_state:
+        type: integer
+        description: >-
+          The orderline's new state: 2 accepted, 3 shipped, 4 cancelled, 5
+          refunded before shipping, 6 refunded after shipping, 7 closed.
+        enum: [0, 9, 8, 1, 2, 3, 4, 5, 6, 7]
+      sku:
+        type: string
+        description: Your own SKU for the orderline being updated, which is how the line is matched.
+        optional: true
+      tracking_number:
+        type: string
+        description: Carrier tracking number. Required when `new_state` is 3.
+        optional: true
+      tracking_url:
+        type: string
+        description: Carrier tracking url shown to the customer.
+        optional: true
+      shipper:
+        type: string
+        description: Carrier actually used, which may differ from the listing's shipper.
+        optional: true
+      date_shipping:
+        type: string
+        description: Date the parcel was handed to the carrier, processed when `new_state` is 3.
+        optional: true
+      imei:
+        type: string
+        description: Device IMEI, for phone categories. Processed when `new_state` is 3.
+        optional: true
+      serial_number:
+        type: string
+        description: Device serial number. Processed when `new_state` is 3.
+        optional: true
+      vat_type:
+        type: string
+        description: VAT scheme the sale falls under.
+        optional: true
+        enum: [REGULAR, MARGINAL]
+      return_reason:
+        type: integer
+        description: >-
+          Why the item came back -- 0 stock mistake, 1 legal 14-day withdrawal,
+          11-13 delivery failures, 21-24 faults, 25 other. Send with a
+          cancellation or refund.
+        optional: true
+        enum: [0, 1, 11, 12, 13, 21, 22, 23, 24, 25]
+      return_message:
+        type: string
+        description: Message shown to the customer with a cancellation or refund.
+        optional: true
+    output:
+      description: The updated order.
+      type: object
+
+  update_orderline:
+    title: Set an orderline's device identifiers
+    description: >-
+      Record the IMEI or serial number of the device actually shipped for one
+      orderline. Back Market requires it for phone categories and it is what
+      after-sales claims are matched against.
+    category: orders
+    request:
+      method: PATCH
+      path: /ws/orderlines/${orderline_id}
+      body:
+        imei: "${imei}"
+        serial_number: "${serial_number}"
+    input:
+      orderline_id:
+        type: integer
+        description: The orderline's numeric id, from the order's `orderlines`.
+      imei:
+        type: string
+        description: The device's IMEI.
+        optional: true
+      serial_number:
+        type: string
+        description: The device's serial number.
+        optional: true
+    output:
+      description: The updated orderline.
+      type: object
+
+  # -- shipping ------------------------------------------------------------
+
+  list_deliveries:
+    title: List Backship deliveries
+    description: >-
+      Read the outbound parcels Back Market's own shipping service is handling
+      for you, with their pickup and delivery state. Filter by `order_id` to
+      trace one order's parcel.
+    category: shipping
+    read_only: true
+    request:
+      method: GET
+      path: /ws/shipping/v1/deliveries
+      query:
+        page: "${page}"
+        order_id: "${order_id}"
+        start_date: "${start_date}"
+        end_date: "${end_date}"
+        pickup_start_date: "${pickup_start_date}"
+        pickup_end_date: "${pickup_end_date}"
+        order_state: "${order_state}"
+        hub_scanned: "${hub_scanned}"
+    input:
+      page:
+        type: integer
+        description: Page number, starting at 1.
+        optional: true
+        minimum: 1
+      order_id:
+        type: string
+        description: Only the delivery for this order.
+        optional: true
+      start_date:
+        type: string
+        description: Only deliveries created on or after this date.
+        optional: true
+      end_date:
+        type: string
+        description: Only deliveries created on or before this date.
+        optional: true
+      pickup_start_date:
+        type: string
+        description: Only deliveries picked up on or after this date.
+        optional: true
+      pickup_end_date:
+        type: string
+        description: Only deliveries picked up on or before this date.
+        optional: true
+      order_state:
+        type: string
+        description: Only deliveries whose order is in this state.
+        optional: true
+      hub_scanned:
+        type: boolean
+        description: Only parcels that have (or have not) been scanned at the hub.
+        optional: true
+    output:
+      description: A page of deliveries.
+      type: object
+
+  get_delivery:
+    title: Get a delivery
+    description: Read one Backship delivery -- carrier, tracking and every scan event on the parcel.
+    category: shipping
+    read_only: true
+    request:
+      method: GET
+      path: /ws/shipping/v1/deliveries/${delivery_id}
+    input:
+      delivery_id:
+        type: string
+        description: The delivery's id, from list_deliveries.
+    output:
+      description: The delivery.
+      type: object
+
+  list_returns:
+    title: List product returns
+    description: >-
+      Read the parcels coming back to you, with pickup and receipt state. The
+      inbound mirror of list_deliveries, and the first place to look when a
+      customer says they have returned something.
+    category: shipping
+    read_only: true
+    request:
+      method: GET
+      path: /ws/shipping/v1/returns
+      query:
+        page: "${page}"
+        order_id: "${order_id}"
+        start_date: "${start_date}"
+        end_date: "${end_date}"
+        pickup_start_date: "${pickup_start_date}"
+        pickup_end_date: "${pickup_end_date}"
+        order_state: "${order_state}"
+        hub_scanned: "${hub_scanned}"
+    input:
+      page:
+        type: integer
+        description: Page number, starting at 1.
+        optional: true
+        minimum: 1
+      order_id:
+        type: string
+        description: Only the return for this order.
+        optional: true
+      start_date:
+        type: string
+        description: Only returns created on or after this date.
+        optional: true
+      end_date:
+        type: string
+        description: Only returns created on or before this date.
+        optional: true
+      pickup_start_date:
+        type: string
+        description: Only returns picked up on or after this date.
+        optional: true
+      pickup_end_date:
+        type: string
+        description: Only returns picked up on or before this date.
+        optional: true
+      order_state:
+        type: string
+        description: Only returns whose order is in this state.
+        optional: true
+      hub_scanned:
+        type: boolean
+        description: Only parcels that have (or have not) been scanned at the hub.
+        optional: true
+    output:
+      description: A page of product returns.
+      type: object
+
+  get_return:
+    title: Get a product return
+    description: Read one inbound return -- carrier, tracking and the scans recorded against it.
+    category: shipping
+    read_only: true
+    request:
+      method: GET
+      path: /ws/shipping/v1/returns/${return_id}
+    input:
+      return_id:
+        type: string
+        description: The return's id, from list_returns.
+    output:
+      description: The product return.
+      type: object
+
+  # -- care (after sales) --------------------------------------------------
+
+  list_care_folders:
+    title: List care folders
+    description: >-
+      Read the after-sales cases open against your orders. `state` narrows to
+      what still needs you, and `last_message_date` is how you find the ones
+      where a customer is waiting on a reply.
+    category: care
+    read_only: true
+    request:
+      method: GET
+      path: /ws/sav
+      query:
+        last_id: "${last_id}"
+        state: "${state}"
+        orderline: "${orderline}"
+        last_modification_date: "${last_modification_date}"
+        last_message_date: "${last_message_date}"
+        page: "${page}"
+    input:
+      last_id:
+        type: string
+        description: Return folders after this id, for cursor-style paging.
+        optional: true
+      state:
+        type: string
+        description: Only folders in this state.
+        optional: true
+      orderline:
+        type: string
+        description: Only the folder for this orderline id.
+        optional: true
+      last_modification_date:
+        type: string
+        description: Only folders modified at or after this date.
+        optional: true
+      last_message_date:
+        type: string
+        description: Only folders whose last message is at or after this date.
+        optional: true
+      page:
+        type: integer
+        description: Page number, starting at 1.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of care folders.
+      type: object
+
+  get_care_folder:
+    title: Get a care folder
+    description: >-
+      Read one after-sales case in full -- the orderline it concerns, the
+      declared problem, and the conversation with the customer.
+    category: care
+    read_only: true
+    request:
+      method: GET
+      path: /ws/sav/${care_folder_id}
+    input:
+      care_folder_id:
+        type: integer
+        description: The care folder's numeric id, from list_care_folders.
+    output:
+      description: The care folder.
+      type: object
+
+  create_refund:
+    title: Refund an orderline
+    description: >-
+      Refund money on an orderline through the after-sales platform.
+      `refund_type` 4 is a full refund of a paid line, 5 a full refund of a
+      shipped line, and 6 a partial refund -- only type 6 takes an `amount`.
+      This moves real money and cannot be reversed.
+    category: care
+    destructive: true
+    request:
+      method: POST
+      path: /ws/sav/refund
+      body:
+        orderline_pk: "${orderline_id}"
+        refund_type: "${refund_type}"
+        amount: "${amount}"
+    input:
+      orderline_id:
+        type: integer
+        description: The orderline to refund, by its numeric id.
+      refund_type:
+        type: integer
+        description: >-
+          4 for a full refund of an orderline in state 1, 5 for a full refund
+          of a shipped orderline, 6 for a partial refund of `amount`.
+        enum: [4, 5, 6]
+      amount:
+        type: number
+        description: Amount to refund. Only used, and required, when `refund_type` is 6.
+        optional: true
+        minimum: 0
+    output:
+      description: The created refund.
+      type: object
+
+  declare_item_transfer:
+    title: Declare an item transfer back to the customer
+    description: >-
+      Tell Back Market you are sending the device back to the customer after
+      handling a care folder, with the carrier and tracking id, and whether you
+      repaired, replaced or did nothing to it.
+    category: care
+    request:
+      method: POST
+      path: /ws/sav/${care_folder_id}/item-transfer
+      body:
+        shipperName: "${shipper_name}"
+        trackingNumber: "${tracking_number}"
+        action: "${action}"
+    input:
+      care_folder_id:
+        type: integer
+        description: The care folder the transfer belongs to.
+      shipper_name:
+        type: string
+        description: Carrier carrying the device back.
+      tracking_number:
+        type: string
+        description: Tracking id issued by that carrier.
+      action:
+        type: string
+        description: What you did to the device before sending it back.
+        optional: true
+        enum: [REPAIR, REPLACE, NOTHING]
+    output:
+      description: Confirmation of the declared transfer.
+      type: object
+
+  # -- buyback (trade-in) --------------------------------------------------
+
+  list_buyback_orders:
+    title: List BuyBack orders
+    description: >-
+      Read the trade-in orders customers have sent you, filtered by status --
+      NEW and TO_SEND are incoming, RECEIVED are devices in your hands awaiting
+      a decision, COUNTER_PROPOSAL are waiting on the customer.
+    category: buyback
+    read_only: true
+    request:
+      method: GET
+      path: /ws/buyback/v1/orders
+      query:
+        status: "${status}"
+        productId: "${product_id}"
+        creationDate: "${creation_date}"
+        modificationDate: "${modification_date}"
+        shippingDate: "${shipping_date}"
+        receivedDate: "${received_date}"
+        suspendedDate: "${suspended_date}"
+        paymentDate: "${payment_date}"
+        page: "${page}"
+    input:
+      status:
+        type: string
+        description: Only orders in this status.
+        optional: true
+        enum: [NEW, PENDING, TO_SEND, SENT, RECEIVED, COUNTER_PROPOSAL, VALIDATED, PAID,
+               MONEY_TRANSFERED, SUSPENDED]
+      product_id:
+        type: integer
+        description: Only orders for this BuyBack product id.
+        optional: true
+      creation_date:
+        type: string
+        description: Only orders created at or after this date.
+        optional: true
+      modification_date:
+        type: string
+        description: Only orders modified at or after this date.
+        optional: true
+      shipping_date:
+        type: string
+        description: Only orders shipped at or after this date.
+        optional: true
+      received_date:
+        type: string
+        description: Only orders received at or after this date.
+        optional: true
+      suspended_date:
+        type: string
+        description: Only orders suspended at or after this date.
+        optional: true
+      payment_date:
+        type: string
+        description: Only orders paid at or after this date.
+        optional: true
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of BuyBack orders.
+      type: object
+
+  list_buyback_orders_pending_reply:
+    title: List BuyBack orders waiting on you
+    description: >-
+      Read the trade-in orders where the customer has written and you have not
+      answered. The shortest path to "what is overdue a reply".
+    category: buyback
+    read_only: true
+    request:
+      method: GET
+      path: /ws/buyback/v1/orders/pending-reply
+      query:
+        page: "${page}"
+    input:
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: The BuyBack orders awaiting a reply.
+      type: object
+
+  get_buyback_order:
+    title: Get a BuyBack order
+    description: Read one trade-in order -- the device offered, the agreed price, its status and history.
+    category: buyback
+    read_only: true
+    request:
+      method: GET
+      path: /ws/buyback/v1/orders/${buyback_order_id}
+    input:
+      buyback_order_id:
+        type: string
+        description: The BuyBack order's id, from list_buyback_orders.
+    output:
+      description: The BuyBack order.
+      type: object
+
+  list_buyback_order_messages:
+    title: List a BuyBack order's messages
+    description: Read the conversation on a trade-in order, oldest first, with any attached photos.
+    category: buyback
+    read_only: true
+    request:
+      method: GET
+      path: /ws/buyback/v1/orders/${buyback_order_id}/messages
+      query:
+        page: "${page}"
+    input:
+      buyback_order_id:
+        type: string
+        description: The BuyBack order's id.
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of messages on the order.
+      type: object
+
+  post_buyback_order_message:
+    title: Post a message on a BuyBack order
+    description: >-
+      Write to the customer about their trade-in. `files` must be present --
+      pass an empty list when there are no photos -- and each entry is
+      {"name": ..., "content": <base64>}. The customer sees this immediately.
+    category: buyback
+    request:
+      method: POST
+      path: /ws/buyback/v1/orders/${buyback_order_id}/messages
+      body:
+        message: "${message}"
+        files: "${files}"
+    input:
+      buyback_order_id:
+        type: string
+        description: The BuyBack order's id.
+      message:
+        type: string
+        description: The message text sent to the customer.
+      files:
+        type: array
+        description: >-
+          Photos supporting the message, each {"name": ..., "content": <base64>}.
+          Send an empty list when there are none.
+        items: {type: object}
+    output:
+      description: Confirmation that the message was posted.
+      type: object
+
+  validate_buyback_order:
+    title: Validate a BuyBack order
+    description: >-
+      Accept a trade-in at its current price, which starts the payment to the
+      customer. Do this only once the device is in hand and matches the offer.
+    category: buyback
+    request:
+      method: PUT
+      path: /ws/buyback/v1/orders/${buyback_order_id}/validate
+    input:
+      buyback_order_id:
+        type: string
+        description: The BuyBack order's id.
+    output:
+      description: The validated BuyBack order.
+      type: object
+
+  suspend_buyback_order:
+    title: Suspend a BuyBack order
+    description: >-
+      Put a trade-in on hold, giving one or more reason ids from
+      list_buyback_suspend_reasons. The customer is told the order is suspended
+      and why.
+    category: buyback
+    request:
+      method: PUT
+      path: /ws/buyback/v1/orders/${buyback_order_id}/suspend
+      body:
+        reasons: "${reasons}"
+    input:
+      buyback_order_id:
+        type: string
+        description: The BuyBack order's id.
+      reasons:
+        type: array
+        description: Suspension reason ids, from list_buyback_suspend_reasons.
+        items: {type: integer}
+    output:
+      description: The suspended BuyBack order.
+      type: object
+
+  list_buyback_suspend_reasons:
+    title: List BuyBack suspension reasons
+    description: >-
+      Read the reason ids Back Market accepts for suspending a trade-in order.
+      Call this before suspend_buyback_order; the ids are not guessable.
+    category: buyback
+    read_only: true
+    request:
+      method: GET
+      path: /ws/buyback/v1/orders/suspend-reasons
+    input: {}
+    output:
+      description: The available suspension reasons, with their ids.
+      type: object
+
+  list_buyback_counter_offer_reasons:
+    title: List BuyBack counter-offer reasons
+    description: >-
+      Read the reason ids a counter-offer on a trade-in must cite -- screen
+      damage, battery health, missing accessories and so on -- for a given
+      order.
+    category: buyback
+    read_only: true
+    request:
+      method: GET
+      path: /ws/buyback/v1/orders/${buyback_order_id}/counter-offers/reasons
+    input:
+      buyback_order_id:
+        type: string
+        description: The BuyBack order's id.
+    output:
+      description: The counter-offer reasons available for this order.
+      type: object
+
+  list_buyback_listings:
+    title: List BuyBack listings
+    description: >-
+      Read the trade-in offers you publish -- which devices you buy back and at
+      what price per grade. Cursor-paginated.
+    category: buyback
+    read_only: true
+    request:
+      method: GET
+      path: /ws/buyback/v1/listings
+      query:
+        productId: "${product_id}"
+        cursor: "${cursor}"
+        pageSize: "${page_size}"
+    input:
+      product_id:
+        type: integer
+        description: Only listings for this BuyBack product id.
+        optional: true
+      cursor:
+        type: string
+        description: Cursor from the previous page's response.
+        optional: true
+      page_size:
+        type: integer
+        description: Listings per page.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of BuyBack listings, with the cursor for the next page.
+      type: object
+
+  get_buyback_listing:
+    title: Get a BuyBack listing
+    description: Read one trade-in offer -- the device it covers and your price for each condition grade.
+    category: buyback
+    read_only: true
+    request:
+      method: GET
+      path: /ws/buyback/v1/listings/${buyback_listing_id}
+    input:
+      buyback_listing_id:
+        type: string
+        description: The BuyBack listing's id, from list_buyback_listings.
+    output:
+      description: The BuyBack listing.
+      type: object
+
+  update_buyback_listing:
+    title: Update BuyBack listing prices
+    description: >-
+      Change what you will pay for a traded-in device. `prices` is keyed by
+      condition grade, as returned by get_buyback_listing -- send the whole
+      object, since omitted grades are not preserved.
+    category: buyback
+    request:
+      method: PUT
+      path: /ws/buyback/v1/listings/${buyback_listing_id}
+      body:
+        prices: "${prices}"
+    input:
+      buyback_listing_id:
+        type: string
+        description: The BuyBack listing's id.
+      prices:
+        type: object
+        description: Price per condition grade, in the same shape get_buyback_listing returns.
+    output:
+      description: The updated BuyBack listing.
+      type: object
+
+  get_buyback_competitors:
+    title: Get BuyBack competitor prices
+    description: >-
+      Read what other sellers are offering for the same traded-in device, so a
+      BuyBack price can be set against the market rather than blind.
+    category: buyback
+    read_only: true
+    request:
+      method: GET
+      path: /ws/buyback/v1/competitors/${listing_id}
+    input:
+      listing_id:
+        type: string
+        description: The BuyBack listing id to compare.
+    output:
+      description: Competing BuyBack prices for that device.
+      type: object
+
+  # -- backbox (competitive pricing) ---------------------------------------
+
+  get_backbox_competitors:
+    title: Get competitor prices for a listing
+    description: >-
+      Read the competing offers on the same product as one of your listings --
+      price, grade and shipping -- which is the input to any repricing
+      decision.
+    category: pricing
+    read_only: true
+    request:
+      method: GET
+      path: /ws/backbox/v1/competitors/${listing_id}
+    input:
+      listing_id:
+        type: string
+        description: Your listing's id, from list_listings.
+    output:
+      description: The competing offers on that product.
+      type: object
+
+  list_listing_performance:
+    title: List per-listing Backbox data
+    description: >-
+      Read Back Market's business-intelligence view of your listings -- buybox
+      position and price competitiveness per listing. The bulk companion to
+      get_backbox_competitors.
+    category: pricing
+    read_only: true
+    request:
+      method: GET
+      path: /ws/listings_bi
+      query:
+        page: "${page}"
+        page-size: "${page_size}"
+    input:
+      page:
+        type: integer
+        description: Page number, starting at 1.
+        optional: true
+        minimum: 1
+      page_size:
+        type: integer
+        description: Listings per page. Defaults to 10.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of Backbox listing data.
+      type: object

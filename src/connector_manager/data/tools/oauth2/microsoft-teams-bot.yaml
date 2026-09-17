@@ -1,0 +1,547 @@
+# Microsoft Teams Bot tools -- the Bot Framework Connector service.
+#
+# This connector is not Microsoft Graph. It drives the Bot Framework Connector
+# REST API on the Teams service host (smba.trafficmanager.net/teams), which is
+# how a *bot* talks to Teams. Four things follow from that, and each one trips
+# people up:
+#
+#   * **the token is the bot's, not a user's.** The connection authenticates
+#     the bot application with the `.default` scope against the tenant, so
+#     every tool acts as the bot. There are no per-user delegated scopes to
+#     name, which is why no tool below declares any;
+#   * **everything hangs off a conversation id.** A `conversationId` is
+#     minted either by `create_conversation` or -- far more often -- handed to
+#     you on an inbound activity's `conversation.id` when a user messages the
+#     bot. There is no endpoint that searches for one by user or channel name;
+#   * **an "activity" is the unit of everything.** A message, a typing
+#     indicator, a card update and a member-joined event are all Activity
+#     objects distinguished by their `type`. `send_to_conversation` with
+#     `{"type": "message", "text": "..."}` is the ordinary send;
+#   * **channels differ in what they allow.** Update and delete are
+#     best-effort across the Bot Framework generally; on Teams they work for
+#     the bot's own messages. Nested replies land as ordinary messages where a
+#     channel does not support threading.
+#
+# The two `/v3/teams/` tools are the Teams-specific extension to the connector
+# protocol -- they answer only when the conversation is in a team, not a 1:1
+# chat.
+#
+# Docs: https://learn.microsoft.com/en-us/azure/bot-service/rest-api/bot-framework-rest-connector-api-reference
+
+connector_id: microsoft-teams-bot
+display_name: Microsoft Teams Bot
+docs_url: https://learn.microsoft.com/en-us/azure/bot-service/rest-api/bot-framework-rest-connector-api-reference
+
+tools:
+
+  # -- conversations --------------------------------------------------------
+
+  create_conversation:
+    title: Start a conversation
+    description: >-
+      Create a new conversation and get back the id every other tool needs.
+      This is how a bot opens a proactive 1:1 chat: pass the target user in
+      `members` along with the bot itself, and Teams either creates the chat or
+      returns the existing one. Replying to an inbound message needs no
+      creation -- reuse the `conversation.id` from the activity instead.
+    category: conversations
+    request:
+      method: POST
+      path: /v3/conversations
+      body:
+        bot: "${bot}"
+        members: "${members}"
+        isGroup: "${is_group}"
+        topicName: "${topic_name}"
+        tenantId: "${tenant_id}"
+        channelData: "${channel_data}"
+        activity: "${activity}"
+    input:
+      bot:
+        type: object
+        description: 'The bot''s own ChannelAccount, e.g. {"id": "28:<app-id>", "name": "MyBot"}.'
+        optional: true
+      members:
+        type: array
+        description: 'The ChannelAccounts to include, each at least {"id": "29:..."}. For a 1:1 chat this is the single target user.'
+        optional: true
+        items:
+          type: object
+          properties:
+            id: {type: string}
+            name: {type: string}
+      is_group:
+        type: boolean
+        description: True for a group conversation, false or omitted for 1:1.
+        optional: true
+      topic_name:
+        type: string
+        description: Topic for a group conversation, where the channel shows one.
+        optional: true
+      tenant_id:
+        type: string
+        description: The Microsoft Entra tenant the conversation belongs to.
+        optional: true
+      channel_data:
+        type: object
+        description: 'Teams-specific payload, e.g. {"tenant": {"id": "..."}} or a channel to post into.'
+        optional: true
+      activity:
+        type: object
+        description: An Activity to send as soon as the conversation exists, saving a second call.
+        optional: true
+    output:
+      description: The new conversation's id, and the id of the activity if one was sent.
+      type: object
+      properties:
+        id: {type: string, description: "conversationId -- what every other tool takes."}
+        activityId: {type: string}
+
+  get_conversations:
+    title: List the bot's conversations
+    description: >-
+      Page through the conversations this bot has taken part in. Continuation
+      is by token rather than offset -- pass the previous response's
+      `continuationToken` to get the next page. Useful for auditing reach; not
+      a substitute for storing conversation ids as you learn them.
+    category: conversations
+    read_only: true
+    request:
+      method: GET
+      path: /v3/conversations
+      query:
+        continuationToken: "${continuation_token}"
+    input:
+      continuation_token:
+        type: string
+        description: Token from the previous response, to fetch the next page.
+        optional: true
+    output:
+      description: A page of conversations the bot participates in.
+      type: object
+      properties:
+        conversations: {type: array}
+        continuationToken: {type: string}
+
+  # -- activities -----------------------------------------------------------
+
+  send_to_conversation:
+    title: Send a message to a conversation
+    description: >-
+      Append an activity to a conversation -- the ordinary way a bot sends a
+      message. Pass an Activity object; the common case is
+      {"type": "message", "text": "..."} , and `attachments` carries Adaptive
+      Cards. To answer a specific earlier message in a thread, use
+      reply_to_activity instead.
+    category: activities
+    request:
+      method: POST
+      path: /v3/conversations/${conversation_id}/activities
+      body: "${activity}"
+    input:
+      conversation_id:
+        type: string
+        description: The conversation id, from an inbound activity's conversation.id or from create_conversation.
+      activity:
+        type: object
+        description: 'The Activity to send, e.g. {"type": "message", "text": "Hello", "attachments": [...]}.'
+        properties:
+          type: {type: string}
+          text: {type: string}
+          attachments: {type: array}
+    output:
+      description: The id of the activity that was sent.
+      type: object
+      properties:
+        id: {type: string}
+
+  reply_to_activity:
+    title: Reply to a specific activity
+    description: >-
+      Send an activity as a reply to an earlier one, which is what keeps a
+      conversation threaded in a Teams channel. Where a channel does not
+      support nested replies the message is simply appended, so this is always
+      at least as good as send_to_conversation for answering a user.
+    category: activities
+    request:
+      method: POST
+      path: /v3/conversations/${conversation_id}/activities/${activity_id}
+      body: "${activity}"
+    input:
+      conversation_id:
+        type: string
+        description: The conversation id.
+      activity_id:
+        type: string
+        description: The id of the activity being replied to -- the inbound activity's `id`.
+      activity:
+        type: object
+        description: The Activity to send as the reply.
+        properties:
+          type: {type: string}
+          text: {type: string}
+          attachments: {type: array}
+    output:
+      description: The id of the reply activity.
+      type: object
+      properties:
+        id: {type: string}
+
+  update_activity:
+    title: Edit an activity already sent
+    description: >-
+      Replace an activity the bot previously sent, which is how a card is
+      redrawn after a user clicks one of its buttons. The whole Activity is
+      replaced, not patched, so send the complete new body. Only works for the
+      bot's own messages.
+    category: activities
+    request:
+      method: PUT
+      path: /v3/conversations/${conversation_id}/activities/${activity_id}
+      body: "${activity}"
+    input:
+      conversation_id:
+        type: string
+        description: The conversation id.
+      activity_id:
+        type: string
+        description: The id of the activity to replace, as returned when it was sent.
+      activity:
+        type: object
+        description: The full replacement Activity.
+        properties:
+          type: {type: string}
+          text: {type: string}
+          attachments: {type: array}
+    output:
+      description: The id of the updated activity.
+      type: object
+      properties:
+        id: {type: string}
+
+  delete_activity:
+    title: Delete an activity
+    description: >-
+      Remove an activity from a conversation. Irreversible, and it removes the
+      message for everyone in the conversation, not just the bot's view. Only
+      works for the bot's own messages and only where the channel supports
+      deletion.
+    category: activities
+    destructive: true
+    request:
+      method: DELETE
+      path: /v3/conversations/${conversation_id}/activities/${activity_id}
+    input:
+      conversation_id:
+        type: string
+        description: The conversation id.
+      activity_id:
+        type: string
+        description: The id of the activity to delete.
+    output:
+      description: Empty on success; the status code carries the outcome.
+      type: object
+
+  send_conversation_history:
+    title: Upload conversation history
+    description: >-
+      Post a Transcript -- a batch of past activities -- into a conversation so
+      the client can render them. Used when a bot migrates a conversation from
+      elsewhere and wants the backlog visible, rather than for ordinary
+      sending.
+    category: activities
+    request:
+      method: POST
+      path: /v3/conversations/${conversation_id}/activities/history
+      body:
+        activities: "${activities}"
+    input:
+      conversation_id:
+        type: string
+        description: The conversation id.
+      activities:
+        type: array
+        description: The past Activity objects to render, oldest first.
+        items: {type: object}
+    output:
+      description: The id assigned to the uploaded transcript.
+      type: object
+      properties:
+        id: {type: string}
+
+  get_activity_members:
+    title: List the members of an activity
+    description: >-
+      The accounts involved in one specific activity within a conversation.
+      Narrower than the conversation roster: it answers who a particular
+      message concerned, which matters for member-added and member-removed
+      events.
+    category: members
+    read_only: true
+    request:
+      method: GET
+      path: /v3/conversations/${conversation_id}/activities/${activity_id}/members
+    input:
+      conversation_id:
+        type: string
+        description: The conversation id.
+      activity_id:
+        type: string
+        description: The activity id.
+    output:
+      description: The ChannelAccounts for that activity.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          name: {type: string}
+          aadObjectId: {type: string}
+
+  # -- members --------------------------------------------------------------
+
+  get_conversation_members:
+    title: List a conversation's members
+    description: >-
+      The full roster of a conversation in one response. Fine for 1:1 and small
+      group chats; for a team or channel Microsoft says to use
+      get_conversation_paged_members instead, because a large roster can come
+      back incomplete or throttled here.
+    category: members
+    read_only: true
+    request:
+      method: GET
+      path: /v3/conversations/${conversation_id}/members
+    input:
+      conversation_id:
+        type: string
+        description: The conversation id.
+    output:
+      description: The ChannelAccounts in the conversation.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: string}
+          name: {type: string}
+          aadObjectId: {type: string, description: "Entra object id -- the join key to Microsoft Graph."}
+
+  get_conversation_paged_members:
+    title: List a conversation's members, one page at a time
+    description: >-
+      The roster in pages, which is the supported way to read a team or channel
+      membership. Page size may be 50-500 and defaults to 200; loop on the
+      returned `continuationToken` until it comes back empty. Paging is not
+      available in 1:1 or group chats, where the whole roster is returned.
+    category: members
+    read_only: true
+    request:
+      method: GET
+      path: /v3/conversations/${conversation_id}/pagedmembers
+      query:
+        pageSize: "${page_size}"
+        continuationToken: "${continuation_token}"
+    input:
+      conversation_id:
+        type: string
+        description: The conversation id.
+      page_size:
+        type: integer
+        description: Members per page (50-500, default 200).
+        optional: true
+        minimum: 50
+        maximum: 500
+      continuation_token:
+        type: string
+        description: Token from the previous page; omit for the first.
+        optional: true
+    output:
+      description: One page of members plus the token for the next.
+      type: object
+      properties:
+        members: {type: array}
+        continuationToken: {type: string}
+
+  get_conversation_member:
+    title: Get one conversation member
+    description: >-
+      Details for a single member of a conversation, including the
+      `aadObjectId` that joins them to their Microsoft Entra identity. Cheaper
+      than pulling the whole roster when you already have the member id off an
+      inbound activity's `from.id`.
+    category: members
+    read_only: true
+    request:
+      method: GET
+      path: /v3/conversations/${conversation_id}/members/${member_id}
+    input:
+      conversation_id:
+        type: string
+        description: The conversation id.
+      member_id:
+        type: string
+        description: The member's channel account id, e.g. the inbound activity's from.id.
+    output:
+      description: The member's ChannelAccount.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        aadObjectId: {type: string}
+
+  delete_conversation_member:
+    title: Remove a member from a conversation
+    description: >-
+      Remove someone from a conversation. If they were the last member the
+      conversation is deleted along with them, so this can destroy the whole
+      thread rather than just trimming its roster.
+    category: members
+    destructive: true
+    request:
+      method: DELETE
+      path: /v3/conversations/${conversation_id}/members/${member_id}
+    input:
+      conversation_id:
+        type: string
+        description: The conversation id.
+      member_id:
+        type: string
+        description: The channel account id of the member to remove.
+    output:
+      description: Empty on success; the status code carries the outcome.
+      type: object
+
+  # -- attachments ----------------------------------------------------------
+
+  upload_attachment:
+    title: Upload an attachment to a channel's store
+    description: >-
+      Put a file into the channel's own blob storage and get back an attachment
+      id that get_attachment_info and get_attachment then read. Keeps the data
+      inside the channel's compliance boundary instead of hosting it yourself.
+      Contents go inline as base64 in `originalBase64`.
+    category: attachments
+    request:
+      method: POST
+      path: /v3/conversations/${conversation_id}/attachments
+      body:
+        name: "${name}"
+        type: "${type}"
+        originalBase64: "${original_base64}"
+        thumbnailBase64: "${thumbnail_base64}"
+    input:
+      conversation_id:
+        type: string
+        description: The conversation to store the attachment against.
+      name:
+        type: string
+        description: File name for the attachment.
+      type:
+        type: string
+        description: The attachment's content type, e.g. "image/png".
+      original_base64:
+        type: string
+        description: The file contents, base64 encoded.
+      thumbnail_base64:
+        type: string
+        description: An optional thumbnail, base64 encoded.
+        optional: true
+    output:
+      description: The attachment id, for use with the attachment read tools.
+      type: object
+      properties:
+        id: {type: string}
+
+  get_attachment_info:
+    title: Get an attachment's metadata
+    description: >-
+      Name, content type and the list of available views for one attachment.
+      Read this first: the view ids it returns ("original", "thumbnail") are
+      what get_attachment takes, and guessing them is how that call 404s.
+    category: attachments
+    read_only: true
+    request:
+      method: GET
+      path: /v3/attachments/${attachment_id}
+    input:
+      attachment_id:
+        type: string
+        description: The attachment id, from upload_attachment or an inbound activity.
+    output:
+      description: The attachment's metadata and available views.
+      type: object
+      properties:
+        name: {type: string}
+        type: {type: string}
+        views: {type: array}
+
+  get_attachment:
+    title: Download an attachment view
+    description: >-
+      Fetch one view of an attachment as binary content. The view id comes from
+      get_attachment_info -- usually "original" for the full file or
+      "thumbnail" for the preview.
+    category: attachments
+    read_only: true
+    request:
+      method: GET
+      path: /v3/attachments/${attachment_id}/views/${view_id}
+    input:
+      attachment_id:
+        type: string
+        description: The attachment id.
+      view_id:
+        type: string
+        description: The view to fetch, from get_attachment_info -- typically "original" or "thumbnail".
+        example: original
+    output:
+      description: The attachment's binary content for that view.
+      type: object
+
+  # -- Teams-specific extensions -------------------------------------------
+
+  get_team_details:
+    title: Get a team's details
+    description: >-
+      Teams-only extension: the team's name and its Microsoft Entra group id,
+      which is the join key to Microsoft Graph's group and channel APIs. The
+      `teamId` comes from an inbound activity's `channelData.team.id`; this
+      answers nothing for a 1:1 or group chat.
+    category: teams
+    read_only: true
+    request:
+      method: GET
+      path: /v3/teams/${team_id}
+    input:
+      team_id:
+        type: string
+        description: The team id, from an inbound activity's channelData.team.id.
+    output:
+      description: The team's id, name and Entra group id.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        aadGroupId: {type: string}
+
+  get_team_channels:
+    title: List a team's channels
+    description: >-
+      Teams-only extension: the channels in a team, each with the conversation
+      id to post into. Two quirks worth expecting -- the General channel's name
+      comes back null so clients can localise it, and its channel id is always
+      identical to the team id.
+    category: teams
+    read_only: true
+    request:
+      method: GET
+      path: /v3/teams/${team_id}/conversations
+    input:
+      team_id:
+        type: string
+        description: The team id, from an inbound activity's channelData.team.id.
+    output:
+      description: The team's channels, each usable as a conversation id.
+      type: object
+      properties:
+        conversations: {type: array}

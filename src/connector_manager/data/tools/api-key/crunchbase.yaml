@@ -1,0 +1,4789 @@
+# Crunchbase tools -- the v4 private-market data API.
+#
+# The connection's base url stops at the host, so every path here starts with
+# /v4. Four things shape how this API is driven, and each one is a common
+# stumbling block:
+#
+#   * **entities are addressed by permalink, not by UUID.** Stripe is
+#     `stripe`, not a hex id. `autocomplete_entities` is the intended first
+#     call in almost every workflow -- it turns the name a human typed into the
+#     identifier every lookup tool takes;
+#   * **you choose the fields.** A lookup returns a small default set unless
+#     `field_ids` asks for more, and a search returns nothing useful without
+#     them. `get_field_metadata` is the authoritative list of what a collection
+#     has; a misspelt field id is a 400, not an empty column;
+#   * **searches are POSTs with a predicate language.** `query` is an array of
+#     `{type: predicate, field_id, operator_id, values}` objects, ANDed
+#     together. Paging is by `after_id` over a stable `order` -- there is no
+#     offset, and paging without an explicit order is not reproducible;
+#   * **cards are how relationships are read.** A funding round's investors, an
+#     organization's founders, a person's jobs are all *cards*. Ask for them
+#     inline with `card_ids` on a lookup when you want a handful, and use the
+#     single-card tool when a card has more rows than the lookup will return --
+#     only the single-card endpoint pages within a card.
+#
+# **Packages gate what a key can reach.** Crunchbase sells Firmographic, Core
+# and Advanced Financials, Insights and Predictions separately, and every
+# collection here belongs to one of them. A key without the package gets a 403,
+# not an empty result, so the prediction and insight tools below say which
+# package they need. `get_openapi_spec` returns the surface *this* key is
+# actually entitled to.
+#
+# A mirror also has to poll `list_deleted_entities`: deletions never appear in
+# search results, so an index built only from searches silently keeps records
+# Crunchbase has removed.
+#
+# Docs: https://data.crunchbase.com/docs/using-the-api
+
+connector_id: crunchbase
+display_name: Crunchbase
+docs_url: https://data.crunchbase.com/docs/using-the-api
+
+tools:
+
+  autocomplete_entities:
+    title: Autocomplete entity identifiers
+    description: >-
+      Resolve a name fragment to Crunchbase entity identifiers. This is the
+      intended first step for almost every workflow: the lookup and card tools
+      take a `entity_id` (the permalink, e.g. "stripe"), and this is how you
+      get one from a name a human typed.
+    category: search
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/autocompletes
+      query:
+        query: "${query}"
+        collection_ids: "${collection_ids}"
+        limit: "${limit}"
+    input:
+      query:
+        type: string
+        description: The text to match, e.g. a company or person name.
+      collection_ids:
+        type: string
+        description: Restrict to these collections, comma-separated, e.g. "organizations,people".
+        optional: true
+      limit:
+        type: integer
+        description: How many suggestions to return.
+        optional: true
+        default: '10'
+    output:
+      description: The requested record.
+      type: object
+
+  list_deleted_entities:
+    title: List deleted entities
+    description: >-
+      Entities Crunchbase has deleted, newest first. A mirror that only ever
+      adds records drifts out of date silently, so an incremental sync needs
+      to poll this as well as the search endpoints -- this is the only place a
+      deletion shows up.
+    category: sync
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/deleted_entities
+      query:
+        collection_ids: "${collection_ids}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+        deleted_at_order: "${deleted_at_order}"
+    input:
+      collection_ids:
+        type: string
+        description: Restrict to these collections, comma-separated.
+        optional: true
+      limit:
+        type: integer
+        description: How many records to return.
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+      deleted_at_order:
+        type: string
+        description: Sort direction on the deletion timestamp.
+        optional: true
+        enum: [asc, desc]
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  list_deleted_entities_for_collection:
+    title: List one collection's deleted entities
+    description: >-
+      Deletions within a single collection, newest first. Cheaper than the
+      org-wide feed when a mirror only tracks, say, organizations, and paged
+      the same way.
+    category: sync
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/deleted_entities/${collection_id}
+      query:
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+        deleted_at_order: "${deleted_at_order}"
+    input:
+      collection_id:
+        type: string
+        description: The collection to read deletions for, e.g. "organizations".
+      limit:
+        type: integer
+        description: How many records to return.
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+      deleted_at_order:
+        type: string
+        description: Sort direction on the deletion timestamp.
+        optional: true
+        enum: [asc, desc]
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  get_field_metadata:
+    title: List the fields a collection has
+    description: >-
+      Every field Crunchbase publishes for the given collections, with its
+      type and description. This is what `field_ids` and a search's predicates
+      must be built from -- guessing a field name is the most common cause of
+      a 400 from this API.
+    category: metadata
+    read_only: true
+    request:
+      method: GET
+      path: /v4/md/applications/crunchbase/fields
+      query:
+        collection_ids: "${collection_ids}"
+    input:
+      collection_ids:
+        type: string
+        description: Restrict to these collections, comma-separated. Omit for all of them.
+        optional: true
+    output:
+      description: The requested record.
+      type: object
+
+  get_openapi_spec:
+    title: Get the OpenAPI specification
+    description: >-
+      Crunchbase's own OpenAPI document for the packages this API key is
+      entitled to. The authoritative answer to which collections and fields
+      the key can actually reach, which differs by package.
+    category: metadata
+    read_only: true
+    request:
+      method: GET
+      path: /v4/md/applications/crunchbase/openapi.json
+    output:
+      description: The OpenAPI 3 document describing the entitled surface.
+      type: object
+
+  get_acquisition_prediction:
+    title: Look up a acquisition prediction
+    description: >-
+      Fetch one acquisition prediction by its Crunchbase identifier --
+      Crunchbase's modelled likelihood that a company is acquired. The
+      identifier is the permalink, not a UUID; autocomplete_entities is how to
+      turn a name into one. Part of Crunchbase's Predictions package -- an
+      account without it gets a 403 rather than an empty result.
+    category: acquisition_predictions
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/acquisition_predictions/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The acquisition prediction's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The acquisition prediction record, with the fields and cards requested.
+      type: object
+
+  get_acquisition:
+    title: Look up a acquisition
+    description: >-
+      Fetch one acquisition by its Crunchbase identifier -- who bought whom,
+      for how much, and when. The identifier is the permalink, not a UUID;
+      autocomplete_entities is how to turn a name into one.
+    category: acquisitions
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/acquisitions/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The acquisition's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The acquisition record, with the fields and cards requested.
+      type: object
+
+  get_address:
+    title: Look up a address
+    description: >-
+      Fetch one address by its Crunchbase identifier -- a physical address
+      attached to an organization or event. The identifier is the permalink,
+      not a UUID; autocomplete_entities is how to turn a name into one.
+    category: addresses
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/addresses/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The address's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The address record, with the fields and cards requested.
+      type: object
+
+  get_award:
+    title: Look up a award
+    description: >-
+      Fetch one award by its Crunchbase identifier -- a recognition an
+      organization has received. The identifier is the permalink, not a UUID;
+      autocomplete_entities is how to turn a name into one.
+    category: awards
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/awards/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The award's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The award record, with the fields and cards requested.
+      type: object
+
+  get_category:
+    title: Look up a category
+    description: >-
+      Fetch one category by its Crunchbase identifier -- the industry tags
+      organizations carry. The identifier is the permalink, not a UUID;
+      autocomplete_entities is how to turn a name into one.
+    category: categories
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/categories/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The category's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The category record, with the fields and cards requested.
+      type: object
+
+  get_category_group:
+    title: Look up a category group
+    description: >-
+      Fetch one category group by its Crunchbase identifier -- the broader
+      grouping several categories roll up into. The identifier is the
+      permalink, not a UUID; autocomplete_entities is how to turn a name into
+      one.
+    category: category_groups
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/category_groups/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The category group's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The category group record, with the fields and cards requested.
+      type: object
+
+  get_closure_prediction:
+    title: Look up a closure prediction
+    description: >-
+      Fetch one closure prediction by its Crunchbase identifier --
+      Crunchbase's modelled likelihood that a company shuts down. The
+      identifier is the permalink, not a UUID; autocomplete_entities is how to
+      turn a name into one. Part of Crunchbase's Predictions package -- an
+      account without it gets a 403 rather than an empty result.
+    category: closure_predictions
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/closure_predictions/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The closure prediction's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The closure prediction record, with the fields and cards requested.
+      type: object
+
+  get_current_valuation_estimate:
+    title: Look up a current valuation estimate
+    description: >-
+      Fetch one current valuation estimate by its Crunchbase identifier --
+      Crunchbase's modelled valuation for a private company. The identifier is
+      the permalink, not a UUID; autocomplete_entities is how to turn a name
+      into one. Part of Crunchbase's Predictions package -- an account without
+      it gets a 403 rather than an empty result.
+    category: current_valuation_estimates
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/current_valuation_estimates/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The current valuation estimate's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The current valuation estimate record, with the fields and cards requested.
+      type: object
+
+  get_degree:
+    title: Look up a degree
+    description: >-
+      Fetch one degree by its Crunchbase identifier -- a person's
+      qualification and the school that granted it. The identifier is the
+      permalink, not a UUID; autocomplete_entities is how to turn a name into
+      one.
+    category: degrees
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/degrees/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The degree's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The degree record, with the fields and cards requested.
+      type: object
+
+  get_diversity_spotlight:
+    title: Look up a diversity spotlight
+    description: >-
+      Fetch one diversity spotlight by its Crunchbase identifier --
+      Crunchbase's diversity classification for an organization. The
+      identifier is the permalink, not a UUID; autocomplete_entities is how to
+      turn a name into one.
+    category: diversity_spotlights
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/diversity_spotlights/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The diversity spotlight's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The diversity spotlight record, with the fields and cards requested.
+      type: object
+
+  get_event_appearance:
+    title: Look up a event appearance
+    description: >-
+      Fetch one event appearance by its Crunchbase identifier -- one
+      organization's or person's role at one event. The identifier is the
+      permalink, not a UUID; autocomplete_entities is how to turn a name into
+      one.
+    category: event_appearances
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/event_appearances/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The event appearance's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The event appearance record, with the fields and cards requested.
+      type: object
+
+  get_event:
+    title: Look up a event
+    description: >-
+      Fetch one event by its Crunchbase identifier -- a conference or summit
+      Crunchbase tracks. The identifier is the permalink, not a UUID;
+      autocomplete_entities is how to turn a name into one.
+    category: events
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/events/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The event's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The event record, with the fields and cards requested.
+      type: object
+
+  get_funding_prediction:
+    title: Look up a funding prediction
+    description: >-
+      Fetch one funding prediction by its Crunchbase identifier --
+      Crunchbase's modelled likelihood that a company raises. The identifier
+      is the permalink, not a UUID; autocomplete_entities is how to turn a
+      name into one. Part of Crunchbase's Predictions package -- an account
+      without it gets a 403 rather than an empty result.
+    category: funding_predictions
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/funding_predictions/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The funding prediction's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The funding prediction record, with the fields and cards requested.
+      type: object
+
+  get_funding_round:
+    title: Look up a funding round
+    description: >-
+      Fetch one funding round by its Crunchbase identifier -- a single round,
+      its money raised and who took part. The identifier is the permalink, not
+      a UUID; autocomplete_entities is how to turn a name into one.
+    category: funding_rounds
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/funding_rounds/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The funding round's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The funding round record, with the fields and cards requested.
+      type: object
+
+  get_fund:
+    title: Look up a fund
+    description: >-
+      Fetch one fund by its Crunchbase identifier -- a vehicle an investor
+      raises and deploys. The identifier is the permalink, not a UUID;
+      autocomplete_entities is how to turn a name into one.
+    category: funds
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/funds/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The fund's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The fund record, with the fields and cards requested.
+      type: object
+
+  get_growth_insight:
+    title: Look up a growth insight
+    description: >-
+      Fetch one growth insight by its Crunchbase identifier -- Crunchbase's
+      read on how fast an organization is growing. The identifier is the
+      permalink, not a UUID; autocomplete_entities is how to turn a name into
+      one. Part of Crunchbase's Insights package -- an account without it gets
+      a 403 rather than an empty result.
+    category: growth_insights
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/growth_insights/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The growth insight's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The growth insight record, with the fields and cards requested.
+      type: object
+
+  get_growth_prediction:
+    title: Look up a growth prediction
+    description: >-
+      Fetch one growth prediction by its Crunchbase identifier -- Crunchbase's
+      modelled growth trajectory for a company. The identifier is the
+      permalink, not a UUID; autocomplete_entities is how to turn a name into
+      one. Part of Crunchbase's Predictions package -- an account without it
+      gets a 403 rather than an empty result.
+    category: growth_predictions
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/growth_predictions/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The growth prediction's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The growth prediction record, with the fields and cards requested.
+      type: object
+
+  get_investment:
+    title: Look up a investment
+    description: >-
+      Fetch one investment by its Crunchbase identifier -- one investor's
+      participation in one funding round. The identifier is the permalink, not
+      a UUID; autocomplete_entities is how to turn a name into one.
+    category: investments
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/investments/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The investment's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The investment record, with the fields and cards requested.
+      type: object
+
+  get_investor_insight:
+    title: Look up a investor insight
+    description: >-
+      Fetch one investor insight by its Crunchbase identifier -- Crunchbase's
+      read on an investor's behaviour and portfolio. The identifier is the
+      permalink, not a UUID; autocomplete_entities is how to turn a name into
+      one. Part of Crunchbase's Insights package -- an account without it gets
+      a 403 rather than an empty result.
+    category: investor_insights
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/investor_insights/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The investor insight's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The investor insight record, with the fields and cards requested.
+      type: object
+
+  get_investor_match:
+    title: Look up a investor match
+    description: >-
+      Fetch one investor match by its Crunchbase identifier -- investors
+      Crunchbase considers a fit for an organization. The identifier is the
+      permalink, not a UUID; autocomplete_entities is how to turn a name into
+      one. Part of Crunchbase's Insights package -- an account without it gets
+      a 403 rather than an empty result.
+    category: investor_matches
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/investor_matches/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The investor match's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The investor match record, with the fields and cards requested.
+      type: object
+
+  get_ipo_prediction:
+    title: Look up a IPO prediction
+    description: >-
+      Fetch one IPO prediction by its Crunchbase identifier -- Crunchbase's
+      modelled likelihood that a company goes public. The identifier is the
+      permalink, not a UUID; autocomplete_entities is how to turn a name into
+      one. Part of Crunchbase's Predictions package -- an account without it
+      gets a 403 rather than an empty result.
+    category: ipo_predictions
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/ipo_predictions/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The IPO prediction's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The IPO prediction record, with the fields and cards requested.
+      type: object
+
+  get_ipo:
+    title: Look up a IPO
+    description: >-
+      Fetch one IPO by its Crunchbase identifier -- a company's public
+      listing, its price and the money raised. The identifier is the
+      permalink, not a UUID; autocomplete_entities is how to turn a name into
+      one.
+    category: ipos
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/ipos/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The IPO's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The IPO record, with the fields and cards requested.
+      type: object
+
+  get_job:
+    title: Look up a job
+    description: >-
+      Fetch one job by its Crunchbase identifier -- one person's role at one
+      organization, with its dates and title. The identifier is the permalink,
+      not a UUID; autocomplete_entities is how to turn a name into one.
+    category: jobs
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/jobs/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The job's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The job record, with the fields and cards requested.
+      type: object
+
+  get_key_employee_change:
+    title: Look up a key employee change
+    description: >-
+      Fetch one key employee change by its Crunchbase identifier -- a senior
+      hire or departure. The identifier is the permalink, not a UUID;
+      autocomplete_entities is how to turn a name into one.
+    category: key_employee_changes
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/key_employee_changes/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The key employee change's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The key employee change record, with the fields and cards requested.
+      type: object
+
+  get_layoff_prediction:
+    title: Look up a layoff prediction
+    description: >-
+      Fetch one layoff prediction by its Crunchbase identifier -- Crunchbase's
+      modelled likelihood of a reduction in force. The identifier is the
+      permalink, not a UUID; autocomplete_entities is how to turn a name into
+      one. Part of Crunchbase's Predictions package -- an account without it
+      gets a 403 rather than an empty result.
+    category: layoff_predictions
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/layoff_predictions/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The layoff prediction's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The layoff prediction record, with the fields and cards requested.
+      type: object
+
+  get_layoff:
+    title: Look up a layoff
+    description: >-
+      Fetch one layoff by its Crunchbase identifier -- a reported reduction in
+      force, its size and date. The identifier is the permalink, not a UUID;
+      autocomplete_entities is how to turn a name into one.
+    category: layoffs
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/layoffs/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The layoff's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The layoff record, with the fields and cards requested.
+      type: object
+
+  get_legal_proceeding:
+    title: Look up a legal proceeding
+    description: >-
+      Fetch one legal proceeding by its Crunchbase identifier -- litigation
+      Crunchbase has recorded against an organization. The identifier is the
+      permalink, not a UUID; autocomplete_entities is how to turn a name into
+      one.
+    category: legal_proceedings
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/legal_proceedings/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The legal proceeding's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The legal proceeding record, with the fields and cards requested.
+      type: object
+
+  get_location:
+    title: Look up a location
+    description: >-
+      Fetch one location by its Crunchbase identifier -- a city, region or
+      country used for headquarters and search. The identifier is the
+      permalink, not a UUID; autocomplete_entities is how to turn a name into
+      one.
+    category: locations
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/locations/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The location's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The location record, with the fields and cards requested.
+      type: object
+
+  get_market_insight_reason:
+    title: Look up a market insight reason
+    description: >-
+      Fetch one market insight reason by its Crunchbase identifier -- the
+      evidence behind a market insight. The identifier is the permalink, not a
+      UUID; autocomplete_entities is how to turn a name into one. Part of
+      Crunchbase's Insights package -- an account without it gets a 403 rather
+      than an empty result.
+    category: market_insight_reasons
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/market_insight_reasons/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The market insight reason's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The market insight reason record, with the fields and cards requested.
+      type: object
+
+  get_market_insight:
+    title: Look up a market insight
+    description: >-
+      Fetch one market insight by its Crunchbase identifier -- Crunchbase's
+      read on a market's shape and momentum. The identifier is the permalink,
+      not a UUID; autocomplete_entities is how to turn a name into one. Part
+      of Crunchbase's Insights package -- an account without it gets a 403
+      rather than an empty result.
+    category: market_insights
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/market_insights/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The market insight's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The market insight record, with the fields and cards requested.
+      type: object
+
+  get_micro_category:
+    title: Look up a micro category
+    description: >-
+      Fetch one micro category by its Crunchbase identifier -- the
+      finest-grained industry classification. The identifier is the permalink,
+      not a UUID; autocomplete_entities is how to turn a name into one.
+    category: micro_categories
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/micro_categories/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The micro category's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The micro category record, with the fields and cards requested.
+      type: object
+
+  get_organization_similarity:
+    title: Look up a organization similarity
+    description: >-
+      Fetch one organization similarity by its Crunchbase identifier -- how
+      close two organizations are, as Crunchbase scores them. The identifier
+      is the permalink, not a UUID; autocomplete_entities is how to turn a
+      name into one.
+    category: org_similarities
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/org_similarities/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The organization similarity's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The organization similarity record, with the fields and cards requested.
+      type: object
+
+  get_organization:
+    title: Look up a organization
+    description: >-
+      Fetch one organization by its Crunchbase identifier -- companies,
+      investors and schools -- every kind of organization Crunchbase tracks.
+      The identifier is the permalink, not a UUID; autocomplete_entities is
+      how to turn a name into one.
+    category: organizations
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/organizations/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The organization's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The organization record, with the fields and cards requested.
+      type: object
+
+  get_ownership:
+    title: Look up a ownership
+    description: >-
+      Fetch one ownership by its Crunchbase identifier -- the parent/child
+      relationship between two organizations. The identifier is the permalink,
+      not a UUID; autocomplete_entities is how to turn a name into one.
+    category: ownerships
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/ownerships/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The ownership's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The ownership record, with the fields and cards requested.
+      type: object
+
+  get_partnership_announcement:
+    title: Look up a partnership announcement
+    description: >-
+      Fetch one partnership announcement by its Crunchbase identifier -- a
+      publicly announced partnership between organizations. The identifier is
+      the permalink, not a UUID; autocomplete_entities is how to turn a name
+      into one.
+    category: partnership_announcements
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/partnership_announcements/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The partnership announcement's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The partnership announcement record, with the fields and cards requested.
+      type: object
+
+  get_person:
+    title: Look up a person
+    description: >-
+      Fetch one person by its Crunchbase identifier -- founders, executives
+      and investors. The identifier is the permalink, not a UUID;
+      autocomplete_entities is how to turn a name into one.
+    category: people
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/people/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The person's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The person record, with the fields and cards requested.
+      type: object
+
+  get_press_reference:
+    title: Look up a press reference
+    description: >-
+      Fetch one press reference by its Crunchbase identifier -- a news article
+      Crunchbase has linked to an entity. The identifier is the permalink, not
+      a UUID; autocomplete_entities is how to turn a name into one.
+    category: press_references
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/press_references/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The press reference's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The press reference record, with the fields and cards requested.
+      type: object
+
+  get_principal:
+    title: Look up a principal
+    description: >-
+      Fetch one principal by its Crunchbase identifier -- the unified
+      person-or-organization record behind an identifier. The identifier is
+      the permalink, not a UUID; autocomplete_entities is how to turn a name
+      into one.
+    category: principals
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/principals/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The principal's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+    output:
+      description: The principal record, with the fields and cards requested.
+      type: object
+
+  get_product_launch:
+    title: Look up a product launch
+    description: >-
+      Fetch one product launch by its Crunchbase identifier -- a launch
+      Crunchbase has recorded. The identifier is the permalink, not a UUID;
+      autocomplete_entities is how to turn a name into one.
+    category: product_launches
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/product_launches/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The product launch's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The product launch record, with the fields and cards requested.
+      type: object
+
+  get_product_similarity:
+    title: Look up a product similarity
+    description: >-
+      Fetch one product similarity by its Crunchbase identifier -- how close
+      two products are, as Crunchbase scores them. The identifier is the
+      permalink, not a UUID; autocomplete_entities is how to turn a name into
+      one.
+    category: product_similarities
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/product_similarities/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The product similarity's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The product similarity record, with the fields and cards requested.
+      type: object
+
+  get_product:
+    title: Look up a product
+    description: >-
+      Fetch one product by its Crunchbase identifier -- a product an
+      organization ships. The identifier is the permalink, not a UUID;
+      autocomplete_entities is how to turn a name into one.
+    category: products
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/products/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The product's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The product record, with the fields and cards requested.
+      type: object
+
+  get_remain_private_prediction:
+    title: Look up a remain private prediction
+    description: >-
+      Fetch one remain private prediction by its Crunchbase identifier --
+      Crunchbase's modelled likelihood a company stays private. The identifier
+      is the permalink, not a UUID; autocomplete_entities is how to turn a
+      name into one. Part of Crunchbase's Predictions package -- an account
+      without it gets a 403 rather than an empty result.
+    category: remain_private_predictions
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/remain_private_predictions/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The remain private prediction's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The remain private prediction record, with the fields and cards requested.
+      type: object
+
+  get_research_insight:
+    title: Look up a research insight
+    description: >-
+      Fetch one research insight by its Crunchbase identifier -- a
+      research-grade signal Crunchbase publishes about an entity. The
+      identifier is the permalink, not a UUID; autocomplete_entities is how to
+      turn a name into one. Part of Crunchbase's Insights package -- an
+      account without it gets a 403 rather than an empty result.
+    category: research_insights
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/research_insights/${entity_id}
+      query:
+        field_ids: "${field_ids}"
+        card_ids: "${card_ids}"
+    input:
+      entity_id:
+        type: string
+        description: The research insight's Crunchbase permalink or UUID.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      card_ids:
+        type: array
+        description: Related-entity cards to embed in the same response, saving a second call. Each collection publishes its own card names.
+        optional: true
+        items: {type: string}
+    output:
+      description: The research insight record, with the fields and cards requested.
+      type: object
+
+  get_acquisition_card:
+    title: Get one card for a acquisition
+    description: >-
+      Fetch a single related-entity card for one acquisition -- its founders,
+      its addresses, its child organizations and so on, depending on the
+      collection. Use this rather than `card_ids` on the lookup when a card
+      has more rows than the lookup will return, since only this endpoint
+      pages within a card.
+    category: acquisitions
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/acquisitions/${entity_id}/cards/${card_id}
+      query:
+        field_ids: "${field_ids}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+        order: "${order}"
+    input:
+      entity_id:
+        type: string
+        description: The acquisition's Crunchbase permalink or UUID.
+      card_id:
+        type: string
+        description: Which card to fetch. Each collection publishes its own card names.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: How many rows of the card to return.
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this row id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this row id.
+        optional: true
+      order:
+        type: string
+        description: Sort order for the card's rows, e.g. "identifier asc".
+        optional: true
+    output:
+      description: One page of the requested card for that acquisition.
+      type: object
+
+  get_address_card:
+    title: Get one card for a address
+    description: >-
+      Fetch a single related-entity card for one address -- its founders, its
+      addresses, its child organizations and so on, depending on the
+      collection. Use this rather than `card_ids` on the lookup when a card
+      has more rows than the lookup will return, since only this endpoint
+      pages within a card.
+    category: addresses
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/addresses/${entity_id}/cards/${card_id}
+      query:
+        field_ids: "${field_ids}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+        order: "${order}"
+    input:
+      entity_id:
+        type: string
+        description: The address's Crunchbase permalink or UUID.
+      card_id:
+        type: string
+        description: Which card to fetch. Each collection publishes its own card names.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: How many rows of the card to return.
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this row id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this row id.
+        optional: true
+      order:
+        type: string
+        description: Sort order for the card's rows, e.g. "identifier asc".
+        optional: true
+    output:
+      description: One page of the requested card for that address.
+      type: object
+
+  get_category_card:
+    title: Get one card for a category
+    description: >-
+      Fetch a single related-entity card for one category -- its founders, its
+      addresses, its child organizations and so on, depending on the
+      collection. Use this rather than `card_ids` on the lookup when a card
+      has more rows than the lookup will return, since only this endpoint
+      pages within a card.
+    category: categories
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/categories/${entity_id}/cards/${card_id}
+      query:
+        field_ids: "${field_ids}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+        order: "${order}"
+    input:
+      entity_id:
+        type: string
+        description: The category's Crunchbase permalink or UUID.
+      card_id:
+        type: string
+        description: Which card to fetch. Each collection publishes its own card names.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: How many rows of the card to return.
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this row id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this row id.
+        optional: true
+      order:
+        type: string
+        description: Sort order for the card's rows, e.g. "identifier asc".
+        optional: true
+    output:
+      description: One page of the requested card for that category.
+      type: object
+
+  get_category_group_card:
+    title: Get one card for a category group
+    description: >-
+      Fetch a single related-entity card for one category group -- its
+      founders, its addresses, its child organizations and so on, depending on
+      the collection. Use this rather than `card_ids` on the lookup when a
+      card has more rows than the lookup will return, since only this endpoint
+      pages within a card.
+    category: category_groups
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/category_groups/${entity_id}/cards/${card_id}
+      query:
+        field_ids: "${field_ids}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+        order: "${order}"
+    input:
+      entity_id:
+        type: string
+        description: The category group's Crunchbase permalink or UUID.
+      card_id:
+        type: string
+        description: Which card to fetch. Each collection publishes its own card names.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: How many rows of the card to return.
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this row id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this row id.
+        optional: true
+      order:
+        type: string
+        description: Sort order for the card's rows, e.g. "identifier asc".
+        optional: true
+    output:
+      description: One page of the requested card for that category group.
+      type: object
+
+  get_degree_card:
+    title: Get one card for a degree
+    description: >-
+      Fetch a single related-entity card for one degree -- its founders, its
+      addresses, its child organizations and so on, depending on the
+      collection. Use this rather than `card_ids` on the lookup when a card
+      has more rows than the lookup will return, since only this endpoint
+      pages within a card.
+    category: degrees
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/degrees/${entity_id}/cards/${card_id}
+      query:
+        field_ids: "${field_ids}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+        order: "${order}"
+    input:
+      entity_id:
+        type: string
+        description: The degree's Crunchbase permalink or UUID.
+      card_id:
+        type: string
+        description: Which card to fetch. Each collection publishes its own card names.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: How many rows of the card to return.
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this row id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this row id.
+        optional: true
+      order:
+        type: string
+        description: Sort order for the card's rows, e.g. "identifier asc".
+        optional: true
+    output:
+      description: One page of the requested card for that degree.
+      type: object
+
+  get_event_appearance_card:
+    title: Get one card for a event appearance
+    description: >-
+      Fetch a single related-entity card for one event appearance -- its
+      founders, its addresses, its child organizations and so on, depending on
+      the collection. Use this rather than `card_ids` on the lookup when a
+      card has more rows than the lookup will return, since only this endpoint
+      pages within a card.
+    category: event_appearances
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/event_appearances/${entity_id}/cards/${card_id}
+      query:
+        field_ids: "${field_ids}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+        order: "${order}"
+    input:
+      entity_id:
+        type: string
+        description: The event appearance's Crunchbase permalink or UUID.
+      card_id:
+        type: string
+        description: Which card to fetch. Each collection publishes its own card names.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: How many rows of the card to return.
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this row id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this row id.
+        optional: true
+      order:
+        type: string
+        description: Sort order for the card's rows, e.g. "identifier asc".
+        optional: true
+    output:
+      description: One page of the requested card for that event appearance.
+      type: object
+
+  get_event_card:
+    title: Get one card for a event
+    description: >-
+      Fetch a single related-entity card for one event -- its founders, its
+      addresses, its child organizations and so on, depending on the
+      collection. Use this rather than `card_ids` on the lookup when a card
+      has more rows than the lookup will return, since only this endpoint
+      pages within a card.
+    category: events
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/events/${entity_id}/cards/${card_id}
+      query:
+        field_ids: "${field_ids}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+        order: "${order}"
+    input:
+      entity_id:
+        type: string
+        description: The event's Crunchbase permalink or UUID.
+      card_id:
+        type: string
+        description: Which card to fetch. Each collection publishes its own card names.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: How many rows of the card to return.
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this row id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this row id.
+        optional: true
+      order:
+        type: string
+        description: Sort order for the card's rows, e.g. "identifier asc".
+        optional: true
+    output:
+      description: One page of the requested card for that event.
+      type: object
+
+  get_funding_round_card:
+    title: Get one card for a funding round
+    description: >-
+      Fetch a single related-entity card for one funding round -- its
+      founders, its addresses, its child organizations and so on, depending on
+      the collection. Use this rather than `card_ids` on the lookup when a
+      card has more rows than the lookup will return, since only this endpoint
+      pages within a card.
+    category: funding_rounds
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/funding_rounds/${entity_id}/cards/${card_id}
+      query:
+        field_ids: "${field_ids}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+        order: "${order}"
+    input:
+      entity_id:
+        type: string
+        description: The funding round's Crunchbase permalink or UUID.
+      card_id:
+        type: string
+        description: Which card to fetch. Each collection publishes its own card names.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: How many rows of the card to return.
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this row id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this row id.
+        optional: true
+      order:
+        type: string
+        description: Sort order for the card's rows, e.g. "identifier asc".
+        optional: true
+    output:
+      description: One page of the requested card for that funding round.
+      type: object
+
+  get_fund_card:
+    title: Get one card for a fund
+    description: >-
+      Fetch a single related-entity card for one fund -- its founders, its
+      addresses, its child organizations and so on, depending on the
+      collection. Use this rather than `card_ids` on the lookup when a card
+      has more rows than the lookup will return, since only this endpoint
+      pages within a card.
+    category: funds
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/funds/${entity_id}/cards/${card_id}
+      query:
+        field_ids: "${field_ids}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+        order: "${order}"
+    input:
+      entity_id:
+        type: string
+        description: The fund's Crunchbase permalink or UUID.
+      card_id:
+        type: string
+        description: Which card to fetch. Each collection publishes its own card names.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: How many rows of the card to return.
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this row id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this row id.
+        optional: true
+      order:
+        type: string
+        description: Sort order for the card's rows, e.g. "identifier asc".
+        optional: true
+    output:
+      description: One page of the requested card for that fund.
+      type: object
+
+  get_investment_card:
+    title: Get one card for a investment
+    description: >-
+      Fetch a single related-entity card for one investment -- its founders,
+      its addresses, its child organizations and so on, depending on the
+      collection. Use this rather than `card_ids` on the lookup when a card
+      has more rows than the lookup will return, since only this endpoint
+      pages within a card.
+    category: investments
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/investments/${entity_id}/cards/${card_id}
+      query:
+        field_ids: "${field_ids}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+        order: "${order}"
+    input:
+      entity_id:
+        type: string
+        description: The investment's Crunchbase permalink or UUID.
+      card_id:
+        type: string
+        description: Which card to fetch. Each collection publishes its own card names.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: How many rows of the card to return.
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this row id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this row id.
+        optional: true
+      order:
+        type: string
+        description: Sort order for the card's rows, e.g. "identifier asc".
+        optional: true
+    output:
+      description: One page of the requested card for that investment.
+      type: object
+
+  get_ipo_card:
+    title: Get one card for a IPO
+    description: >-
+      Fetch a single related-entity card for one IPO -- its founders, its
+      addresses, its child organizations and so on, depending on the
+      collection. Use this rather than `card_ids` on the lookup when a card
+      has more rows than the lookup will return, since only this endpoint
+      pages within a card.
+    category: ipos
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/ipos/${entity_id}/cards/${card_id}
+      query:
+        field_ids: "${field_ids}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+        order: "${order}"
+    input:
+      entity_id:
+        type: string
+        description: The IPO's Crunchbase permalink or UUID.
+      card_id:
+        type: string
+        description: Which card to fetch. Each collection publishes its own card names.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: How many rows of the card to return.
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this row id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this row id.
+        optional: true
+      order:
+        type: string
+        description: Sort order for the card's rows, e.g. "identifier asc".
+        optional: true
+    output:
+      description: One page of the requested card for that IPO.
+      type: object
+
+  get_job_card:
+    title: Get one card for a job
+    description: >-
+      Fetch a single related-entity card for one job -- its founders, its
+      addresses, its child organizations and so on, depending on the
+      collection. Use this rather than `card_ids` on the lookup when a card
+      has more rows than the lookup will return, since only this endpoint
+      pages within a card.
+    category: jobs
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/jobs/${entity_id}/cards/${card_id}
+      query:
+        field_ids: "${field_ids}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+        order: "${order}"
+    input:
+      entity_id:
+        type: string
+        description: The job's Crunchbase permalink or UUID.
+      card_id:
+        type: string
+        description: Which card to fetch. Each collection publishes its own card names.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: How many rows of the card to return.
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this row id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this row id.
+        optional: true
+      order:
+        type: string
+        description: Sort order for the card's rows, e.g. "identifier asc".
+        optional: true
+    output:
+      description: One page of the requested card for that job.
+      type: object
+
+  get_market_insight_card:
+    title: Get one card for a market insight
+    description: >-
+      Fetch a single related-entity card for one market insight -- its
+      founders, its addresses, its child organizations and so on, depending on
+      the collection. Use this rather than `card_ids` on the lookup when a
+      card has more rows than the lookup will return, since only this endpoint
+      pages within a card. Part of Crunchbase's Insights package -- an account
+      without it gets a 403 rather than an empty result.
+    category: market_insights
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/market_insights/${entity_id}/cards/${card_id}
+      query:
+        field_ids: "${field_ids}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+        order: "${order}"
+    input:
+      entity_id:
+        type: string
+        description: The market insight's Crunchbase permalink or UUID.
+      card_id:
+        type: string
+        description: Which card to fetch. Each collection publishes its own card names.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: How many rows of the card to return.
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this row id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this row id.
+        optional: true
+      order:
+        type: string
+        description: Sort order for the card's rows, e.g. "identifier asc".
+        optional: true
+    output:
+      description: One page of the requested card for that market insight.
+      type: object
+
+  get_micro_category_card:
+    title: Get one card for a micro category
+    description: >-
+      Fetch a single related-entity card for one micro category -- its
+      founders, its addresses, its child organizations and so on, depending on
+      the collection. Use this rather than `card_ids` on the lookup when a
+      card has more rows than the lookup will return, since only this endpoint
+      pages within a card.
+    category: micro_categories
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/micro_categories/${entity_id}/cards/${card_id}
+      query:
+        field_ids: "${field_ids}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+        order: "${order}"
+    input:
+      entity_id:
+        type: string
+        description: The micro category's Crunchbase permalink or UUID.
+      card_id:
+        type: string
+        description: Which card to fetch. Each collection publishes its own card names.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: How many rows of the card to return.
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this row id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this row id.
+        optional: true
+      order:
+        type: string
+        description: Sort order for the card's rows, e.g. "identifier asc".
+        optional: true
+    output:
+      description: One page of the requested card for that micro category.
+      type: object
+
+  get_organization_card:
+    title: Get one card for a organization
+    description: >-
+      Fetch a single related-entity card for one organization -- its founders,
+      its addresses, its child organizations and so on, depending on the
+      collection. Use this rather than `card_ids` on the lookup when a card
+      has more rows than the lookup will return, since only this endpoint
+      pages within a card.
+    category: organizations
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/organizations/${entity_id}/cards/${card_id}
+      query:
+        field_ids: "${field_ids}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+        order: "${order}"
+    input:
+      entity_id:
+        type: string
+        description: The organization's Crunchbase permalink or UUID.
+      card_id:
+        type: string
+        description: Which card to fetch. Each collection publishes its own card names.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: How many rows of the card to return.
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this row id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this row id.
+        optional: true
+      order:
+        type: string
+        description: Sort order for the card's rows, e.g. "identifier asc".
+        optional: true
+    output:
+      description: One page of the requested card for that organization.
+      type: object
+
+  get_ownership_card:
+    title: Get one card for a ownership
+    description: >-
+      Fetch a single related-entity card for one ownership -- its founders,
+      its addresses, its child organizations and so on, depending on the
+      collection. Use this rather than `card_ids` on the lookup when a card
+      has more rows than the lookup will return, since only this endpoint
+      pages within a card.
+    category: ownerships
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/ownerships/${entity_id}/cards/${card_id}
+      query:
+        field_ids: "${field_ids}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+        order: "${order}"
+    input:
+      entity_id:
+        type: string
+        description: The ownership's Crunchbase permalink or UUID.
+      card_id:
+        type: string
+        description: Which card to fetch. Each collection publishes its own card names.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: How many rows of the card to return.
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this row id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this row id.
+        optional: true
+      order:
+        type: string
+        description: Sort order for the card's rows, e.g. "identifier asc".
+        optional: true
+    output:
+      description: One page of the requested card for that ownership.
+      type: object
+
+  get_person_card:
+    title: Get one card for a person
+    description: >-
+      Fetch a single related-entity card for one person -- its founders, its
+      addresses, its child organizations and so on, depending on the
+      collection. Use this rather than `card_ids` on the lookup when a card
+      has more rows than the lookup will return, since only this endpoint
+      pages within a card.
+    category: people
+    read_only: true
+    request:
+      method: GET
+      path: /v4/data/entities/people/${entity_id}/cards/${card_id}
+      query:
+        field_ids: "${field_ids}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+        order: "${order}"
+    input:
+      entity_id:
+        type: string
+        description: The person's Crunchbase permalink or UUID.
+      card_id:
+        type: string
+        description: Which card to fetch. Each collection publishes its own card names.
+      field_ids:
+        type: array
+        description: Which fields to return, comma-separated. Omit for the collection's default field set; get_field_metadata lists every field a collection has.
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: How many rows of the card to return.
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this row id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this row id.
+        optional: true
+      order:
+        type: string
+        description: Sort order for the card's rows, e.g. "identifier asc".
+        optional: true
+    output:
+      description: One page of the requested card for that person.
+      type: object
+
+  search_acquisition_predictions:
+    title: Search acquisition predictions
+    description: >-
+      Query the acquisition predictions collection with Crunchbase's predicate
+      language -- Crunchbase's modelled likelihood that a company is acquired.
+      Filters go in `query` as predicates over field ids; get_field_metadata
+      lists the fields and their operators. Page with `after_id` plus a stable
+      `order`, never with an offset. Part of Crunchbase's Predictions package
+      -- an account without it gets a 403 rather than an empty result.
+    category: acquisition_predictions
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/acquisition_predictions
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching acquisition predictions, with `count` and `entities`.
+      type: object
+
+  search_acquisitions:
+    title: Search acquisitions
+    description: >-
+      Query the acquisitions collection with Crunchbase's predicate language
+      -- who bought whom, for how much, and when. Filters go in `query` as
+      predicates over field ids; get_field_metadata lists the fields and their
+      operators. Page with `after_id` plus a stable `order`, never with an
+      offset.
+    category: acquisitions
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/acquisitions
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching acquisitions, with `count` and `entities`.
+      type: object
+
+  search_addresses:
+    title: Search addresses
+    description: >-
+      Query the addresses collection with Crunchbase's predicate language -- a
+      physical address attached to an organization or event. Filters go in
+      `query` as predicates over field ids; get_field_metadata lists the
+      fields and their operators. Page with `after_id` plus a stable `order`,
+      never with an offset.
+    category: addresses
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/addresses
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching addresses, with `count` and `entities`.
+      type: object
+
+  search_awards:
+    title: Search awards
+    description: >-
+      Query the awards collection with Crunchbase's predicate language -- a
+      recognition an organization has received. Filters go in `query` as
+      predicates over field ids; get_field_metadata lists the fields and their
+      operators. Page with `after_id` plus a stable `order`, never with an
+      offset.
+    category: awards
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/awards
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching awards, with `count` and `entities`.
+      type: object
+
+  search_categories:
+    title: Search categories
+    description: >-
+      Query the categories collection with Crunchbase's predicate language --
+      the industry tags organizations carry. Filters go in `query` as
+      predicates over field ids; get_field_metadata lists the fields and their
+      operators. Page with `after_id` plus a stable `order`, never with an
+      offset.
+    category: categories
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/categories
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching categories, with `count` and `entities`.
+      type: object
+
+  search_category_groups:
+    title: Search category groups
+    description: >-
+      Query the category groups collection with Crunchbase's predicate
+      language -- the broader grouping several categories roll up into.
+      Filters go in `query` as predicates over field ids; get_field_metadata
+      lists the fields and their operators. Page with `after_id` plus a stable
+      `order`, never with an offset.
+    category: category_groups
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/category_groups
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching category groups, with `count` and `entities`.
+      type: object
+
+  search_closure_predictions:
+    title: Search closure predictions
+    description: >-
+      Query the closure predictions collection with Crunchbase's predicate
+      language -- Crunchbase's modelled likelihood that a company shuts down.
+      Filters go in `query` as predicates over field ids; get_field_metadata
+      lists the fields and their operators. Page with `after_id` plus a stable
+      `order`, never with an offset. Part of Crunchbase's Predictions package
+      -- an account without it gets a 403 rather than an empty result.
+    category: closure_predictions
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/closure_predictions
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching closure predictions, with `count` and `entities`.
+      type: object
+
+  search_current_valuation_estimates:
+    title: Search current valuation estimates
+    description: >-
+      Query the current valuation estimates collection with Crunchbase's
+      predicate language -- Crunchbase's modelled valuation for a private
+      company. Filters go in `query` as predicates over field ids;
+      get_field_metadata lists the fields and their operators. Page with
+      `after_id` plus a stable `order`, never with an offset. Part of
+      Crunchbase's Predictions package -- an account without it gets a 403
+      rather than an empty result.
+    category: current_valuation_estimates
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/current_valuation_estimates
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching current valuation estimates, with `count` and `entities`.
+      type: object
+
+  search_degrees:
+    title: Search degrees
+    description: >-
+      Query the degrees collection with Crunchbase's predicate language -- a
+      person's qualification and the school that granted it. Filters go in
+      `query` as predicates over field ids; get_field_metadata lists the
+      fields and their operators. Page with `after_id` plus a stable `order`,
+      never with an offset.
+    category: degrees
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/degrees
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching degrees, with `count` and `entities`.
+      type: object
+
+  search_diversity_spotlights:
+    title: Search diversity spotlights
+    description: >-
+      Query the diversity spotlights collection with Crunchbase's predicate
+      language -- Crunchbase's diversity classification for an organization.
+      Filters go in `query` as predicates over field ids; get_field_metadata
+      lists the fields and their operators. Page with `after_id` plus a stable
+      `order`, never with an offset.
+    category: diversity_spotlights
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/diversity_spotlights
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching diversity spotlights, with `count` and `entities`.
+      type: object
+
+  search_event_appearances:
+    title: Search event appearances
+    description: >-
+      Query the event appearances collection with Crunchbase's predicate
+      language -- one organization's or person's role at one event. Filters go
+      in `query` as predicates over field ids; get_field_metadata lists the
+      fields and their operators. Page with `after_id` plus a stable `order`,
+      never with an offset.
+    category: event_appearances
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/event_appearances
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching event appearances, with `count` and `entities`.
+      type: object
+
+  search_events:
+    title: Search events
+    description: >-
+      Query the events collection with Crunchbase's predicate language -- a
+      conference or summit Crunchbase tracks. Filters go in `query` as
+      predicates over field ids; get_field_metadata lists the fields and their
+      operators. Page with `after_id` plus a stable `order`, never with an
+      offset.
+    category: events
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/events
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching events, with `count` and `entities`.
+      type: object
+
+  search_funding_predictions:
+    title: Search funding predictions
+    description: >-
+      Query the funding predictions collection with Crunchbase's predicate
+      language -- Crunchbase's modelled likelihood that a company raises.
+      Filters go in `query` as predicates over field ids; get_field_metadata
+      lists the fields and their operators. Page with `after_id` plus a stable
+      `order`, never with an offset. Part of Crunchbase's Predictions package
+      -- an account without it gets a 403 rather than an empty result.
+    category: funding_predictions
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/funding_predictions
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching funding predictions, with `count` and `entities`.
+      type: object
+
+  search_funding_rounds:
+    title: Search funding rounds
+    description: >-
+      Query the funding rounds collection with Crunchbase's predicate language
+      -- a single round, its money raised and who took part. Filters go in
+      `query` as predicates over field ids; get_field_metadata lists the
+      fields and their operators. Page with `after_id` plus a stable `order`,
+      never with an offset.
+    category: funding_rounds
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/funding_rounds
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching funding rounds, with `count` and `entities`.
+      type: object
+
+  search_funds:
+    title: Search funds
+    description: >-
+      Query the funds collection with Crunchbase's predicate language -- a
+      vehicle an investor raises and deploys. Filters go in `query` as
+      predicates over field ids; get_field_metadata lists the fields and their
+      operators. Page with `after_id` plus a stable `order`, never with an
+      offset.
+    category: funds
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/funds
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching funds, with `count` and `entities`.
+      type: object
+
+  search_growth_insights:
+    title: Search growth insights
+    description: >-
+      Query the growth insights collection with Crunchbase's predicate
+      language -- Crunchbase's read on how fast an organization is growing.
+      Filters go in `query` as predicates over field ids; get_field_metadata
+      lists the fields and their operators. Page with `after_id` plus a stable
+      `order`, never with an offset. Part of Crunchbase's Insights package --
+      an account without it gets a 403 rather than an empty result.
+    category: growth_insights
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/growth_insights
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching growth insights, with `count` and `entities`.
+      type: object
+
+  search_growth_predictions:
+    title: Search growth predictions
+    description: >-
+      Query the growth predictions collection with Crunchbase's predicate
+      language -- Crunchbase's modelled growth trajectory for a company.
+      Filters go in `query` as predicates over field ids; get_field_metadata
+      lists the fields and their operators. Page with `after_id` plus a stable
+      `order`, never with an offset. Part of Crunchbase's Predictions package
+      -- an account without it gets a 403 rather than an empty result.
+    category: growth_predictions
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/growth_predictions
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching growth predictions, with `count` and `entities`.
+      type: object
+
+  search_investments:
+    title: Search investments
+    description: >-
+      Query the investments collection with Crunchbase's predicate language --
+      one investor's participation in one funding round. Filters go in `query`
+      as predicates over field ids; get_field_metadata lists the fields and
+      their operators. Page with `after_id` plus a stable `order`, never with
+      an offset.
+    category: investments
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/investments
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching investments, with `count` and `entities`.
+      type: object
+
+  search_investor_insights:
+    title: Search investor insights
+    description: >-
+      Query the investor insights collection with Crunchbase's predicate
+      language -- Crunchbase's read on an investor's behaviour and portfolio.
+      Filters go in `query` as predicates over field ids; get_field_metadata
+      lists the fields and their operators. Page with `after_id` plus a stable
+      `order`, never with an offset. Part of Crunchbase's Insights package --
+      an account without it gets a 403 rather than an empty result.
+    category: investor_insights
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/investor_insights
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching investor insights, with `count` and `entities`.
+      type: object
+
+  search_investor_matches:
+    title: Search investor matches
+    description: >-
+      Query the investor matches collection with Crunchbase's predicate
+      language -- investors Crunchbase considers a fit for an organization.
+      Filters go in `query` as predicates over field ids; get_field_metadata
+      lists the fields and their operators. Page with `after_id` plus a stable
+      `order`, never with an offset. Part of Crunchbase's Insights package --
+      an account without it gets a 403 rather than an empty result.
+    category: investor_matches
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/investor_matches
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching investor matches, with `count` and `entities`.
+      type: object
+
+  search_ipo_predictions:
+    title: Search ipo predictions
+    description: >-
+      Query the ipo predictions collection with Crunchbase's predicate
+      language -- Crunchbase's modelled likelihood that a company goes public.
+      Filters go in `query` as predicates over field ids; get_field_metadata
+      lists the fields and their operators. Page with `after_id` plus a stable
+      `order`, never with an offset. Part of Crunchbase's Predictions package
+      -- an account without it gets a 403 rather than an empty result.
+    category: ipo_predictions
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/ipo_predictions
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching ipo predictions, with `count` and `entities`.
+      type: object
+
+  search_ipos:
+    title: Search ipos
+    description: >-
+      Query the ipos collection with Crunchbase's predicate language -- a
+      company's public listing, its price and the money raised. Filters go in
+      `query` as predicates over field ids; get_field_metadata lists the
+      fields and their operators. Page with `after_id` plus a stable `order`,
+      never with an offset.
+    category: ipos
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/ipos
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching ipos, with `count` and `entities`.
+      type: object
+
+  search_jobs:
+    title: Search jobs
+    description: >-
+      Query the jobs collection with Crunchbase's predicate language -- one
+      person's role at one organization, with its dates and title. Filters go
+      in `query` as predicates over field ids; get_field_metadata lists the
+      fields and their operators. Page with `after_id` plus a stable `order`,
+      never with an offset.
+    category: jobs
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/jobs
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching jobs, with `count` and `entities`.
+      type: object
+
+  search_key_employee_changes:
+    title: Search key employee changes
+    description: >-
+      Query the key employee changes collection with Crunchbase's predicate
+      language -- a senior hire or departure. Filters go in `query` as
+      predicates over field ids; get_field_metadata lists the fields and their
+      operators. Page with `after_id` plus a stable `order`, never with an
+      offset.
+    category: key_employee_changes
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/key_employee_changes
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching key employee changes, with `count` and `entities`.
+      type: object
+
+  search_layoff_predictions:
+    title: Search layoff predictions
+    description: >-
+      Query the layoff predictions collection with Crunchbase's predicate
+      language -- Crunchbase's modelled likelihood of a reduction in force.
+      Filters go in `query` as predicates over field ids; get_field_metadata
+      lists the fields and their operators. Page with `after_id` plus a stable
+      `order`, never with an offset. Part of Crunchbase's Predictions package
+      -- an account without it gets a 403 rather than an empty result.
+    category: layoff_predictions
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/layoff_predictions
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching layoff predictions, with `count` and `entities`.
+      type: object
+
+  search_layoffs:
+    title: Search layoffs
+    description: >-
+      Query the layoffs collection with Crunchbase's predicate language -- a
+      reported reduction in force, its size and date. Filters go in `query` as
+      predicates over field ids; get_field_metadata lists the fields and their
+      operators. Page with `after_id` plus a stable `order`, never with an
+      offset.
+    category: layoffs
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/layoffs
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching layoffs, with `count` and `entities`.
+      type: object
+
+  search_legal_proceedings:
+    title: Search legal proceedings
+    description: >-
+      Query the legal proceedings collection with Crunchbase's predicate
+      language -- litigation Crunchbase has recorded against an organization.
+      Filters go in `query` as predicates over field ids; get_field_metadata
+      lists the fields and their operators. Page with `after_id` plus a stable
+      `order`, never with an offset.
+    category: legal_proceedings
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/legal_proceedings
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching legal proceedings, with `count` and `entities`.
+      type: object
+
+  search_locations:
+    title: Search locations
+    description: >-
+      Query the locations collection with Crunchbase's predicate language -- a
+      city, region or country used for headquarters and search. Filters go in
+      `query` as predicates over field ids; get_field_metadata lists the
+      fields and their operators. Page with `after_id` plus a stable `order`,
+      never with an offset.
+    category: locations
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/locations
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching locations, with `count` and `entities`.
+      type: object
+
+  search_market_insight_reasons:
+    title: Search market insight reasons
+    description: >-
+      Query the market insight reasons collection with Crunchbase's predicate
+      language -- the evidence behind a market insight. Filters go in `query`
+      as predicates over field ids; get_field_metadata lists the fields and
+      their operators. Page with `after_id` plus a stable `order`, never with
+      an offset. Part of Crunchbase's Insights package -- an account without
+      it gets a 403 rather than an empty result.
+    category: market_insight_reasons
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/market_insight_reasons
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching market insight reasons, with `count` and `entities`.
+      type: object
+
+  search_market_insights:
+    title: Search market insights
+    description: >-
+      Query the market insights collection with Crunchbase's predicate
+      language -- Crunchbase's read on a market's shape and momentum. Filters
+      go in `query` as predicates over field ids; get_field_metadata lists the
+      fields and their operators. Page with `after_id` plus a stable `order`,
+      never with an offset. Part of Crunchbase's Insights package -- an
+      account without it gets a 403 rather than an empty result.
+    category: market_insights
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/market_insights
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching market insights, with `count` and `entities`.
+      type: object
+
+  search_micro_categories:
+    title: Search micro categories
+    description: >-
+      Query the micro categories collection with Crunchbase's predicate
+      language -- the finest-grained industry classification. Filters go in
+      `query` as predicates over field ids; get_field_metadata lists the
+      fields and their operators. Page with `after_id` plus a stable `order`,
+      never with an offset.
+    category: micro_categories
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/micro_categories
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching micro categories, with `count` and `entities`.
+      type: object
+
+  search_org_similarities:
+    title: Search org similarities
+    description: >-
+      Query the org similarities collection with Crunchbase's predicate
+      language -- how close two organizations are, as Crunchbase scores them.
+      Filters go in `query` as predicates over field ids; get_field_metadata
+      lists the fields and their operators. Page with `after_id` plus a stable
+      `order`, never with an offset.
+    category: org_similarities
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/org_similarities
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching org similarities, with `count` and `entities`.
+      type: object
+
+  search_organizations:
+    title: Search organizations
+    description: >-
+      Query the organizations collection with Crunchbase's predicate language
+      -- companies, investors and schools -- every kind of organization
+      Crunchbase tracks. Filters go in `query` as predicates over field ids;
+      get_field_metadata lists the fields and their operators. Page with
+      `after_id` plus a stable `order`, never with an offset.
+    category: organizations
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/organizations
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching organizations, with `count` and `entities`.
+      type: object
+
+  search_ownerships:
+    title: Search ownerships
+    description: >-
+      Query the ownerships collection with Crunchbase's predicate language --
+      the parent/child relationship between two organizations. Filters go in
+      `query` as predicates over field ids; get_field_metadata lists the
+      fields and their operators. Page with `after_id` plus a stable `order`,
+      never with an offset.
+    category: ownerships
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/ownerships
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching ownerships, with `count` and `entities`.
+      type: object
+
+  search_partnership_announcements:
+    title: Search partnership announcements
+    description: >-
+      Query the partnership announcements collection with Crunchbase's
+      predicate language -- a publicly announced partnership between
+      organizations. Filters go in `query` as predicates over field ids;
+      get_field_metadata lists the fields and their operators. Page with
+      `after_id` plus a stable `order`, never with an offset.
+    category: partnership_announcements
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/partnership_announcements
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching partnership announcements, with `count` and `entities`.
+      type: object
+
+  search_people:
+    title: Search people
+    description: >-
+      Query the people collection with Crunchbase's predicate language --
+      founders, executives and investors. Filters go in `query` as predicates
+      over field ids; get_field_metadata lists the fields and their operators.
+      Page with `after_id` plus a stable `order`, never with an offset.
+    category: people
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/people
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching people, with `count` and `entities`.
+      type: object
+
+  search_press_references:
+    title: Search press references
+    description: >-
+      Query the press references collection with Crunchbase's predicate
+      language -- a news article Crunchbase has linked to an entity. Filters
+      go in `query` as predicates over field ids; get_field_metadata lists the
+      fields and their operators. Page with `after_id` plus a stable `order`,
+      never with an offset.
+    category: press_references
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/press_references
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching press references, with `count` and `entities`.
+      type: object
+
+  search_principals:
+    title: Search principals
+    description: >-
+      Query the principals collection with Crunchbase's predicate language --
+      the unified person-or-organization record behind an identifier. Filters
+      go in `query` as predicates over field ids; get_field_metadata lists the
+      fields and their operators. Page with `after_id` plus a stable `order`,
+      never with an offset.
+    category: principals
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/principals
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching principals, with `count` and `entities`.
+      type: object
+
+  search_product_launches:
+    title: Search product launches
+    description: >-
+      Query the product launches collection with Crunchbase's predicate
+      language -- a launch Crunchbase has recorded. Filters go in `query` as
+      predicates over field ids; get_field_metadata lists the fields and their
+      operators. Page with `after_id` plus a stable `order`, never with an
+      offset.
+    category: product_launches
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/product_launches
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching product launches, with `count` and `entities`.
+      type: object
+
+  search_product_similarities:
+    title: Search product similarities
+    description: >-
+      Query the product similarities collection with Crunchbase's predicate
+      language -- how close two products are, as Crunchbase scores them.
+      Filters go in `query` as predicates over field ids; get_field_metadata
+      lists the fields and their operators. Page with `after_id` plus a stable
+      `order`, never with an offset.
+    category: product_similarities
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/product_similarities
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching product similarities, with `count` and `entities`.
+      type: object
+
+  search_products:
+    title: Search products
+    description: >-
+      Query the products collection with Crunchbase's predicate language -- a
+      product an organization ships. Filters go in `query` as predicates over
+      field ids; get_field_metadata lists the fields and their operators. Page
+      with `after_id` plus a stable `order`, never with an offset.
+    category: products
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/products
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching products, with `count` and `entities`.
+      type: object
+
+  search_remain_private_predictions:
+    title: Search remain private predictions
+    description: >-
+      Query the remain private predictions collection with Crunchbase's
+      predicate language -- Crunchbase's modelled likelihood a company stays
+      private. Filters go in `query` as predicates over field ids;
+      get_field_metadata lists the fields and their operators. Page with
+      `after_id` plus a stable `order`, never with an offset. Part of
+      Crunchbase's Predictions package -- an account without it gets a 403
+      rather than an empty result.
+    category: remain_private_predictions
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/remain_private_predictions
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching remain private predictions, with `count` and `entities`.
+      type: object
+
+  search_research_insights:
+    title: Search research insights
+    description: >-
+      Query the research insights collection with Crunchbase's predicate
+      language -- a research-grade signal Crunchbase publishes about an
+      entity. Filters go in `query` as predicates over field ids;
+      get_field_metadata lists the fields and their operators. Page with
+      `after_id` plus a stable `order`, never with an offset. Part of
+      Crunchbase's Insights package -- an account without it gets a 403 rather
+      than an empty result.
+    category: research_insights
+    read_only: true
+    request:
+      method: POST
+      path: /v4/data/searches/research_insights
+      body:
+        field_ids: "${field_ids}"
+        query: "${query}"
+        order: "${order}"
+        limit: "${limit}"
+        before_id: "${before_id}"
+        after_id: "${after_id}"
+    input:
+      field_ids:
+        type: array
+        description: Which fields to return on each result. Omit for the collection's defaults.
+        optional: true
+        items: {type: string}
+      query:
+        type: array
+        description: 'The filter, as an array of predicates. Each is {"type": "predicate", "field_id": "...", "operator_id": "...", "values": [...]}; several predicates are ANDed together.'
+        optional: true
+        items: {type: object}
+      order:
+        type: array
+        description: 'Sort order, as [{"field_id": "...", "sort": "asc"|"desc"}]. Needed for stable paging.'
+        optional: true
+        items: {type: object}
+      limit:
+        type: integer
+        description: How many results per page (up to 1000 on most packages).
+        optional: true
+        default: '100'
+      before_id:
+        type: string
+        description: Page backwards from this entity id.
+        optional: true
+      after_id:
+        type: string
+        description: Page forwards from this entity id.
+        optional: true
+    output:
+      description: A page of matching research insights, with `count` and `entities`.
+      type: object

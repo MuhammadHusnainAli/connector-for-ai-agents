@@ -1,0 +1,233 @@
+# DataCandy tools -- gift card and loyalty processing.
+#
+# **This pack is deliberately small, and that is a statement about the
+# provider, not an oversight.** DataCandy publishes no public API reference:
+# the surface is documented per-account under NDA, and the live API is
+# geo-restricted, so it cannot be probed to establish what exists. Naming
+# endpoints here that nobody has verified would be worse than useless -- a tool
+# that claims `/card/balance` exists is a confident lie if it does not.
+#
+# So this pack names only the endpoint the connector's own catalogue entry
+# declares and verifies against -- `GET /merchant` -- and leaves the rest of
+# the surface to the raw request tools, which claim nothing.
+#
+# Two things about how this connection authenticates, since they are unusual
+# and both are handled for you:
+#
+#   * **three secrets, two mechanisms.** The username and password go in HTTP
+#     basic auth; the *access key* and *application key* go in the query
+#     string. The connection appends both keys to every request automatically,
+#     which is why no tool below takes them -- and why a call that 401s is
+#     usually a wrong key pair rather than a wrong password;
+#   * **the host is per-account.** `application_url` in the connection config
+#     is the base, so a different DataCandy deployment is a different
+#     connection, not a different path.
+#
+# If you have DataCandy's account documentation to hand, the raw tools reach
+# the whole API: paths are relative to `/api2`, and the two keys are already on
+# the query string. A pack naming those endpoints properly would be a real
+# improvement -- it just has to be written against the documentation rather
+# than against a guess.
+#
+# Docs: https://datacandy.com/ (API reference is account-specific and not public)
+
+connector_id: datacandy
+display_name: DataCandy
+docs_url: https://datacandy.com/
+
+tools:
+
+  check_connection:
+    title: Check the connection
+    description: >-
+      Call the merchant endpoint the connector's own catalogue entry declares,
+      with a limit of one, to confirm the credentials and keys work. This is
+      the only DataCandy endpoint this package can vouch for, and it is what
+      the connector verifies with.
+    category: connection
+    read_only: true
+    request:
+      method: GET
+      path: /merchant
+      query:
+        limit: "${limit}"
+    input:
+      limit:
+        type: integer
+        description: How many records to ask for. One is enough to prove the credential works.
+        optional: true
+        default: '1'
+    output:
+      description: The first merchant record, which is enough to confirm the credentials and keys are accepted.
+      type: object
+
+  list_merchants:
+    title: List merchants
+    description: >-
+      List the merchants visible to these credentials. The same endpoint the
+      connector verifies with, used for its actual purpose. `limit` and
+      `offset` are DataCandy's usual paging parameters; pass any further
+      filters the account's own documentation names through the raw GET tool
+      instead of guessing them here.
+    category: merchants
+    read_only: true
+    request:
+      method: GET
+      path: /merchant
+      query:
+        limit: "${limit}"
+        offset: "${offset}"
+    input:
+      limit:
+        type: integer
+        description: How many merchants to return.
+        optional: true
+      offset:
+        type: integer
+        description: How many records to skip, for paging.
+        optional: true
+    output:
+      description: The merchants this access key can see.
+      type: object
+
+  call_datacandy_api_get:
+    title: Read from the API (GET)
+    description: >-
+      GET any path on DataCandy's API with this connection's credentials applied,
+      for the parts of the surface the named tools above do not cover. You must
+      know the provider's API; nothing here validates the path. Prefer a named
+      tool wherever one exists.
+    category: raw
+    read_only: true
+    request:
+      method: GET
+      path: ${path}
+      query: ${query}
+    input:
+      path:
+        type: string
+        description: Path to call, relative to the connection's base url.
+        example: /merchant
+      query:
+        type: object
+        description: 'Query-string parameters as a flat object, e.g. {"limit": 50}.'
+        optional: true
+    output:
+      description: Whatever DataCandy's API returns for that request, parsed as JSON where possible.
+      type: object
+
+  call_datacandy_api_post:
+    title: Send data to the API (POST)
+    description: >-
+      POST to any path on DataCandy's API with this connection's credentials
+      applied. A general-purpose escape hatch for the parts of the surface the
+      named tools above do not cover; it makes no claim about which endpoints
+      exist, and a POST can create real records.
+    category: raw
+    destructive: true
+    request:
+      method: POST
+      path: ${path}
+      query: ${query}
+      body: ${body}
+    input:
+      path:
+        type: string
+        description: Path to call, relative to the connection's base url.
+        example: /merchant
+      query:
+        type: object
+        description: Query-string parameters as a flat object.
+        optional: true
+      body:
+        type: object
+        description: JSON request body to send.
+        optional: true
+    output:
+      description: Whatever DataCandy's API returns for that request, parsed as JSON where possible.
+      type: object
+
+  call_datacandy_api_put:
+    title: Replace a resource at the API (PUT)
+    description: >-
+      PUT to any path on DataCandy's API with this connection's credentials
+      applied, for the parts of the surface the named tools above do not cover.
+      A PUT replaces rather than merges, so an omitted field is usually cleared.
+    category: raw
+    destructive: true
+    request:
+      method: PUT
+      path: ${path}
+      query: ${query}
+      body: ${body}
+    input:
+      path:
+        type: string
+        description: Path to call, relative to the connection's base url.
+        example: /merchant
+      query:
+        type: object
+        description: Query-string parameters as a flat object.
+        optional: true
+      body:
+        type: object
+        description: JSON request body to send.
+        optional: true
+    output:
+      description: Whatever DataCandy's API returns for that request, parsed as JSON where possible.
+      type: object
+
+  call_datacandy_api_patch:
+    title: Partially update a resource at the API (PATCH)
+    description: >-
+      PATCH any path on DataCandy's API with this connection's credentials
+      applied, for the parts of the surface the named tools above do not cover.
+      You must know the provider's API; nothing here validates the path.
+    category: raw
+    destructive: true
+    request:
+      method: PATCH
+      path: ${path}
+      query: ${query}
+      body: ${body}
+    input:
+      path:
+        type: string
+        description: Path to call, relative to the connection's base url.
+        example: /merchant
+      query:
+        type: object
+        description: Query-string parameters as a flat object.
+        optional: true
+      body:
+        type: object
+        description: JSON request body to send.
+        optional: true
+    output:
+      description: Whatever DataCandy's API returns for that request, parsed as JSON where possible.
+      type: object
+
+  call_datacandy_api_delete:
+    title: Delete a resource at the API (DELETE)
+    description: >-
+      DELETE any path on DataCandy's API with this connection's credentials
+      applied, for the parts of the surface the named tools above do not cover.
+      Irreversible, and nothing here checks what the path points at.
+    category: raw
+    destructive: true
+    request:
+      method: DELETE
+      path: ${path}
+      query: ${query}
+    input:
+      path:
+        type: string
+        description: Path to call, relative to the connection's base url.
+        example: /merchant
+      query:
+        type: object
+        description: Query-string parameters as a flat object.
+        optional: true
+    output:
+      description: Whatever DataCandy's API returns for that request, parsed as JSON where possible.
+      type: object

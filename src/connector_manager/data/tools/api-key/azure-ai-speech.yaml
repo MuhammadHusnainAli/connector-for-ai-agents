@@ -1,0 +1,1334 @@
+# Azure AI Speech tools.
+#
+# The connection's base url is the region's Cognitive Services endpoint
+# (https://<region>.api.cognitive.microsoft.com), which serves three of the
+# four surfaces below. The key is tied to that region: a key from a resource in
+# westeurope will not work against eastus.
+#
+#   /speechtotext/v3.2/...        Batch transcription and Custom Speech --
+#                                 transcriptions, models, projects, datasets,
+#                                 endpoints and evaluations. No api-version
+#                                 query parameter; the version is in the path.
+#   /texttospeech/batchsyntheses  Batch (long-form) synthesis, which does take
+#                                 an api-version.
+#   /sts/v1.0/issueToken          Exchange the key for a ten-minute bearer
+#                                 token, which is what the SDKs and the
+#                                 WebSocket endpoints want.
+#
+# Two tools reach a different host, because Microsoft puts real-time synthesis
+# on its own endpoint: list_voices and synthesize_speech override the base url
+# to https://<region>.tts.speech.microsoft.com. The region comes from the same
+# connection field, so nothing extra is needed to call them.
+#
+# What is deliberately absent: real-time speech recognition. It wants raw audio
+# bytes on an application/octet-stream body (or a WebSocket), which a JSON tool
+# call cannot carry. Transcribe recordings by URL with create_transcription
+# instead -- that is the batch path and it is what the REST API is for.
+#
+# Docs: https://learn.microsoft.com/azure/ai-services/speech-service/rest-speech-to-text
+
+connector_id: azure-ai-speech
+display_name: Azure AI Speech
+docs_url: https://learn.microsoft.com/azure/ai-services/speech-service/rest-speech-to-text
+
+tools:
+
+  list_transcriptions:
+    title: List batch transcriptions
+    description: >-
+      Page through the batch transcription jobs on this resource, newest first,
+      each with its status (NotStarted, Running, Succeeded, Failed) and the
+      locale and model it used. Narrow with an OData filter such as
+      "status eq 'Failed'".
+    category: transcription
+    read_only: true
+    request:
+      method: GET
+      path: /speechtotext/v3.2/transcriptions
+      query:
+        skip: "${skip}"
+        top: "${top}"
+        filter: "${filter}"
+    input:
+      skip:
+        type: integer
+        description: How many transcriptions to skip, for paging.
+        optional: true
+        minimum: 0
+      top:
+        type: integer
+        description: How many transcriptions to return per page.
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 100
+      filter:
+        type: string
+        description: 'OData filter, e.g. "status eq ''Succeeded''" or "createdDateTime gt 2026-01-01T00:00:00Z".'
+        optional: true
+    output:
+      description: A page of transcription jobs.
+      type: object
+      properties:
+        values: {type: array, description: "Each with self, displayName, status, locale, createdDateTime and links."}
+        "@nextLink": {type: string, description: "Absolute url of the next page; absent on the last."}
+
+  create_transcription:
+    title: Start a batch transcription
+    description: >-
+      Transcribe recorded audio that already sits at a URL -- give content_urls
+      for individual files, or content_container_url for a SAS-signed blob
+      container to transcribe wholesale. Returns immediately with a job whose
+      self link ends in the id; poll get_transcription until status is
+      Succeeded, then read the results with list_transcription_files.
+      properties is where diarisation, profanity filtering, word-level
+      timestamps and destination container go.
+    category: transcription
+    request:
+      method: POST
+      path: /speechtotext/v3.2/transcriptions
+      body:
+        displayName: "${display_name}"
+        description: "${description}"
+        locale: "${locale}"
+        contentUrls: "${content_urls}"
+        contentContainerUrl: "${content_container_url}"
+        model: "${model}"
+        properties: "${properties}"
+        customProperties: "${custom_properties}"
+    input:
+      display_name:
+        type: string
+        description: Name for the job, shown when listing.
+        example: Support calls, week 12
+      locale:
+        type: string
+        description: Language of the audio, e.g. en-US, en-GB, de-DE.
+        example: en-GB
+      content_urls:
+        type: array
+        description: URLs of the audio files to transcribe. Give this or content_container_url.
+        optional: true
+        items: {type: string}
+        example: ["https://example.blob.core.windows.net/audio/call1.wav?sv=..."]
+      content_container_url:
+        type: string
+        description: SAS URL of a blob container whose audio files should all be transcribed.
+        optional: true
+        format: uri
+      description:
+        type: string
+        description: Free-text note describing the job.
+        optional: true
+      model:
+        type: string
+        description: >-
+          Custom Speech model to use, as an object with a self link, e.g.
+          {"self": ".../models/<id>"}. Omit for the default base model.
+        optional: true
+      properties:
+        type: object
+        description: >-
+          Job options -- diarizationEnabled, wordLevelTimestampsEnabled,
+          punctuationMode, profanityFilterMode, destinationContainerUrl,
+          languageIdentification and timeToLive.
+        optional: true
+        example: {diarizationEnabled: true, wordLevelTimestampsEnabled: true}
+      custom_properties:
+        type: object
+        description: Your own key/value metadata, echoed back on the job.
+        optional: true
+    output:
+      description: The created job, whose self link carries the transcription id.
+      type: object
+      properties:
+        self: {type: string}
+        status: {type: string}
+        displayName: {type: string}
+        links: {type: object, description: "files link, once the job succeeds."}
+
+  get_transcription:
+    title: Get a batch transcription
+    description: >-
+      Read one transcription job's current status and settings. status is
+      NotStarted, Running, Succeeded or Failed; on failure, properties.error
+      says why. Once Succeeded, call list_transcription_files for the results.
+    category: transcription
+    read_only: true
+    request:
+      method: GET
+      path: /speechtotext/v3.2/transcriptions/${transcription_id}
+    input:
+      transcription_id:
+        type: string
+        description: Id of the transcription, the last segment of its self link.
+        example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+    output:
+      description: The job, with its status, locale, model and any error.
+      type: object
+      properties:
+        self: {type: string}
+        status: {type: string}
+        locale: {type: string}
+        properties: {type: object, description: "Includes error and duration."}
+
+  update_transcription:
+    title: Rename or annotate a transcription
+    description: >-
+      Change a transcription job's display name, description or custom
+      properties. The audio, locale and model of a submitted job cannot be
+      changed -- create a new job for that.
+    category: transcription
+    request:
+      method: PATCH
+      path: /speechtotext/v3.2/transcriptions/${transcription_id}
+      body:
+        displayName: "${display_name}"
+        description: "${description}"
+        customProperties: "${custom_properties}"
+    input:
+      transcription_id:
+        type: string
+        description: Id of the transcription to update.
+        example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+      display_name:
+        type: string
+        description: New name for the job.
+        optional: true
+      description:
+        type: string
+        description: New free-text description.
+        optional: true
+      custom_properties:
+        type: object
+        description: Replacement key/value metadata for the job.
+        optional: true
+    output:
+      description: The job as stored after the update.
+      type: object
+      properties:
+        self: {type: string}
+        displayName: {type: string}
+
+  delete_transcription:
+    title: Delete a batch transcription
+    description: >-
+      Remove a transcription job and its result files from the service. The
+      source audio is untouched, but the transcripts are gone unless the job
+      wrote them to your own destination container.
+    category: transcription
+    destructive: true
+    request:
+      method: DELETE
+      path: /speechtotext/v3.2/transcriptions/${transcription_id}
+    input:
+      transcription_id:
+        type: string
+        description: Id of the transcription to delete.
+        example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+    output:
+      description: Empty on success -- the service answers 204 No Content.
+      type: object
+
+  list_transcription_files:
+    title: List a transcription's result files
+    description: >-
+      List the output files of a completed transcription. Each entry has a kind
+      (Transcription for the per-audio JSON result, TranscriptionReport for the
+      run summary) and a links.contentUrl holding a short-lived SAS URL to
+      download it. Only available once status is Succeeded.
+    category: transcription
+    read_only: true
+    request:
+      method: GET
+      path: /speechtotext/v3.2/transcriptions/${transcription_id}/files
+      query:
+        skip: "${skip}"
+        top: "${top}"
+        sasValidityInSeconds: "${sas_validity_in_seconds}"
+    input:
+      transcription_id:
+        type: string
+        description: Id of the completed transcription.
+        example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+      skip:
+        type: integer
+        description: How many files to skip, for paging.
+        optional: true
+        minimum: 0
+      top:
+        type: integer
+        description: How many files to return per page.
+        optional: true
+        minimum: 1
+      sas_validity_in_seconds:
+        type: integer
+        description: How long the returned download URLs stay valid.
+        optional: true
+        minimum: 0
+    output:
+      description: The result files, each with a temporary download URL.
+      type: object
+      properties:
+        values: {type: array, description: "Each with kind, name, createdDateTime and links.contentUrl."}
+        "@nextLink": {type: string}
+
+  list_supported_locales:
+    title: List locales supported for transcription
+    description: >-
+      List the language codes batch transcription accepts, so a locale can be
+      validated before a job is submitted rather than after it fails.
+    category: transcription
+    read_only: true
+    request:
+      method: GET
+      path: /speechtotext/v3.2/transcriptions/locales
+    input: {}
+    output:
+      description: The supported locale codes.
+      type: array
+      items: {type: string, description: "A BCP-47 locale such as en-GB."}
+
+  list_base_models:
+    title: List base speech models
+    description: >-
+      List the Microsoft-provided speech recognition models available in this
+      region, with the locale and features each supports and when it is retired.
+      A base model is what a transcription uses when no custom model is named,
+      and what a custom model is trained from.
+    category: models
+    read_only: true
+    request:
+      method: GET
+      path: /speechtotext/v3.2/models/base
+      query:
+        skip: "${skip}"
+        top: "${top}"
+        filter: "${filter}"
+    input:
+      skip:
+        type: integer
+        description: How many models to skip, for paging.
+        optional: true
+        minimum: 0
+      top:
+        type: integer
+        description: How many models to return per page.
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 100
+      filter:
+        type: string
+        description: 'OData filter, e.g. "locale eq ''en-GB''".'
+        optional: true
+    output:
+      description: A page of base models.
+      type: object
+      properties:
+        values: {type: array, description: "Each with self, displayName, locale, properties and deprecationDates."}
+        "@nextLink": {type: string}
+
+  get_base_model:
+    title: Get a base speech model
+    description: >-
+      Read one base model's details -- its locale, the features it supports,
+      the datasets it may be adapted with, and the dates adaptation and
+      transcription support end.
+    category: models
+    read_only: true
+    request:
+      method: GET
+      path: /speechtotext/v3.2/models/base/${model_id}
+    input:
+      model_id:
+        type: string
+        description: Id of the base model, the last segment of its self link.
+        example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+    output:
+      description: The base model's details.
+      type: object
+      properties:
+        self: {type: string}
+        displayName: {type: string}
+        locale: {type: string}
+        deprecationDates: {type: object}
+
+  list_custom_models:
+    title: List custom speech models
+    description: >-
+      List the Custom Speech models trained on this resource, with the base
+      model each adapted and its current status. Use one of these in
+      create_transcription to improve accuracy on domain vocabulary.
+    category: models
+    read_only: true
+    request:
+      method: GET
+      path: /speechtotext/v3.2/models
+      query:
+        skip: "${skip}"
+        top: "${top}"
+        filter: "${filter}"
+    input:
+      skip:
+        type: integer
+        description: How many models to skip, for paging.
+        optional: true
+        minimum: 0
+      top:
+        type: integer
+        description: How many models to return per page.
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 100
+      filter:
+        type: string
+        description: 'OData filter over the models, e.g. "locale eq ''en-US''".'
+        optional: true
+    output:
+      description: A page of custom models.
+      type: object
+      properties:
+        values: {type: array, description: "Each with self, displayName, baseModel, locale and status."}
+        "@nextLink": {type: string}
+
+  create_custom_model:
+    title: Train a custom speech model
+    description: >-
+      Adapt a base model to your domain using datasets already uploaded to the
+      resource -- plain text for vocabulary, or audio plus transcripts for
+      acoustic adaptation. Training is asynchronous: poll get_custom_model
+      until status is Succeeded.
+    category: models
+    request:
+      method: POST
+      path: /speechtotext/v3.2/models
+      body:
+        displayName: "${display_name}"
+        description: "${description}"
+        locale: "${locale}"
+        baseModel: "${base_model}"
+        datasets: "${datasets}"
+        project: "${project}"
+        properties: "${properties}"
+        customProperties: "${custom_properties}"
+    input:
+      display_name:
+        type: string
+        description: Name for the model, shown when listing.
+        example: Clinical vocabulary v2
+      locale:
+        type: string
+        description: Language the model recognises, e.g. en-GB.
+        example: en-GB
+      datasets:
+        type: array
+        description: >-
+          The datasets to train from, each an object with a self link, e.g.
+          [{"self": ".../datasets/<id>"}].
+        items: {type: object}
+      base_model:
+        type: string
+        description: 'Base model to adapt, as {"self": ".../models/base/<id>"}. Omit for the region default.'
+        optional: true
+      project:
+        type: string
+        description: 'Project to file the model under, as {"self": ".../projects/<id>"}.'
+        optional: true
+      description:
+        type: string
+        description: Free-text note describing the model.
+        optional: true
+      properties:
+        type: object
+        description: 'Training options, e.g. {"emailAddress": "..."} to be notified when it finishes.'
+        optional: true
+      custom_properties:
+        type: object
+        description: Your own key/value metadata, echoed back on the model.
+        optional: true
+    output:
+      description: The model being trained, whose self link carries its id.
+      type: object
+      properties:
+        self: {type: string}
+        status: {type: string}
+
+  get_custom_model:
+    title: Get a custom speech model
+    description: >-
+      Read one custom model's status, the base model it adapted, the datasets
+      it trained on and its deprecation dates. Poll this after
+      create_custom_model until status is Succeeded.
+    category: models
+    read_only: true
+    request:
+      method: GET
+      path: /speechtotext/v3.2/models/${model_id}
+    input:
+      model_id:
+        type: string
+        description: Id of the custom model.
+        example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+    output:
+      description: The custom model's details and training status.
+      type: object
+      properties:
+        self: {type: string}
+        status: {type: string}
+        baseModel: {type: object}
+        datasets: {type: array}
+
+  delete_custom_model:
+    title: Delete a custom speech model
+    description: >-
+      Remove a custom model. Any endpoint still deployed with it stops working,
+      and the model cannot be recovered without retraining, so check
+      list_endpoints first.
+    category: models
+    destructive: true
+    request:
+      method: DELETE
+      path: /speechtotext/v3.2/models/${model_id}
+    input:
+      model_id:
+        type: string
+        description: Id of the custom model to delete.
+        example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+    output:
+      description: Empty on success -- the service answers 204 No Content.
+      type: object
+
+  list_projects:
+    title: List Custom Speech projects
+    description: >-
+      List the projects on this resource. A project groups the datasets,
+      models, evaluations and endpoints for one Custom Speech effort, which is
+      how Speech Studio organises them.
+    category: projects
+    read_only: true
+    request:
+      method: GET
+      path: /speechtotext/v3.2/projects
+      query:
+        skip: "${skip}"
+        top: "${top}"
+    input:
+      skip:
+        type: integer
+        description: How many projects to skip, for paging.
+        optional: true
+        minimum: 0
+      top:
+        type: integer
+        description: How many projects to return per page.
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 100
+    output:
+      description: A page of projects.
+      type: object
+      properties:
+        values: {type: array, description: "Each with self, displayName, locale and createdDateTime."}
+        "@nextLink": {type: string}
+
+  create_project:
+    title: Create a Custom Speech project
+    description: >-
+      Create a project to group datasets, models, evaluations and endpoints for
+      one locale. Projects are organisational only -- nothing requires one, but
+      Speech Studio shows work through them.
+    category: projects
+    request:
+      method: POST
+      path: /speechtotext/v3.2/projects
+      body:
+        displayName: "${display_name}"
+        description: "${description}"
+        locale: "${locale}"
+        customProperties: "${custom_properties}"
+    input:
+      display_name:
+        type: string
+        description: Name for the project.
+        example: Clinical dictation
+      locale:
+        type: string
+        description: Language the project works in, e.g. en-GB.
+        example: en-GB
+      description:
+        type: string
+        description: Free-text note describing the project.
+        optional: true
+      custom_properties:
+        type: object
+        description: Your own key/value metadata for the project.
+        optional: true
+    output:
+      description: The created project, whose self link carries its id.
+      type: object
+      properties:
+        self: {type: string}
+        displayName: {type: string}
+
+  get_project:
+    title: Get a Custom Speech project
+    description: >-
+      Read one project's metadata and the links to the datasets, models,
+      evaluations and endpoints filed under it.
+    category: projects
+    read_only: true
+    request:
+      method: GET
+      path: /speechtotext/v3.2/projects/${project_id}
+    input:
+      project_id:
+        type: string
+        description: Id of the project.
+        example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+    output:
+      description: The project and links to the resources it groups.
+      type: object
+      properties:
+        self: {type: string}
+        displayName: {type: string}
+        links: {type: object}
+
+  delete_project:
+    title: Delete a Custom Speech project
+    description: >-
+      Delete a project along with the datasets, models, evaluations and
+      endpoints filed under it. This cascades, so confirm what the project
+      holds with get_project before calling it.
+    category: projects
+    destructive: true
+    request:
+      method: DELETE
+      path: /speechtotext/v3.2/projects/${project_id}
+    input:
+      project_id:
+        type: string
+        description: Id of the project to delete.
+        example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+    output:
+      description: Empty on success -- the service answers 204 No Content.
+      type: object
+
+  list_datasets:
+    title: List Custom Speech datasets
+    description: >-
+      List the training and testing datasets uploaded to this resource, each
+      with its kind (Language, Acoustic, Pronunciation, AudioFiles) and
+      processing status.
+    category: datasets
+    read_only: true
+    request:
+      method: GET
+      path: /speechtotext/v3.2/datasets
+      query:
+        skip: "${skip}"
+        top: "${top}"
+        filter: "${filter}"
+    input:
+      skip:
+        type: integer
+        description: How many datasets to skip, for paging.
+        optional: true
+        minimum: 0
+      top:
+        type: integer
+        description: How many datasets to return per page.
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 100
+      filter:
+        type: string
+        description: 'OData filter, e.g. "kind eq ''Language''".'
+        optional: true
+    output:
+      description: A page of datasets.
+      type: object
+      properties:
+        values: {type: array, description: "Each with self, kind, displayName, locale and status."}
+        "@nextLink": {type: string}
+
+  create_dataset:
+    title: Register a Custom Speech dataset
+    description: >-
+      Register training or testing data that already sits at a URL, so a custom
+      model can be trained from it. kind picks what the data is -- Language for
+      a plain-text vocabulary file, Acoustic for audio with transcripts,
+      Pronunciation for a pronunciation file, AudioFiles for audio alone.
+      Import is asynchronous; poll get_dataset until status is Succeeded.
+    category: datasets
+    request:
+      method: POST
+      path: /speechtotext/v3.2/datasets
+      body:
+        kind: "${kind}"
+        displayName: "${display_name}"
+        description: "${description}"
+        locale: "${locale}"
+        contentUrl: "${content_url}"
+        project: "${project}"
+        properties: "${properties}"
+        customProperties: "${custom_properties}"
+    input:
+      kind:
+        type: string
+        description: What the data is, which decides how it may be used in training.
+        enum: [Language, Acoustic, Pronunciation, AudioFiles, LanguageMarkdown, OutputFormatting]
+        example: Language
+      display_name:
+        type: string
+        description: Name for the dataset.
+        example: Drug names
+      locale:
+        type: string
+        description: Language of the data, e.g. en-GB.
+        example: en-GB
+      content_url:
+        type: string
+        description: SAS-signed URL of the data file or zip archive to import.
+        format: uri
+        example: "https://example.blob.core.windows.net/data/vocab.txt?sv=..."
+      description:
+        type: string
+        description: Free-text note describing the dataset.
+        optional: true
+      project:
+        type: string
+        description: 'Project to file the dataset under, as {"self": ".../projects/<id>"}.'
+        optional: true
+      properties:
+        type: object
+        description: Import options for the dataset.
+        optional: true
+      custom_properties:
+        type: object
+        description: Your own key/value metadata for the dataset.
+        optional: true
+    output:
+      description: The dataset being imported, whose self link carries its id.
+      type: object
+      properties:
+        self: {type: string}
+        status: {type: string}
+
+  get_dataset:
+    title: Get a Custom Speech dataset
+    description: >-
+      Read one dataset's kind, locale and import status. Poll after
+      create_dataset until status is Succeeded; on failure,
+      properties.error explains what the import rejected.
+    category: datasets
+    read_only: true
+    request:
+      method: GET
+      path: /speechtotext/v3.2/datasets/${dataset_id}
+    input:
+      dataset_id:
+        type: string
+        description: Id of the dataset.
+        example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+    output:
+      description: The dataset's details and import status.
+      type: object
+      properties:
+        self: {type: string}
+        kind: {type: string}
+        status: {type: string}
+        properties: {type: object}
+
+  delete_dataset:
+    title: Delete a Custom Speech dataset
+    description: >-
+      Remove a dataset from the resource. Models already trained from it keep
+      working; the data itself is no longer available for future training.
+    category: datasets
+    destructive: true
+    request:
+      method: DELETE
+      path: /speechtotext/v3.2/datasets/${dataset_id}
+    input:
+      dataset_id:
+        type: string
+        description: Id of the dataset to delete.
+        example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+    output:
+      description: Empty on success -- the service answers 204 No Content.
+      type: object
+
+  list_dataset_files:
+    title: List a dataset's files
+    description: >-
+      List the files that make up a dataset, each with a short-lived SAS URL to
+      download it -- including the report the service produced while importing,
+      which is where import warnings live.
+    category: datasets
+    read_only: true
+    request:
+      method: GET
+      path: /speechtotext/v3.2/datasets/${dataset_id}/files
+      query:
+        skip: "${skip}"
+        top: "${top}"
+        sasValidityInSeconds: "${sas_validity_in_seconds}"
+    input:
+      dataset_id:
+        type: string
+        description: Id of the dataset.
+        example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+      skip:
+        type: integer
+        description: How many files to skip, for paging.
+        optional: true
+        minimum: 0
+      top:
+        type: integer
+        description: How many files to return per page.
+        optional: true
+        minimum: 1
+      sas_validity_in_seconds:
+        type: integer
+        description: How long the returned download URLs stay valid.
+        optional: true
+        minimum: 0
+    output:
+      description: The dataset's files, each with a temporary download URL.
+      type: object
+      properties:
+        values: {type: array, description: "Each with kind, name and links.contentUrl."}
+        "@nextLink": {type: string}
+
+  list_endpoints:
+    title: List custom speech endpoints
+    description: >-
+      List the deployed Custom Speech endpoints on this resource, each with the
+      model it serves and its status. An endpoint is what real-time recognition
+      clients address when they want a custom model rather than the base one.
+    category: endpoints
+    read_only: true
+    request:
+      method: GET
+      path: /speechtotext/v3.2/endpoints
+      query:
+        skip: "${skip}"
+        top: "${top}"
+        filter: "${filter}"
+    input:
+      skip:
+        type: integer
+        description: How many endpoints to skip, for paging.
+        optional: true
+        minimum: 0
+      top:
+        type: integer
+        description: How many endpoints to return per page.
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 100
+      filter:
+        type: string
+        description: 'OData filter, e.g. "status eq ''Succeeded''".'
+        optional: true
+    output:
+      description: A page of deployed endpoints.
+      type: object
+      properties:
+        values: {type: array, description: "Each with self, displayName, model, locale and status."}
+        "@nextLink": {type: string}
+
+  create_endpoint:
+    title: Deploy a custom speech endpoint
+    description: >-
+      Deploy a custom model so real-time recognition clients can use it.
+      Deployment takes some minutes -- poll get_endpoint until status is
+      Succeeded, then read properties for the endpoint key and id the SDKs need.
+    category: endpoints
+    request:
+      method: POST
+      path: /speechtotext/v3.2/endpoints
+      body:
+        displayName: "${display_name}"
+        description: "${description}"
+        locale: "${locale}"
+        model: "${model}"
+        project: "${project}"
+        properties: "${properties}"
+        customProperties: "${custom_properties}"
+    input:
+      display_name:
+        type: string
+        description: Name for the endpoint.
+        example: Clinical dictation live
+      locale:
+        type: string
+        description: Language the endpoint recognises, e.g. en-GB.
+        example: en-GB
+      model:
+        type: string
+        description: 'The model to deploy, as {"self": ".../models/<id>"}.'
+      description:
+        type: string
+        description: Free-text note describing the endpoint.
+        optional: true
+      project:
+        type: string
+        description: 'Project to file the endpoint under, as {"self": ".../projects/<id>"}.'
+        optional: true
+      properties:
+        type: object
+        description: 'Deployment options, e.g. {"loggingEnabled": true} to keep audio and transcripts.'
+        optional: true
+      custom_properties:
+        type: object
+        description: Your own key/value metadata for the endpoint.
+        optional: true
+    output:
+      description: The endpoint being deployed, whose self link carries its id.
+      type: object
+      properties:
+        self: {type: string}
+        status: {type: string}
+
+  get_endpoint:
+    title: Get a custom speech endpoint
+    description: >-
+      Read one endpoint's status, the model it serves and its logging settings.
+      Poll this after create_endpoint until status is Succeeded.
+    category: endpoints
+    read_only: true
+    request:
+      method: GET
+      path: /speechtotext/v3.2/endpoints/${endpoint_id}
+    input:
+      endpoint_id:
+        type: string
+        description: Id of the endpoint.
+        example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+    output:
+      description: The endpoint's details and deployment status.
+      type: object
+      properties:
+        self: {type: string}
+        status: {type: string}
+        model: {type: object}
+        properties: {type: object}
+
+  delete_endpoint:
+    title: Delete a custom speech endpoint
+    description: >-
+      Undeploy an endpoint. Any client still addressing its endpoint id stops
+      recognising immediately; the model and datasets behind it are untouched.
+    category: endpoints
+    destructive: true
+    request:
+      method: DELETE
+      path: /speechtotext/v3.2/endpoints/${endpoint_id}
+    input:
+      endpoint_id:
+        type: string
+        description: Id of the endpoint to delete.
+        example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+    output:
+      description: Empty on success -- the service answers 204 No Content.
+      type: object
+
+  list_evaluations:
+    title: List model evaluations
+    description: >-
+      List the accuracy evaluations run on this resource. An evaluation
+      transcribes a test dataset with one or two models and reports the word
+      error rate, which is how you tell whether a custom model actually beats
+      the base one.
+    category: evaluations
+    read_only: true
+    request:
+      method: GET
+      path: /speechtotext/v3.2/evaluations
+      query:
+        skip: "${skip}"
+        top: "${top}"
+        filter: "${filter}"
+    input:
+      skip:
+        type: integer
+        description: How many evaluations to skip, for paging.
+        optional: true
+        minimum: 0
+      top:
+        type: integer
+        description: How many evaluations to return per page.
+        optional: true
+        default: 100
+        minimum: 1
+        maximum: 100
+      filter:
+        type: string
+        description: 'OData filter, e.g. "status eq ''Succeeded''".'
+        optional: true
+    output:
+      description: A page of evaluations.
+      type: object
+      properties:
+        values: {type: array, description: "Each with self, displayName, status and the models compared."}
+        "@nextLink": {type: string}
+
+  create_evaluation:
+    title: Evaluate speech models against a test set
+    description: >-
+      Compare one or two models on a labelled test dataset and get word error
+      rates back. Give model1 and model2 as objects with self links (use the
+      same link twice to score a single model). Asynchronous -- poll
+      get_evaluation until status is Succeeded.
+    category: evaluations
+    request:
+      method: POST
+      path: /speechtotext/v3.2/evaluations
+      body:
+        displayName: "${display_name}"
+        description: "${description}"
+        locale: "${locale}"
+        dataset: "${dataset}"
+        model1: "${model1}"
+        model2: "${model2}"
+        project: "${project}"
+        customProperties: "${custom_properties}"
+    input:
+      display_name:
+        type: string
+        description: Name for the evaluation.
+        example: Base vs clinical v2
+      locale:
+        type: string
+        description: Language of the test data, e.g. en-GB.
+        example: en-GB
+      dataset:
+        type: string
+        description: 'The labelled test dataset, as {"self": ".../datasets/<id>"}.'
+      model1:
+        type: string
+        description: 'First model to score, as {"self": ".../models/<id>"}.'
+      model2:
+        type: string
+        description: 'Second model to compare against. Pass the same link as model1 to score one model.'
+      description:
+        type: string
+        description: Free-text note describing the evaluation.
+        optional: true
+      project:
+        type: string
+        description: 'Project to file the evaluation under, as {"self": ".../projects/<id>"}.'
+        optional: true
+      custom_properties:
+        type: object
+        description: Your own key/value metadata for the evaluation.
+        optional: true
+    output:
+      description: The evaluation being run, whose self link carries its id.
+      type: object
+      properties:
+        self: {type: string}
+        status: {type: string}
+
+  get_evaluation:
+    title: Get a model evaluation
+    description: >-
+      Read an evaluation's status and, once Succeeded, its word error rate
+      breakdown -- insertions, deletions and substitutions for each model
+      compared.
+    category: evaluations
+    read_only: true
+    request:
+      method: GET
+      path: /speechtotext/v3.2/evaluations/${evaluation_id}
+    input:
+      evaluation_id:
+        type: string
+        description: Id of the evaluation.
+        example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+    output:
+      description: The evaluation's status and error rate results.
+      type: object
+      properties:
+        self: {type: string}
+        status: {type: string}
+        properties: {type: object, description: "wordErrorRate1, wordErrorRate2 and the counts behind them."}
+
+  delete_evaluation:
+    title: Delete a model evaluation
+    description: >-
+      Remove an evaluation and its result files. The models and test dataset it
+      compared are untouched.
+    category: evaluations
+    destructive: true
+    request:
+      method: DELETE
+      path: /speechtotext/v3.2/evaluations/${evaluation_id}
+    input:
+      evaluation_id:
+        type: string
+        description: Id of the evaluation to delete.
+        example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+    output:
+      description: Empty on success -- the service answers 204 No Content.
+      type: object
+
+  get_health_status:
+    title: Check the Speech service's health
+    description: >-
+      Report the health of the speech-to-text service in this region. A useful
+      first call when transcriptions are failing, to separate a service problem
+      from a problem with the job.
+    category: service
+    read_only: true
+    request:
+      method: GET
+      path: /speechtotext/v3.2/healthstatus
+    input: {}
+    output:
+      description: Overall health and per-component status for the region.
+      type: object
+      properties:
+        overallStatus: {type: string}
+        components: {type: array}
+
+  list_batch_syntheses:
+    title: List batch synthesis jobs
+    description: >-
+      List the long-form text-to-speech jobs on this resource, each with its
+      status and the audio it produced. Batch synthesis is for material too
+      long for a single synthesize_speech call -- audiobooks, whole articles.
+    category: synthesis
+    read_only: true
+    request:
+      method: GET
+      path: /texttospeech/batchsyntheses
+      query:
+        api-version: "${api_version}"
+        skip: "${skip}"
+        maxpagesize: "${max_page_size}"
+    input:
+      skip:
+        type: integer
+        description: How many jobs to skip, for paging.
+        optional: true
+        minimum: 0
+      max_page_size:
+        type: integer
+        description: How many jobs to return per page.
+        optional: true
+        minimum: 1
+      api_version:
+        type: string
+        description: Batch synthesis API version to call.
+        optional: true
+        default: "2024-04-01"
+    output:
+      description: A page of batch synthesis jobs.
+      type: object
+      properties:
+        value: {type: array, description: "Each with id, status, createdDateTime and outputs."}
+        nextLink: {type: string}
+
+  create_batch_synthesis:
+    title: Start a batch synthesis job
+    description: >-
+      Synthesise long-form audio asynchronously. You choose the job id, so the
+      call is idempotent -- a repeat with the same id returns the existing job
+      rather than starting a second one. input_kind is PlainText or SSML, and
+      inputs is a list of {"content": "..."} blocks. Poll get_batch_synthesis
+      until status is Succeeded, then download from outputs.result.
+    category: synthesis
+    request:
+      method: PUT
+      path: /texttospeech/batchsyntheses/${synthesis_id}
+      query:
+        api-version: "${api_version}"
+      body:
+        description: "${description}"
+        inputKind: "${input_kind}"
+        inputs: "${inputs}"
+        synthesisConfig: "${synthesis_config}"
+        properties: "${properties}"
+        customVoices: "${custom_voices}"
+    input:
+      synthesis_id:
+        type: string
+        description: An id you choose for the job. Reusing one returns the existing job.
+        example: chapter-01
+      inputs:
+        type: array
+        description: 'The text blocks to synthesise, each an object with content, e.g. [{"content": "Hello."}].'
+        items: {type: object}
+        example: [{content: It was a bright cold day in April.}]
+      input_kind:
+        type: string
+        description: Whether inputs hold plain text or SSML markup.
+        optional: true
+        enum: [PlainText, SSML]
+      synthesis_config:
+        type: object
+        description: 'Voice settings for PlainText input, e.g. {"voice": "en-GB-SoniaNeural"}.'
+        optional: true
+      description:
+        type: string
+        description: Free-text note describing the job.
+        optional: true
+      properties:
+        type: object
+        description: >-
+          Job options -- outputFormat, wordBoundaryEnabled,
+          concatenateResult, destinationContainerUrl.
+        optional: true
+      custom_voices:
+        type: object
+        description: Map of custom voice name to deployment id, when using your own voices.
+        optional: true
+      api_version:
+        type: string
+        description: Batch synthesis API version to call.
+        optional: true
+        default: "2024-04-01"
+    output:
+      description: The job as created, with its id and initial status.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string}
+
+  get_batch_synthesis:
+    title: Get a batch synthesis job
+    description: >-
+      Read one batch synthesis job's status and, once Succeeded, the URLs of
+      the audio, summary and word-boundary files it produced. Those URLs are
+      short-lived, so download promptly.
+    category: synthesis
+    read_only: true
+    request:
+      method: GET
+      path: /texttospeech/batchsyntheses/${synthesis_id}
+      query:
+        api-version: "${api_version}"
+    input:
+      synthesis_id:
+        type: string
+        description: Id of the batch synthesis job.
+        example: chapter-01
+      api_version:
+        type: string
+        description: Batch synthesis API version to call.
+        optional: true
+        default: "2024-04-01"
+    output:
+      description: The job's status and output file URLs.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string, description: "NotStarted, Running, Succeeded or Failed."}
+        outputs: {type: object, description: "result, summary and, when enabled, wordBoundary URLs."}
+
+  delete_batch_synthesis:
+    title: Delete a batch synthesis job
+    description: >-
+      Remove a batch synthesis job and the audio it produced. Download anything
+      you need from outputs first -- after this the files are gone.
+    category: synthesis
+    destructive: true
+    request:
+      method: DELETE
+      path: /texttospeech/batchsyntheses/${synthesis_id}
+      query:
+        api-version: "${api_version}"
+    input:
+      synthesis_id:
+        type: string
+        description: Id of the batch synthesis job to delete.
+        example: chapter-01
+      api_version:
+        type: string
+        description: Batch synthesis API version to call.
+        optional: true
+        default: "2024-04-01"
+    output:
+      description: Empty on success -- the service answers 204 No Content.
+      type: object
+
+  list_voices:
+    title: List available speech voices
+    description: >-
+      List every neural voice available in this region, with its short name
+      (en-GB-SoniaNeural), locale, gender, the styles and roles it supports and
+      whether it can whisper or sing. Use the ShortName from here as the voice
+      in synthesize_speech. Served from the region's TTS host rather than the
+      Cognitive Services endpoint.
+    category: synthesis
+    read_only: true
+    request:
+      method: GET
+      path: /cognitiveservices/voices/list
+      base_url_override: https://${connectionConfig.region}.tts.speech.microsoft.com
+    input: {}
+    output:
+      description: Every voice available in the region.
+      type: array
+      items: {type: object, description: "Name, ShortName, DisplayName, Locale, Gender, VoiceType, StyleList and RolePlayList."}
+
+  synthesize_speech:
+    title: Synthesise speech from SSML
+    description: >-
+      Turn SSML into audio and return the audio bytes. The body is SSML, not
+      plain text -- wrap the words in <speak> with a <voice name="..."> naming
+      a voice from list_voices. output_format picks the codec and sample rate,
+      e.g. audio-24khz-48kbitrate-mono-mp3 or riff-24khz-16bit-mono-pcm. Limits
+      are 10 minutes of audio and 64 KB of SSML per call; use
+      create_batch_synthesis for anything longer. Served from the region's TTS
+      host rather than the Cognitive Services endpoint.
+    category: synthesis
+    request:
+      method: POST
+      path: /cognitiveservices/v1
+      base_url_override: https://${connectionConfig.region}.tts.speech.microsoft.com
+      headers:
+        content-type: application/ssml+xml
+        X-Microsoft-OutputFormat: "${output_format}"
+        User-Agent: connector-manager
+      content: "${ssml}"
+    input:
+      ssml:
+        type: string
+        description: >-
+          The SSML document to speak, e.g.
+          <speak version='1.0' xml:lang='en-GB'><voice name='en-GB-SoniaNeural'>Hello.</voice></speak>
+        example: <speak version='1.0' xml:lang='en-GB'><voice name='en-GB-SoniaNeural'>Hello.</voice></speak>
+      output_format:
+        type: string
+        description: Audio codec and sample rate to return, from the service's output format list.
+        optional: true
+        default: audio-24khz-48kbitrate-mono-mp3
+    output:
+      description: The synthesised audio, as bytes in the requested format.
+      type: string
+
+  issue_auth_token:
+    title: Exchange the key for a bearer token
+    description: >-
+      Trade the subscription key for a bearer token valid for ten minutes. The
+      Speech SDKs and the real-time WebSocket endpoints take this token rather
+      than the key, so this is the call to make before handing credentials to a
+      client that should not hold the key itself.
+    category: service
+    request:
+      method: POST
+      path: /sts/v1.0/issueToken
+      headers:
+        content-length: "0"
+    input: {}
+    output:
+      description: The bearer token, as a plain-text JWT valid for ten minutes.
+      type: string

@@ -1,0 +1,1683 @@
+# Anthropic Administrator tools -- the Admin API's control plane.
+#
+# This connector holds an **Admin** API key (`sk-ant-admin...`) and manages the
+# organization itself: members, invites, RBAC groups and roles, workspaces,
+# workspace members, service accounts, API keys, rate limits, and the usage,
+# cost and Claude Code analytics reports. It cannot send a message. Its
+# counterpart is the `anthropic` connector, which holds a regular API key and
+# cannot reach any endpoint here -- Anthropic rejects each credential on the
+# other's surface by design.
+#
+# Four things are worth knowing before driving this:
+#
+#   * **updates are POSTs, not PATCHes.** Changing a member's role, renaming a
+#     workspace, deactivating a key -- all are `POST` to the resource's own
+#     path. There is no PATCH anywhere in this API, so a tool that "updates"
+#     below is still a POST;
+#   * **archiving is not deleting.** Workspaces, service accounts and policies
+#     archive rather than delete, and archived workspaces stay visible with
+#     `include_archived`. Members, invites and RBAC group memberships are the
+#     ones that really DELETE;
+#   * **service accounts and federation need OAuth, not this key.** Those
+#     endpoints reject an Admin API key and want an `org:admin` bearer token,
+#     so the service-account tools here will 401 on a key-only connection. The
+#     workspace-scoped service-account membership endpoints below do work with
+#     an admin key;
+#   * **the reports are a different shape from everything else.** Usage, cost
+#     and Claude Code analytics use `starting_at`/`ending_at` with time buckets
+#     and `page` cursors, not the `after_id`/`before_id` paging the resource
+#     lists use.
+#
+# Costs come back as decimal strings in cents, not dollars.
+#
+# Docs: https://platform.claude.com/docs/en/api/admin
+
+connector_id: anthropic-admin
+display_name: Anthropic Administrator
+docs_url: https://platform.claude.com/docs/en/api/admin
+
+tools:
+
+  # -- organization ---------------------------------------------------------
+
+  get_organization:
+    title: Get the organization
+    description: >-
+      The organization this Admin key belongs to -- its id and name. The
+      cheapest call that proves the credential is a working admin credential,
+      and the source of the organization id the federation and analytics
+      surfaces want.
+    category: organization
+    read_only: true
+    request:
+      method: GET
+      path: /v1/organizations/me
+    output:
+      description: The organization behind the credential.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+
+  # -- members --------------------------------------------------------------
+
+  list_users:
+    title: List organization members
+    description: >-
+      Page through the organization's members with their emails and roles.
+      Filterable by exact email or by role. Roles run user, claude_code_user,
+      developer, billing, admin -- plus owner and primary owner, which the API
+      reports but cannot assign.
+    category: members
+    read_only: true
+    request:
+      method: GET
+      path: /v1/organizations/users
+      query:
+        limit: "${limit}"
+        after_id: "${after_id}"
+        before_id: "${before_id}"
+        email: "${email}"
+        roles: "${roles}"
+    input:
+      limit:
+        type: integer
+        description: How many members per page.
+        optional: true
+        default: 20
+        minimum: 1
+      after_id:
+        type: string
+        description: Return the page immediately after this user id.
+        optional: true
+      before_id:
+        type: string
+        description: Return the page immediately before this user id.
+        optional: true
+      email:
+        type: string
+        description: Return only the member with this exact email address.
+        optional: true
+      roles:
+        type: string
+        description: Filter to one or more organization roles.
+        optional: true
+    output:
+      description: A page of organization members.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}
+
+  get_user:
+    title: Get an organization member
+    description: >-
+      One member by id, with their email, name, organization role and when they
+      were added. Use it to confirm who a user id refers to before changing or
+      removing them.
+    category: members
+    read_only: true
+    request:
+      method: GET
+      path: /v1/organizations/users/${user_id}
+    input:
+      user_id:
+        type: string
+        description: The member's user id.
+    output:
+      description: The member record.
+      type: object
+      properties:
+        id: {type: string}
+        email: {type: string}
+        role: {type: string}
+
+  update_user:
+    title: Change a member's role
+    description: >-
+      Set a member's organization role. This is a POST to the member's own
+      path, not a PATCH. Raising someone to `admin` grants them the ability to
+      manage every other member, so treat it as a privileged change.
+    category: members
+    request:
+      method: POST
+      path: /v1/organizations/users/${user_id}
+      body:
+        role: "${role}"
+    input:
+      user_id:
+        type: string
+        description: The member's user id.
+      role:
+        type: string
+        description: The organization role to set.
+        enum: [user, claude_code_user, developer, billing, admin]
+    output:
+      description: The member with their new role.
+      type: object
+      properties:
+        id: {type: string}
+        role: {type: string}
+
+  remove_user:
+    title: Remove a member from the organization
+    description: >-
+      Remove someone from the organization entirely. They lose access to every
+      workspace at once, and re-adding them means a fresh invite -- there is no
+      undo and no soft-delete for members.
+    category: members
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/organizations/users/${user_id}
+    input:
+      user_id:
+        type: string
+        description: The user id to remove.
+    output:
+      description: Confirmation that the member was removed.
+      type: object
+      properties:
+        id: {type: string}
+        type: {type: string}
+
+  # -- invites --------------------------------------------------------------
+
+  create_invite:
+    title: Invite someone to the organization
+    description: >-
+      Send an invitation with the role the person will hold once they accept,
+      and optionally the RBAC groups they should join. The invite is pending
+      until accepted -- creating one does not make them a member or consume a
+      seat yet.
+    category: invites
+    request:
+      method: POST
+      path: /v1/organizations/invites
+      body:
+        email: "${email}"
+        role: "${role}"
+        rbac_group_ids: "${rbac_group_ids}"
+    input:
+      email:
+        type: string
+        description: The email address to invite.
+        format: email
+      role:
+        type: string
+        description: The organization role the invitee will hold.
+        enum: [user, claude_code_user, developer, billing, admin]
+      rbac_group_ids:
+        type: array
+        description: RBAC groups to add the person to when they accept.
+        optional: true
+        items: {type: string}
+    output:
+      description: The created invite and its status.
+      type: object
+      properties:
+        id: {type: string}
+        email: {type: string}
+        status: {type: string}
+
+  list_invites:
+    title: List invites
+    description: >-
+      Page through the organization's invitations, filterable by email, role or
+      status. The way to see who has been invited but has not accepted, and to
+      find the invite id needed to revoke one.
+    category: invites
+    read_only: true
+    request:
+      method: GET
+      path: /v1/organizations/invites
+      query:
+        limit: "${limit}"
+        after_id: "${after_id}"
+        before_id: "${before_id}"
+        email: "${email}"
+        roles: "${roles}"
+        statuses: "${statuses}"
+    input:
+      limit:
+        type: integer
+        description: How many invites per page.
+        optional: true
+        default: 20
+        minimum: 1
+      after_id:
+        type: string
+        description: Return the page immediately after this invite id.
+        optional: true
+      before_id:
+        type: string
+        description: Return the page immediately before this invite id.
+        optional: true
+      email:
+        type: string
+        description: Return only invites to this exact address.
+        optional: true
+      roles:
+        type: string
+        description: Filter by the role the invite grants.
+        optional: true
+      statuses:
+        type: string
+        description: Filter by invite status, e.g. pending, accepted or expired.
+        optional: true
+    output:
+      description: A page of invites.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}
+
+  get_invite:
+    title: Get an invite
+    description: >-
+      One invitation by id, with the address it went to, the role it grants and
+      its current status. Useful for checking whether an invite is still
+      pending before re-sending one.
+    category: invites
+    read_only: true
+    request:
+      method: GET
+      path: /v1/organizations/invites/${invite_id}
+    input:
+      invite_id:
+        type: string
+        description: The invite id.
+    output:
+      description: The invite record.
+      type: object
+      properties:
+        id: {type: string}
+        email: {type: string}
+        status: {type: string}
+
+  delete_invite:
+    title: Revoke an invite
+    description: >-
+      Cancel a pending invitation so the link stops working. Harmless on an
+      invite the person has not accepted; it does not remove someone who
+      already joined -- use remove_user for that.
+    category: invites
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/organizations/invites/${invite_id}
+    input:
+      invite_id:
+        type: string
+        description: The invite id to revoke.
+    output:
+      description: Confirmation that the invite was revoked.
+      type: object
+      properties:
+        id: {type: string}
+        type: {type: string}
+
+  # -- RBAC groups and roles -----------------------------------------------
+
+  list_rbac_groups:
+    title: List RBAC groups
+    description: >-
+      Page through the organization's role-based access control groups. Groups
+      are how permissions are granted to sets of people rather than one at a
+      time, and their ids are what create_invite's rbac_group_ids takes.
+    category: rbac
+    read_only: true
+    request:
+      method: GET
+      path: /v1/organizations/rbac_groups
+      query:
+        limit: "${limit}"
+        page: "${page}"
+    input:
+      limit:
+        type: integer
+        description: How many groups per page.
+        optional: true
+        minimum: 1
+      page:
+        type: string
+        description: Page cursor from the previous response.
+        optional: true
+    output:
+      description: A page of RBAC groups.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}
+
+  get_rbac_group:
+    title: Get an RBAC group
+    description: >-
+      One RBAC group by id, with its name. Use it to confirm which group an id
+      refers to before adding people to it or deleting it.
+    category: rbac
+    read_only: true
+    request:
+      method: GET
+      path: /v1/organizations/rbac_groups/${group_id}
+    input:
+      group_id:
+        type: string
+        description: The RBAC group id.
+    output:
+      description: The RBAC group.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+
+  create_rbac_group:
+    title: Create an RBAC group
+    description: >-
+      Create a new role-based access control group by name. The group starts
+      empty -- add people with add_rbac_group_member, or name it on an invite
+      so they join on acceptance.
+    category: rbac
+    request:
+      method: POST
+      path: /v1/organizations/rbac_groups
+      body:
+        name: "${name}"
+    input:
+      name:
+        type: string
+        description: A name for the group.
+    output:
+      description: The created group.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+
+  update_rbac_group:
+    title: Rename an RBAC group
+    description: >-
+      Change an RBAC group's name. A POST to the group's own path, like every
+      other update in this API. Membership and permissions are unaffected.
+    category: rbac
+    request:
+      method: POST
+      path: /v1/organizations/rbac_groups/${group_id}
+      body:
+        name: "${name}"
+    input:
+      group_id:
+        type: string
+        description: The RBAC group id.
+      name:
+        type: string
+        description: The new name.
+        optional: true
+    output:
+      description: The group after the rename.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+
+  delete_rbac_group:
+    title: Delete an RBAC group
+    description: >-
+      Delete an RBAC group. Its members stay in the organization but lose
+      whatever access the group granted them, which can silently break someone
+      mid-task -- check the membership first.
+    category: rbac
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/organizations/rbac_groups/${group_id}
+    input:
+      group_id:
+        type: string
+        description: The RBAC group id to delete.
+    output:
+      description: Confirmation that the group was deleted.
+      type: object
+      properties:
+        id: {type: string}
+        type: {type: string}
+
+  list_rbac_group_members:
+    title: List an RBAC group's members
+    description: >-
+      Page through the people in one RBAC group. Read this before deleting a
+      group or revoking its permissions, since it is the only place the blast
+      radius of that change is visible.
+    category: rbac
+    read_only: true
+    request:
+      method: GET
+      path: /v1/organizations/rbac_groups/${group_id}/members
+      query:
+        limit: "${limit}"
+        page: "${page}"
+    input:
+      group_id:
+        type: string
+        description: The RBAC group id.
+      limit:
+        type: integer
+        description: How many members per page.
+        optional: true
+        minimum: 1
+      page:
+        type: string
+        description: Page cursor from the previous response.
+        optional: true
+    output:
+      description: A page of the group's members.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}
+
+  add_rbac_group_member:
+    title: Add a member to an RBAC group
+    description: >-
+      Put an existing organization member into an RBAC group, granting them
+      whatever that group carries. The person must already be a member of the
+      organization; this does not invite them.
+    category: rbac
+    request:
+      method: POST
+      path: /v1/organizations/rbac_groups/${group_id}/members
+      body:
+        user_id: "${user_id}"
+    input:
+      group_id:
+        type: string
+        description: The RBAC group id.
+      user_id:
+        type: string
+        description: The user id to add.
+    output:
+      description: The resulting group membership.
+      type: object
+      properties:
+        id: {type: string}
+
+  remove_rbac_group_member:
+    title: Remove a member from an RBAC group
+    description: >-
+      Take someone out of an RBAC group. They keep their organization
+      membership and any access granted elsewhere, but lose what this group
+      conferred.
+    category: rbac
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/organizations/rbac_groups/${group_id}/members/${user_id}
+    input:
+      group_id:
+        type: string
+        description: The RBAC group id.
+      user_id:
+        type: string
+        description: The user id to remove from the group.
+    output:
+      description: Confirmation that the membership was removed.
+      type: object
+      properties:
+        id: {type: string}
+        type: {type: string}
+
+  list_rbac_roles:
+    title: List RBAC roles
+    description: >-
+      The role definitions available in the organization, including any custom
+      ones. Read-only -- roles are defined in the Console, not created through
+      this API.
+    category: rbac
+    read_only: true
+    request:
+      method: GET
+      path: /v1/organizations/rbac_roles
+      query:
+        limit: "${limit}"
+        page: "${page}"
+    input:
+      limit:
+        type: integer
+        description: How many roles per page.
+        optional: true
+        minimum: 1
+      page:
+        type: string
+        description: Page cursor from the previous response.
+        optional: true
+    output:
+      description: A page of RBAC roles.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}
+
+  get_rbac_role:
+    title: Get an RBAC role
+    description: >-
+      One role definition by id. Pair it with list_rbac_role_permissions to see
+      exactly what the role allows before assigning it to anyone.
+    category: rbac
+    read_only: true
+    request:
+      method: GET
+      path: /v1/organizations/rbac_roles/${role_id}
+    input:
+      role_id:
+        type: string
+        description: The RBAC role id.
+    output:
+      description: The role definition.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+
+  list_rbac_role_permissions:
+    title: List an RBAC role's permissions
+    description: >-
+      Every permission one role grants. This is the audit answer to "what can
+      someone with this role actually do", which the role's name alone does not
+      settle.
+    category: rbac
+    read_only: true
+    request:
+      method: GET
+      path: /v1/organizations/rbac_roles/${role_id}/permissions
+      query:
+        limit: "${limit}"
+        page: "${page}"
+    input:
+      role_id:
+        type: string
+        description: The RBAC role id.
+      limit:
+        type: integer
+        description: How many permissions per page.
+        optional: true
+        minimum: 1
+      page:
+        type: string
+        description: Page cursor from the previous response.
+        optional: true
+    output:
+      description: A page of the role's permissions.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}
+
+  # -- workspaces -----------------------------------------------------------
+
+  create_workspace:
+    title: Create a workspace
+    description: >-
+      Create a workspace -- the unit API keys, rate limits and spend are scoped
+      to. `data_residency` pins where inference runs and `external_key_id`
+      attaches a customer-managed encryption key; both are easier to set here
+      than to change later.
+    category: workspaces
+    request:
+      method: POST
+      path: /v1/organizations/workspaces
+      body:
+        name: "${name}"
+        data_residency: "${data_residency}"
+        display_color: "${display_color}"
+        external_key_id: "${external_key_id}"
+        tags: "${tags}"
+    input:
+      name:
+        type: string
+        description: A name for the workspace.
+      data_residency:
+        type: string
+        description: Where inference for this workspace should run.
+        optional: true
+      display_color:
+        type: string
+        description: The colour the Console shows for the workspace.
+        optional: true
+      external_key_id:
+        type: string
+        description: A registered CMEK external key to encrypt the workspace with.
+        optional: true
+      tags:
+        type: array
+        description: Tags to attach to the workspace.
+        optional: true
+        items: {type: string}
+    output:
+      description: The created workspace.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+
+  list_workspaces:
+    title: List workspaces
+    description: >-
+      Page through the organization's workspaces. Archived ones are hidden
+      unless `include_archived` is set -- which is why a workspace that still
+      exists can appear missing from this list.
+    category: workspaces
+    read_only: true
+    request:
+      method: GET
+      path: /v1/organizations/workspaces
+      query:
+        limit: "${limit}"
+        after_id: "${after_id}"
+        before_id: "${before_id}"
+        include_archived: "${include_archived}"
+    input:
+      limit:
+        type: integer
+        description: How many workspaces per page.
+        optional: true
+        default: 20
+        minimum: 1
+      after_id:
+        type: string
+        description: Return the page immediately after this workspace id.
+        optional: true
+      before_id:
+        type: string
+        description: Return the page immediately before this workspace id.
+        optional: true
+      include_archived:
+        type: boolean
+        description: Include archived workspaces, which are otherwise omitted.
+        optional: true
+    output:
+      description: A page of workspaces.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}
+
+  get_workspace:
+    title: Get a workspace
+    description: >-
+      One workspace by id, with its name, display colour, data residency and
+      archive state. The source of the workspace id every workspace-scoped tool
+      below takes.
+    category: workspaces
+    read_only: true
+    request:
+      method: GET
+      path: /v1/organizations/workspaces/${workspace_id}
+    input:
+      workspace_id:
+        type: string
+        description: The workspace id.
+    output:
+      description: The workspace record.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        archived_at: {type: string}
+
+  update_workspace:
+    title: Update a workspace
+    description: >-
+      Change a workspace's name, colour, tags, data residency or attached CMEK
+      key. Attaching an external key is done here rather than through a
+      dedicated endpoint. A POST, not a PATCH.
+    category: workspaces
+    request:
+      method: POST
+      path: /v1/organizations/workspaces/${workspace_id}
+      body:
+        name: "${name}"
+        data_residency: "${data_residency}"
+        display_color: "${display_color}"
+        external_key_id: "${external_key_id}"
+        tags: "${tags}"
+    input:
+      workspace_id:
+        type: string
+        description: The workspace id.
+      name:
+        type: string
+        description: A new name for the workspace.
+        optional: true
+      data_residency:
+        type: string
+        description: Where inference for this workspace should run.
+        optional: true
+      display_color:
+        type: string
+        description: The colour the Console shows for the workspace.
+        optional: true
+      external_key_id:
+        type: string
+        description: A registered CMEK external key to attach to the workspace.
+        optional: true
+      tags:
+        type: array
+        description: Replacement tags for the workspace.
+        optional: true
+        items: {type: string}
+    output:
+      description: The workspace after the update.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+
+  archive_workspace:
+    title: Archive a workspace
+    description: >-
+      Archive a workspace, which stops it being used while leaving it visible
+      to list_workspaces under `include_archived`. Its API keys stop working,
+      so this is disruptive even though nothing is deleted.
+    category: workspaces
+    destructive: true
+    request:
+      method: POST
+      path: /v1/organizations/workspaces/${workspace_id}/archive
+    input:
+      workspace_id:
+        type: string
+        description: The workspace id to archive.
+    output:
+      description: The archived workspace.
+      type: object
+      properties:
+        id: {type: string}
+        archived_at: {type: string}
+
+  # -- workspace members ----------------------------------------------------
+
+  add_workspace_member:
+    title: Add a member to a workspace
+    description: >-
+      Give an existing organization member access to one workspace, at a
+      workspace role -- workspace_user, workspace_developer, workspace_admin or
+      workspace_billing. Organization admins already reach every workspace and
+      do not need adding.
+    category: workspace-members
+    request:
+      method: POST
+      path: /v1/organizations/workspaces/${workspace_id}/members
+      body:
+        user_id: "${user_id}"
+        workspace_role: "${workspace_role}"
+    input:
+      workspace_id:
+        type: string
+        description: The workspace id.
+      user_id:
+        type: string
+        description: The organization member's user id.
+      workspace_role:
+        type: string
+        description: The role they hold in this workspace.
+        enum: [workspace_user, workspace_developer, workspace_admin, workspace_billing]
+    output:
+      description: The new workspace membership.
+      type: object
+      properties:
+        user_id: {type: string}
+        workspace_role: {type: string}
+
+  list_workspace_members:
+    title: List a workspace's members
+    description: >-
+      Page through who has access to one workspace and at what role. Note that
+      organization admins have access without appearing here, so this is not
+      the complete list of people who can reach the workspace.
+    category: workspace-members
+    read_only: true
+    request:
+      method: GET
+      path: /v1/organizations/workspaces/${workspace_id}/members
+      query:
+        limit: "${limit}"
+        after_id: "${after_id}"
+        before_id: "${before_id}"
+    input:
+      workspace_id:
+        type: string
+        description: The workspace id.
+      limit:
+        type: integer
+        description: How many members per page.
+        optional: true
+        default: 20
+        minimum: 1
+      after_id:
+        type: string
+        description: Return the page immediately after this user id.
+        optional: true
+      before_id:
+        type: string
+        description: Return the page immediately before this user id.
+        optional: true
+    output:
+      description: A page of workspace members.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}
+
+  get_workspace_member:
+    title: Get a workspace member
+    description: >-
+      One person's membership of one workspace, with the role they hold there.
+      Cheaper than paging the whole roster when you already know the user id.
+    category: workspace-members
+    read_only: true
+    request:
+      method: GET
+      path: /v1/organizations/workspaces/${workspace_id}/members/${user_id}
+    input:
+      workspace_id:
+        type: string
+        description: The workspace id.
+      user_id:
+        type: string
+        description: The member's user id.
+    output:
+      description: The workspace membership.
+      type: object
+      properties:
+        user_id: {type: string}
+        workspace_role: {type: string}
+
+  update_workspace_member:
+    title: Change a workspace member's role
+    description: >-
+      Set the role someone holds in one workspace. Their organization role is
+      untouched -- these are separate ladders, and a workspace_admin is not an
+      organization admin.
+    category: workspace-members
+    request:
+      method: POST
+      path: /v1/organizations/workspaces/${workspace_id}/members/${user_id}
+      body:
+        workspace_role: "${workspace_role}"
+    input:
+      workspace_id:
+        type: string
+        description: The workspace id.
+      user_id:
+        type: string
+        description: The member's user id.
+      workspace_role:
+        type: string
+        description: The new workspace role.
+        enum: [workspace_user, workspace_developer, workspace_admin, workspace_billing]
+    output:
+      description: The membership after the change.
+      type: object
+      properties:
+        user_id: {type: string}
+        workspace_role: {type: string}
+
+  remove_workspace_member:
+    title: Remove a member from a workspace
+    description: >-
+      Revoke one person's access to one workspace. They stay in the
+      organization and keep access to any other workspace they belong to.
+    category: workspace-members
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/organizations/workspaces/${workspace_id}/members/${user_id}
+    input:
+      workspace_id:
+        type: string
+        description: The workspace id.
+      user_id:
+        type: string
+        description: The user id to remove from the workspace.
+    output:
+      description: Confirmation that the membership was removed.
+      type: object
+      properties:
+        user_id: {type: string}
+        type: {type: string}
+
+  # -- service accounts in workspaces --------------------------------------
+
+  add_workspace_service_account:
+    title: Add a service account to a workspace
+    description: >-
+      Give a service account access to one workspace at a workspace role. This
+      is how an automated workload gets scoped credentials without a human
+      member behind them. Unlike the organization-level service-account
+      endpoints, this one works with an Admin API key.
+    category: service-accounts
+    request:
+      method: POST
+      path: /v1/organizations/workspaces/${workspace_id}/service_accounts
+      body:
+        service_account_id: "${service_account_id}"
+        workspace_role: "${workspace_role}"
+    input:
+      workspace_id:
+        type: string
+        description: The workspace id.
+      service_account_id:
+        type: string
+        description: The service account id, e.g. "svac_...".
+      workspace_role:
+        type: string
+        description: The role the service account holds in this workspace.
+        enum: [workspace_user, workspace_developer, workspace_admin, workspace_billing]
+    output:
+      description: The new service account membership.
+      type: object
+      properties:
+        service_account_id: {type: string}
+        workspace_role: {type: string}
+
+  list_workspace_service_accounts:
+    title: List a workspace's service accounts
+    description: >-
+      Page through the service accounts with access to one workspace. The audit
+      view of which automated workloads can spend against it, which the human
+      member list does not show.
+    category: service-accounts
+    read_only: true
+    request:
+      method: GET
+      path: /v1/organizations/workspaces/${workspace_id}/service_accounts
+      query:
+        limit: "${limit}"
+        page: "${page}"
+    input:
+      workspace_id:
+        type: string
+        description: The workspace id.
+      limit:
+        type: integer
+        description: How many service accounts per page.
+        optional: true
+        minimum: 1
+      page:
+        type: string
+        description: Page cursor from the previous response.
+        optional: true
+    output:
+      description: A page of workspace service accounts.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}
+
+  get_workspace_service_account:
+    title: Get a workspace's service account membership
+    description: >-
+      One service account's membership of one workspace, with the role it
+      holds. Use it to confirm an automated workload's access level before
+      changing or revoking it.
+    category: service-accounts
+    read_only: true
+    request:
+      method: GET
+      path: /v1/organizations/workspaces/${workspace_id}/service_accounts/${service_account_id}
+    input:
+      workspace_id:
+        type: string
+        description: The workspace id.
+      service_account_id:
+        type: string
+        description: The service account id.
+    output:
+      description: The service account's workspace membership.
+      type: object
+      properties:
+        service_account_id: {type: string}
+        workspace_role: {type: string}
+
+  update_workspace_service_account:
+    title: Change a service account's workspace role
+    description: >-
+      Set the role a service account holds in one workspace. Lowering it can
+      break a running workload immediately, since its existing keys start
+      failing rather than degrading.
+    category: service-accounts
+    request:
+      method: POST
+      path: /v1/organizations/workspaces/${workspace_id}/service_accounts/${service_account_id}
+      body:
+        workspace_role: "${workspace_role}"
+    input:
+      workspace_id:
+        type: string
+        description: The workspace id.
+      service_account_id:
+        type: string
+        description: The service account id.
+      workspace_role:
+        type: string
+        description: The new workspace role.
+        enum: [workspace_user, workspace_developer, workspace_admin, workspace_billing]
+    output:
+      description: The membership after the change.
+      type: object
+      properties:
+        service_account_id: {type: string}
+        workspace_role: {type: string}
+
+  remove_workspace_service_account:
+    title: Remove a service account from a workspace
+    description: >-
+      Revoke a service account's access to one workspace. Any workload
+      authenticating through it against that workspace stops working
+      immediately, so check what depends on it first.
+    category: service-accounts
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/organizations/workspaces/${workspace_id}/service_accounts/${service_account_id}
+    input:
+      workspace_id:
+        type: string
+        description: The workspace id.
+      service_account_id:
+        type: string
+        description: The service account id to remove.
+    output:
+      description: Confirmation that the membership was removed.
+      type: object
+      properties:
+        service_account_id: {type: string}
+        type: {type: string}
+
+  # -- API keys -------------------------------------------------------------
+
+  list_api_keys:
+    title: List API keys
+    description: >-
+      Page through the organization's API keys with their names, status,
+      workspace and creator. Key *values* are never returned -- only metadata.
+      The key ids here are what the usage report's api_key_ids filter takes.
+    category: api-keys
+    read_only: true
+    request:
+      method: GET
+      path: /v1/organizations/api_keys
+      query:
+        limit: "${limit}"
+        after_id: "${after_id}"
+        before_id: "${before_id}"
+        status: "${status}"
+        workspace_id: "${workspace_id}"
+        created_by_user_id: "${created_by_user_id}"
+    input:
+      limit:
+        type: integer
+        description: How many keys per page.
+        optional: true
+        default: 20
+        minimum: 1
+      after_id:
+        type: string
+        description: Return the page immediately after this key id.
+        optional: true
+      before_id:
+        type: string
+        description: Return the page immediately before this key id.
+        optional: true
+      status:
+        type: string
+        description: Filter by key status.
+        optional: true
+        enum: [active, inactive, archived]
+      workspace_id:
+        type: string
+        description: Only keys scoped to this workspace.
+        optional: true
+      created_by_user_id:
+        type: string
+        description: Only keys created by this member.
+        optional: true
+    output:
+      description: A page of API key records, without the key values.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}
+
+  get_api_key:
+    title: Get an API key
+    description: >-
+      One API key's metadata -- name, status, workspace and who created it. The
+      secret itself is never retrievable after creation, so this cannot recover
+      a lost key.
+    category: api-keys
+    read_only: true
+    request:
+      method: GET
+      path: /v1/organizations/api_keys/${api_key_id}
+    input:
+      api_key_id:
+        type: string
+        description: The API key id, e.g. "apikey_...".
+    output:
+      description: The API key's metadata.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        status: {type: string}
+        workspace_id: {type: string}
+
+  update_api_key:
+    title: Rename or deactivate an API key
+    description: >-
+      Change an API key's name or status. Setting status to `inactive` is the
+      immediate kill switch for a leaked key -- every request using it starts
+      failing at once, and there is no grace period.
+    category: api-keys
+    request:
+      method: POST
+      path: /v1/organizations/api_keys/${api_key_id}
+      body:
+        name: "${name}"
+        status: "${status}"
+    input:
+      api_key_id:
+        type: string
+        description: The API key id.
+      name:
+        type: string
+        description: A new name for the key.
+        optional: true
+      status:
+        type: string
+        description: The key's new status. `inactive` disables it immediately.
+        optional: true
+        enum: [active, inactive, archived]
+    output:
+      description: The key after the change.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        status: {type: string}
+
+  # -- rate limits ----------------------------------------------------------
+
+  list_rate_limits:
+    title: List the organization's rate limits
+    description: >-
+      The configured rate limits for the organization, optionally narrowed to
+      one model or limit group. These are the *configured* ceilings, not
+      current consumption -- for what is actually being used, read the usage
+      report.
+    category: rate-limits
+    read_only: true
+    request:
+      method: GET
+      path: /v1/organizations/rate_limits
+      query:
+        model: "${model}"
+        group_type: "${group_type}"
+        limit: "${limit}"
+        page: "${page}"
+    input:
+      model:
+        type: string
+        description: Only limits for this model, e.g. "claude-opus-5".
+        optional: true
+      group_type:
+        type: string
+        description: Only limits of this group type.
+        optional: true
+      limit:
+        type: integer
+        description: How many limits per page.
+        optional: true
+        minimum: 1
+      page:
+        type: string
+        description: Page cursor from the previous response.
+        optional: true
+    output:
+      description: A page of configured rate limits.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}
+
+  list_workspace_rate_limits:
+    title: List a workspace's rate limits
+    description: >-
+      The rate limits configured for one workspace. Where an organization
+      splits capacity across workspaces, this is what says how much each is
+      allowed, and therefore why one workspace is throttling while another is
+      not.
+    category: rate-limits
+    read_only: true
+    request:
+      method: GET
+      path: /v1/organizations/workspaces/${workspace_id}/rate_limits
+      query:
+        group_type: "${group_type}"
+        limit: "${limit}"
+        page: "${page}"
+    input:
+      workspace_id:
+        type: string
+        description: The workspace id.
+      group_type:
+        type: string
+        description: Only limits of this group type.
+        optional: true
+      limit:
+        type: integer
+        description: How many limits per page.
+        optional: true
+        minimum: 1
+      page:
+        type: string
+        description: Page cursor from the previous response.
+        optional: true
+    output:
+      description: A page of the workspace's rate limits.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}
+
+  # -- usage, cost and analytics -------------------------------------------
+
+  get_usage_report:
+    title: Get the token usage report
+    description: >-
+      Token consumption over a time range, bucketed by minute, hour or day and
+      optionally grouped by model, workspace, API key, service tier, inference
+      geo or speed. This is the accurate source for usage -- more reliable than
+      summing `usage` off responses. Bucket counts are capped per granularity
+      (1440 at 1m, 168 at 1h, 31 at 1d), so long ranges need several calls.
+    category: reports
+    read_only: true
+    request:
+      method: GET
+      path: /v1/organizations/usage_report/messages
+      query:
+        starting_at: "${starting_at}"
+        ending_at: "${ending_at}"
+        bucket_width: "${bucket_width}"
+        group_by[]: "${group_by}"
+        models[]: "${models}"
+        workspace_ids[]: "${workspace_ids}"
+        api_key_ids[]: "${api_key_ids}"
+        service_tiers[]: "${service_tiers}"
+        context_window[]: "${context_window}"
+        inference_geos[]: "${inference_geos}"
+        limit: "${limit}"
+        page: "${page}"
+    input:
+      starting_at:
+        type: string
+        description: Start of the range, ISO 8601 UTC, e.g. "2025-01-01T00:00:00Z".
+        format: date-time
+      ending_at:
+        type: string
+        description: End of the range, ISO 8601 UTC.
+        optional: true
+        format: date-time
+      bucket_width:
+        type: string
+        description: Time bucket size.
+        optional: true
+        default: 1d
+        enum: ["1m", "1h", "1d"]
+      group_by:
+        type: array
+        description: Dimensions to break the numbers down by, e.g. model, workspace_id, api_key_id, service_tier, inference_geo.
+        optional: true
+        items: {type: string}
+      models:
+        type: array
+        description: Only these models.
+        optional: true
+        items: {type: string}
+      workspace_ids:
+        type: array
+        description: Only these workspaces. The default workspace reports as null.
+        optional: true
+        items: {type: string}
+      api_key_ids:
+        type: array
+        description: Only these API keys. Console playground usage has no key and reports as null.
+        optional: true
+        items: {type: string}
+      service_tiers:
+        type: array
+        description: Only these service tiers, e.g. batch or priority.
+        optional: true
+        items: {type: string}
+      context_window:
+        type: array
+        description: Only these context window buckets, e.g. "0-200k".
+        optional: true
+        items: {type: string}
+      inference_geos:
+        type: array
+        description: Only these inference geographies -- global, us or not_available.
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: How many buckets per page.
+        optional: true
+        minimum: 1
+      page:
+        type: string
+        description: The `next_page` cursor from the previous response.
+        optional: true
+    output:
+      description: Token usage per bucket, broken down by the requested dimensions.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}
+        next_page: {type: string}
+
+  get_cost_report:
+    title: Get the cost report
+    description: >-
+      Costs in USD over a range, daily granularity only, groupable by workspace
+      or description. Amounts are decimal strings in cents. Two gaps worth
+      knowing: Priority Tier costs are not included here at all, and code
+      execution shows up here but not in the usage report.
+    category: reports
+    read_only: true
+    request:
+      method: GET
+      path: /v1/organizations/cost_report
+      query:
+        starting_at: "${starting_at}"
+        ending_at: "${ending_at}"
+        group_by[]: "${group_by}"
+        limit: "${limit}"
+        page: "${page}"
+    input:
+      starting_at:
+        type: string
+        description: Start of the range, ISO 8601 UTC.
+        format: date-time
+      ending_at:
+        type: string
+        description: End of the range, ISO 8601 UTC.
+        optional: true
+        format: date-time
+      group_by:
+        type: array
+        description: Dimensions to break costs down by -- workspace_id and description.
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: How many buckets per page.
+        optional: true
+        minimum: 1
+      page:
+        type: string
+        description: The `next_page` cursor from the previous response.
+        optional: true
+    output:
+      description: Daily costs in cents, broken down by the requested dimensions.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}
+        next_page: {type: string}
+
+  get_claude_code_analytics:
+    title: Get Claude Code analytics
+    description: >-
+      Per-user Claude Code metrics for a single UTC day -- sessions, lines added
+      and removed, commits, pull requests, per-tool accept/reject counts and
+      estimated cost by model. `starting_at` is a date, not a timestamp, and
+      names one day only; there is no range. Data lags real time by up to an
+      hour.
+    category: reports
+    read_only: true
+    request:
+      method: GET
+      path: /v1/organizations/usage_report/claude_code
+      query:
+        starting_at: "${starting_at}"
+        limit: "${limit}"
+        page: "${page}"
+    input:
+      starting_at:
+        type: string
+        description: The UTC day to report on, as YYYY-MM-DD. One day per call.
+        example: "2025-09-08"
+        pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+      limit:
+        type: integer
+        description: Records per page (max 1000).
+        optional: true
+        default: 20
+        minimum: 1
+        maximum: 1000
+      page:
+        type: string
+        description: The `next_page` cursor from the previous response.
+        optional: true
+    output:
+      description: One record per user for that day, with productivity metrics and estimated cost.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}
+        next_page: {type: string}
+
+  # -- service accounts and federation (OAuth org:admin only) --------------
+
+  list_service_accounts:
+    title: List service accounts
+    description: >-
+      The organization's service accounts. This endpoint rejects an Admin API
+      key -- it needs an `org:admin` OAuth bearer token, so on a key-only
+      connection it answers 401 rather than an empty list.
+    category: service-accounts
+    read_only: true
+    request:
+      method: GET
+      path: /v1/organizations/service_accounts
+      query:
+        limit: "${limit}"
+        page: "${page}"
+    input:
+      limit:
+        type: integer
+        description: How many service accounts per page.
+        optional: true
+        minimum: 1
+      page:
+        type: string
+        description: Page cursor from the previous response.
+        optional: true
+    output:
+      description: A page of service accounts.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}
+
+  create_service_account:
+    title: Create a service account
+    description: >-
+      Create a service account for an automated workload, at an organization
+      role. Needs an `org:admin` OAuth bearer token rather than an Admin API
+      key. Pair it with a workspace membership to scope what it can spend
+      against.
+    category: service-accounts
+    request:
+      method: POST
+      path: /v1/organizations/service_accounts
+      body:
+        name: "${name}"
+        organization_role: "${organization_role}"
+    input:
+      name:
+        type: string
+        description: A name for the service account.
+      organization_role:
+        type: string
+        description: The organization role the service account holds.
+        enum: [user, claude_code_user, developer, billing, admin]
+    output:
+      description: The created service account.
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+
+  archive_service_account:
+    title: Archive a service account
+    description: >-
+      Archive a service account so it can no longer authenticate. Any workload
+      using it stops immediately. Needs an `org:admin` OAuth bearer token
+      rather than an Admin API key.
+    category: service-accounts
+    destructive: true
+    request:
+      method: POST
+      path: /v1/organizations/service_accounts/${service_account_id}/archive
+    input:
+      service_account_id:
+        type: string
+        description: The service account id to archive.
+    output:
+      description: The archived service account.
+      type: object
+      properties:
+        id: {type: string}
+        archived_at: {type: string}
+
+  list_federation_issuers:
+    title: List workload identity federation issuers
+    description: >-
+      The OIDC issuers trusted for workload identity federation, such as GitHub
+      Actions. Needs an `org:admin` OAuth bearer token rather than an Admin API
+      key.
+    category: federation
+    read_only: true
+    request:
+      method: GET
+      path: /v1/organizations/federation_issuers
+      query:
+        limit: "${limit}"
+        page: "${page}"
+    input:
+      limit:
+        type: integer
+        description: How many issuers per page.
+        optional: true
+        minimum: 1
+      page:
+        type: string
+        description: Page cursor from the previous response.
+        optional: true
+    output:
+      description: A page of federation issuers.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}
+
+  list_federation_rules:
+    title: List workload identity federation rules
+    description: >-
+      The rules mapping an external identity's claims onto a service account
+      and OAuth scope -- how CI exchanges its own JWT for Anthropic
+      credentials. Needs an `org:admin` OAuth bearer token rather than an Admin
+      API key.
+    category: federation
+    read_only: true
+    request:
+      method: GET
+      path: /v1/organizations/federation_rules
+      query:
+        limit: "${limit}"
+        page: "${page}"
+    input:
+      limit:
+        type: integer
+        description: How many rules per page.
+        optional: true
+        minimum: 1
+      page:
+        type: string
+        description: Page cursor from the previous response.
+        optional: true
+    output:
+      description: A page of federation rules.
+      type: object
+      properties:
+        data: {type: array}
+        has_more: {type: boolean}
+
+  # -- customer-managed encryption keys ------------------------------------
+
+  create_external_key:
+    title: Register a CMEK external key
+    description: >-
+      Register a customer-managed encryption key held in your own KMS. Registering
+      is only the first step -- validate it, then attach it to a workspace with
+      update_workspace's external_key_id before it protects anything.
+    category: encryption
+    request:
+      method: POST
+      path: /v1/organizations/external_keys
+      body:
+        display_name: "${display_name}"
+        geo: "${geo}"
+        provider_config: "${provider_config}"
+    input:
+      display_name:
+        type: string
+        description: A name for the key in the Console.
+      provider_config:
+        type: object
+        description: 'The KMS reference, e.g. {"type": "aws", "kms_arn": "arn:aws:kms:..."}.'
+      geo:
+        type: string
+        description: The geography the key applies in, e.g. "us".
+        optional: true
+    output:
+      description: The registered external key.
+      type: object
+      properties:
+        id: {type: string}
+        display_name: {type: string}
+
+  validate_external_key:
+    title: Validate a CMEK external key
+    description: >-
+      Check that Anthropic can actually reach and use a registered key. Run this
+      before attaching the key to a workspace -- a key that fails validation
+      will not encrypt anything, and the failure is easier to diagnose here
+      than on a workspace update.
+    category: encryption
+    request:
+      method: POST
+      path: /v1/organizations/external_keys/${external_key_id}/validate
+    input:
+      external_key_id:
+        type: string
+        description: The external key id, e.g. "ekey_...".
+    output:
+      description: The validation result for the key.
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string}
