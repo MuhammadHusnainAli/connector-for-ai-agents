@@ -4,6 +4,40 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] — 2026-09-17
+
+### Changed
+
+- **The WSSE password digest is SHA-256.** The WS-Security UsernameToken
+  profile specifies SHA-1, and Emarsys -- the only connector on the
+  `SIGNATURE` auth mode -- implements the profile as written, so this works
+  only against a provider that accepts SHA-256. A password hash should not
+  rest on a broken algorithm; the docstring records the departure.
+
+### Fixed
+
+- **The spec-fetching scripts no longer go through `urllib`.**
+  `discover_openapi.py`, `generate_from_openapi.py` and
+  `generate_from_google_discovery.py` opened whatever scheme they were handed,
+  so a url from `--spec` or argv could read a local file instead of
+  downloading a document. They use httpx, which speaks http and https and
+  nothing else. `generate_from_google_discovery.py` keeps its explicit
+  local-path branch.
+- **The pack linter's placeholder check parses the `docs_url` host** instead of
+  testing it with a substring, which let `example.com.evil.net` read as the
+  scaffold placeholder.
+- **README.md and TOOLS.md carry the real counts again** -- 19,966 tools,
+  11,398 hand-authored across 259 packs. `altoviz`, `alai` and `akkio` became
+  hand-authored without the coverage block being rebuilt, so
+  `scripts/scaffold_tools.py --check` and two tests were failing.
+
+### Security
+
+- Bandit reports nothing at all, down from roughly 520 findings. The test
+  suite is out of its scan -- `assert` is pytest's assertion model, so B101
+  fired on all 457 of them -- and B105 is skipped, since it matches dictionary
+  keys and this package's whole subject is credential schemas.
+
 ## [0.2.1] — 2026-09-17
 
 ### Added
@@ -892,6 +926,7 @@ particular credential is allowed to do.
   `TBA` and `OAUTH1`, request proxying with interpolation, pagination and retry
   metadata, and a `connectors` CLI.
 
+[0.2.2]: https://github.com/MuhammadHusnainAli/connector-for-ai-agents/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/MuhammadHusnainAli/connector-for-ai-agents/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/MuhammadHusnainAli/connector-for-ai-agents/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/MuhammadHusnainAli/connector-for-ai-agents/compare/v0.1.2...v0.1.3
