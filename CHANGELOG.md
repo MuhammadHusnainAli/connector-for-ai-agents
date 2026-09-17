@@ -4,6 +4,59 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] — 2026-09-18
+
+### Changed
+
+- **The bundled catalogue is JSON, and the package starts 84x faster.**
+  `ConnectorManager()` took 13.6 seconds: it parsed all 406 tool packs --
+  15 MB of YAML, 12,949 tools -- to answer a question about one connector,
+  with the pure-Python YAML loader, on every construction, and nothing cached
+  the result. That overruns AWS Lambda's 10-second init cap and rules out any
+  runtime that builds a fresh process per request.
+
+  The layout is unchanged -- `data/connectors/<auth-mode>.json` and
+  `data/tools/<auth-mode>/<connector-id>.json` -- with `data/tools/index.json`
+  beside the packs, mapping every connector id, `applies_to` aliases included,
+  to the one file that serves it. `ToolRegistry` reads the index at startup and
+  parses a pack the first time something asks for it, so a lookup opens one
+  small file instead of all 406.
+
+      import + ConnectorManager()     13.63s -> 0.16s
+      list_tools() for one connector           0.5ms, cached thereafter
+      the test suite                    795s -> 5s
+
+  No API changed. Every one of the 12,949 tool specs was diffed field by field,
+  order included, against what the YAML produced.
+
+- **PyYAML is no longer a runtime dependency.** Nothing in the package reads
+  YAML, so it moves to the `dev` extra, where `generate_from_openapi.py` still
+  needs it for provider specs served as YAML. Installs are one dependency
+  lighter.
+
+- **The scripts read and write JSON**: `split_connectors.py`,
+  `scaffold_tools.py --new`, and both spec generators.
+
+### Added
+
+- `scripts/build_index.py` rebuilds `data/tools/index.json`; `--check` fails CI
+  when a pack was added or renamed without it, which would otherwise make that
+  pack invisible to the registry.
+- `scripts/verify_wheel.py` fails a build whose wheel lost the catalogue or its
+  index, or still carries YAML -- caught before PyPI rather than after.
+
+### Fixed
+
+- Three Bandit B506 findings, which were `yaml.load` calls it would not accept
+  as safe. There is no YAML parser in the package any more.
+
+### Removed
+
+- The YAML source of the catalogue, and with it 9,088 lines of comments
+  recording each pack's provenance and limits. JSON holds no comments. Those
+  lines remain in git history, and a pack's origin is still carried by its
+  `docs_url`, `generated` and `generated_from` fields.
+
 ## [0.2.2] — 2026-09-17
 
 ### Changed
@@ -926,6 +979,7 @@ particular credential is allowed to do.
   `TBA` and `OAUTH1`, request proxying with interpolation, pagination and retry
   metadata, and a `connectors` CLI.
 
+[0.2.3]: https://github.com/MuhammadHusnainAli/connector-for-ai-agents/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/MuhammadHusnainAli/connector-for-ai-agents/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/MuhammadHusnainAli/connector-for-ai-agents/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/MuhammadHusnainAli/connector-for-ai-agents/compare/v0.1.3...v0.2.0
