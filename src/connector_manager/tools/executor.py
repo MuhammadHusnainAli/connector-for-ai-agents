@@ -504,7 +504,7 @@ def build_mime_message(
         try:
             data = _base64.b64decode(str(raw), validate=False)
         except Exception:  # noqa: BLE001 - a bad blob must not lose the message
-            continue
+            continue  # nosec B112
         maintype, _, subtype = str(attachment.get("content_type") or "application/octet-stream").partition("/")
         message.add_attachment(
             data,

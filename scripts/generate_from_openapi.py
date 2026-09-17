@@ -26,9 +26,10 @@ import argparse
 import json
 import re
 import sys
-import urllib.request
 from pathlib import Path
 from typing import Any
+
+import httpx
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
@@ -51,10 +52,19 @@ NOISE = re.compile(r"(controller|handler|using|_v\d+$|^api_)", re.I)
 
 
 def fetch(url: str) -> Any:
-    """Download and parse a JSON or YAML document."""
-    request = urllib.request.Request(url, headers={"User-Agent": "connector-for-ai-agents"})
-    with urllib.request.urlopen(request, timeout=90) as response:
-        raw = response.read()
+    """Download and parse a JSON or YAML document.
+
+    httpx speaks http and https and nothing else, so a ``file:`` or custom
+    scheme in ``url`` is refused rather than read off the local disk.
+    """
+    response = httpx.get(
+        url,
+        headers={"User-Agent": "connector-for-ai-agents"},
+        timeout=90,
+        follow_redirects=True,
+    )
+    response.raise_for_status()
+    raw = response.content
     try:
         return json.loads(raw)
     except ValueError:

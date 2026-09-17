@@ -24,6 +24,7 @@ import argparse
 import re
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
@@ -38,6 +39,11 @@ TOOLS_DIR = REPO_ROOT / "src" / "connector_manager" / "data" / "tools"
 WHOLE_PATH = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}")
 
 METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE"})
+
+#: Hosts the scaffold writes into a new pack, matched on the host itself rather
+#: than as a substring: "example.com.evil.net" is a real host that a substring
+#: test would wave through as a placeholder.
+PLACEHOLDER_HOSTS = frozenset({"example.com", "example.org", "example.net"})
 
 SKELETON = '''\
 # {display_name} tools.
@@ -188,9 +194,10 @@ def _check_pack(pack: ToolPack, registry: ConnectorRegistry, seen: dict[str, str
         problems.append(f"{where}: is under {path.parent.name}/ but {pack.connector_id} is {expected}")
     if not pack.display_name:
         problems.append(f"{where}: no display_name")
-    if not (pack.docs_url or "").startswith("http"):
+    docs_url = urlsplit(pack.docs_url or "")
+    if docs_url.scheme not in ("http", "https") or not docs_url.hostname:
         problems.append(f"{where}: docs_url must point at the provider's reference")
-    elif "example.com" in (pack.docs_url or ""):
+    elif (docs_url.hostname or "").removeprefix("www.") in PLACEHOLDER_HOSTS:
         problems.append(f"{where}: docs_url is still the scaffold placeholder")
     if not pack.tools:
         problems.append(f"{where}: declares no tools")

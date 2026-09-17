@@ -44,9 +44,20 @@ jobs:
           # Report only issues of a given confidence level or higher. Can be LOW, MEDIUM or HIGH. Default is UNDEFINED (everything)
           # confidence: # optional, default is UNDEFINED
           # comma-separated list of paths (glob patterns supported) to exclude from scan (note that these are in addition to the excluded paths provided in the config file) (default: .svn,CVS,.bzr,.hg,.git,__pycache__,.tox,.eggs,*.egg)
-          # excluded_paths: # optional, default is DEFAULT
+          #
+          # The test suite is excluded: pytest's whole assertion model is the
+          # bare `assert`, so B101 fires on every one of the 450-odd of them and
+          # buries the findings that matter under notes that describe pytest
+          # working as designed. Nothing under tests/ ships in the wheel.
+          excluded_paths: ./tests
           # comma-separated list of test IDs to skip
-          # skips: # optional, default is DEFAULT
+          #
+          # B105 (hardcoded password string) matches on dictionary keys, and
+          # this package's whole subject is credential schemas: every
+          # `{"secret": True}` field descriptor and every
+          # `{"client_secret": "required"}` validation detail trips it. Thirteen
+          # hits, all of them field metadata, none of them a password.
+          skips: B105
           # path to a .bandit file that supplies command line arguments
           # ini_path: # optional, default is DEFAULT
 

@@ -18,10 +18,10 @@ import argparse
 import json
 import re
 import sys
-import urllib.error
-import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+
+import httpx
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
@@ -82,18 +82,29 @@ def looks_like_spec(payload: bytes) -> bool:
 
 
 def probe(url: str) -> bool:
-    request = urllib.request.Request(
-        url, headers={"User-Agent": "connector-for-ai-agents spec discovery", "Accept": "application/json, application/yaml"}
-    )
+    """Whether ``url`` serves something that reads like an OpenAPI document.
+
+    The candidate urls are built from connector base urls, so this only ever
+    speaks http and https: httpx refuses every other scheme, which keeps a
+    ``file:`` candidate from turning a spec hunt into a local file read.
+    """
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
-            if response.status != 200:
-                return False
-            ctype = (response.headers.get("Content-Type") or "").lower()
-            if "html" in ctype:
-                return False
-            return looks_like_spec(response.read(400000))
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError, OSError):
+        response = httpx.get(
+            url,
+            headers={
+                "User-Agent": "connector-for-ai-agents spec discovery",
+                "Accept": "application/json, application/yaml",
+            },
+            timeout=TIMEOUT,
+            follow_redirects=True,
+        )
+        if response.status_code != 200:
+            return False
+        ctype = (response.headers.get("Content-Type") or "").lower()
+        if "html" in ctype:
+            return False
+        return looks_like_spec(response.content[:400000])
+    except (httpx.HTTPError, ValueError, OSError):
         return False
 
 

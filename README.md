@@ -462,10 +462,10 @@ from the registry by `python scripts/scaffold_tools.py --catalogue`.
 ### Coverage
 
 <!-- tool-coverage-summary:start -->
-**Every one of the 1,638 connectors exposes tools — 19,839 in total.**
+**Every one of the 1,638 connectors exposes tools — 19,966 in total.**
 
-- **11,241 hand-authored** across 256 packs covering 269 connectors, written against the providers' own references, with typed inputs and real scope names.
-- **1,581 generated from providers' published OpenAPI specifications**, across 150 packs.
+- **11,398 hand-authored** across 259 packs covering 272 connectors, written against the providers' own references, with typed inputs and real scope names.
+- **1,551 generated from providers' published OpenAPI specifications**, across 147 packs.
 - **569 connectors** get a `check_connection` tool built from the verification endpoint their catalogue entry declares.
 - **650 connectors** have only the raw authenticated request tools, which claim nothing about the provider's API.
 
@@ -501,6 +501,7 @@ and destructive flags must match its HTTP verb.
 | `agiliron` | Agiliron | 128 | hand-authored |
 | `autodesk` | Autodesk | 123 | hand-authored |
 | `autotask` | AutoTask | 120 | hand-authored |
+| `altoviz` | Altoviz | 116 | hand-authored |
 | `adoxx-cc` | ADOXX (Client Credentials) | 111 | hand-authored |
 | `customgpt` | CustomGPT | 111 | hand-authored |
 | `crunchbase` | Crunchbase | 108 | hand-authored |
@@ -596,6 +597,7 @@ and destructive flags must match its HTTP verb.
 | `slack` | Slack | 25 | hand-authored |
 | `cursor-admin` | Cursor Admin | 24 | hand-authored |
 | `stripe` | Stripe | 24 | hand-authored |
+| `alai` | Alai | 23 | hand-authored |
 | `anthropic` | Anthropic | 23 | hand-authored |
 | `awardco` | Awardco | 23 | hand-authored |
 | `azure-ai-search-management` | Azure AI Search (Management) | 23 | hand-authored |
@@ -618,6 +620,7 @@ and destructive flags must match its HTTP verb.
 | `azure-cosmos-db` | Azure Cosmos DB (NoSQL) | 19 | hand-authored |
 | `azure-service-bus` | Azure Service Bus | 19 | hand-authored |
 | `google-sheet` | Google Sheets | 19 | hand-authored |
+| `akkio` | Akkio | 18 | hand-authored |
 | `google-meet` | Google Meet | 18 | hand-authored |
 | `azure-data-explorer` | Azure Data Explorer (Kusto) | 17 | hand-authored |
 | `azure-openai-service` | Azure OpenAI Service | 17 | hand-authored |
@@ -756,7 +759,6 @@ and destructive flags must match its HTTP verb.
 | `vimeo-basic` | Vimeo (Basic Auth) | 14 | spec-generated |
 | `xero-oauth2-cc` | Xero (Client Credentials) | 14 | spec-generated |
 | `zoom-cc` | Zoom (Server-to-Server OAuth) | 14 | spec-generated |
-| `akkio` | Akkio | 12 | spec-generated |
 | `attention` | Attention | 12 | spec-generated |
 | `cloudflare` | Cloudflare | 12 | spec-generated |
 | `connecteam` | Connecteam | 12 | spec-generated |
@@ -816,7 +818,6 @@ and destructive flags must match its HTTP verb.
 | `newscatcher` | Newscatcher | 11 | spec-generated |
 | `payfit` | Payfit | 11 | spec-generated |
 | `sofya` | Sofya | 11 | spec-generated |
-| `altoviz` | Altoviz | 10 | spec-generated |
 | `apple-app-store` | Apple App Store | 10 | spec-generated |
 | `atlassian` | Atlassian | 10 | spec-generated |
 | `commpeak` | CommPeak | 10 | spec-generated |
@@ -858,7 +859,6 @@ and destructive flags must match its HTTP verb.
 | `typefully` | Typefully | 9 | spec-generated |
 | `typefully-v2` | Typefully (API v2) | 9 | spec-generated |
 | `yutori` | Yutori | 9 | spec-generated |
-| `alai` | Alai | 8 | spec-generated |
 | `apify` | Apify | 8 | spec-generated |
 | `appstle-subscriptions` | Appstle Subscriptions | 8 | spec-generated |
 | `boldsign` | BoldSign | 8 | spec-generated |

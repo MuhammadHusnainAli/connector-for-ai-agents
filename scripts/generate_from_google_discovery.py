@@ -27,9 +27,10 @@ import argparse
 import json
 import re
 import sys
-import urllib.request
 from pathlib import Path
 from typing import Any
+
+import httpx
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
@@ -64,12 +65,22 @@ MAX_BODY_FIELDS = 24
 
 
 def fetch(url: str) -> dict[str, Any]:
-    """The discovery document, from Google or from a local copy of one."""
+    """The discovery document, from Google or from a local copy of one.
+
+    A local copy is read only when the argument is plainly a path: anything
+    with a scheme goes to httpx, which speaks http and https and nothing else,
+    so a ``file:`` url cannot masquerade as a download.
+    """
     if not url.startswith(("http://", "https://")):
         return json.loads(Path(url).read_text(encoding="utf-8"))
-    request = urllib.request.Request(url, headers={"User-Agent": "connector-for-ai-agents"})
-    with urllib.request.urlopen(request, timeout=90) as response:
-        return json.loads(response.read())
+    response = httpx.get(
+        url,
+        headers={"User-Agent": "connector-for-ai-agents"},
+        timeout=90,
+        follow_redirects=True,
+    )
+    response.raise_for_status()
+    return json.loads(response.content)
 
 
 def snake(value: str) -> str:
