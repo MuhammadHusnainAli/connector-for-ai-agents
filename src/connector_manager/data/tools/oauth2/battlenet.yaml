@@ -1,0 +1,1869 @@
+# Battle.net tools -- World of Warcraft profile and game data.
+#
+# The connection carries the API host (`us.api.blizzard.com`,
+# `eu.api.blizzard.com`, and so on) in its base url, so paths here start at
+# `/profile` or `/data`. Three things decide whether a call works, and none of
+# them are optional knowledge:
+#
+#   * **every endpoint needs a `namespace`, and it is region-suffixed.** The
+#     prefix is fixed by the endpoint -- `profile` for character and account
+#     data, `dynamic` for realms, auctions and leaderboards, `static` for the
+#     game's reference data -- and the region comes from *your* connection's
+#     host. The tools below take a `region` argument and build the namespace
+#     for you, so pass the region matching the api domain the connection uses;
+#   * **the account tools need a *user* token.** `/profile/user/wow` and its
+#     collections read the signed-in player's own account, so they require the
+#     `wow.profile` scope from the authorization-code flow. Character, realm
+#     and reference data work with any valid token;
+#   * **realm and character names are slugs.** `realm_slug` is the
+#     lower-cased, hyphenated realm ("tarren-mill", not "Tarren Mill"), and
+#     character names must be lower case. Blizzard 404s on anything else.
+#
+# `locale` is optional everywhere and decides the language of names in the
+# response; leave it out and you get every localisation.
+#
+# Docs: https://develop.battle.net/documentation/world-of-warcraft
+
+connector_id: battlenet
+display_name: Battle.net
+docs_url: https://develop.battle.net/documentation/world-of-warcraft
+
+tools:
+
+  # -- the signed-in player's account --------------------------------------
+
+  get_wow_account_profile:
+    title: Get my WoW account profile
+    description: >-
+      Read the signed-in player's World of Warcraft account -- every character
+      on it, with realm, level and class. The starting point for anything
+      about "my characters", and the only way to enumerate them. Needs a user
+      token with the wow.profile scope.
+    category: account
+    scopes: [wow.profile]
+    read_only: true
+    request:
+      method: GET
+      path: /profile/user/wow
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      region:
+        type: string
+        description: >-
+          Region of the connection's api domain -- "us" for us.api.blizzard.com,
+          "eu" for eu.api.blizzard.com, and so on. It suffixes the namespace.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names, e.g. "en_US". Omit for all localisations.
+        optional: true
+    output:
+      description: The account's WoW characters, grouped by account.
+      type: object
+      properties:
+        wow_accounts: {type: array, description: "Each with a `characters` array."}
+
+  get_wow_account_collections:
+    title: Get my collections index
+    description: >-
+      Read which collection types the signed-in player's account has -- mounts,
+      pets, toys, heirlooms, transmogs -- with the link to each. Needs the
+      wow.profile scope.
+    category: account
+    scopes: [wow.profile]
+    read_only: true
+    request:
+      method: GET
+      path: /profile/user/wow/collections
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names, e.g. "en_US".
+        optional: true
+    output:
+      description: The account's collection types.
+      type: object
+
+  get_wow_account_mounts:
+    title: Get my mount collection
+    description: >-
+      Read every mount the signed-in player's account has collected,
+      account-wide rather than per character. Needs the wow.profile scope.
+    category: account
+    scopes: [wow.profile]
+    read_only: true
+    request:
+      method: GET
+      path: /profile/user/wow/collections/mounts
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names, e.g. "en_US".
+        optional: true
+    output:
+      description: The account's collected mounts.
+      type: object
+
+  get_wow_account_pets:
+    title: Get my battle pet collection
+    description: >-
+      Read the battle pets on the signed-in player's account, with each pet's
+      level, quality and nickname. Needs the wow.profile scope.
+    category: account
+    scopes: [wow.profile]
+    read_only: true
+    request:
+      method: GET
+      path: /profile/user/wow/collections/pets
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names, e.g. "en_US".
+        optional: true
+    output:
+      description: The account's collected battle pets.
+      type: object
+
+  get_wow_account_toys:
+    title: Get my toy collection
+    description: >-
+      Read the toys the signed-in player's account has collected. Needs the
+      wow.profile scope.
+    category: account
+    scopes: [wow.profile]
+    read_only: true
+    request:
+      method: GET
+      path: /profile/user/wow/collections/toys
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names, e.g. "en_US".
+        optional: true
+    output:
+      description: The account's collected toys.
+      type: object
+
+  get_wow_account_heirlooms:
+    title: Get my heirloom collection
+    description: >-
+      Read the heirlooms on the signed-in player's account, with each one's
+      upgrade level. Needs the wow.profile scope.
+    category: account
+    scopes: [wow.profile]
+    read_only: true
+    request:
+      method: GET
+      path: /profile/user/wow/collections/heirlooms
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names, e.g. "en_US".
+        optional: true
+    output:
+      description: The account's collected heirlooms.
+      type: object
+
+  get_wow_account_transmogs:
+    title: Get my transmog collection
+    description: >-
+      Read the appearances the signed-in player's account has unlocked for
+      transmogrification. Needs the wow.profile scope.
+    category: account
+    scopes: [wow.profile]
+    read_only: true
+    request:
+      method: GET
+      path: /profile/user/wow/collections/transmogs
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names, e.g. "en_US".
+        optional: true
+    output:
+      description: The account's unlocked appearances.
+      type: object
+
+  # -- characters ----------------------------------------------------------
+
+  get_character_profile:
+    title: Get a character profile
+    description: >-
+      Read a character's summary -- level, race, class, specialisation, item
+      level, guild and achievement points. `realm_slug` is the hyphenated
+      lower-case realm and `character_name` must be lower case, or Blizzard
+      404s.
+    category: characters
+    read_only: true
+    request:
+      method: GET
+      path: /profile/wow/character/${realm_slug}/${character_name}
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      realm_slug:
+        type: string
+        description: The realm's slug -- lower case and hyphenated, e.g. "tarren-mill".
+        example: tarren-mill
+      character_name:
+        type: string
+        description: The character's name in lower case.
+        example: thrall
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names, e.g. "en_US".
+        optional: true
+    output:
+      description: The character's profile summary.
+      type: object
+      properties:
+        name: {type: string}
+        level: {type: integer}
+        equipped_item_level: {type: integer}
+        character_class: {type: object}
+
+  get_character_status:
+    title: Check whether a character still exists
+    description: >-
+      Read a character's status, which says whether the character is still
+      valid and gives its stable id. The cheap check before assuming a 404 means
+      "renamed or transferred".
+    category: characters
+    read_only: true
+    request:
+      method: GET
+      path: /profile/wow/character/${realm_slug}/${character_name}/status
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      realm_slug:
+        type: string
+        description: The realm's slug.
+      character_name:
+        type: string
+        description: The character's name in lower case.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The character's id and validity.
+      type: object
+
+  get_character_equipment:
+    title: Get a character's equipment
+    description: >-
+      Read what a character is wearing -- every slot with its item, item
+      level, enchants and gems. The basis of any gear check.
+    category: characters
+    read_only: true
+    request:
+      method: GET
+      path: /profile/wow/character/${realm_slug}/${character_name}/equipment
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      realm_slug:
+        type: string
+        description: The realm's slug.
+      character_name:
+        type: string
+        description: The character's name in lower case.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The character's equipped items.
+      type: object
+      properties:
+        equipped_items: {type: array}
+
+  get_character_specializations:
+    title: Get a character's specialisations
+    description: >-
+      Read a character's specialisations and talent loadouts, including which
+      is active -- what you need to judge a build rather than just gear.
+    category: characters
+    read_only: true
+    request:
+      method: GET
+      path: /profile/wow/character/${realm_slug}/${character_name}/specializations
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      realm_slug:
+        type: string
+        description: The realm's slug.
+      character_name:
+        type: string
+        description: The character's name in lower case.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The character's specialisations and talent loadouts.
+      type: object
+
+  get_character_statistics:
+    title: Get a character's statistics
+    description: >-
+      Read a character's stat sheet -- primary and secondary stats, ratings and
+      resistances, as the in-game character pane shows them.
+    category: characters
+    read_only: true
+    request:
+      method: GET
+      path: /profile/wow/character/${realm_slug}/${character_name}/statistics
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      realm_slug:
+        type: string
+        description: The realm's slug.
+      character_name:
+        type: string
+        description: The character's name in lower case.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The character's statistics.
+      type: object
+
+  get_character_achievements:
+    title: Get a character's achievements
+    description: >-
+      Read the achievements a character has completed, with timestamps and
+      category totals.
+    category: characters
+    read_only: true
+    request:
+      method: GET
+      path: /profile/wow/character/${realm_slug}/${character_name}/achievements
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      realm_slug:
+        type: string
+        description: The realm's slug.
+      character_name:
+        type: string
+        description: The character's name in lower case.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The character's completed achievements.
+      type: object
+
+  get_character_achievement_statistics:
+    title: Get a character's achievement statistics
+    description: >-
+      Read the counters behind a character's achievements -- kills, quests,
+      deaths -- which is where progress toward an unfinished achievement lives.
+    category: characters
+    read_only: true
+    request:
+      method: GET
+      path: /profile/wow/character/${realm_slug}/${character_name}/achievements/statistics
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      realm_slug:
+        type: string
+        description: The realm's slug.
+      character_name:
+        type: string
+        description: The character's name in lower case.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The character's achievement statistics.
+      type: object
+
+  get_character_professions:
+    title: Get a character's professions
+    description: >-
+      Read a character's primary and secondary professions with their skill
+      tiers and known recipes.
+    category: characters
+    read_only: true
+    request:
+      method: GET
+      path: /profile/wow/character/${realm_slug}/${character_name}/professions
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      realm_slug:
+        type: string
+        description: The realm's slug.
+      character_name:
+        type: string
+        description: The character's name in lower case.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The character's professions.
+      type: object
+
+  get_character_reputations:
+    title: Get a character's reputations
+    description: Read a character's standing with every faction it has met.
+    category: characters
+    read_only: true
+    request:
+      method: GET
+      path: /profile/wow/character/${realm_slug}/${character_name}/reputations
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      realm_slug:
+        type: string
+        description: The realm's slug.
+      character_name:
+        type: string
+        description: The character's name in lower case.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The character's faction standings.
+      type: object
+
+  get_character_titles:
+    title: Get a character's titles
+    description: Read the titles a character has earned, and which one is displayed.
+    category: characters
+    read_only: true
+    request:
+      method: GET
+      path: /profile/wow/character/${realm_slug}/${character_name}/titles
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      realm_slug:
+        type: string
+        description: The realm's slug.
+      character_name:
+        type: string
+        description: The character's name in lower case.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The character's titles.
+      type: object
+
+  get_character_media:
+    title: Get a character's images
+    description: >-
+      Read the rendered images of a character -- avatar, inset and full body
+      render -- as urls you can display.
+    category: characters
+    read_only: true
+    request:
+      method: GET
+      path: /profile/wow/character/${realm_slug}/${character_name}/character-media
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      realm_slug:
+        type: string
+        description: The realm's slug.
+      character_name:
+        type: string
+        description: The character's name in lower case.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The character's image urls.
+      type: object
+
+  get_character_appearance:
+    title: Get a character's appearance
+    description: >-
+      Read a character's customisation -- race, face, hair, skin and the
+      transmog it is displaying.
+    category: characters
+    read_only: true
+    request:
+      method: GET
+      path: /profile/wow/character/${realm_slug}/${character_name}/appearance
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      realm_slug:
+        type: string
+        description: The realm's slug.
+      character_name:
+        type: string
+        description: The character's name in lower case.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The character's appearance.
+      type: object
+
+  get_character_collections:
+    title: Get a character's collections index
+    description: >-
+      Read which collections are available for a character -- mounts, pets,
+      toys, heirlooms, transmogs -- with the link to each. Unlike the account
+      collections, this needs no user token.
+    category: characters
+    read_only: true
+    request:
+      method: GET
+      path: /profile/wow/character/${realm_slug}/${character_name}/collections
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      realm_slug:
+        type: string
+        description: The realm's slug.
+      character_name:
+        type: string
+        description: The character's name in lower case.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The character's collection types.
+      type: object
+
+  get_character_mounts:
+    title: Get a character's mounts
+    description: Read the mounts available to one character, as that character sees them.
+    category: characters
+    read_only: true
+    request:
+      method: GET
+      path: /profile/wow/character/${realm_slug}/${character_name}/collections/mounts
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      realm_slug:
+        type: string
+        description: The realm's slug.
+      character_name:
+        type: string
+        description: The character's name in lower case.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The character's mounts.
+      type: object
+
+  get_character_pets:
+    title: Get a character's battle pets
+    description: Read the battle pets available to one character, with levels and quality.
+    category: characters
+    read_only: true
+    request:
+      method: GET
+      path: /profile/wow/character/${realm_slug}/${character_name}/collections/pets
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      realm_slug:
+        type: string
+        description: The realm's slug.
+      character_name:
+        type: string
+        description: The character's name in lower case.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The character's battle pets.
+      type: object
+
+  get_character_hunter_pets:
+    title: Get a hunter's pets
+    description: >-
+      Read a hunter character's tamed pets, with their names, families and
+      levels. Empty for any other class.
+    category: characters
+    read_only: true
+    request:
+      method: GET
+      path: /profile/wow/character/${realm_slug}/${character_name}/hunter-pets
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      realm_slug:
+        type: string
+        description: The realm's slug.
+      character_name:
+        type: string
+        description: The character's name in lower case.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The hunter's tamed pets.
+      type: object
+
+  get_character_quests:
+    title: Get a character's active quests
+    description: Read the quests a character currently has in its log.
+    category: characters
+    read_only: true
+    request:
+      method: GET
+      path: /profile/wow/character/${realm_slug}/${character_name}/quests
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      realm_slug:
+        type: string
+        description: The realm's slug.
+      character_name:
+        type: string
+        description: The character's name in lower case.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The character's active quests.
+      type: object
+
+  get_character_completed_quests:
+    title: Get a character's completed quests
+    description: >-
+      Read every quest a character has finished -- a long list, and the way to
+      check whether a particular chain is done.
+    category: characters
+    read_only: true
+    request:
+      method: GET
+      path: /profile/wow/character/${realm_slug}/${character_name}/quests/completed
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      realm_slug:
+        type: string
+        description: The realm's slug.
+      character_name:
+        type: string
+        description: The character's name in lower case.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The character's completed quests.
+      type: object
+
+  get_character_dungeon_encounters:
+    title: Get a character's dungeon progress
+    description: Read which dungeon bosses a character has defeated, and how often.
+    category: characters
+    read_only: true
+    request:
+      method: GET
+      path: /profile/wow/character/${realm_slug}/${character_name}/encounters/dungeons
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      realm_slug:
+        type: string
+        description: The realm's slug.
+      character_name:
+        type: string
+        description: The character's name in lower case.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The character's dungeon encounter progress.
+      type: object
+
+  get_character_raid_encounters:
+    title: Get a character's raid progress
+    description: >-
+      Read which raid bosses a character has defeated, per difficulty -- the
+      canonical answer to "have they cleared it".
+    category: characters
+    read_only: true
+    request:
+      method: GET
+      path: /profile/wow/character/${realm_slug}/${character_name}/encounters/raids
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      realm_slug:
+        type: string
+        description: The realm's slug.
+      character_name:
+        type: string
+        description: The character's name in lower case.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The character's raid encounter progress.
+      type: object
+
+  get_character_mythic_keystone_profile:
+    title: Get a character's Mythic+ profile
+    description: >-
+      Read a character's Mythic+ record -- current rating and the seasons it
+      has played. Use get_character_mythic_keystone_season for one season's
+      runs.
+    category: characters
+    read_only: true
+    request:
+      method: GET
+      path: /profile/wow/character/${realm_slug}/${character_name}/mythic-keystone-profile
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      realm_slug:
+        type: string
+        description: The realm's slug.
+      character_name:
+        type: string
+        description: The character's name in lower case.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The character's Mythic+ profile.
+      type: object
+
+  get_character_mythic_keystone_season:
+    title: Get a character's Mythic+ season
+    description: >-
+      Read one season's Mythic+ runs for a character -- dungeon, level,
+      timing and the party it ran with.
+    category: characters
+    read_only: true
+    request:
+      method: GET
+      path: /profile/wow/character/${realm_slug}/${character_name}/mythic-keystone-profile/season/${season_id}
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      realm_slug:
+        type: string
+        description: The realm's slug.
+      character_name:
+        type: string
+        description: The character's name in lower case.
+      season_id:
+        type: integer
+        description: The Mythic+ season's id, from the character's keystone profile.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The character's runs in that season.
+      type: object
+
+  get_character_pvp_summary:
+    title: Get a character's PvP summary
+    description: >-
+      Read a character's PvP record -- honour level, ratings and season
+      statistics across brackets.
+    category: characters
+    read_only: true
+    request:
+      method: GET
+      path: /profile/wow/character/${realm_slug}/${character_name}/pvp-summary
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      realm_slug:
+        type: string
+        description: The realm's slug.
+      character_name:
+        type: string
+        description: The character's name in lower case.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The character's PvP summary.
+      type: object
+
+  get_character_pvp_bracket:
+    title: Get a character's PvP bracket statistics
+    description: >-
+      Read a character's record in one PvP bracket -- 2v2, 3v3 or rated
+      battlegrounds -- with its rating and win/loss counts.
+    category: characters
+    read_only: true
+    request:
+      method: GET
+      path: /profile/wow/character/${realm_slug}/${character_name}/pvp-bracket/${bracket}
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      realm_slug:
+        type: string
+        description: The realm's slug.
+      character_name:
+        type: string
+        description: The character's name in lower case.
+      bracket:
+        type: string
+        description: The bracket to read, e.g. "2v2", "3v3" or "rbg".
+        example: 3v3
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The character's record in that bracket.
+      type: object
+
+  # -- guilds --------------------------------------------------------------
+
+  get_guild:
+    title: Get a guild
+    description: >-
+      Read a guild's summary -- faction, member count, achievement points and
+      creation date. Both `realm_slug` and `guild_slug` are lower-case and
+      hyphenated.
+    category: guilds
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/guild/${realm_slug}/${guild_slug}
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      realm_slug:
+        type: string
+        description: The realm's slug, lower case and hyphenated.
+      guild_slug:
+        type: string
+        description: The guild's name as a slug -- lower case, hyphenated.
+        example: the-horde-council
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The guild's summary.
+      type: object
+
+  get_guild_roster:
+    title: Get a guild's roster
+    description: >-
+      Read a guild's members with their character, level, class and rank. The
+      basis of any roster audit.
+    category: guilds
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/guild/${realm_slug}/${guild_slug}/roster
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      realm_slug:
+        type: string
+        description: The realm's slug.
+      guild_slug:
+        type: string
+        description: The guild's slug.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The guild's members.
+      type: object
+      properties:
+        members: {type: array}
+
+  get_guild_achievements:
+    title: Get a guild's achievements
+    description: Read the achievements a guild has earned, with categories and totals.
+    category: guilds
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/guild/${realm_slug}/${guild_slug}/achievements
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      realm_slug:
+        type: string
+        description: The realm's slug.
+      guild_slug:
+        type: string
+        description: The guild's slug.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The guild's achievements.
+      type: object
+
+  get_guild_activity:
+    title: Get a guild's recent activity
+    description: >-
+      Read a guild's activity feed -- who joined, who earned what -- which is
+      the closest thing to a change log for the roster.
+    category: guilds
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/guild/${realm_slug}/${guild_slug}/activity
+      query:
+        namespace: "profile-${region}"
+        locale: "${locale}"
+    input:
+      realm_slug:
+        type: string
+        description: The realm's slug.
+      guild_slug:
+        type: string
+        description: The guild's slug.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The guild's recent activity.
+      type: object
+
+  # -- realms and the economy ----------------------------------------------
+
+  list_realms:
+    title: List realms
+    description: >-
+      Read every realm in the region with its slug -- the lookup that turns
+      "Tarren Mill" into the "tarren-mill" every character call needs. Uses
+      the dynamic namespace.
+    category: realms
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/realm/index
+      query:
+        namespace: "dynamic-${region}"
+        locale: "${locale}"
+    input:
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The region's realms.
+      type: object
+      properties:
+        realms: {type: array}
+
+  get_realm:
+    title: Get a realm
+    description: >-
+      Read one realm -- its name, timezone, type and the connected realm it
+      belongs to, which is what the auction house is keyed by.
+    category: realms
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/realm/${realm_slug}
+      query:
+        namespace: "dynamic-${region}"
+        locale: "${locale}"
+    input:
+      realm_slug:
+        type: string
+        description: The realm's slug.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The realm.
+      type: object
+
+  search_realms:
+    title: Search realms
+    description: >-
+      Search realms by field, which is how you find a realm when you have a
+      timezone or partial name rather than a slug. Pass Blizzard's search
+      parameters -- e.g. {"timezone": "Europe/Paris", "orderby": "id",
+      "_page": 1} -- in `query`.
+    category: realms
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/search/realm
+      query: "${query}"
+    input:
+      query:
+        type: object
+        description: >-
+          Search parameters as a flat object. Must include
+          `namespace` (e.g. "dynamic-us"), plus any of `timezone`, `orderby`,
+          `_page` and Blizzard's field filters such as `name.en_US`.
+        properties:
+          namespace: {type: string, description: 'Required, e.g. "dynamic-us".'}
+          orderby: {type: string}
+          _page: {type: integer}
+    output:
+      description: The matching realms.
+      type: object
+
+  list_connected_realms:
+    title: List connected realms
+    description: >-
+      Read the connected-realm groups in the region. Auctions and Mythic+
+      leaderboards are keyed by connected realm, not by individual realm, so
+      this is the id those calls need.
+    category: realms
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/connected-realm/index
+      query:
+        namespace: "dynamic-${region}"
+        locale: "${locale}"
+    input:
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The region's connected realms.
+      type: object
+
+  get_connected_realm:
+    title: Get a connected realm
+    description: >-
+      Read one connected-realm group -- which realms share it, its population
+      and status.
+    category: realms
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/connected-realm/${connected_realm_id}
+      query:
+        namespace: "dynamic-${region}"
+        locale: "${locale}"
+    input:
+      connected_realm_id:
+        type: integer
+        description: The connected realm's id, from list_connected_realms.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The connected realm.
+      type: object
+
+  get_auctions:
+    title: Get a connected realm's auctions
+    description: >-
+      Read every live auction on a connected realm. This is a very large
+      response -- the whole auction house -- and Blizzard refreshes it roughly
+      hourly, so cache it rather than polling.
+    category: economy
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/connected-realm/${connected_realm_id}/auctions
+      query:
+        namespace: "dynamic-${region}"
+        locale: "${locale}"
+    input:
+      connected_realm_id:
+        type: integer
+        description: The connected realm's id, from list_connected_realms.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The connected realm's live auctions.
+      type: object
+      properties:
+        auctions: {type: array}
+
+  get_commodity_auctions:
+    title: Get commodity auctions
+    description: >-
+      Read the region-wide commodity auctions -- crafting materials and other
+      stackable goods, which are pooled across realms rather than per
+      connected realm. Also large, and refreshed roughly hourly.
+    category: economy
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/auctions/commodities
+      query:
+        namespace: "dynamic-${region}"
+        locale: "${locale}"
+    input:
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The region's commodity auctions.
+      type: object
+
+  get_wow_token_price:
+    title: Get the WoW token price
+    description: >-
+      Read the current WoW token price for the region, with the timestamp it
+      was set. The cheapest interesting call in the game-data API.
+    category: economy
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/token/index
+      query:
+        namespace: "dynamic-${region}"
+        locale: "${locale}"
+    input:
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The token's current price and last update.
+      type: object
+
+  # -- leaderboards --------------------------------------------------------
+
+  list_mythic_leaderboards:
+    title: List a connected realm's Mythic+ leaderboards
+    description: >-
+      Read which dungeon leaderboards exist for a connected realm, with the
+      dungeon and period ids get_mythic_leaderboard needs.
+    category: leaderboards
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/connected-realm/${connected_realm_id}/mythic-leaderboard/index
+      query:
+        namespace: "dynamic-${region}"
+        locale: "${locale}"
+    input:
+      connected_realm_id:
+        type: integer
+        description: The connected realm's id.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The available Mythic+ leaderboards.
+      type: object
+
+  get_mythic_leaderboard:
+    title: Get a Mythic+ leaderboard
+    description: >-
+      Read one dungeon's Mythic+ leaderboard for a connected realm and weekly
+      period -- the ranked runs, with their groups and timings.
+    category: leaderboards
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/connected-realm/${connected_realm_id}/mythic-leaderboard/${dungeon_id}/period/${period}
+      query:
+        namespace: "dynamic-${region}"
+        locale: "${locale}"
+    input:
+      connected_realm_id:
+        type: integer
+        description: The connected realm's id.
+      dungeon_id:
+        type: integer
+        description: The dungeon's id, from list_mythic_leaderboards.
+      period:
+        type: integer
+        description: The weekly period id, from list_mythic_leaderboards.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The leaderboard's ranked runs.
+      type: object
+
+  list_pvp_seasons:
+    title: List PvP seasons
+    description: Read the PvP seasons, whose ids the leaderboard calls take.
+    category: leaderboards
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/pvp-season/index
+      query:
+        namespace: "dynamic-${region}"
+        locale: "${locale}"
+    input:
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The PvP seasons.
+      type: object
+
+  get_pvp_leaderboard:
+    title: Get a PvP leaderboard
+    description: >-
+      Read the ranked ladder for one PvP bracket in a season -- 2v2, 3v3 or
+      rated battlegrounds -- with each character's rating and record.
+    category: leaderboards
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/pvp-season/${pvp_season_id}/pvp-leaderboard/${bracket}
+      query:
+        namespace: "dynamic-${region}"
+        locale: "${locale}"
+    input:
+      pvp_season_id:
+        type: integer
+        description: The PvP season's id, from list_pvp_seasons.
+      bracket:
+        type: string
+        description: The bracket, e.g. "2v2", "3v3" or "rbg".
+        example: 3v3
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The bracket's ranked ladder.
+      type: object
+
+  # -- reference data ------------------------------------------------------
+
+  get_item:
+    title: Get an item
+    description: >-
+      Read one item's definition -- name, quality, level, stats and item
+      class. Uses the static namespace, since this is game reference data
+      rather than a player's copy of the item.
+    category: game_data
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/item/${item_id}
+      query:
+        namespace: "static-${region}"
+        locale: "${locale}"
+    input:
+      item_id:
+        type: integer
+        description: The item's id.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The item's definition.
+      type: object
+
+  search_items:
+    title: Search items
+    description: >-
+      Search the item database by field -- the way to turn a name into an item
+      id. Pass Blizzard's search parameters in `query`, e.g.
+      {"namespace": "static-us", "name.en_US": "Thunderfury", "orderby": "id"}.
+    category: game_data
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/search/item
+      query: "${query}"
+    input:
+      query:
+        type: object
+        description: >-
+          Search parameters as a flat object. Must include `namespace` (e.g.
+          "static-us"); then any of `name.en_US`, `item_class.id`,
+          `item_subclass.id`, `orderby` and `_page`.
+        properties:
+          namespace: {type: string, description: 'Required, e.g. "static-us".'}
+          orderby: {type: string}
+          _page: {type: integer}
+    output:
+      description: The matching items.
+      type: object
+
+  get_item_media:
+    title: Get an item's icon
+    description: Read the icon and image assets for one item, as urls.
+    category: game_data
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/media/item/${item_id}
+      query:
+        namespace: "static-${region}"
+        locale: "${locale}"
+    input:
+      item_id:
+        type: integer
+        description: The item's id.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The item's media urls.
+      type: object
+
+  list_item_classes:
+    title: List item classes
+    description: >-
+      Read the item class taxonomy -- weapons, armour, consumables -- whose
+      ids narrow an item search.
+    category: game_data
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/item-class/index
+      query:
+        namespace: "static-${region}"
+        locale: "${locale}"
+    input:
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The item classes.
+      type: object
+
+  list_playable_classes:
+    title: List playable classes
+    description: Read the game's playable classes with their ids and specialisations.
+    category: game_data
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/playable-class/index
+      query:
+        namespace: "static-${region}"
+        locale: "${locale}"
+    input:
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The playable classes.
+      type: object
+
+  get_playable_class:
+    title: Get a playable class
+    description: >-
+      Read one class -- its specialisations, power type and media -- which is
+      the reference behind a character's class field.
+    category: game_data
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/playable-class/${playable_class_id}
+      query:
+        namespace: "static-${region}"
+        locale: "${locale}"
+    input:
+      playable_class_id:
+        type: integer
+        description: The class's id, from list_playable_classes.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The class's definition.
+      type: object
+
+  list_achievements:
+    title: List achievements
+    description: >-
+      Read the achievement index -- every achievement in the game with its id,
+      which a character's achievement list refers to.
+    category: game_data
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/achievement/index
+      query:
+        namespace: "static-${region}"
+        locale: "${locale}"
+    input:
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The achievement index.
+      type: object
+
+  get_achievement:
+    title: Get an achievement
+    description: >-
+      Read one achievement's definition -- its criteria, points, category and
+      reward.
+    category: game_data
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/achievement/${achievement_id}
+      query:
+        namespace: "static-${region}"
+        locale: "${locale}"
+    input:
+      achievement_id:
+        type: integer
+        description: The achievement's id.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The achievement's definition.
+      type: object
+
+  list_professions:
+    title: List professions
+    description: >-
+      Read the game's professions with their ids, which a character's
+      profession list refers to.
+    category: game_data
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/profession/index
+      query:
+        namespace: "static-${region}"
+        locale: "${locale}"
+    input:
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The professions.
+      type: object
+
+  get_profession_skill_tier:
+    title: Get a profession's skill tier
+    description: >-
+      Read one skill tier of a profession -- its recipe categories and the
+      recipes in each, which is how a crafting list is built.
+    category: game_data
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/profession/${profession_id}/skill-tier/${skill_tier_id}
+      query:
+        namespace: "static-${region}"
+        locale: "${locale}"
+    input:
+      profession_id:
+        type: integer
+        description: The profession's id, from list_professions.
+      skill_tier_id:
+        type: integer
+        description: The skill tier's id, from the profession's own record.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The skill tier's recipe categories.
+      type: object
+
+  get_recipe:
+    title: Get a recipe
+    description: Read one crafting recipe -- what it makes and what it needs.
+    category: game_data
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/recipe/${recipe_id}
+      query:
+        namespace: "static-${region}"
+        locale: "${locale}"
+    input:
+      recipe_id:
+        type: integer
+        description: The recipe's id, from a profession's skill tier.
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The recipe's definition.
+      type: object
+
+  list_mounts:
+    title: List mounts
+    description: Read every mount in the game with its id, the reference behind a collection.
+    category: game_data
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/mount/index
+      query:
+        namespace: "static-${region}"
+        locale: "${locale}"
+    input:
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The mount index.
+      type: object
+
+  list_battle_pets:
+    title: List battle pets
+    description: Read every battle pet in the game with its id and family.
+    category: game_data
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/pet/index
+      query:
+        namespace: "static-${region}"
+        locale: "${locale}"
+    input:
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The battle pet index.
+      type: object
+
+  list_titles:
+    title: List titles
+    description: Read every title in the game with its id and display format.
+    category: game_data
+    read_only: true
+    request:
+      method: GET
+      path: /data/wow/title/index
+      query:
+        namespace: "static-${region}"
+        locale: "${locale}"
+    input:
+      region:
+        type: string
+        description: Region of the connection's api domain.
+        enum: [us, eu, kr, tw, cn]
+      locale:
+        type: string
+        description: Language for names.
+        optional: true
+    output:
+      description: The title index.
+      type: object

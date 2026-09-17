@@ -1,0 +1,185 @@
+# AWS Multi-Service tools -- the three AWS wire protocols, as tools.
+#
+# This connector is deliberately generic: the connection names an AWS
+# `service` and `region`, and the base url becomes
+# `https://<service>.<region>.amazonaws.com`. There is therefore no fixed set
+# of endpoints to write tools for -- the surface is whichever service you
+# point it at.
+#
+# What *is* fixed, and what these tools encode, is **how AWS services are
+# called**. Almost every one uses one of three protocols, and knowing which is
+# the difference between a working call and a 404:
+#
+#   * **query** (IAM, STS, SQS, EC2, CloudFormation, Elastic Load Balancing,
+#     Auto Scaling, SNS, RDS): no paths. `Action` and `Version` name the
+#     operation, sent as a form-encoded POST body to `/`. List parameters are
+#     numbered -- `Filters.member.1.Name=...`;
+#   * **json** (DynamoDB, Athena, Kinesis, Lambda's control operations, ECS,
+#     Secrets Manager, KMS, CloudWatch Logs, Step Functions): a POST to `/`
+#     with an `X-Amz-Target: <TargetPrefix>.<Operation>` header and a JSON
+#     body. The target prefix is per service -- `DynamoDB_20120810`,
+#     `AmazonAthena`, `AWSSecretsManager` -- and comes from that service's API
+#     reference;
+#   * **rest-json** / **rest-xml** (S3, API Gateway, Lambda invoke, Inspector,
+#     EventBridge Pipes, ECR): real REST paths and verbs, like any other HTTP
+#     API.
+#
+# **Two hard limits before you use any of this.** AWS requires Signature
+# Version 4 on every request, and this package does not implement SigV4 yet --
+# the connection currently sends the access key and secret as HTTP basic auth,
+# which AWS rejects. And because the service is a connection setting rather
+# than a per-call one, these tools cannot validate that the operation you name
+# exists on the service you configured. They build correctly shaped requests;
+# they do not pretend to know your service's operation list.
+#
+# For a service this repo covers specifically -- `aws-iam`, `aws-inspector2` --
+# use that connector instead: its tools name real operations.
+#
+# Docs: https://docs.aws.amazon.com/general/latest/gr/aws-general.pdf
+
+connector_id: aws-multi-service
+display_name: AWS Multi-Service
+docs_url: https://docs.aws.amazon.com/general/latest/gr/aws-general.pdf
+
+tools:
+
+  call_query_api:
+    title: Call a query-protocol AWS service
+    description: >-
+      Call a service that uses the AWS query protocol -- IAM, STS, SQS, EC2,
+      SNS, RDS, CloudFormation, Auto Scaling and the rest. `action` and
+      `version` name the operation (both come from that service's API
+      reference), and `parameters` carries its arguments. Lists must be
+      pre-flattened into AWS's numbered form, e.g.
+      {"Filters.member.1.Name": "instance-state-name",
+      "Filters.member.1.Value.1": "running"}.
+    category: protocols
+    request:
+      method: POST
+      path: /
+      encoding: form
+      body: "${request}"
+    input:
+      request:
+        type: object
+        description: >-
+          The whole form body, including `Action` and `Version` -- e.g.
+          {"Action": "DescribeInstances", "Version": "2016-11-15",
+          "MaxResults": "10"}. Both `Action` and `Version` are required by the
+          protocol, and `Version` differs per service.
+        properties:
+          Action: {type: string, description: "The operation name, e.g. \"DescribeInstances\"."}
+          Version: {type: string, description: "The service's API version, e.g. \"2016-11-15\"."}
+    output:
+      description: >-
+        The service's response. Query-protocol services answer XML by default,
+        returned here as text unless the service supports JSON.
+      type: object
+
+  call_json_api:
+    title: Call a JSON-protocol AWS service
+    description: >-
+      Call a service that uses the AWS JSON protocol -- DynamoDB, Athena,
+      Kinesis, KMS, Secrets Manager, CloudWatch Logs, Step Functions, ECS.
+      The operation goes in the `X-Amz-Target` header as
+      `<TargetPrefix>.<Operation>` and the arguments in the JSON body; the
+      target prefix is per service (`DynamoDB_20120810`, `AmazonAthena`,
+      `AWSSecretsManager`) and is documented in that service's API reference.
+    category: protocols
+    request:
+      method: POST
+      path: /
+      headers:
+        X-Amz-Target: "${target}"
+        Content-Type: "${content_type}"
+      body: "${payload}"
+    input:
+      target:
+        type: string
+        description: >-
+          The full target, `<TargetPrefix>.<Operation>` -- e.g.
+          "DynamoDB_20120810.Query" or "AmazonAthena.StartQueryExecution".
+        example: DynamoDB_20120810.Query
+      payload:
+        type: object
+        description: >-
+          The operation's arguments as JSON, exactly as that service's API
+          reference documents them.
+      content_type:
+        type: string
+        description: >-
+          The JSON protocol version the service speaks --
+          "application/x-amz-json-1.0" (DynamoDB) or "-1.1" (most others).
+        optional: true
+        default: application/x-amz-json-1.1
+        enum: [application/x-amz-json-1.0, application/x-amz-json-1.1]
+    output:
+      description: The service's JSON response.
+      type: object
+
+  get_rest_resource:
+    title: Read from a REST-protocol AWS service
+    description: >-
+      GET a path on a service that exposes a real REST API -- S3, API Gateway,
+      ECR, EventBridge, Inspector, MediaConvert. You supply the path and query
+      exactly as that service's reference documents them.
+    category: protocols
+    read_only: true
+    request:
+      method: GET
+      path: "${path}"
+      query: "${query}"
+    input:
+      path:
+        type: string
+        description: >-
+          The path to call on the configured service, e.g.
+          "/restapis" for API Gateway or "/2015-03-31/functions" for Lambda.
+        example: /restapis
+      query:
+        type: object
+        description: Query-string parameters as a flat object.
+        optional: true
+    output:
+      description: Whatever the service returns, parsed as JSON where possible.
+      type: object
+
+  send_rest_request:
+    title: Write to a REST-protocol AWS service
+    description: >-
+      Send a POST, PUT, PATCH or DELETE to a REST-protocol AWS service. The
+      method is yours to choose, so this covers creates, updates and deletes
+      alike -- and can therefore delete real infrastructure, which is why it is
+      flagged destructive.
+    category: protocols
+    destructive: true
+    request:
+      method: POST
+      path: "${path}"
+      query: "${query}"
+      body: "${body}"
+      headers:
+        X-HTTP-Method-Override: "${method_override}"
+    input:
+      path:
+        type: string
+        description: The path to call on the configured service.
+      body:
+        type: object
+        description: The JSON request body, as that service's reference documents it.
+        optional: true
+      query:
+        type: object
+        description: Query-string parameters as a flat object.
+        optional: true
+      method_override:
+        type: string
+        description: >-
+          For a service that honours it, the verb to apply instead of POST --
+          "PUT", "PATCH" or "DELETE". Not every AWS service supports the
+          override header; where it does not, use the connector's raw tools.
+        optional: true
+        enum: [PUT, PATCH, DELETE]
+    output:
+      description: Whatever the service returns, parsed as JSON where possible.
+      type: object

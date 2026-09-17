@@ -1,0 +1,2360 @@
+# Basecamp 4 tools.
+#
+# The connection carries the account id in the base url, so every path here
+# starts after it -- `/projects.json`, not `/999999999/projects.json`. Paths
+# keep Basecamp's `.json` suffix, which the API requires.
+#
+# The one thing to understand before anything else: **a Basecamp project is a
+# dock of tools, and each tool has its own id.** `get_project` returns a
+# `dock` array, and the entry for the message board, to-do set, schedule,
+# vault (docs & files), card table or questionnaire carries the id that every
+# call in this pack wants. So the shape of almost any task is:
+#
+#   1. `list_projects` -> project id
+#   2. `get_project`   -> dock entry for the tool you need -> its id
+#   3. the tool's own list/create call
+#
+# Two consequences worth knowing:
+#
+#   * **`recording_id` is universal.** Comments, subscriptions, boosts,
+#     archiving and trashing all work on any "recording" -- a to-do, message,
+#     document, card or comment alike -- so `create_comment` takes the id of
+#     whatever you are commenting on, whatever kind it is;
+#   * **nothing is really deleted.** `trash_project` and `trash_recording`
+#     move things to the trash, where Basecamp keeps them for 30 days.
+#
+# Rich text fields (`content`, `description`) accept a small HTML subset --
+# `<div>`, `<h1>`, `<strong>`, `<em>`, `<a>`, `<ul>`, `<ol>`, `<li>`,
+# `<blockquote>`, `<pre>`, `<br>`. Plain text is fine too.
+#
+# Lists are paginated 15 at a time via `page`, and Basecamp answers with a
+# `Link` header rather than a cursor in the body.
+#
+# Docs: https://github.com/basecamp/bc3-api
+
+connector_id: basecamp
+display_name: Basecamp
+docs_url: https://github.com/basecamp/bc3-api
+
+tools:
+
+  # -- account, projects, people -------------------------------------------
+
+  get_account:
+    title: Get the account
+    description: >-
+      Read the Basecamp account behind the token -- its name, plan and
+      timezone. The cheapest call that proves the connection works.
+    category: account
+    read_only: true
+    request:
+      method: GET
+      path: /account.json
+    input: {}
+    output:
+      description: The account record.
+      type: object
+
+  list_projects:
+    title: List projects
+    description: >-
+      Read the projects on the account, 15 per page. Each carries a `dock`
+      array whose entries hold the ids of that project's message board, to-do
+      set, schedule, vault and card table -- which every other tool here needs.
+    category: projects
+    read_only: true
+    request:
+      method: GET
+      path: /projects.json
+      query:
+        status: "${status}"
+        page: "${page}"
+    input:
+      status:
+        type: string
+        description: Which projects to return. Defaults to active only.
+        optional: true
+        enum: [active, archived, trashed]
+      page:
+        type: integer
+        description: Page number, starting at 1.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of projects, each with its dock of tools.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          name: {type: string}
+          dock: {type: array, description: "Tool entries, each with name, id and enabled."}
+
+  get_project:
+    title: Get a project
+    description: >-
+      Read one project, including the `dock` array that names every tool it has
+      enabled and, crucially, each tool's id. This is the lookup step before
+      almost any other call in this pack.
+    category: projects
+    read_only: true
+    request:
+      method: GET
+      path: /projects/${project_id}
+    input:
+      project_id:
+        type: integer
+        description: The project's id, from list_projects.
+    output:
+      description: The project and its dock.
+      type: object
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        dock: {type: array}
+
+  create_project:
+    title: Create a project
+    description: >-
+      Create a project with the standard set of tools enabled. The response
+      carries the new project's dock, so read the tool ids from it rather than
+      calling get_project again.
+    category: projects
+    request:
+      method: POST
+      path: /projects.json
+      body:
+        name: "${name}"
+        description: "${description}"
+    input:
+      name:
+        type: string
+        description: The project's name.
+      description:
+        type: string
+        description: What the project is for; shown under its name.
+        optional: true
+    output:
+      description: The created project, with its dock.
+      type: object
+
+  update_project:
+    title: Update a project
+    description: >-
+      Rename a project, change its description, or set who may be admitted to
+      it. `admissions` of "employee" lets anyone on the account in; "invite"
+      keeps it to people explicitly added.
+    category: projects
+    request:
+      method: PUT
+      path: /projects/${project_id}
+      body:
+        name: "${name}"
+        description: "${description}"
+        admissions: "${admissions}"
+        schedule_attributes:
+          $when: "${start_date} || ${end_date}"
+          start_date: "${start_date}"
+          end_date: "${end_date}"
+    input:
+      project_id:
+        type: integer
+        description: The project's id.
+      name:
+        type: string
+        description: New project name. Basecamp requires a name on every update.
+      description:
+        type: string
+        description: New description.
+        optional: true
+      admissions:
+        type: string
+        description: Who may join the project.
+        optional: true
+        enum: [invite, employee, team]
+      start_date:
+        type: string
+        description: Project start date as YYYY-MM-DD, shown on the schedule.
+        optional: true
+      end_date:
+        type: string
+        description: Project end date as YYYY-MM-DD.
+        optional: true
+    output:
+      description: The updated project.
+      type: object
+
+  trash_project:
+    title: Trash a project
+    description: >-
+      Move a project to the trash. Basecamp keeps trashed projects for 30 days
+      before deleting them for good, so this is recoverable in the UI -- but
+      not through this API.
+    category: projects
+    destructive: true
+    request:
+      method: DELETE
+      path: /projects/${project_id}
+    input:
+      project_id:
+        type: integer
+        description: The project's id.
+    output:
+      description: Empty on success -- Basecamp answers 204.
+      type: object
+
+  archive_project:
+    title: Archive a project
+    description: >-
+      Archive a project, taking it out of the active list while keeping
+      everything in it readable. The reversible alternative to trashing.
+    category: projects
+    request:
+      method: PUT
+      path: /projects/${project_id}/status/archived.json
+    input:
+      project_id:
+        type: integer
+        description: The project's id.
+    output:
+      description: Empty on success.
+      type: object
+
+  unarchive_project:
+    title: Unarchive a project
+    description: Bring an archived project back into the active list, with its contents intact.
+    category: projects
+    request:
+      method: PUT
+      path: /projects/${project_id}/status/active.json
+    input:
+      project_id:
+        type: integer
+        description: The project's id.
+    output:
+      description: Empty on success.
+      type: object
+
+  list_people:
+    title: List people on the account
+    description: >-
+      Read everyone on the Basecamp account, with their id, name, email address
+      and whether they are an admin or a client. Person ids are what
+      `assignee_ids` and `participant_ids` take.
+    category: people
+    read_only: true
+    request:
+      method: GET
+      path: /people.json
+      query:
+        page: "${page}"
+    input:
+      page:
+        type: integer
+        description: Page number, starting at 1.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of people.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          name: {type: string}
+          email_address: {type: string}
+
+  get_person:
+    title: Get a person
+    description: Read one person on the account -- name, email, title, company and admin status.
+    category: people
+    read_only: true
+    request:
+      method: GET
+      path: /people/${person_id}
+    input:
+      person_id:
+        type: integer
+        description: The person's id, from list_people.
+    output:
+      description: The person.
+      type: object
+
+  get_my_profile:
+    title: Get my profile
+    description: >-
+      Read the person the token belongs to. The quickest way to learn your own
+      person id, which reports and assignment filters take.
+    category: people
+    read_only: true
+    request:
+      method: GET
+      path: /my/profile.json
+    input: {}
+    output:
+      description: Your own person record.
+      type: object
+
+  list_project_people:
+    title: List a project's people
+    description: >-
+      Read who has access to one project. Use it before assigning a to-do:
+      Basecamp rejects an assignee who is not on the project.
+    category: people
+    read_only: true
+    request:
+      method: GET
+      path: /projects/${project_id}/people.json
+      query:
+        page: "${page}"
+    input:
+      project_id:
+        type: integer
+        description: The project's id.
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of the project's people.
+      type: array
+      items: {type: object}
+
+  update_project_access:
+    title: Change who is on a project
+    description: >-
+      Grant or revoke project access by person id, or invite new people by
+      email. `create` entries are {"name": ..., "email_address": ...} and send
+      a real invitation, so treat it as an outward-facing action.
+    category: people
+    request:
+      method: PUT
+      path: /projects/${project_id}/people/users.json
+      body:
+        grant: "${grant}"
+        revoke: "${revoke}"
+        create: "${create}"
+    input:
+      project_id:
+        type: integer
+        description: The project's id.
+      grant:
+        type: array
+        description: Person ids to add to the project.
+        optional: true
+        items: {type: integer}
+      revoke:
+        type: array
+        description: Person ids to remove from the project.
+        optional: true
+        items: {type: integer}
+      create:
+        type: array
+        description: >-
+          People to invite who are not on the account yet, each
+          {"name": ..., "email_address": ...}. This emails them.
+        optional: true
+        items: {type: object}
+    output:
+      description: The project's people after the change.
+      type: object
+
+  # -- to-dos --------------------------------------------------------------
+
+  get_todoset:
+    title: Get a project's to-do set
+    description: >-
+      Read the to-do set of a project -- the container all its to-do lists live
+      in, with a count of completed and remaining work. Its id comes from the
+      project's dock.
+    category: todos
+    read_only: true
+    request:
+      method: GET
+      path: /todosets/${todoset_id}
+    input:
+      todoset_id:
+        type: integer
+        description: The to-do set's id, from the project's dock entry named "todoset".
+    output:
+      description: The to-do set.
+      type: object
+
+  list_todolists:
+    title: List to-do lists
+    description: Read the to-do lists in a project's to-do set, 15 per page.
+    category: todos
+    read_only: true
+    request:
+      method: GET
+      path: /todosets/${todoset_id}/todolists.json
+      query:
+        status: "${status}"
+        page: "${page}"
+    input:
+      todoset_id:
+        type: integer
+        description: The to-do set's id, from the project's dock.
+      status:
+        type: string
+        description: Which lists to return. Defaults to active.
+        optional: true
+        enum: [active, archived, trashed]
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of to-do lists.
+      type: array
+      items: {type: object}
+
+  create_todolist:
+    title: Create a to-do list
+    description: >-
+      Add a to-do list to a project's to-do set. `visible_to_clients` decides
+      whether people on the client side of the project can see it.
+    category: todos
+    request:
+      method: POST
+      path: /todosets/${todoset_id}/todolists.json
+      body:
+        name: "${name}"
+        description: "${description}"
+        visible_to_clients: "${visible_to_clients}"
+    input:
+      todoset_id:
+        type: integer
+        description: The to-do set's id.
+      name:
+        type: string
+        description: The list's name.
+      description:
+        type: string
+        description: What the list covers; accepts Basecamp's rich-text HTML subset.
+        optional: true
+      visible_to_clients:
+        type: boolean
+        description: Whether clients on the project can see this list.
+        optional: true
+    output:
+      description: The created to-do list.
+      type: object
+
+  get_todolist:
+    title: Get a to-do list
+    description: >-
+      Read one to-do list (or to-do list group) by id -- its name, description
+      and completion counts.
+    category: todos
+    read_only: true
+    request:
+      method: GET
+      path: /todolists/${todolist_id}
+    input:
+      todolist_id:
+        type: integer
+        description: The to-do list's id.
+    output:
+      description: The to-do list.
+      type: object
+
+  update_todolist:
+    title: Update a to-do list
+    description: >-
+      Rename a to-do list or change its description. Basecamp requires the name
+      on every update, so send it even when only the description changes.
+    category: todos
+    request:
+      method: PUT
+      path: /todolists/${todolist_id}
+      body:
+        name: "${name}"
+        description: "${description}"
+    input:
+      todolist_id:
+        type: integer
+        description: The to-do list's id.
+      name:
+        type: string
+        description: The list's name, required even if unchanged.
+      description:
+        type: string
+        description: New description, in Basecamp's rich-text HTML subset.
+        optional: true
+    output:
+      description: The updated to-do list.
+      type: object
+
+  list_todolist_groups:
+    title: List a to-do list's groups
+    description: >-
+      Read the groups inside a to-do list -- the headings that split a long
+      list into sections, each of which holds its own to-dos.
+    category: todos
+    read_only: true
+    request:
+      method: GET
+      path: /todolists/${todolist_id}/groups.json
+      query:
+        page: "${page}"
+    input:
+      todolist_id:
+        type: integer
+        description: The to-do list's id.
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of groups in the list.
+      type: array
+      items: {type: object}
+
+  create_todolist_group:
+    title: Create a to-do list group
+    description: >-
+      Add a section heading to a to-do list. The group behaves as a to-do list
+      of its own -- its id is what create_todo takes for to-dos inside it.
+    category: todos
+    request:
+      method: POST
+      path: /todolists/${todolist_id}/groups.json
+      body:
+        name: "${name}"
+    input:
+      todolist_id:
+        type: integer
+        description: The to-do list's id.
+      name:
+        type: string
+        description: The group's heading.
+    output:
+      description: The created group.
+      type: object
+
+  list_todos:
+    title: List to-dos
+    description: >-
+      Read the to-dos in one list, 15 per page. Completed to-dos are excluded
+      unless `completed` is true, which is the usual source of "where did my
+      to-do go".
+    category: todos
+    read_only: true
+    request:
+      method: GET
+      path: /todolists/${todolist_id}/todos.json
+      query:
+        status: "${status}"
+        completed: "${completed}"
+        page: "${page}"
+    input:
+      todolist_id:
+        type: integer
+        description: The to-do list's (or group's) id.
+      status:
+        type: string
+        description: Which to-dos to return. Defaults to active.
+        optional: true
+        enum: [active, archived, trashed]
+      completed:
+        type: boolean
+        description: Return completed to-dos instead of open ones.
+        optional: true
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of to-dos.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          content: {type: string}
+          completed: {type: boolean}
+          due_on: {type: string}
+          assignees: {type: array}
+
+  create_todo:
+    title: Create a to-do
+    description: >-
+      Add a to-do to a list. `content` is the one-line title; `description`
+      takes rich text. Assignees must already be on the project, and `notify`
+      decides whether they get told.
+    category: todos
+    request:
+      method: POST
+      path: /todolists/${todolist_id}/todos.json
+      body:
+        content: "${content}"
+        description: "${description}"
+        assignee_ids: "${assignee_ids}"
+        completion_subscriber_ids: "${completion_subscriber_ids}"
+        notify: "${notify}"
+        due_on: "${due_on}"
+        starts_on: "${starts_on}"
+    input:
+      todolist_id:
+        type: integer
+        description: The to-do list's (or group's) id.
+      content:
+        type: string
+        description: What needs doing -- the to-do's title.
+      description:
+        type: string
+        description: Longer detail, in Basecamp's rich-text HTML subset.
+        optional: true
+      assignee_ids:
+        type: array
+        description: Person ids to assign, from list_project_people.
+        optional: true
+        items: {type: integer}
+      completion_subscriber_ids:
+        type: array
+        description: Person ids to notify when the to-do is completed.
+        optional: true
+        items: {type: integer}
+      notify:
+        type: boolean
+        description: Email the assignees about the new to-do.
+        optional: true
+      due_on:
+        type: string
+        description: Due date as YYYY-MM-DD.
+        optional: true
+      starts_on:
+        type: string
+        description: Start date as YYYY-MM-DD, which makes the to-do a date range.
+        optional: true
+    output:
+      description: The created to-do.
+      type: object
+
+  get_todo:
+    title: Get a to-do
+    description: Read one to-do -- its content, assignees, dates and completion state.
+    category: todos
+    read_only: true
+    request:
+      method: GET
+      path: /todos/${todo_id}
+    input:
+      todo_id:
+        type: integer
+        description: The to-do's id.
+    output:
+      description: The to-do.
+      type: object
+
+  update_todo:
+    title: Update a to-do
+    description: >-
+      Replace a to-do's fields. This is a full replace, not a merge: anything
+      you leave out -- assignees, dates -- is cleared, so read the to-do first
+      and send back everything you want kept.
+    category: todos
+    request:
+      method: PUT
+      path: /todos/${todo_id}
+      body:
+        content: "${content}"
+        description: "${description}"
+        assignee_ids: "${assignee_ids}"
+        completion_subscriber_ids: "${completion_subscriber_ids}"
+        notify: "${notify}"
+        due_on: "${due_on}"
+        starts_on: "${starts_on}"
+    input:
+      todo_id:
+        type: integer
+        description: The to-do's id.
+      content:
+        type: string
+        description: The to-do's title.
+      description:
+        type: string
+        description: Longer detail, in rich-text HTML.
+        optional: true
+      assignee_ids:
+        type: array
+        description: The complete list of assignees after the update; omitting it clears them.
+        optional: true
+        items: {type: integer}
+      completion_subscriber_ids:
+        type: array
+        description: The complete list of completion subscribers after the update.
+        optional: true
+        items: {type: integer}
+      notify:
+        type: boolean
+        description: Email assignees about the change.
+        optional: true
+      due_on:
+        type: string
+        description: Due date as YYYY-MM-DD.
+        optional: true
+      starts_on:
+        type: string
+        description: Start date as YYYY-MM-DD.
+        optional: true
+    output:
+      description: The updated to-do.
+      type: object
+
+  complete_todo:
+    title: Complete a to-do
+    description: >-
+      Tick a to-do off. Anyone subscribed to its completion is notified, so
+      this is visible to other people immediately.
+    category: todos
+    request:
+      method: POST
+      path: /todos/${todo_id}/completion.json
+    input:
+      todo_id:
+        type: integer
+        description: The to-do's id.
+    output:
+      description: Empty on success -- Basecamp answers 204.
+      type: object
+
+  uncomplete_todo:
+    title: Reopen a to-do
+    description: Untick a completed to-do, putting it back on the open list.
+    category: todos
+    request:
+      method: DELETE
+      path: /todos/${todo_id}/completion.json
+    input:
+      todo_id:
+        type: integer
+        description: The to-do's id.
+    destructive: true
+    output:
+      description: Empty on success.
+      type: object
+
+  get_my_assignments:
+    title: Get my assignments
+    description: >-
+      Read every to-do and card assigned to the person the token belongs to,
+      across all projects. The fastest answer to "what am I on the hook for".
+    category: reports
+    read_only: true
+    request:
+      method: GET
+      path: /my/assignments.json
+    input: {}
+    output:
+      description: Your assignments across the account.
+      type: array
+      items: {type: object}
+
+  get_overdue_todos:
+    title: Get overdue to-dos
+    description: >-
+      Read every to-do past its due date across the whole account, which is
+      the report to run before a status meeting.
+    category: reports
+    read_only: true
+    request:
+      method: GET
+      path: /reports/todos/overdue.json
+    input: {}
+    output:
+      description: The overdue to-dos.
+      type: array
+      items: {type: object}
+
+  get_assigned_todos:
+    title: Get one person's to-dos
+    description: >-
+      Read every to-do assigned to a given person across all projects -- the
+      per-person version of get_my_assignments.
+    category: reports
+    read_only: true
+    request:
+      method: GET
+      path: /reports/todos/assigned/${person_id}
+    input:
+      person_id:
+        type: integer
+        description: The person's id, from list_people.
+    output:
+      description: That person's assigned to-dos.
+      type: array
+      items: {type: object}
+
+  get_progress_report:
+    title: Get the progress report
+    description: >-
+      Read the account-wide activity feed -- what was completed, posted and
+      commented on recently, across every project.
+    category: reports
+    read_only: true
+    request:
+      method: GET
+      path: /reports/progress.json
+      query:
+        page: "${page}"
+    input:
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of recent activity.
+      type: object
+
+  get_timesheet_report:
+    title: Get the timesheet report
+    description: >-
+      Read logged time across the account over a date range, optionally for one
+      person. Requires the timesheet feature to be enabled on the account.
+    category: reports
+    read_only: true
+    request:
+      method: GET
+      path: /reports/timesheet.json
+      query:
+        from: "${from_date}"
+        to: "${to_date}"
+        person_id: "${person_id}"
+    input:
+      from_date:
+        type: string
+        description: Start of the range as YYYY-MM-DD.
+        optional: true
+      to_date:
+        type: string
+        description: End of the range as YYYY-MM-DD.
+        optional: true
+      person_id:
+        type: integer
+        description: Only this person's entries.
+        optional: true
+    output:
+      description: The timesheet entries in the range.
+      type: object
+
+  create_timesheet_entry:
+    title: Log time against a recording
+    description: >-
+      Record hours against any recording -- a to-do, a card, a message.
+      `hours` is a decimal string such as "1.5", and `person_id` defaults to
+      the token's own person.
+    category: reports
+    request:
+      method: POST
+      path: /recordings/${recording_id}/timesheet/entries.json
+      body:
+        date: "${date}"
+        hours: "${hours}"
+        description: "${description}"
+        person_id: "${person_id}"
+    input:
+      recording_id:
+        type: integer
+        description: The recording the time is logged against.
+      date:
+        type: string
+        description: The day worked, as YYYY-MM-DD.
+      hours:
+        type: string
+        description: Hours worked, as a decimal string such as "1.5".
+      description:
+        type: string
+        description: What the time went on.
+        optional: true
+      person_id:
+        type: integer
+        description: Whose time this is. Defaults to the authenticated person.
+        optional: true
+    output:
+      description: The created timesheet entry.
+      type: object
+
+  # -- messages and comments -----------------------------------------------
+
+  get_message_board:
+    title: Get a project's message board
+    description: >-
+      Read the message board of a project -- the container its announcements
+      live in. Its id comes from the project's dock.
+    category: messages
+    read_only: true
+    request:
+      method: GET
+      path: /message_boards/${board_id}
+    input:
+      board_id:
+        type: integer
+        description: The message board's id, from the project's dock entry named "message_board".
+    output:
+      description: The message board.
+      type: object
+
+  list_messages:
+    title: List messages
+    description: Read the messages posted on a project's message board, newest first by default.
+    category: messages
+    read_only: true
+    request:
+      method: GET
+      path: /message_boards/${board_id}/messages.json
+      query:
+        sort: "${sort}"
+        direction: "${direction}"
+        page: "${page}"
+    input:
+      board_id:
+        type: integer
+        description: The message board's id.
+      sort:
+        type: string
+        description: Field to sort by.
+        optional: true
+        enum: [created_at, updated_at]
+      direction:
+        type: string
+        description: Sort direction.
+        optional: true
+        enum: [asc, desc]
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of messages.
+      type: array
+      items: {type: object}
+
+  create_message:
+    title: Post a message
+    description: >-
+      Post an announcement to a project's message board. `status` of "active"
+      publishes it and notifies the project's subscribers; "drafted" keeps it
+      private until published. `category_id` is a message type from
+      list_message_types.
+    category: messages
+    request:
+      method: POST
+      path: /message_boards/${board_id}/messages.json
+      body:
+        subject: "${subject}"
+        content: "${content}"
+        status: "${status}"
+        category_id: "${category_id}"
+        subscriptions: "${subscriptions}"
+        visible_to_clients: "${visible_to_clients}"
+    input:
+      board_id:
+        type: integer
+        description: The message board's id.
+      subject:
+        type: string
+        description: The message's title.
+      content:
+        type: string
+        description: The message body, in Basecamp's rich-text HTML subset.
+        optional: true
+      status:
+        type: string
+        description: Publish it now or keep it as a draft. Defaults to a draft.
+        optional: true
+        enum: [active, drafted]
+      category_id:
+        type: integer
+        description: Message type id, from list_message_types.
+        optional: true
+      subscriptions:
+        type: array
+        description: Person ids to notify about this message.
+        optional: true
+        items: {type: integer}
+      visible_to_clients:
+        type: boolean
+        description: Whether clients on the project can see it.
+        optional: true
+    output:
+      description: The created message.
+      type: object
+
+  get_message:
+    title: Get a message
+    description: Read one message -- its subject, body, author and comment count.
+    category: messages
+    read_only: true
+    request:
+      method: GET
+      path: /messages/${message_id}
+    input:
+      message_id:
+        type: integer
+        description: The message's id.
+    output:
+      description: The message.
+      type: object
+
+  update_message:
+    title: Update a message
+    description: >-
+      Edit a message's subject, body, type or status. Publishing a draft by
+      setting `status` to "active" notifies subscribers at that point, not when
+      it was written.
+    category: messages
+    request:
+      method: PUT
+      path: /messages/${message_id}
+      body:
+        subject: "${subject}"
+        content: "${content}"
+        status: "${status}"
+        category_id: "${category_id}"
+    input:
+      message_id:
+        type: integer
+        description: The message's id.
+      subject:
+        type: string
+        description: New title.
+        optional: true
+      content:
+        type: string
+        description: New body, in rich-text HTML.
+        optional: true
+      status:
+        type: string
+        description: Set to "active" to publish a draft.
+        optional: true
+        enum: [active, drafted]
+      category_id:
+        type: integer
+        description: New message type id.
+        optional: true
+    output:
+      description: The updated message.
+      type: object
+
+  list_message_types:
+    title: List message types
+    description: >-
+      Read a project's message categories -- "Announcement", "FYI", "Heartbeat"
+      and any custom ones -- with the ids create_message's `category_id` takes.
+    category: messages
+    read_only: true
+    request:
+      method: GET
+      path: /buckets/${project_id}/categories.json
+    input:
+      project_id:
+        type: integer
+        description: The project's id. Basecamp calls a project a "bucket" on this endpoint.
+    output:
+      description: The project's message types.
+      type: array
+      items: {type: object}
+
+  list_comments:
+    title: List comments on a recording
+    description: >-
+      Read the comments on any recording -- a to-do, message, document or card.
+      One call covers all of them, since Basecamp comments are universal.
+    category: comments
+    read_only: true
+    request:
+      method: GET
+      path: /recordings/${recording_id}/comments.json
+      query:
+        page: "${page}"
+    input:
+      recording_id:
+        type: integer
+        description: The id of the thing being commented on, whatever kind it is.
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of comments.
+      type: array
+      items: {type: object}
+
+  create_comment:
+    title: Comment on a recording
+    description: >-
+      Add a comment to any recording -- to-do, message, document, card. The
+      recording's subscribers are notified, so this reaches real people.
+    category: comments
+    request:
+      method: POST
+      path: /recordings/${recording_id}/comments.json
+      body:
+        content: "${content}"
+    input:
+      recording_id:
+        type: integer
+        description: The id of the thing to comment on.
+      content:
+        type: string
+        description: The comment, in Basecamp's rich-text HTML subset.
+    output:
+      description: The created comment.
+      type: object
+
+  get_comment:
+    title: Get a comment
+    description: Read one comment by id, with its author and the recording it belongs to.
+    category: comments
+    read_only: true
+    request:
+      method: GET
+      path: /comments/${comment_id}
+    input:
+      comment_id:
+        type: integer
+        description: The comment's id.
+    output:
+      description: The comment.
+      type: object
+
+  update_comment:
+    title: Update a comment
+    description: Rewrite a comment's content. Only the author (or an admin) may edit a comment.
+    category: comments
+    request:
+      method: PUT
+      path: /comments/${comment_id}
+      body:
+        content: "${content}"
+    input:
+      comment_id:
+        type: integer
+        description: The comment's id.
+      content:
+        type: string
+        description: The new comment text, in rich-text HTML.
+    output:
+      description: The updated comment.
+      type: object
+
+  # -- campfire ------------------------------------------------------------
+
+  list_campfires:
+    title: List campfires
+    description: >-
+      Read every campfire (group chat) the token can see across the account,
+      with the project each belongs to.
+    category: campfire
+    read_only: true
+    request:
+      method: GET
+      path: /chats.json
+      query:
+        page: "${page}"
+    input:
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of campfires.
+      type: array
+      items: {type: object}
+
+  get_campfire:
+    title: Get a campfire
+    description: Read one campfire -- its title, topic and the project it sits in.
+    category: campfire
+    read_only: true
+    request:
+      method: GET
+      path: /chats/${campfire_id}
+    input:
+      campfire_id:
+        type: integer
+        description: The campfire's id, from list_campfires or the project's dock.
+    output:
+      description: The campfire.
+      type: object
+
+  list_campfire_lines:
+    title: Read campfire messages
+    description: Read the recent lines in a campfire, newest first, 15 per page.
+    category: campfire
+    read_only: true
+    request:
+      method: GET
+      path: /chats/${campfire_id}/lines.json
+      query:
+        sort: "${sort}"
+        direction: "${direction}"
+        page: "${page}"
+    input:
+      campfire_id:
+        type: integer
+        description: The campfire's id.
+      sort:
+        type: string
+        description: Field to sort by.
+        optional: true
+        enum: [created_at, updated_at]
+      direction:
+        type: string
+        description: Sort direction.
+        optional: true
+        enum: [asc, desc]
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of campfire lines.
+      type: array
+      items: {type: object}
+
+  create_campfire_line:
+    title: Post to a campfire
+    description: >-
+      Say something in a campfire. It appears in the chat for everyone watching
+      the moment it succeeds -- there is no draft state.
+    category: campfire
+    request:
+      method: POST
+      path: /chats/${campfire_id}/lines.json
+      body:
+        content: "${content}"
+        content_type: "${content_type}"
+    input:
+      campfire_id:
+        type: integer
+        description: The campfire's id.
+      content:
+        type: string
+        description: What to say. Accepts Basecamp's rich-text HTML subset.
+      content_type:
+        type: string
+        description: Content type of `content`, when it is not plain rich text.
+        optional: true
+    output:
+      description: The posted line.
+      type: object
+
+  delete_campfire_line:
+    title: Delete a campfire message
+    description: >-
+      Remove a line from a campfire. It disappears for everyone; there is no
+      undo and no trash for chat lines.
+    category: campfire
+    destructive: true
+    request:
+      method: DELETE
+      path: /chats/${campfire_id}/lines/${line_id}
+    input:
+      campfire_id:
+        type: integer
+        description: The campfire's id.
+      line_id:
+        type: integer
+        description: The line's id, from list_campfire_lines.
+    output:
+      description: Empty on success.
+      type: object
+
+  # -- schedule ------------------------------------------------------------
+
+  get_schedule:
+    title: Get a project's schedule
+    description: >-
+      Read the schedule tool of a project, including whether to-dos with dates
+      appear on it. Its id comes from the project's dock.
+    category: schedule
+    read_only: true
+    request:
+      method: GET
+      path: /schedules/${schedule_id}
+    input:
+      schedule_id:
+        type: integer
+        description: The schedule's id, from the project's dock entry named "schedule".
+    output:
+      description: The schedule.
+      type: object
+
+  list_schedule_entries:
+    title: List schedule entries
+    description: Read the events on a project's schedule, 15 per page.
+    category: schedule
+    read_only: true
+    request:
+      method: GET
+      path: /schedules/${schedule_id}/entries.json
+      query:
+        status: "${status}"
+        page: "${page}"
+    input:
+      schedule_id:
+        type: integer
+        description: The schedule's id.
+      status:
+        type: string
+        description: Which entries to return. Defaults to active.
+        optional: true
+        enum: [active, archived, trashed]
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of schedule entries.
+      type: array
+      items: {type: object}
+
+  create_schedule_entry:
+    title: Create a schedule entry
+    description: >-
+      Put an event on a project's schedule. A bare date ("2026-06-01") in
+      `starts_at` and `ends_at` makes it all-day; a full timestamp makes it
+      timed. Participants are notified when `notify` is true.
+    category: schedule
+    request:
+      method: POST
+      path: /schedules/${schedule_id}/entries.json
+      body:
+        summary: "${summary}"
+        starts_at: "${starts_at}"
+        ends_at: "${ends_at}"
+        description: "${description}"
+        participant_ids: "${participant_ids}"
+        all_day: "${all_day}"
+        notify: "${notify}"
+        url: "${url}"
+    input:
+      schedule_id:
+        type: integer
+        description: The schedule's id.
+      summary:
+        type: string
+        description: The event's title.
+      starts_at:
+        type: string
+        description: Start, as a bare date for an all-day event or an ISO 8601 timestamp for a timed one.
+        example: "2026-06-01"
+      ends_at:
+        type: string
+        description: End, in the same form as `starts_at`.
+      description:
+        type: string
+        description: Detail about the event, in rich-text HTML.
+        optional: true
+      participant_ids:
+        type: array
+        description: Person ids attending, from list_project_people.
+        optional: true
+        items: {type: integer}
+      all_day:
+        type: boolean
+        description: Force an all-day event regardless of the timestamps.
+        optional: true
+      notify:
+        type: boolean
+        description: Email the participants.
+        optional: true
+      url:
+        type: string
+        description: Join link for the event -- a video-call url or similar.
+        optional: true
+    output:
+      description: The created schedule entry.
+      type: object
+
+  get_schedule_entry:
+    title: Get a schedule entry
+    description: Read one schedule entry -- its summary, times, participants and description.
+    category: schedule
+    read_only: true
+    request:
+      method: GET
+      path: /schedule_entries/${entry_id}
+    input:
+      entry_id:
+        type: integer
+        description: The entry's id.
+    output:
+      description: The schedule entry.
+      type: object
+
+  update_schedule_entry:
+    title: Update a schedule entry
+    description: >-
+      Replace a schedule entry's fields. Like to-dos, this is a full replace:
+      participants and description you leave out are cleared.
+    category: schedule
+    request:
+      method: PUT
+      path: /schedule_entries/${entry_id}
+      body:
+        summary: "${summary}"
+        starts_at: "${starts_at}"
+        ends_at: "${ends_at}"
+        description: "${description}"
+        participant_ids: "${participant_ids}"
+        all_day: "${all_day}"
+        notify: "${notify}"
+    input:
+      entry_id:
+        type: integer
+        description: The entry's id.
+      summary:
+        type: string
+        description: The event's title.
+      starts_at:
+        type: string
+        description: Start, as a bare date or an ISO 8601 timestamp.
+      ends_at:
+        type: string
+        description: End, in the same form as `starts_at`.
+      description:
+        type: string
+        description: Detail about the event.
+        optional: true
+      participant_ids:
+        type: array
+        description: The complete participant list after the update.
+        optional: true
+        items: {type: integer}
+      all_day:
+        type: boolean
+        description: Force an all-day event.
+        optional: true
+      notify:
+        type: boolean
+        description: Email the participants about the change.
+        optional: true
+    output:
+      description: The updated schedule entry.
+      type: object
+
+  get_upcoming_schedule:
+    title: Get the upcoming schedule
+    description: >-
+      Read what is coming up across every project's schedule -- the
+      account-wide "what's next" view rather than one project's calendar.
+    category: reports
+    read_only: true
+    request:
+      method: GET
+      path: /reports/schedules/upcoming.json
+    input: {}
+    output:
+      description: Upcoming schedule entries across the account.
+      type: object
+
+  # -- docs and files ------------------------------------------------------
+
+  get_vault:
+    title: Get a docs & files vault
+    description: >-
+      Read a project's vault -- the folder its documents and uploads live in.
+      Its id comes from the project's dock entry named "vault".
+    category: docs
+    read_only: true
+    request:
+      method: GET
+      path: /vaults/${vault_id}
+    input:
+      vault_id:
+        type: integer
+        description: The vault's id, from the project's dock.
+    output:
+      description: The vault.
+      type: object
+
+  list_vaults:
+    title: List sub-folders in a vault
+    description: Read the folders nested inside a vault, each of which is itself a vault.
+    category: docs
+    read_only: true
+    request:
+      method: GET
+      path: /vaults/${vault_id}/vaults.json
+      query:
+        page: "${page}"
+    input:
+      vault_id:
+        type: integer
+        description: The parent vault's id.
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of nested vaults.
+      type: array
+      items: {type: object}
+
+  list_documents:
+    title: List documents
+    description: Read the documents in a vault, 15 per page.
+    category: docs
+    read_only: true
+    request:
+      method: GET
+      path: /vaults/${vault_id}/documents.json
+      query:
+        page: "${page}"
+    input:
+      vault_id:
+        type: integer
+        description: The vault's id.
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of documents.
+      type: array
+      items: {type: object}
+
+  create_document:
+    title: Create a document
+    description: >-
+      Write a document into a vault. `status` of "active" publishes it and
+      notifies subscribers; leave it out for a draft only you can see.
+    category: docs
+    request:
+      method: POST
+      path: /vaults/${vault_id}/documents.json
+      body:
+        title: "${title}"
+        content: "${content}"
+        status: "${status}"
+        subscriptions: "${subscriptions}"
+        visible_to_clients: "${visible_to_clients}"
+    input:
+      vault_id:
+        type: integer
+        description: The vault's id.
+      title:
+        type: string
+        description: The document's title.
+      content:
+        type: string
+        description: The document body, in Basecamp's rich-text HTML subset.
+        optional: true
+      status:
+        type: string
+        description: Publish it or keep it as a draft.
+        optional: true
+        enum: [active, drafted]
+      subscriptions:
+        type: array
+        description: Person ids to notify.
+        optional: true
+        items: {type: integer}
+      visible_to_clients:
+        type: boolean
+        description: Whether clients on the project can see it.
+        optional: true
+    output:
+      description: The created document.
+      type: object
+
+  get_document:
+    title: Get a document
+    description: Read one document -- its title, body and author.
+    category: docs
+    read_only: true
+    request:
+      method: GET
+      path: /documents/${document_id}
+    input:
+      document_id:
+        type: integer
+        description: The document's id.
+    output:
+      description: The document.
+      type: object
+
+  update_document:
+    title: Update a document
+    description: >-
+      Replace a document's title and content. The whole body is replaced, so
+      read it first if you mean to append.
+    category: docs
+    request:
+      method: PUT
+      path: /documents/${document_id}
+      body:
+        title: "${title}"
+        content: "${content}"
+    input:
+      document_id:
+        type: integer
+        description: The document's id.
+      title:
+        type: string
+        description: New title.
+        optional: true
+      content:
+        type: string
+        description: New body, in rich-text HTML. Replaces the whole document.
+        optional: true
+    output:
+      description: The updated document.
+      type: object
+
+  list_uploads:
+    title: List uploads
+    description: >-
+      Read the files uploaded into a vault, with their names, sizes and
+      download urls.
+    category: docs
+    read_only: true
+    request:
+      method: GET
+      path: /vaults/${vault_id}/uploads.json
+      query:
+        page: "${page}"
+    input:
+      vault_id:
+        type: integer
+        description: The vault's id.
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of uploads.
+      type: array
+      items: {type: object}
+
+  get_upload:
+    title: Get an upload
+    description: Read one uploaded file's record -- name, content type, size and download url.
+    category: docs
+    read_only: true
+    request:
+      method: GET
+      path: /uploads/${upload_id}
+    input:
+      upload_id:
+        type: integer
+        description: The upload's id.
+    output:
+      description: The upload.
+      type: object
+
+  # -- card table ----------------------------------------------------------
+
+  get_card_table:
+    title: Get a card table
+    description: >-
+      Read a project's card table (its kanban board) with every column and each
+      column's id. Cards are created against a column, so this is the lookup
+      step first.
+    category: card_table
+    read_only: true
+    request:
+      method: GET
+      path: /card_tables/${card_table_id}
+    input:
+      card_table_id:
+        type: integer
+        description: The card table's id, from the project's dock entry named "kanban_board".
+    output:
+      description: The card table and its columns.
+      type: object
+
+  list_cards:
+    title: List cards in a column
+    description: Read the cards in one card-table column, 15 per page.
+    category: card_table
+    read_only: true
+    request:
+      method: GET
+      path: /card_tables/lists/${column_id}/cards.json
+      query:
+        page: "${page}"
+    input:
+      column_id:
+        type: integer
+        description: The column's id, from get_card_table.
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of cards.
+      type: array
+      items: {type: object}
+
+  create_card:
+    title: Create a card
+    description: >-
+      Add a card to a card-table column. `notify` tells the column's
+      subscribers; assignees are set with update_card afterwards.
+    category: card_table
+    request:
+      method: POST
+      path: /card_tables/lists/${column_id}/cards.json
+      body:
+        title: "${title}"
+        content: "${content}"
+        due_on: "${due_on}"
+        notify: "${notify}"
+    input:
+      column_id:
+        type: integer
+        description: The column's id.
+      title:
+        type: string
+        description: The card's title.
+      content:
+        type: string
+        description: Card detail, in Basecamp's rich-text HTML subset.
+        optional: true
+      due_on:
+        type: string
+        description: Due date as YYYY-MM-DD.
+        optional: true
+      notify:
+        type: boolean
+        description: Notify the column's subscribers.
+        optional: true
+    output:
+      description: The created card.
+      type: object
+
+  get_card:
+    title: Get a card
+    description: Read one card -- title, content, due date, assignees and its steps.
+    category: card_table
+    read_only: true
+    request:
+      method: GET
+      path: /card_tables/cards/${card_id}
+    input:
+      card_id:
+        type: integer
+        description: The card's id.
+    output:
+      description: The card.
+      type: object
+
+  update_card:
+    title: Update a card
+    description: >-
+      Change a card's title, content, due date or assignees. `assignee_ids` is
+      the complete list after the update, so send every assignee you want kept.
+    category: card_table
+    request:
+      method: PUT
+      path: /card_tables/cards/${card_id}
+      body:
+        title: "${title}"
+        content: "${content}"
+        due_on: "${due_on}"
+        assignee_ids: "${assignee_ids}"
+    input:
+      card_id:
+        type: integer
+        description: The card's id.
+      title:
+        type: string
+        description: New title.
+        optional: true
+      content:
+        type: string
+        description: New card detail, in rich-text HTML.
+        optional: true
+      due_on:
+        type: string
+        description: New due date as YYYY-MM-DD.
+        optional: true
+      assignee_ids:
+        type: array
+        description: The complete assignee list after the update.
+        optional: true
+        items: {type: integer}
+    output:
+      description: The updated card.
+      type: object
+
+  move_card:
+    title: Move a card to another column
+    description: >-
+      Move a card into a different card-table column, which is how work
+      progresses across the board. `position` is 1-indexed from the top.
+    category: card_table
+    request:
+      method: POST
+      path: /card_tables/cards/${card_id}/moves.json
+      body:
+        column_id: "${column_id}"
+        position: "${position}"
+    input:
+      card_id:
+        type: integer
+        description: The card's id.
+      column_id:
+        type: integer
+        description: The destination column's id, from get_card_table.
+      position:
+        type: integer
+        description: 1-indexed position in the destination column. Defaults to the top.
+        optional: true
+        minimum: 1
+    output:
+      description: The moved card.
+      type: object
+
+  create_card_step:
+    title: Add a step to a card
+    description: >-
+      Add a checklist step to a card, optionally assigned and dated. Steps are
+      how a card's work is broken down without leaving the board.
+    category: card_table
+    request:
+      method: POST
+      path: /card_tables/cards/${card_id}/steps.json
+      body:
+        title: "${title}"
+        due_on: "${due_on}"
+        assignees: "${assignee_ids}"
+    input:
+      card_id:
+        type: integer
+        description: The card's id.
+      title:
+        type: string
+        description: What the step is.
+      due_on:
+        type: string
+        description: Due date as YYYY-MM-DD.
+        optional: true
+      assignee_ids:
+        type: array
+        description: Person ids responsible for the step.
+        optional: true
+        items: {type: integer}
+    output:
+      description: The created step.
+      type: object
+
+  set_card_step_completion:
+    title: Complete or reopen a card step
+    description: Tick a card's checklist step off, or untick it by sending `completion` as false.
+    category: card_table
+    request:
+      method: PUT
+      path: /card_tables/steps/${step_id}/completions.json
+      body:
+        completion: "${completion}"
+    input:
+      step_id:
+        type: integer
+        description: The step's id, from get_card.
+      completion:
+        type: boolean
+        description: True to complete the step, false to reopen it.
+    output:
+      description: The updated step.
+      type: object
+
+  # -- questionnaires (automatic check-ins) --------------------------------
+
+  get_questionnaire:
+    title: Get a project's questionnaire
+    description: >-
+      Read the automatic check-in tool of a project -- the container its
+      recurring questions live in. Its id comes from the project's dock.
+    category: checkins
+    read_only: true
+    request:
+      method: GET
+      path: /questionnaires/${questionnaire_id}
+    input:
+      questionnaire_id:
+        type: integer
+        description: The questionnaire's id, from the project's dock entry named "questionnaire".
+    output:
+      description: The questionnaire.
+      type: object
+
+  list_questions:
+    title: List check-in questions
+    description: >-
+      Read a project's recurring check-in questions, with their schedules and
+      who is asked.
+    category: checkins
+    read_only: true
+    request:
+      method: GET
+      path: /questionnaires/${questionnaire_id}/questions.json
+      query:
+        page: "${page}"
+    input:
+      questionnaire_id:
+        type: integer
+        description: The questionnaire's id.
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of check-in questions.
+      type: array
+      items: {type: object}
+
+  list_answers:
+    title: List answers to a check-in question
+    description: Read the answers people have given to one recurring check-in question, newest first.
+    category: checkins
+    read_only: true
+    request:
+      method: GET
+      path: /questions/${question_id}/answers.json
+      query:
+        page: "${page}"
+    input:
+      question_id:
+        type: integer
+        description: The question's id, from list_questions.
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of answers.
+      type: array
+      items: {type: object}
+
+  create_answer:
+    title: Answer a check-in question
+    description: >-
+      Post an answer to a recurring check-in as the authenticated person. It
+      appears in the project's check-in feed for everyone subscribed.
+    category: checkins
+    request:
+      method: POST
+      path: /questions/${question_id}/answers.json
+      body:
+        content: "${content}"
+        group_on: "${group_on}"
+    input:
+      question_id:
+        type: integer
+        description: The question's id.
+      content:
+        type: string
+        description: The answer, in Basecamp's rich-text HTML subset.
+      group_on:
+        type: string
+        description: The date the answer belongs to, as YYYY-MM-DD. Defaults to today.
+        optional: true
+    output:
+      description: The created answer.
+      type: object
+
+  # -- search, recordings, webhooks ----------------------------------------
+
+  search:
+    title: Search Basecamp
+    description: >-
+      Search everything the token can see. `type_names` narrows to particular
+      recording types and `bucket_ids` to particular projects; `since` limits
+      how far back to look.
+    category: search
+    read_only: true
+    request:
+      method: GET
+      path: /search.json
+      query:
+        q: "${query}"
+        type_names[]: "${type_names}"
+        bucket_ids[]: "${project_ids}"
+        creator_ids[]: "${creator_ids}"
+        since: "${since}"
+        sort: "${sort}"
+        exclude_chat: "${exclude_chat}"
+        page: "${page}"
+    input:
+      query:
+        type: string
+        description: What to search for.
+      type_names:
+        type: array
+        description: >-
+          Recording types to include, e.g. ["Todo", "Message", "Document",
+          "Comment", "Kanban::Card", "Schedule::Entry", "Upload"].
+        optional: true
+        items: {type: string}
+      project_ids:
+        type: array
+        description: Only search inside these projects.
+        optional: true
+        items: {type: integer}
+      creator_ids:
+        type: array
+        description: Only things created by these people.
+        optional: true
+        items: {type: integer}
+      since:
+        type: string
+        description: How far back to search.
+        optional: true
+        enum: [last_7_days, last_30_days, last_90_days, last_12_months, forever]
+      sort:
+        type: string
+        description: Result order.
+        optional: true
+        enum: [best_match, recency]
+      exclude_chat:
+        type: boolean
+        description: Leave campfire lines out of the results.
+        optional: true
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: The matching recordings.
+      type: object
+
+  list_recordings:
+    title: List recordings of one type
+    description: >-
+      Read every recording of a given type across the account -- all comments,
+      all documents, all cards. `type` is required and takes Basecamp's class
+      names, e.g. "Todo", "Message", "Document", "Kanban::Card".
+    category: search
+    read_only: true
+    request:
+      method: GET
+      path: /projects/recordings.json
+      query:
+        type: "${type}"
+        bucket: "${project_ids}"
+        status: "${status}"
+        sort: "${sort}"
+        direction: "${direction}"
+        page: "${page}"
+    input:
+      type:
+        type: string
+        description: The recording type to list.
+        enum: [Comment, Document, Message, "Question::Answer", "Schedule::Entry", Todo,
+               Todolist, Upload, Vault, "Kanban::Card", "Kanban::Step"]
+      project_ids:
+        type: string
+        description: Comma-separated project ids to restrict the listing to.
+        optional: true
+      status:
+        type: string
+        description: Which recordings to return. Defaults to active.
+        optional: true
+        enum: [active, archived, trashed]
+      sort:
+        type: string
+        description: Field to sort by.
+        optional: true
+        enum: [created_at, updated_at]
+      direction:
+        type: string
+        description: Sort direction.
+        optional: true
+        enum: [asc, desc]
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of recordings of that type.
+      type: array
+      items: {type: object}
+
+  archive_recording:
+    title: Archive a recording
+    description: >-
+      Archive any recording -- a to-do list, message, document, card -- taking
+      it out of the active view while keeping it readable.
+    category: recordings
+    request:
+      method: PUT
+      path: /recordings/${recording_id}/status/archived.json
+    input:
+      recording_id:
+        type: integer
+        description: The recording's id.
+    output:
+      description: Empty on success.
+      type: object
+
+  unarchive_recording:
+    title: Unarchive a recording
+    description: Bring an archived recording back into the active view of its project.
+    category: recordings
+    request:
+      method: PUT
+      path: /recordings/${recording_id}/status/active.json
+    input:
+      recording_id:
+        type: integer
+        description: The recording's id.
+    output:
+      description: Empty on success.
+      type: object
+
+  trash_recording:
+    title: Trash a recording
+    description: >-
+      Move any recording to the trash, where Basecamp keeps it for 30 days
+      before deleting it. Recoverable in the UI, not through this API.
+    category: recordings
+    request:
+      method: PUT
+      path: /recordings/${recording_id}/status/trashed.json
+    input:
+      recording_id:
+        type: integer
+        description: The recording's id.
+    output:
+      description: Empty on success.
+      type: object
+
+  subscribe_to_recording:
+    title: Subscribe to a recording
+    description: >-
+      Follow a recording so its comments and changes reach your inbox. Adds
+      the authenticated person as a subscriber.
+    category: recordings
+    request:
+      method: POST
+      path: /recordings/${recording_id}/subscription.json
+    input:
+      recording_id:
+        type: integer
+        description: The recording's id.
+    output:
+      description: The subscription after the change.
+      type: object
+
+  unsubscribe_from_recording:
+    title: Unsubscribe from a recording
+    description: Stop following a recording. Removes the authenticated person from its subscribers.
+    category: recordings
+    destructive: true
+    request:
+      method: DELETE
+      path: /recordings/${recording_id}/subscription.json
+    input:
+      recording_id:
+        type: integer
+        description: The recording's id.
+    output:
+      description: Empty on success.
+      type: object
+
+  update_recording_subscribers:
+    title: Change a recording's subscribers
+    description: >-
+      Add or remove other people from a recording's subscribers by person id,
+      which decides who gets notified about its comments and changes.
+    category: recordings
+    request:
+      method: PUT
+      path: /recordings/${recording_id}/subscription.json
+      body:
+        subscriptions: "${subscribe}"
+        unsubscriptions: "${unsubscribe}"
+    input:
+      recording_id:
+        type: integer
+        description: The recording's id.
+      subscribe:
+        type: array
+        description: Person ids to add as subscribers.
+        optional: true
+        items: {type: integer}
+      unsubscribe:
+        type: array
+        description: Person ids to remove from the subscribers.
+        optional: true
+        items: {type: integer}
+    output:
+      description: The subscription after the change.
+      type: object
+
+  list_webhooks:
+    title: List a project's webhooks
+    description: >-
+      Read the webhooks registered on one project, with the event types each
+      listens for. Webhooks in Basecamp are per project, not per account.
+    category: webhooks
+    read_only: true
+    request:
+      method: GET
+      path: /buckets/${project_id}/webhooks.json
+    input:
+      project_id:
+        type: integer
+        description: The project's id.
+    output:
+      description: The project's webhooks.
+      type: array
+      items: {type: object}
+
+  create_webhook:
+    title: Create a webhook
+    description: >-
+      Register a webhook on a project. `types` names the recording types whose
+      changes should be delivered, e.g. ["Todo", "Comment"]; leave it out and
+      Basecamp sends everything.
+    category: webhooks
+    request:
+      method: POST
+      path: /buckets/${project_id}/webhooks.json
+      body:
+        payload_url: "${payload_url}"
+        types: "${types}"
+        active: "${active}"
+    input:
+      project_id:
+        type: integer
+        description: The project's id.
+      payload_url:
+        type: string
+        description: HTTPS url Basecamp should POST events to.
+      types:
+        type: array
+        description: Recording types to subscribe to, e.g. ["Todo", "Comment", "Message"].
+        items: {type: string}
+      active:
+        type: boolean
+        description: Whether the webhook starts enabled. Defaults to true.
+        optional: true
+    output:
+      description: The created webhook.
+      type: object
+
+  delete_webhook:
+    title: Delete a webhook
+    description: Remove a webhook from a project; deliveries stop immediately and cannot be replayed.
+    category: webhooks
+    destructive: true
+    request:
+      method: DELETE
+      path: /webhooks/${webhook_id}
+    input:
+      webhook_id:
+        type: integer
+        description: The webhook's id, from list_webhooks.
+    output:
+      description: Empty on success.
+      type: object
+
+  # -- templates -----------------------------------------------------------
+
+  list_templates:
+    title: List project templates
+    description: Read the project templates on the account, which create_project_from_template uses.
+    category: templates
+    read_only: true
+    request:
+      method: GET
+      path: /templates.json
+      query:
+        status: "${status}"
+        page: "${page}"
+    input:
+      status:
+        type: string
+        description: Which templates to return. Defaults to active.
+        optional: true
+        enum: [active, archived, trashed]
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of templates.
+      type: array
+      items: {type: object}
+
+  create_project_from_template:
+    title: Create a project from a template
+    description: >-
+      Start a project from a template. Basecamp builds it in the background and
+      answers with a construction record -- poll get_project_construction until
+      it reports the new project's id. Dates in the template are relative to
+      `start_date`.
+    category: templates
+    request:
+      method: POST
+      path: /templates/${template_id}/project_constructions.json
+      body:
+        project:
+          name: "${name}"
+          description: "${description}"
+          start_date: "${start_date}"
+    input:
+      template_id:
+        type: integer
+        description: The template's id, from list_templates.
+      name:
+        type: string
+        description: Name for the new project.
+      description:
+        type: string
+        description: Description for the new project.
+        optional: true
+      start_date:
+        type: string
+        description: Date the new project starts, as YYYY-MM-DD. Template dates are relative to it.
+        optional: true
+    output:
+      description: The queued project construction, whose status get_project_construction polls.
+      type: object
+
+  get_project_construction:
+    title: Check a project being built from a template
+    description: >-
+      Poll a project construction until Basecamp finishes copying the template;
+      the completed record carries the new project.
+    category: templates
+    read_only: true
+    request:
+      method: GET
+      path: /templates/${template_id}/project_constructions/${construction_id}
+    input:
+      template_id:
+        type: integer
+        description: The template's id.
+      construction_id:
+        type: integer
+        description: The construction id returned by create_project_from_template.
+    output:
+      description: The construction's status, and the new project once it is done.
+      type: object

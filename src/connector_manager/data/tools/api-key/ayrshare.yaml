@@ -1,0 +1,2663 @@
+# Ayrshare tools -- post, schedule and measure across social networks.
+#
+# Ayrshare is one API in front of a dozen social networks. The connection's
+# base url already ends in `/api`, so paths here start at `/post`,
+# `/analytics/...` and so on.
+#
+# Four things decide whether a call does what you meant:
+#
+#   * **`create_post` publishes for real.** Every tool that posts, comments or
+#     messages reaches live accounts the moment it succeeds. `schedule_date`
+#     defers it, `validate_post` and `check_post_length` are the rehearsals,
+#     and `requires_approval` parks it for a human. There is no undo -- only
+#     `delete_post`, which removes it from the networks that allow deletion;
+#   * **`platforms` is the whole shape of a post.** It names which networks to
+#     publish to, and each network then has its own `<network>Options` object
+#     for the things only it supports -- a YouTube title, a Pinterest board, a
+#     Reddit subreddit. Ayrshare rejects the post if a required per-network
+#     option is missing, so read the media guidelines for the networks you
+#     target;
+#   * **one API key, many profiles.** On the Business plan the API key belongs
+#     to a *primary* profile and each end customer is a **user profile**
+#     addressed by a `Profile-Key` header. These tools do not set that header,
+#     so they act as the primary profile; `list_profiles` and `create_profile`
+#     manage the customers themselves;
+#   * **media must be reachable.** `media_urls` are fetched by Ayrshare, so a
+#     signed or private url fails. `upload_media` and `verify_media_url` exist
+#     for exactly that problem.
+#
+# Analytics are per-post (`get_post_analytics`) or per-account
+# (`get_social_analytics`), and both are network-rate-limited -- cache rather
+# than poll.
+#
+# Docs: https://www.ayrshare.com/docs/apis/overview
+
+connector_id: ayrshare
+display_name: Ayrshare
+docs_url: https://www.ayrshare.com/docs/apis/overview
+
+tools:
+
+  # -- posting -------------------------------------------------------------
+
+  create_post:
+    title: Publish or schedule a post
+    description: >-
+      Publish a post to one or more social networks, or schedule it with
+      `schedule_date`. This is live the moment it succeeds. `platforms` names
+      the networks; each network's own requirements go in its options object --
+      `youtube_options` needs a title, `pinterest_options` a board,
+      `reddit_options` a subreddit. Use validate_post first if you are unsure.
+    category: posting
+    request:
+      method: POST
+      path: /post
+      body:
+        post: "${post}"
+        platforms: "${platforms}"
+        mediaUrls: "${media_urls}"
+        isVideo: "${is_video}"
+        scheduleDate: "${schedule_date}"
+        validateScheduled: "${validate_scheduled}"
+        firstComment: "${first_comment}"
+        disableComments: "${disable_comments}"
+        shortenLinks: "${shorten_links}"
+        autoSchedule: "${auto_schedule}"
+        autoRepost: "${auto_repost}"
+        autoHashtag: "${auto_hashtag}"
+        requiresApproval: "${requires_approval}"
+        idempotencyKey: "${idempotency_key}"
+        notes: "${notes}"
+        blueskyOptions: "${bluesky_options}"
+        faceBookOptions: "${facebook_options}"
+        gmbOptions: "${google_business_options}"
+        instagramOptions: "${instagram_options}"
+        linkedInOptions: "${linkedin_options}"
+        pinterestOptions: "${pinterest_options}"
+        redditOptions: "${reddit_options}"
+        snapChatOptions: "${snapchat_options}"
+        telegramOptions: "${telegram_options}"
+        threadsOptions: "${threads_options}"
+        tikTokOptions: "${tiktok_options}"
+        twitterOptions: "${twitter_options}"
+        youTubeOptions: "${youtube_options}"
+    input:
+      post:
+        type: string
+        description: The post text. Networks truncate differently -- check_post_length says how.
+      platforms:
+        type: array
+        description: >-
+          Networks to publish to, e.g. ["twitter", "linkedin", "instagram"].
+          Each must already be linked to the profile.
+        items: {type: string}
+      media_urls:
+        type: array
+        description: >-
+          Publicly reachable image or video urls to attach. Ayrshare fetches
+          them, so signed or private urls fail.
+        optional: true
+        items: {type: string}
+      is_video:
+        type: boolean
+        description: Treat the attached media as video. Required for video on some networks.
+        optional: true
+      schedule_date:
+        type: string
+        description: >-
+          ISO 8601 time to publish at, e.g. "2026-10-01T14:00:00Z". Omit to
+          publish immediately.
+        optional: true
+      validate_scheduled:
+        type: boolean
+        description: Validate a scheduled post's network requirements now rather than at send time.
+        optional: true
+      first_comment:
+        type: string
+        description: >-
+          A comment to post immediately after publishing, as
+          {"comment": "...", "platforms": [...]} -- the usual place for links
+          on Instagram.
+        optional: true
+      disable_comments:
+        type: boolean
+        description: Turn off comments on the published post, where the network allows it.
+        optional: true
+      shorten_links:
+        type: boolean
+        description: Rewrite links through Ayrshare's shortener so clicks are tracked.
+        optional: true
+      auto_schedule:
+        type: object
+        description: 'Use a saved posting schedule, e.g. {"schedule": true, "title": "default"}.'
+        optional: true
+      auto_repost:
+        type: object
+        description: Repost automatically on a cadence, per Ayrshare's auto-repost options.
+        optional: true
+      auto_hashtag:
+        type: object
+        description: 'Have Ayrshare add hashtags, e.g. {"max": 3, "position": "auto"}.'
+        optional: true
+      requires_approval:
+        type: boolean
+        description: Hold the post for approval instead of publishing -- released with update_post.
+        optional: true
+      idempotency_key:
+        type: string
+        description: Your own key, so a retried call cannot double-post.
+        optional: true
+      notes:
+        type: string
+        description: Internal notes kept on the post, never published.
+        optional: true
+      bluesky_options:
+        type: object
+        description: Bluesky-specific options.
+        optional: true
+      facebook_options:
+        type: object
+        description: Facebook-specific options -- reels, stories, link preview and targeting.
+        optional: true
+      google_business_options:
+        type: object
+        description: Google Business Profile options -- call to action, offer, event.
+        optional: true
+      instagram_options:
+        type: object
+        description: Instagram options -- reels, stories, collaborators, location, thumbnail.
+        optional: true
+      linkedin_options:
+        type: object
+        description: LinkedIn options -- article link, visibility, targeting.
+        optional: true
+      pinterest_options:
+        type: object
+        description: Pinterest options -- `boardId` is required for a pin.
+        optional: true
+      reddit_options:
+        type: object
+        description: Reddit options -- `subreddit` and `title` are required.
+        optional: true
+      snapchat_options:
+        type: object
+        description: Snapchat options.
+        optional: true
+      telegram_options:
+        type: object
+        description: Telegram options.
+        optional: true
+      threads_options:
+        type: object
+        description: Threads options.
+        optional: true
+      tiktok_options:
+        type: object
+        description: TikTok options -- privacy level, duet/stitch/comment permissions.
+        optional: true
+      twitter_options:
+        type: object
+        description: X/Twitter options -- thread, reply settings, poll.
+        optional: true
+      youtube_options:
+        type: object
+        description: >-
+          YouTube options -- `title` is required, plus visibility, playlist,
+          thumbnail and category.
+        optional: true
+    output:
+      description: >-
+        The result per network, each with its post id, live url and status --
+        one network can fail while others succeed, so check every entry.
+      type: object
+      properties:
+        id: {type: string, description: "Ayrshare's own id for the post."}
+        status: {type: string}
+        postIds: {type: array, description: "Per-network id, url and status."}
+
+  create_bulk_posts:
+    title: Publish many posts from a CSV
+    description: >-
+      Queue a batch of posts from a CSV of rows, each with its own text,
+      networks and schedule date. Every row publishes on its own schedule, so
+      an error in the file is an error in production.
+    category: posting
+    request:
+      method: POST
+      path: /post/bulk
+      body:
+        posts: "${posts}"
+    input:
+      posts:
+        type: array
+        description: >-
+          The posts to queue, each an object shaped like create_post's body --
+          `post`, `platforms`, optionally `scheduleDate` and per-network
+          options.
+        items: {type: object}
+    output:
+      description: The queued posts and any per-row errors.
+      type: object
+
+  get_post:
+    title: Get a post
+    description: >-
+      Read one post by its Ayrshare id -- its text, target networks, live urls
+      and per-network status. The way to check whether a scheduled post
+      actually went out.
+    category: posting
+    read_only: true
+    request:
+      method: GET
+      path: /post/${post_id}
+    input:
+      post_id:
+        type: string
+        description: Ayrshare's id for the post, from create_post or get_history.
+    output:
+      description: The post and its per-network results.
+      type: object
+
+  update_post:
+    title: Update or approve a post
+    description: >-
+      Change a scheduled post's date or notes, or set `approved` to release a
+      post that was held for approval. A post already published can only have
+      its metadata changed, not its content.
+    category: posting
+    request:
+      method: PATCH
+      path: /post
+      body:
+        id: "${post_id}"
+        approved: "${approved}"
+        scheduleDate: "${schedule_date}"
+        scheduledPause: "${scheduled_pause}"
+        disableComments: "${disable_comments}"
+        notes: "${notes}"
+        youTubeOptions: "${youtube_options}"
+    input:
+      post_id:
+        type: string
+        description: Ayrshare's id for the post.
+      approved:
+        type: boolean
+        description: Approve a post that was created with `requires_approval` -- this publishes it.
+        optional: true
+      schedule_date:
+        type: string
+        description: New ISO 8601 publish time, for a post that has not gone out yet.
+        optional: true
+      scheduled_pause:
+        type: boolean
+        description: Pause a scheduled post without deleting it.
+        optional: true
+      disable_comments:
+        type: boolean
+        description: Turn comments on or off, where the network allows it.
+        optional: true
+      notes:
+        type: string
+        description: New internal notes.
+        optional: true
+      youtube_options:
+        type: object
+        description: Updated YouTube metadata -- title, description, visibility.
+        optional: true
+    output:
+      description: The post after the change.
+      type: object
+
+  delete_post:
+    title: Delete a post
+    description: >-
+      Delete a post from the networks that allow it, and from Ayrshare's
+      history. Networks that do not support deletion keep the post -- use
+      `mark_manual_deleted` to record that you removed it by hand.
+      `delete_all_scheduled` clears the entire scheduled queue.
+    category: posting
+    destructive: true
+    request:
+      method: DELETE
+      path: /post
+      body:
+        id: "${post_id}"
+        bulk: "${post_ids}"
+        deleteAllScheduled: "${delete_all_scheduled}"
+        markManualDeleted: "${mark_manual_deleted}"
+    input:
+      post_id:
+        type: string
+        description: Ayrshare's id for the post to delete.
+        optional: true
+      post_ids:
+        type: array
+        description: Several post ids to delete at once.
+        optional: true
+        items: {type: string}
+      delete_all_scheduled:
+        type: boolean
+        description: Delete every scheduled post that has not gone out yet.
+        optional: true
+      mark_manual_deleted:
+        type: boolean
+        description: Record the post as deleted in history without calling the network.
+        optional: true
+    output:
+      description: What was deleted, per network.
+      type: object
+
+  retry_post:
+    title: Retry a failed post
+    description: >-
+      Re-attempt a post that failed on one or more networks. Only the failed
+      networks are retried, so a partially successful post does not double-post.
+    category: posting
+    request:
+      method: PUT
+      path: /post/retry
+      body:
+        id: "${post_id}"
+    input:
+      post_id:
+        type: string
+        description: Ayrshare's id for the failed post.
+    output:
+      description: The retry result per network.
+      type: object
+
+  copy_post:
+    title: Copy a post to other networks
+    description: >-
+      Republish an existing post to additional networks, keeping its text and
+      media. Publishes immediately unless a schedule date is given.
+    category: posting
+    request:
+      method: POST
+      path: /post/copy
+      body:
+        id: "${post_id}"
+        platforms: "${platforms}"
+        scheduleDate: "${schedule_date}"
+    input:
+      post_id:
+        type: string
+        description: The post to copy.
+      platforms:
+        type: array
+        description: Networks to copy it to.
+        items: {type: string}
+      schedule_date:
+        type: string
+        description: ISO 8601 time to publish the copies at.
+        optional: true
+    output:
+      description: The copied post's per-network results.
+      type: object
+
+  get_history:
+    title: Get post history
+    description: >-
+      Read the profile's posting history, newest first -- what went out, when,
+      to which networks and whether it succeeded. `status` of "error" is the
+      quickest way to find what failed.
+    category: posting
+    read_only: true
+    request:
+      method: GET
+      path: /history
+      query:
+        limit: "${limit}"
+        platforms: "${platforms}"
+        startDate: "${start_date}"
+        endDate: "${end_date}"
+        lastDays: "${last_days}"
+        status: "${status}"
+        type: "${type}"
+    input:
+      limit:
+        type: integer
+        description: How many posts to return.
+        optional: true
+        minimum: 1
+      platforms:
+        type: array
+        description: Only posts sent to these networks.
+        optional: true
+        items: {type: string}
+      start_date:
+        type: string
+        description: Only posts on or after this ISO 8601 date.
+        optional: true
+      end_date:
+        type: string
+        description: Only posts on or before this ISO 8601 date.
+        optional: true
+      last_days:
+        type: integer
+        description: Only posts from the last N days.
+        optional: true
+        minimum: 1
+      status:
+        type: string
+        description: Only posts in this state, e.g. "success", "error" or "pending".
+        optional: true
+      type:
+        type: string
+        description: Only posts of this kind, e.g. "scheduled".
+        optional: true
+    output:
+      description: The matching history entries.
+      type: object
+
+  get_history_by_platform:
+    title: Get post history for one network
+    description: >-
+      Read the posts published to a single network, which is the per-network
+      view get_history flattens.
+    category: posting
+    read_only: true
+    request:
+      method: GET
+      path: /history/${platform}
+      query:
+        limit: "${limit}"
+        lastDays: "${last_days}"
+    input:
+      platform:
+        type: string
+        description: The network, e.g. "instagram" or "linkedin".
+      limit:
+        type: integer
+        description: How many posts to return.
+        optional: true
+        minimum: 1
+      last_days:
+        type: integer
+        description: Only posts from the last N days.
+        optional: true
+        minimum: 1
+    output:
+      description: That network's post history.
+      type: object
+
+  # -- validation ----------------------------------------------------------
+
+  validate_post:
+    title: Validate a post before publishing
+    description: >-
+      Check a post against each target network's rules -- text length, media
+      type and size, required options -- without publishing anything. The
+      rehearsal for create_post.
+    category: validation
+    request:
+      method: POST
+      path: /validate/post
+      body:
+        post: "${post}"
+        platforms: "${platforms}"
+        mediaUrls: "${media_urls}"
+    input:
+      post:
+        type: string
+        description: The post text to validate.
+      platforms:
+        type: array
+        description: Networks to validate against.
+        items: {type: string}
+      media_urls:
+        type: array
+        description: Media urls to validate.
+        optional: true
+        items: {type: string}
+    output:
+      description: Per-network validation results and the problems found.
+      type: object
+
+  check_post_length:
+    title: Check a post's length per network
+    description: >-
+      Measure a post's text against each network's limit, counting the way that
+      network counts -- links and emoji are not one character everywhere.
+    category: validation
+    request:
+      method: POST
+      path: /post/checkPostWeight
+      body:
+        post: "${post}"
+        platforms: "${platforms}"
+    input:
+      post:
+        type: string
+        description: The post text to measure.
+      platforms:
+        type: array
+        description: Networks to measure against.
+        optional: true
+        items: {type: string}
+    output:
+      description: The measured length and limit per network.
+      type: object
+
+  moderate_post:
+    title: Check a post for policy problems
+    description: >-
+      Run text through Ayrshare's moderation check before publishing, which
+      flags content likely to be rejected or to cause account problems.
+    category: validation
+    request:
+      method: POST
+      path: /validate/moderation
+      body:
+        post: "${post}"
+    input:
+      post:
+        type: string
+        description: The text to check.
+    output:
+      description: The moderation verdict and the categories flagged.
+      type: object
+
+  check_subreddit:
+    title: Check whether a subreddit exists
+    description: >-
+      Verify a subreddit before posting to it -- a Reddit post with a wrong or
+      restricted subreddit fails at publish time, not at compose time.
+    category: validation
+    read_only: true
+    request:
+      method: GET
+      path: /validate/redditExists/${subreddit}
+    input:
+      subreddit:
+        type: string
+        description: The subreddit name, without the "r/" prefix.
+    output:
+      description: Whether the subreddit exists and accepts posts.
+      type: object
+
+  # -- analytics -----------------------------------------------------------
+
+  get_post_analytics:
+    title: Get analytics for a post
+    description: >-
+      Read one post's engagement per network -- impressions, likes, comments,
+      shares, saves. Networks report on a delay and some metrics only appear
+      after a threshold, so a fresh post can legitimately look empty.
+    category: analytics
+    request:
+      method: POST
+      path: /analytics/post
+      body:
+        id: "${post_id}"
+        platforms: "${platforms}"
+    input:
+      post_id:
+        type: string
+        description: Ayrshare's id for the post.
+      platforms:
+        type: array
+        description: Only these networks' analytics.
+        optional: true
+        items: {type: string}
+    output:
+      description: Engagement metrics per network.
+      type: object
+
+  get_social_analytics:
+    title: Get account analytics
+    description: >-
+      Read account-level analytics per network -- follower counts, profile
+      views, reach. `daily` returns a day-by-day series rather than totals.
+    category: analytics
+    request:
+      method: POST
+      path: /analytics/social
+      body:
+        platforms: "${platforms}"
+        daily: "${daily}"
+        quarters: "${quarters}"
+        period60Days: "${period_60_days}"
+    input:
+      platforms:
+        type: array
+        description: Networks to report on, e.g. ["instagram", "facebook"].
+        items: {type: string}
+      daily:
+        type: boolean
+        description: Return a daily series instead of period totals.
+        optional: true
+      quarters:
+        type: integer
+        description: How many quarters of history to include.
+        optional: true
+        minimum: 1
+      period_60_days:
+        type: boolean
+        description: Use a 60-day window rather than the default period.
+        optional: true
+    output:
+      description: Account metrics per network.
+      type: object
+
+  get_instagram_online_followers:
+    title: Get when Instagram followers are online
+    description: >-
+      Read the hourly distribution of when an Instagram account's followers are
+      active -- the input to choosing a posting time.
+    category: analytics
+    read_only: true
+    request:
+      method: GET
+      path: /analytics/getInstagramOnlineFollowers
+    input: {}
+    output:
+      description: Follower activity by hour and weekday.
+      type: object
+
+  get_youtube_playlists:
+    title: Get YouTube playlists
+    description: >-
+      Read the linked YouTube channel's playlists with their ids, which a
+      post's `youtube_options` can add a video to.
+    category: analytics
+    read_only: true
+    request:
+      method: GET
+      path: /analytics/youTubePlaylists
+    input: {}
+    output:
+      description: The channel's playlists.
+      type: object
+
+  # -- profiles (multi-customer) -------------------------------------------
+
+  get_user:
+    title: Get the profile and its linked accounts
+    description: >-
+      Read the current profile -- which social networks are linked, their
+      usernames and display names, and the plan's limits. The cheapest call
+      that proves the API key works, and the way to learn which `platforms`
+      values are valid.
+    category: profiles
+    read_only: true
+    request:
+      method: GET
+      path: /user
+    input: {}
+    output:
+      description: The profile, its linked accounts and plan limits.
+      type: object
+      properties:
+        activeSocialAccounts: {type: array}
+        displayNames: {type: array}
+
+  list_profiles:
+    title: List user profiles
+    description: >-
+      Read the user profiles under this account -- one per end customer on the
+      Business plan -- with each profile's key and linked networks.
+    category: profiles
+    read_only: true
+    request:
+      method: GET
+      path: /profiles
+    input: {}
+    output:
+      description: The account's user profiles.
+      type: object
+
+  create_profile:
+    title: Create a user profile
+    description: >-
+      Create a user profile for an end customer. The response carries the
+      `profileKey` that scopes later calls to that customer -- keep it, it is
+      how their posts and analytics are addressed.
+    category: profiles
+    request:
+      method: POST
+      path: /profiles
+      body:
+        title: "${title}"
+        email: "${email}"
+        messagingActive: "${messaging_active}"
+        disableSocial: "${disable_social}"
+        hideTopHeader: "${hide_top_header}"
+        hideLogo: "${hide_logo}"
+        topHeader: "${top_header}"
+        subHeader: "${sub_header}"
+        team: "${team}"
+        tags: "${tags}"
+    input:
+      title:
+        type: string
+        description: A name for the profile, usually the customer's name.
+      email:
+        type: string
+        description: The customer's email address.
+        optional: true
+        format: email
+      messaging_active:
+        type: boolean
+        description: Enable the messaging API for this profile.
+        optional: true
+      disable_social:
+        type: array
+        description: Networks this profile may not link, e.g. ["tiktok"].
+        optional: true
+        items: {type: string}
+      hide_top_header:
+        type: boolean
+        description: Hide the header in the profile's linking page.
+        optional: true
+      hide_logo:
+        type: boolean
+        description: Hide the Ayrshare logo in the linking page.
+        optional: true
+      top_header:
+        type: string
+        description: Header text for the linking page.
+        optional: true
+      sub_header:
+        type: string
+        description: Sub-header text for the linking page.
+        optional: true
+      team:
+        type: boolean
+        description: Create the profile as a team profile.
+        optional: true
+      tags:
+        type: array
+        description: Your own tags for grouping profiles.
+        optional: true
+        items: {type: string}
+    output:
+      description: The created profile, including its profileKey and refId.
+      type: object
+
+  update_profile:
+    title: Update a user profile
+    description: Change a user profile's title, branding or messaging settings.
+    category: profiles
+    request:
+      method: PATCH
+      path: /profiles
+      body:
+        profileKey: "${profile_key}"
+        title: "${title}"
+        messagingActive: "${messaging_active}"
+        hideTopHeader: "${hide_top_header}"
+        topHeader: "${top_header}"
+        subHeader: "${sub_header}"
+        tags: "${tags}"
+    input:
+      profile_key:
+        type: string
+        description: The profile key of the profile to change.
+      title:
+        type: string
+        description: New title.
+        optional: true
+      messaging_active:
+        type: boolean
+        description: Enable or disable messaging for the profile.
+        optional: true
+      hide_top_header:
+        type: boolean
+        description: Hide the linking page header.
+        optional: true
+      top_header:
+        type: string
+        description: New header text.
+        optional: true
+      sub_header:
+        type: string
+        description: New sub-header text.
+        optional: true
+      tags:
+        type: array
+        description: Replacement tags.
+        optional: true
+        items: {type: string}
+    output:
+      description: The updated profile.
+      type: object
+
+  delete_profile:
+    title: Delete a user profile
+    description: >-
+      Delete a user profile, unlinking its social accounts and losing its
+      history. Irreversible, and the customer's scheduled posts go with it.
+    category: profiles
+    destructive: true
+    request:
+      method: DELETE
+      path: /profiles
+      body:
+        profileKey: "${profile_key}"
+    input:
+      profile_key:
+        type: string
+        description: The profile key of the profile to delete.
+    output:
+      description: Confirmation that the profile was deleted.
+      type: object
+
+  unlink_social_network:
+    title: Unlink a social network from a profile
+    description: >-
+      Disconnect one network from the profile. Scheduled posts targeting it
+      start failing, so clear the queue first.
+    category: profiles
+    destructive: true
+    request:
+      method: DELETE
+      path: /profiles/social
+      body:
+        platform: "${platform}"
+    input:
+      platform:
+        type: string
+        description: The network to unlink, e.g. "twitter".
+    output:
+      description: Confirmation that the network was unlinked.
+      type: object
+
+  create_link_session:
+    title: Create a social linking session
+    description: >-
+      Create a hosted session url a customer can open to connect their own
+      social accounts. The modern alternative to generating a JWT yourself.
+    category: profiles
+    request:
+      method: POST
+      path: /profiles/link-sessions
+      body:
+        profileKey: "${profile_key}"
+        redirect: "${redirect}"
+        allowedSocial: "${allowed_social}"
+        expiresIn: "${expires_in}"
+    input:
+      profile_key:
+        type: string
+        description: The profile the customer should link accounts to.
+      redirect:
+        type: string
+        description: Where to send the customer after linking.
+        optional: true
+      allowed_social:
+        type: array
+        description: Networks the customer may link, e.g. ["instagram", "facebook"].
+        optional: true
+        items: {type: string}
+      expires_in:
+        type: integer
+        description: How long the session link stays valid, in seconds.
+        optional: true
+        minimum: 1
+    output:
+      description: The session, including the url to send the customer to.
+      type: object
+
+  get_link_session:
+    title: Get a linking session
+    description: Read a linking session's state -- whether the customer completed it, and what they linked.
+    category: profiles
+    read_only: true
+    request:
+      method: GET
+      path: /profiles/link-sessions/${session_id}
+    input:
+      session_id:
+        type: string
+        description: The session's id.
+    output:
+      description: The session's state.
+      type: object
+
+  revoke_link_session:
+    title: Revoke a linking session
+    description: Invalidate a linking session url so it can no longer be used.
+    category: profiles
+    destructive: true
+    request:
+      method: DELETE
+      path: /profiles/link-sessions/${session_id}
+    input:
+      session_id:
+        type: string
+        description: The session's id.
+    output:
+      description: Confirmation that the session was revoked.
+      type: object
+
+  generate_jwt:
+    title: Generate a linking JWT
+    description: >-
+      Mint a signed url that lets one customer link their social accounts. Needs
+      the account's private key and the customer's `profile_key`; the older
+      alternative to create_link_session.
+    category: profiles
+    request:
+      method: POST
+      path: /profiles/generateJWT
+      body:
+        domain: "${domain}"
+        privateKey: "${private_key}"
+        profileKey: "${profile_key}"
+        logout: "${logout}"
+        redirect: "${redirect}"
+        allowedSocial: "${allowed_social}"
+        expiresIn: "${expires_in}"
+        verify: "${verify}"
+    input:
+      domain:
+        type: string
+        description: Your Ayrshare domain, from the dashboard.
+      private_key:
+        type: string
+        description: The account's private key, from the dashboard.
+        secret: true
+      profile_key:
+        type: string
+        description: The profile the customer will link accounts to.
+      logout:
+        type: boolean
+        description: Log the customer out of any existing session first.
+        optional: true
+      redirect:
+        type: string
+        description: Where to send them after linking.
+        optional: true
+      allowed_social:
+        type: array
+        description: Networks they may link.
+        optional: true
+        items: {type: string}
+      expires_in:
+        type: integer
+        description: How long the url stays valid, in seconds.
+        optional: true
+        minimum: 1
+      verify:
+        type: boolean
+        description: Verify the key pair without issuing a url.
+        optional: true
+    output:
+      description: The signed linking url and its expiry.
+      type: object
+
+  get_user_lookups:
+    title: Look up connected account details
+    description: >-
+      Read the identifiers of the profile's connected accounts -- page ids,
+      channel ids, usernames -- which per-network options often need.
+    category: profiles
+    read_only: true
+    request:
+      method: GET
+      path: /user/lookups
+    input: {}
+    output:
+      description: Per-network account identifiers.
+      type: object
+
+  get_pinterest_boards:
+    title: Get Pinterest boards
+    description: >-
+      Read the linked Pinterest account's boards with their ids. A pin needs
+      `boardId` in `pinterest_options`, and this is where it comes from.
+    category: profiles
+    read_only: true
+    request:
+      method: GET
+      path: /user/details/pinterest
+    input: {}
+    output:
+      description: The account's Pinterest boards.
+      type: object
+
+  get_whatsapp_profile:
+    title: Get the WhatsApp business profile
+    description: Read the linked WhatsApp business profile's details and phone numbers.
+    category: profiles
+    read_only: true
+    request:
+      method: GET
+      path: /user/details/whatsapp
+    input: {}
+    output:
+      description: The WhatsApp business profile.
+      type: object
+
+  # -- media ---------------------------------------------------------------
+
+  upload_media:
+    title: Upload media to the gallery
+    description: >-
+      Upload an image or video to Ayrshare's gallery and get back a url a post
+      can use. The fix for media that lives somewhere Ayrshare cannot fetch.
+      `file` is a base64 data string or a public url.
+    category: media
+    request:
+      method: POST
+      path: /media/upload
+      body:
+        file: "${file}"
+        fileName: "${file_name}"
+        description: "${description}"
+    input:
+      file:
+        type: string
+        description: >-
+          The media, as a base64 data string ("data:image/png;base64,...") or a
+          publicly reachable url for Ayrshare to fetch.
+      file_name:
+        type: string
+        description: Name to store it under.
+        optional: true
+      description:
+        type: string
+        description: Description kept with the media.
+        optional: true
+    output:
+      description: The uploaded media, including the url to use in a post.
+      type: object
+
+  get_upload_url:
+    title: Get a direct upload URL
+    description: >-
+      Request a signed url for uploading a large video straight to storage,
+      bypassing the size limit on upload_media. You then PUT the bytes to that
+      url yourself.
+    category: media
+    read_only: true
+    request:
+      method: GET
+      path: /media/uploadUrl
+      query:
+        fileName: "${file_name}"
+        contentType: "${content_type}"
+    input:
+      file_name:
+        type: string
+        description: Name of the file you are about to upload.
+        optional: true
+      content_type:
+        type: string
+        description: MIME type of the file, e.g. "video/mp4".
+        optional: true
+    output:
+      description: The signed upload url and the media url to use afterwards.
+      type: object
+
+  list_media:
+    title: List media in the gallery
+    description: Read the media already uploaded to the profile's gallery, with their urls.
+    category: media
+    read_only: true
+    request:
+      method: GET
+      path: /media
+    input: {}
+    output:
+      description: The gallery's media.
+      type: object
+
+  get_media_metadata:
+    title: Get media metadata
+    description: >-
+      Read a media file's dimensions, duration, codec and size -- what you need
+      to know whether a network will accept it.
+    category: media
+    read_only: true
+    request:
+      method: GET
+      path: /media/meta
+      query:
+        url: "${url}"
+    input:
+      url:
+        type: string
+        description: The media url to inspect.
+    output:
+      description: The media's technical metadata.
+      type: object
+
+  verify_media_url:
+    title: Check that a media URL is reachable
+    description: >-
+      Confirm Ayrshare can actually fetch a media url before a post depends on
+      it -- the usual cause of a post failing on one network only.
+    category: media
+    request:
+      method: POST
+      path: /media/urlExists
+      body:
+        url: "${url}"
+    input:
+      url:
+        type: string
+        description: The media url to check.
+    output:
+      description: Whether the url is reachable and what it returned.
+      type: object
+
+  resize_media:
+    title: Resize an image
+    description: >-
+      Resize or crop an image to a network's required aspect ratio, returning a
+      new url -- rather than having the post rejected for its dimensions.
+    category: media
+    request:
+      method: POST
+      path: /media/resize
+      body:
+        imageUrl: "${image_url}"
+        platform: "${platform}"
+        stretch: "${stretch}"
+        backgroundColor: "${background_color}"
+    input:
+      image_url:
+        type: string
+        description: The image to resize.
+      platform:
+        type: string
+        description: The network whose dimensions to fit, e.g. "instagram".
+        optional: true
+      stretch:
+        type: boolean
+        description: Stretch to fill rather than padding.
+        optional: true
+      background_color:
+        type: string
+        description: Padding colour when not stretching, as a hex value.
+        optional: true
+    output:
+      description: The resized image's url.
+      type: object
+
+  # -- comments and messages -----------------------------------------------
+
+  get_comments:
+    title: Get a post's comments
+    description: >-
+      Read the comments on a published post across the networks that expose
+      them, with each commenter and comment id.
+    category: engagement
+    read_only: true
+    request:
+      method: GET
+      path: /comments/${post_id}
+      query:
+        platforms: "${platforms}"
+        searchPlatformId: "${search_platform_id}"
+    input:
+      post_id:
+        type: string
+        description: Ayrshare's post id, or a network post id with `search_platform_id` set.
+      platforms:
+        type: array
+        description: Only these networks' comments.
+        optional: true
+        items: {type: string}
+      search_platform_id:
+        type: boolean
+        description: Treat `post_id` as the network's own post id rather than Ayrshare's.
+        optional: true
+    output:
+      description: The comments per network.
+      type: object
+
+  post_comment:
+    title: Comment on a post
+    description: >-
+      Add a comment to a published post as the connected account. This is
+      public the moment it succeeds.
+    category: engagement
+    request:
+      method: POST
+      path: /comments
+      body:
+        id: "${post_id}"
+        comment: "${comment}"
+        platforms: "${platforms}"
+        mediaUrls: "${media_urls}"
+        searchPlatformId: "${search_platform_id}"
+    input:
+      post_id:
+        type: string
+        description: Ayrshare's post id to comment on.
+      comment:
+        type: string
+        description: The comment text.
+      platforms:
+        type: array
+        description: Networks to comment on.
+        items: {type: string}
+      media_urls:
+        type: array
+        description: Media to attach, where the network allows it.
+        optional: true
+        items: {type: string}
+      search_platform_id:
+        type: boolean
+        description: Treat `post_id` as the network's own post id.
+        optional: true
+    output:
+      description: The created comment per network.
+      type: object
+
+  reply_to_comment:
+    title: Reply to a comment
+    description: >-
+      Reply to a specific comment as the connected account -- publicly visible
+      immediately.
+    category: engagement
+    request:
+      method: POST
+      path: /comments/reply/${comment_id}
+      body:
+        comment: "${comment}"
+        platforms: "${platforms}"
+    input:
+      comment_id:
+        type: string
+        description: The comment to reply to, from get_comments.
+      comment:
+        type: string
+        description: The reply text.
+      platforms:
+        type: array
+        description: Networks the comment is on.
+        optional: true
+        items: {type: string}
+    output:
+      description: The created reply.
+      type: object
+
+  delete_comments:
+    title: Delete comments
+    description: >-
+      Delete a comment, or all Ayrshare-created comments on a post. Only
+      comments the connected account owns can go.
+    category: engagement
+    destructive: true
+    request:
+      method: DELETE
+      path: /comments/${comment_id}
+      query:
+        platforms: "${platforms}"
+    input:
+      comment_id:
+        type: string
+        description: The comment id, or the post id to clear comments from.
+      platforms:
+        type: array
+        description: Networks to delete from.
+        optional: true
+        items: {type: string}
+    output:
+      description: What was deleted.
+      type: object
+
+  get_messages:
+    title: Get direct messages
+    description: >-
+      Read direct messages and conversations for one network. Requires
+      messaging to be enabled on the profile and the network to support it.
+    category: engagement
+    read_only: true
+    request:
+      method: GET
+      path: /messages/${platform}
+      query:
+        conversationId: "${conversation_id}"
+        limit: "${limit}"
+    input:
+      platform:
+        type: string
+        description: The network, e.g. "instagram" or "facebook".
+      conversation_id:
+        type: string
+        description: Only this conversation's messages.
+        optional: true
+      limit:
+        type: integer
+        description: How many messages to return.
+        optional: true
+        minimum: 1
+    output:
+      description: The conversations and their messages.
+      type: object
+
+  send_message:
+    title: Send a direct message
+    description: >-
+      Send a DM as the connected account. It reaches a real person at once, and
+      networks enforce their own messaging windows -- a reply outside the
+      window is rejected.
+    category: engagement
+    request:
+      method: POST
+      path: /messages/${platform}
+      body:
+        recipientId: "${recipient_id}"
+        message: "${message}"
+        mediaUrls: "${media_urls}"
+    input:
+      platform:
+        type: string
+        description: The network to send on, e.g. "instagram".
+      recipient_id:
+        type: string
+        description: The recipient's id on that network, from get_messages.
+      message:
+        type: string
+        description: The message text.
+      media_urls:
+        type: array
+        description: Media to attach.
+        optional: true
+        items: {type: string}
+    output:
+      description: The sent message.
+      type: object
+
+  get_auto_response:
+    title: Get the messaging auto-response
+    description: Read the configured automatic reply for incoming direct messages.
+    category: engagement
+    read_only: true
+    request:
+      method: GET
+      path: /messages/autoresponse
+    input: {}
+    output:
+      description: The auto-response configuration.
+      type: object
+
+  set_auto_response:
+    title: Set the messaging auto-response
+    description: >-
+      Configure an automatic reply to incoming DMs. Every matching message gets
+      it, so word it as something a customer should actually receive.
+    category: engagement
+    request:
+      method: POST
+      path: /messages/autoresponse
+      body:
+        platform: "${platform}"
+        autoResponse: "${auto_response}"
+        active: "${active}"
+    input:
+      platform:
+        type: string
+        description: The network the auto-response applies to.
+      auto_response:
+        type: string
+        description: The text to send automatically.
+      active:
+        type: boolean
+        description: Whether the auto-response is on.
+        optional: true
+    output:
+      description: The stored auto-response configuration.
+      type: object
+
+  # -- reviews -------------------------------------------------------------
+
+  get_reviews:
+    title: Get reviews
+    description: >-
+      Read the reviews on a linked account -- Google Business Profile,
+      Facebook -- with their ratings and text.
+    category: reviews
+    read_only: true
+    request:
+      method: GET
+      path: /reviews
+      query:
+        platform: "${platform}"
+    input:
+      platform:
+        type: string
+        description: The network to read reviews from, e.g. "gmb".
+    output:
+      description: The account's reviews.
+      type: object
+
+  get_review:
+    title: Get one review
+    description: Read a single review by id, with its rating, text and any existing reply.
+    category: reviews
+    read_only: true
+    request:
+      method: GET
+      path: /reviews/${review_id}
+      query:
+        platform: "${platform}"
+    input:
+      review_id:
+        type: string
+        description: The review's id.
+      platform:
+        type: string
+        description: The network the review is on.
+        optional: true
+    output:
+      description: The review.
+      type: object
+
+  reply_to_review:
+    title: Reply to a review
+    description: >-
+      Post a public reply to a review as the business. Visible to everyone who
+      reads the review, and networks allow only one reply per review -- posting
+      again replaces it.
+    category: reviews
+    request:
+      method: POST
+      path: /reviews
+      body:
+        platform: "${platform}"
+        reviewId: "${review_id}"
+        reply: "${reply}"
+    input:
+      platform:
+        type: string
+        description: The network the review is on, e.g. "gmb".
+      review_id:
+        type: string
+        description: The review to reply to.
+      reply:
+        type: string
+        description: The public reply text.
+    output:
+      description: The posted reply.
+      type: object
+
+  delete_review_reply:
+    title: Delete a review reply
+    description: Remove the business's reply from a review. The review itself stays.
+    category: reviews
+    destructive: true
+    request:
+      method: DELETE
+      path: /reviews
+      body:
+        platform: "${platform}"
+        reviewId: "${review_id}"
+    input:
+      platform:
+        type: string
+        description: The network the review is on.
+      review_id:
+        type: string
+        description: The review whose reply should go.
+    output:
+      description: Confirmation that the reply was deleted.
+      type: object
+
+  # -- scheduling ----------------------------------------------------------
+
+  set_auto_schedule:
+    title: Set an auto-schedule
+    description: >-
+      Define posting times a post can be dropped into with `auto_schedule`, so
+      content lands at chosen hours rather than whenever it was created.
+    category: scheduling
+    request:
+      method: POST
+      path: /auto-schedule/set
+      body:
+        schedule: "${schedule}"
+        title: "${title}"
+        setStartDate: "${start_date}"
+        daysOfWeek: "${days_of_week}"
+        excludeDates: "${exclude_dates}"
+    input:
+      schedule:
+        type: array
+        description: Times of day to publish at, as "HH:MM" strings in UTC.
+        items: {type: string}
+      title:
+        type: string
+        description: Name for this schedule. Omit to set the default one.
+        optional: true
+      start_date:
+        type: string
+        description: Date the schedule starts applying, ISO 8601.
+        optional: true
+      days_of_week:
+        type: array
+        description: Days the schedule applies to, as numbers with 1 for Monday.
+        optional: true
+        items: {type: integer}
+      exclude_dates:
+        type: array
+        description: Dates to skip, ISO 8601.
+        optional: true
+        items: {type: string}
+    output:
+      description: The stored schedule.
+      type: object
+
+  list_auto_schedules:
+    title: List auto-schedules
+    description: Read the saved posting schedules on the profile, with their times and titles.
+    category: scheduling
+    read_only: true
+    request:
+      method: GET
+      path: /auto-schedule/list
+    input: {}
+    output:
+      description: The saved schedules.
+      type: object
+
+  get_pending_auto_schedule:
+    title: List posts waiting on an auto-schedule
+    description: >-
+      Read the posts queued into an auto-schedule but not yet published -- the
+      pipeline of what is about to go out.
+    category: scheduling
+    read_only: true
+    request:
+      method: GET
+      path: /auto-schedule/pending
+    input: {}
+    output:
+      description: The pending scheduled posts.
+      type: object
+
+  delete_auto_schedule:
+    title: Delete an auto-schedule
+    description: >-
+      Delete a saved schedule. Posts already queued into it keep their times;
+      new posts can no longer reference it.
+    category: scheduling
+    destructive: true
+    request:
+      method: DELETE
+      path: /auto-schedule/delete
+      body:
+        title: "${title}"
+    input:
+      title:
+        type: string
+        description: The schedule's title. Omit to delete the default schedule.
+        optional: true
+    output:
+      description: Confirmation that the schedule was deleted.
+      type: object
+
+  # -- automations and feeds -----------------------------------------------
+
+  list_automations:
+    title: List automations
+    description: >-
+      Read the profile's automations -- rules that act on triggers such as a
+      new comment or mention, without a human in the loop.
+    category: automations
+    read_only: true
+    request:
+      method: GET
+      path: /automations
+    input: {}
+    output:
+      description: The profile's automations.
+      type: object
+
+  get_automation:
+    title: Get an automation
+    description: Read one automation's triggers, actions and current state.
+    category: automations
+    read_only: true
+    request:
+      method: GET
+      path: /automations/${automation_id}
+    input:
+      automation_id:
+        type: string
+        description: The automation's id.
+    output:
+      description: The automation.
+      type: object
+
+  create_automation:
+    title: Create an automation
+    description: >-
+      Create an automation that reacts to activity on a network -- reply to
+      comments, DM new followers. Once created it acts on real accounts without
+      further review, so keep the triggers narrow.
+    category: automations
+    request:
+      method: POST
+      path: /automations
+      body:
+        platform: "${platform}"
+        name: "${name}"
+        description: "${description}"
+        triggers: "${triggers}"
+        actions: "${actions}"
+    input:
+      platform:
+        type: string
+        description: The network the automation runs on.
+      name:
+        type: string
+        description: A name for the automation.
+      triggers:
+        type: array
+        description: What starts it, in Ayrshare's trigger shape.
+        items: {type: object}
+      actions:
+        type: array
+        description: What it does when triggered, in Ayrshare's action shape.
+        items: {type: object}
+      description:
+        type: string
+        description: What the automation is for.
+        optional: true
+    output:
+      description: The created automation.
+      type: object
+
+  update_automation:
+    title: Update an automation
+    description: >-
+      Change an automation's triggers or actions. It keeps running against the
+      new definition immediately.
+    category: automations
+    request:
+      method: PUT
+      path: /automations/${automation_id}
+      body:
+        name: "${name}"
+        description: "${description}"
+        triggers: "${triggers}"
+        actions: "${actions}"
+        active: "${active}"
+    input:
+      automation_id:
+        type: string
+        description: The automation's id.
+      name:
+        type: string
+        description: New name.
+        optional: true
+      description:
+        type: string
+        description: New description.
+        optional: true
+      triggers:
+        type: array
+        description: The complete trigger list after the update.
+        optional: true
+        items: {type: object}
+      actions:
+        type: array
+        description: The complete action list after the update.
+        optional: true
+        items: {type: object}
+      active:
+        type: boolean
+        description: Turn the automation on or off.
+        optional: true
+    output:
+      description: The updated automation.
+      type: object
+
+  get_automation_activity:
+    title: Get an automation's activity
+    description: >-
+      Read what an automation has actually done -- every trigger it fired on and
+      action it took. The first place to look when an automation misbehaves.
+    category: automations
+    read_only: true
+    request:
+      method: GET
+      path: /automations/${automation_id}/activity
+    input:
+      automation_id:
+        type: string
+        description: The automation's id.
+    output:
+      description: The automation's activity log.
+      type: object
+
+  delete_automation:
+    title: Delete an automation
+    description: Delete an automation. It stops acting immediately; its activity log goes too.
+    category: automations
+    destructive: true
+    request:
+      method: DELETE
+      path: /automations/${automation_id}
+    input:
+      automation_id:
+        type: string
+        description: The automation's id.
+    output:
+      description: Confirmation that the automation was deleted.
+      type: object
+
+  list_feeds:
+    title: List RSS feeds
+    description: >-
+      Read the RSS feeds wired to the profile, which auto-post new items to the
+      chosen networks.
+    category: automations
+    read_only: true
+    request:
+      method: GET
+      path: /feed
+    input: {}
+    output:
+      description: The registered feeds.
+      type: object
+
+  add_feed:
+    title: Add an RSS feed
+    description: >-
+      Wire an RSS feed to the profile so new items publish automatically. Every
+      new item becomes a live post, so point it at a feed you control.
+    category: automations
+    request:
+      method: POST
+      path: /feed
+      body:
+        url: "${url}"
+        platforms: "${platforms}"
+        useFirstImage: "${use_first_image}"
+        autoHashtag: "${auto_hashtag}"
+        type: "${type}"
+    input:
+      url:
+        type: string
+        description: The feed's url.
+      platforms:
+        type: array
+        description: Networks new items should publish to.
+        optional: true
+        items: {type: string}
+      use_first_image:
+        type: boolean
+        description: Attach the item's first image to the post.
+        optional: true
+      auto_hashtag:
+        type: boolean
+        description: Have Ayrshare add hashtags to each item.
+        optional: true
+      type:
+        type: string
+        description: The feed type, e.g. "rss".
+        optional: true
+    output:
+      description: The registered feed.
+      type: object
+
+  update_feed:
+    title: Update an RSS feed
+    description: Change a feed's url, target networks or posting options.
+    category: automations
+    request:
+      method: PUT
+      path: /feed
+      body:
+        id: "${feed_id}"
+        url: "${url}"
+        platforms: "${platforms}"
+        useFirstImage: "${use_first_image}"
+        autoHashtag: "${auto_hashtag}"
+    input:
+      feed_id:
+        type: string
+        description: The feed's id, from list_feeds.
+      url:
+        type: string
+        description: New feed url.
+        optional: true
+      platforms:
+        type: array
+        description: The complete network list after the update.
+        optional: true
+        items: {type: string}
+      use_first_image:
+        type: boolean
+        description: Attach the item's first image.
+        optional: true
+      auto_hashtag:
+        type: boolean
+        description: Add hashtags automatically.
+        optional: true
+    output:
+      description: The updated feed.
+      type: object
+
+  delete_feed:
+    title: Delete an RSS feed
+    description: >-
+      Stop auto-posting from a feed. Items already published stay where they
+      are.
+    category: automations
+    destructive: true
+    request:
+      method: DELETE
+      path: /feed
+      body:
+        id: "${feed_id}"
+    input:
+      feed_id:
+        type: string
+        description: The feed's id.
+    output:
+      description: Confirmation that the feed was removed.
+      type: object
+
+  # -- hashtags, links, generation -----------------------------------------
+
+  recommend_hashtags:
+    title: Recommend hashtags for a keyword
+    description: >-
+      Get hashtag suggestions for a keyword, with popularity data -- the input
+      to a post's tags rather than guessing.
+    category: content
+    read_only: true
+    request:
+      method: GET
+      path: /hashtags/recommend
+      query:
+        keyword: "${keyword}"
+    input:
+      keyword:
+        type: string
+        description: The keyword to get hashtags for.
+    output:
+      description: Recommended hashtags with their metrics.
+      type: object
+
+  search_hashtags:
+    title: Search hashtags
+    description: Search for hashtags matching a term, with usage counts.
+    category: content
+    read_only: true
+    request:
+      method: GET
+      path: /hashtags/search
+      query:
+        keyword: "${keyword}"
+    input:
+      keyword:
+        type: string
+        description: The term to search for.
+    output:
+      description: Matching hashtags.
+      type: object
+
+  check_banned_hashtags:
+    title: Check for banned hashtags
+    description: >-
+      Check hashtags against the networks' banned lists. A banned tag can
+      suppress a whole post's reach, which is why this exists.
+    category: content
+    read_only: true
+    request:
+      method: GET
+      path: /hashtags/banned
+      query:
+        hashtags: "${hashtags}"
+    input:
+      hashtags:
+        type: string
+        description: Comma-separated hashtags to check, without the "#".
+    output:
+      description: Which of the hashtags are banned or restricted.
+      type: object
+
+  auto_hashtags:
+    title: Add hashtags to a post automatically
+    description: >-
+      Have Ayrshare pick and append hashtags to a piece of text, returning the
+      rewritten post rather than publishing it.
+    category: content
+    request:
+      method: POST
+      path: /hashtags/auto
+      body:
+        post: "${post}"
+        position: "${position}"
+        max: "${max}"
+    input:
+      post:
+        type: string
+        description: The post text to add hashtags to.
+      position:
+        type: string
+        description: Where to place them, e.g. "auto" or "end".
+        optional: true
+      max:
+        type: integer
+        description: Most hashtags to add.
+        optional: true
+        minimum: 1
+    output:
+      description: The post text with hashtags added.
+      type: object
+
+  generate_post_text:
+    title: Generate post text
+    description: >-
+      Have Ayrshare write post copy from a prompt or description, optionally
+      with hashtags and emoji. Returns text -- publishing it is a separate call.
+    category: content
+    request:
+      method: POST
+      path: /generate/post
+      body:
+        text: "${text}"
+        mediaUrls: "${media_urls}"
+        hashtags: "${hashtags}"
+        emojis: "${emojis}"
+        twitter: "${twitter}"
+    input:
+      text:
+        type: string
+        description: What the post should be about.
+      media_urls:
+        type: array
+        description: Media to take into account when writing.
+        optional: true
+        items: {type: string}
+      hashtags:
+        type: boolean
+        description: Include hashtags in the generated text.
+        optional: true
+      emojis:
+        type: boolean
+        description: Include emoji.
+        optional: true
+      twitter:
+        type: boolean
+        description: Keep the text within X/Twitter's limit.
+        optional: true
+    output:
+      description: The generated post text.
+      type: object
+
+  rewrite_post:
+    title: Rewrite post text
+    description: >-
+      Rewrite existing copy -- shorter, different tone, another network's
+      conventions -- without publishing it.
+    category: content
+    request:
+      method: POST
+      path: /generate/rewrite
+      body:
+        post: "${post}"
+        rewrite: "${instruction}"
+    input:
+      post:
+        type: string
+        description: The text to rewrite.
+      instruction:
+        type: string
+        description: How to rewrite it, e.g. "shorter and more formal".
+        optional: true
+    output:
+      description: The rewritten text.
+      type: object
+
+  translate_post:
+    title: Translate post text
+    description: Translate post copy into another language, returning the translation.
+    category: content
+    request:
+      method: POST
+      path: /generate/translate
+      body:
+        text: "${text}"
+        lang: "${language}"
+    input:
+      text:
+        type: string
+        description: The text to translate.
+      language:
+        type: string
+        description: Target language as an ISO code, e.g. "es" or "fr".
+    output:
+      description: The translated text.
+      type: object
+
+  generate_alt_text:
+    title: Generate image alt text
+    description: >-
+      Produce accessible alt text for an image, which several networks accept
+      on a post's media.
+    category: content
+    request:
+      method: POST
+      path: /generate/altText
+      body:
+        url: "${url}"
+    input:
+      url:
+        type: string
+        description: The image url to describe.
+    output:
+      description: The generated alt text.
+      type: object
+
+  analyse_sentiment:
+    title: Analyse sentiment
+    description: >-
+      Score text for sentiment -- useful on incoming comments and reviews
+      before deciding how to reply.
+    category: content
+    request:
+      method: POST
+      path: /generate/sentiment
+      body:
+        text: "${text}"
+    input:
+      text:
+        type: string
+        description: The text to score.
+    output:
+      description: The sentiment score and label.
+      type: object
+
+  transcribe_video:
+    title: Transcribe a video
+    description: >-
+      Transcribe a video's audio to text, which is where captions and subtitles
+      for a social video come from.
+    category: content
+    request:
+      method: POST
+      path: /generate/transcription
+      body:
+        url: "${url}"
+    input:
+      url:
+        type: string
+        description: The video url to transcribe.
+    output:
+      description: The transcription.
+      type: object
+
+  create_short_link:
+    title: Create a short link
+    description: >-
+      Shorten a url through Ayrshare so its clicks are tracked, with optional
+      UTM parameters attached.
+    category: content
+    request:
+      method: POST
+      path: /links
+      body:
+        url: "${url}"
+        utmId: "${utm_id}"
+        utmSource: "${utm_source}"
+        utmMedium: "${utm_medium}"
+        utmCampaign: "${utm_campaign}"
+        utmTerm: "${utm_term}"
+        utmContent: "${utm_content}"
+    input:
+      url:
+        type: string
+        description: The url to shorten.
+      utm_id:
+        type: string
+        description: utm_id to append.
+        optional: true
+      utm_source:
+        type: string
+        description: utm_source to append.
+        optional: true
+      utm_medium:
+        type: string
+        description: utm_medium to append.
+        optional: true
+      utm_campaign:
+        type: string
+        description: utm_campaign to append.
+        optional: true
+      utm_term:
+        type: string
+        description: utm_term to append.
+        optional: true
+      utm_content:
+        type: string
+        description: utm_content to append.
+        optional: true
+    output:
+      description: The short link.
+      type: object
+
+  get_link_analytics:
+    title: Get short link analytics
+    description: Read click counts and referrers for the profile's short links.
+    category: content
+    read_only: true
+    request:
+      method: GET
+      path: /links
+      query:
+        id: "${link_id}"
+        startDate: "${start_date}"
+        endDate: "${end_date}"
+    input:
+      link_id:
+        type: string
+        description: Only this short link's analytics.
+        optional: true
+      start_date:
+        type: string
+        description: Only clicks on or after this date.
+        optional: true
+      end_date:
+        type: string
+        description: Only clicks on or before this date.
+        optional: true
+    output:
+      description: Click analytics for the short links.
+      type: object
+
+  update_short_link:
+    title: Update a short link
+    description: >-
+      Point an existing short link at a different destination -- the link
+      itself keeps working, so anything already published still resolves.
+    category: content
+    request:
+      method: PUT
+      path: /links/${link_id}
+      body:
+        url: "${url}"
+    input:
+      link_id:
+        type: string
+        description: The short link's id.
+      url:
+        type: string
+        description: The new destination url.
+    output:
+      description: The updated short link.
+      type: object
+
+  # -- listening -----------------------------------------------------------
+
+  search_tweets:
+    title: Search X/Twitter for a keyword
+    description: >-
+      Search recent X/Twitter posts for a keyword -- social listening rather
+      than posting. Subject to X's own rate limits.
+    category: listening
+    read_only: true
+    request:
+      method: GET
+      path: /listen/keyword
+      query:
+        keyword: "${keyword}"
+        limit: "${limit}"
+    input:
+      keyword:
+        type: string
+        description: The term to search for.
+      limit:
+        type: integer
+        description: How many results to return.
+        optional: true
+        minimum: 1
+    output:
+      description: The matching posts.
+      type: object
+
+  search_facebook_pages:
+    title: Search Facebook pages
+    description: Find Facebook pages by name -- the lookup before monitoring a competitor's page.
+    category: listening
+    read_only: true
+    request:
+      method: GET
+      path: /brand/search/facebook
+      query:
+        search: "${search}"
+    input:
+      search:
+        type: string
+        description: The page name to search for.
+    output:
+      description: The matching pages.
+      type: object
+
+  search_linkedin:
+    title: Search LinkedIn organisations
+    description: Find LinkedIn organisations by name, with their ids.
+    category: listening
+    read_only: true
+    request:
+      method: GET
+      path: /brand/search/linkedin
+      query:
+        search: "${search}"
+    input:
+      search:
+        type: string
+        description: The organisation name to search for.
+    output:
+      description: The matching organisations.
+      type: object
+
+  get_brand_by_user:
+    title: Get public brand data for a user
+    description: >-
+      Read public profile and engagement data for a named social account --
+      competitive benchmarking rather than your own analytics.
+    category: listening
+    read_only: true
+    request:
+      method: GET
+      path: /brand/byUser
+      query:
+        platform: "${platform}"
+        user: "${user}"
+    input:
+      platform:
+        type: string
+        description: The network, e.g. "instagram".
+      user:
+        type: string
+        description: The account's username or handle.
+    output:
+      description: The account's public brand data.
+      type: object
+
+  # -- webhooks ------------------------------------------------------------
+
+  list_webhooks:
+    title: List webhooks
+    description: >-
+      Read the registered webhooks and the actions each listens for. Set
+      `all_webhooks` to include every user profile's, not just this one's.
+    category: webhooks
+    read_only: true
+    request:
+      method: GET
+      path: /hook/webhook
+      query:
+        allWebhooks: "${all_webhooks}"
+    input:
+      all_webhooks:
+        type: boolean
+        description: Include webhooks registered on every user profile of the account.
+        optional: true
+    output:
+      description: The registered webhooks per action.
+      type: object
+
+  register_webhook:
+    title: Register a webhook
+    description: >-
+      Subscribe an HTTPS endpoint to an Ayrshare action -- "scheduled" for
+      scheduled-post results, "social" for account changes, plus feed, batch,
+      messages, mentions, comments, automations and suspended. `secret` enables
+      HMAC signing, which you should verify on receipt.
+    category: webhooks
+    request:
+      method: POST
+      path: /hook/webhook
+      body:
+        action: "${action}"
+        url: "${url}"
+        secret: "${secret}"
+    input:
+      action:
+        type: string
+        description: Which action to subscribe to.
+        enum: [feed, social, scheduled, batch, messages, mentions, comments, automations, suspended]
+      url:
+        type: string
+        description: HTTPS endpoint Ayrshare should POST to.
+      secret:
+        type: string
+        description: Shared secret used to HMAC-sign each delivery.
+        optional: true
+        secret: true
+    output:
+      description: The registered webhook.
+      type: object
+
+  unregister_webhook:
+    title: Unregister a webhook
+    description: >-
+      Remove a webhook subscription. Deliveries stop at once and missed events
+      are not replayed.
+    category: webhooks
+    destructive: true
+    request:
+      method: DELETE
+      path: /hook/webhook
+      body:
+        action: "${action}"
+    input:
+      action:
+        type: string
+        description: The action whose webhook should be removed.
+        enum: [feed, social, scheduled, batch, messages, mentions, comments, automations, suspended]
+    output:
+      description: Confirmation that the webhook was removed.
+      type: object
+
+  get_webhook_history:
+    title: Get webhook delivery history
+    description: >-
+      Read recent webhook deliveries and their responses -- the place to look
+      when your endpoint says it never received an event.
+    category: webhooks
+    read_only: true
+    request:
+      method: GET
+      path: /hook/history
+      query:
+        action: "${action}"
+        limit: "${limit}"
+    input:
+      action:
+        type: string
+        description: Only deliveries for this action.
+        optional: true
+      limit:
+        type: integer
+        description: How many deliveries to return.
+        optional: true
+        minimum: 1
+    output:
+      description: The delivery history.
+      type: object
+
+  rotate_webhook_secret:
+    title: Rotate the webhook signing secret
+    description: >-
+      Issue a new HMAC signing secret for webhooks. Deliveries are signed with
+      the new secret immediately, so update your verifier at the same time.
+    category: webhooks
+    request:
+      method: POST
+      path: /hook/webhook/secret
+    input: {}
+    output:
+      description: The new signing secret.
+      type: object
+
+  # -- network utilities ---------------------------------------------------
+
+  get_youtube_categories:
+    title: Get YouTube categories
+    description: >-
+      Read YouTube's video categories for a country, whose ids a post's
+      `youtube_options` can set.
+    category: utilities
+    read_only: true
+    request:
+      method: GET
+      path: /post/youtubeCategories/${country_code}
+    input:
+      country_code:
+        type: string
+        description: Two-letter country code, e.g. "US".
+        example: US
+    output:
+      description: The available YouTube categories.
+      type: object
+
+  get_reddit_flair:
+    title: Get a subreddit's flairs
+    description: >-
+      Read the flairs a subreddit offers. Many subreddits reject posts without
+      one, so this is a prerequisite for Reddit posting.
+    category: utilities
+    read_only: true
+    request:
+      method: GET
+      path: /post/redditFlair/${subreddit}
+    input:
+      subreddit:
+        type: string
+        description: The subreddit name, without "r/".
+    output:
+      description: The subreddit's available flairs.
+      type: object
+
+  get_instagram_collaborators:
+    title: Check Instagram collaborator eligibility
+    description: >-
+      Check whether accounts can be tagged as collaborators on an Instagram
+      post -- an invitation that fails silently if the account does not allow it.
+    category: utilities
+    read_only: true
+    request:
+      method: GET
+      path: /post/collaborators/${username}
+    input:
+      username:
+        type: string
+        description: The Instagram username to check.
+    output:
+      description: Whether that account can be added as a collaborator.
+      type: object
+
+  set_youtube_watermark:
+    title: Set a YouTube channel watermark
+    description: Apply a branding watermark image to the linked YouTube channel's videos.
+    category: utilities
+    request:
+      method: POST
+      path: /post/youTubeWatermark
+      body:
+        watermarkUrl: "${watermark_url}"
+    input:
+      watermark_url:
+        type: string
+        description: Publicly reachable image url for the watermark.
+    output:
+      description: Confirmation that the watermark was set.
+      type: object
+
+  get_ad_accounts:
+    title: List Facebook ad accounts
+    description: >-
+      Read the Facebook ad accounts available to the linked page, whose ids
+      boost_post needs.
+    category: ads
+    read_only: true
+    request:
+      method: GET
+      path: /ads/facebook/accounts
+    input: {}
+    output:
+      description: The available ad accounts.
+      type: object
+
+  boost_post:
+    title: Boost a Facebook post
+    description: >-
+      Turn a published Facebook post into a paid ad. **This spends money** --
+      the budget and schedule you pass are charged to the ad account -- and it
+      cannot be undone, only paused with update_boosted_ad.
+    category: ads
+    destructive: true
+    request:
+      method: POST
+      path: /ads/facebook/boost
+      body:
+        id: "${post_id}"
+        adAccountId: "${ad_account_id}"
+        budget: "${budget}"
+        durationDays: "${duration_days}"
+        targeting: "${targeting}"
+        objective: "${objective}"
+    input:
+      post_id:
+        type: string
+        description: The published post to boost.
+      ad_account_id:
+        type: string
+        description: The ad account that pays, from get_ad_accounts.
+      budget:
+        type: number
+        description: Total budget in the ad account's currency.
+        minimum: 0
+      duration_days:
+        type: integer
+        description: How many days to run the boost for.
+        optional: true
+        minimum: 1
+      targeting:
+        type: object
+        description: Audience targeting -- geography, interests, age -- in Facebook's shape.
+        optional: true
+      objective:
+        type: string
+        description: Campaign objective, e.g. "POST_ENGAGEMENT".
+        optional: true
+    output:
+      description: The created ad, with its id and status.
+      type: object
+
+  list_boosted_ads:
+    title: List boosted ads
+    description: Read the boosts created through Ayrshare, with their status and spend.
+    category: ads
+    read_only: true
+    request:
+      method: GET
+      path: /ads/facebook/ads
+      query:
+        adAccountId: "${ad_account_id}"
+    input:
+      ad_account_id:
+        type: string
+        description: Only this ad account's boosts.
+        optional: true
+    output:
+      description: The boosted ads.
+      type: object
+
+  update_boosted_ad:
+    title: Update or pause a boosted ad
+    description: >-
+      Change a boost's status or budget -- setting the status to paused is how
+      you stop spend on a live ad.
+    category: ads
+    request:
+      method: PUT
+      path: /ads/facebook/ads
+      body:
+        adId: "${ad_id}"
+        status: "${status}"
+        budget: "${budget}"
+    input:
+      ad_id:
+        type: string
+        description: The ad's id, from list_boosted_ads.
+      status:
+        type: string
+        description: New status, e.g. "PAUSED" or "ACTIVE".
+        optional: true
+      budget:
+        type: number
+        description: New total budget.
+        optional: true
+        minimum: 0
+    output:
+      description: The updated ad.
+      type: object
+
+  get_ad_spend:
+    title: Get ad spend history
+    description: Read what boosts have cost -- spend and results per ad over time.
+    category: ads
+    read_only: true
+    request:
+      method: GET
+      path: /ads/facebook/spend
+      query:
+        adAccountId: "${ad_account_id}"
+        startDate: "${start_date}"
+        endDate: "${end_date}"
+    input:
+      ad_account_id:
+        type: string
+        description: The ad account to report on.
+        optional: true
+      start_date:
+        type: string
+        description: Only spend on or after this date.
+        optional: true
+      end_date:
+        type: string
+        description: Only spend on or before this date.
+        optional: true
+    output:
+      description: Spend and performance per ad.
+      type: object
+
+  search_ad_interests:
+    title: Search Facebook ad interests
+    description: >-
+      Find interest targeting options by name, with the ids a boost's
+      `targeting` object takes.
+    category: ads
+    read_only: true
+    request:
+      method: GET
+      path: /ads/facebook/interests
+      query:
+        search: "${search}"
+    input:
+      search:
+        type: string
+        description: The interest to search for.
+    output:
+      description: Matching interests and their ids.
+      type: object
+
+  search_ad_cities:
+    title: Search Facebook ad cities
+    description: Find city targeting keys by name, for a boost's geographic targeting.
+    category: ads
+    read_only: true
+    request:
+      method: GET
+      path: /ads/facebook/cities
+      query:
+        search: "${search}"
+    input:
+      search:
+        type: string
+        description: The city to search for.
+    output:
+      description: Matching cities and their targeting keys.
+      type: object
+
+  search_ad_regions:
+    title: Search Facebook ad regions
+    description: Find region targeting keys by name, for a boost's geographic targeting.
+    category: ads
+    read_only: true
+    request:
+      method: GET
+      path: /ads/facebook/regions
+      query:
+        search: "${search}"
+    input:
+      search:
+        type: string
+        description: The region to search for.
+    output:
+      description: Matching regions and their targeting keys.
+      type: object

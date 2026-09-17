@@ -1,384 +1,481 @@
-# Akkio tools -- GENERATED from the provider's OpenAPI specification.
+# Akkio tools -- datasets, predictive models, model training, Chat Explore (chat
+# with your data) and projects.
 #
-#   source: https://api.akkio.com/openapi.json
+# Akkio's public API comes in two generations, and both are here -- 18 tools in
+# all, the whole documented surface:
 #
-# Every path, method, parameter and description below comes from that spec.
-# Nothing here is inferred: operations the spec did not describe well enough to
-# build a usable tool from were skipped rather than guessed at.
+#   * **the legacy routes** /v1/datasets and /v1/models, documented in Akkio's
+#     Datasets and Models endpoint pages, take the key as an api_key parameter;
+#   * **the current routes** under /api/v1 (training, Chat Explore, projects)
+#     come from Akkio's own OpenAPI description at
+#     https://api.akkio.com/api/v1/api.yaml and take the key in an X-API-Key
+#     header. These tools set base_url_override to https://api.akkio.com.
 #
-# This is a starting point, not a hand-authored pack. It has no scope
-# annotations, and it covers a representative slice of the API rather than the
-# whole surface. Replacing it with a researched pack is an improvement -- delete
-# the `generated` flag once you do.
+# The connection sends the key both ways (X-API-Key header and api_key query
+# parameter), so every tool authenticates without taking the key as an
+# argument. The API is in beta.
+#
+# Training and Chat Explore are asynchronous: submit, poll the status tool
+# until status is SUCCEEDED (or FAILED), then read the result. Adding rows to
+# a new dataset for the first time fixes that dataset's schema.
+#
+# Not covered: /api/v1/api.yaml and /api/v1/docs, which serve the specification
+# itself.
+#
+# Docs: https://docs.akkio.com/akkio-docs/rest-api/api-introduction
 
 connector_id: akkio
 display_name: Akkio
-docs_url: https://api.akkio.com/openapi.json
-generated: true
-generated_from: https://api.akkio.com/openapi.json
+docs_url: https://docs.akkio.com/akkio-docs/rest-api/api-introduction
 tools:
-  request_route_get_get:
-    title: Request Route Get
-    description: Request Route Get Calls GET / on the provider's API.
-    category: api
+
+  list_models:
+    title: List models
+    description: >-
+      List every trained model in the organization with its id and name.
+    category: models
+    read_only: true
     request:
       method: GET
-      path: /
+      path: /models
     input: {}
     output:
-      description: Successful Response
+      description: status and models [{id, name}].
       type: object
+
+  make_prediction:
+    title: Make predictions
+    description: >-
+      Run rows through a trained model and get a prediction for each, with class probabilities
+      for classification models.
+    category: models
     read_only: true
-  route_get_api_get:
-    title: Api Route Get
-    description: Api Route Get Calls GET /api on the provider's API.
-    category: api
-    request:
-      method: GET
-      path: /api
-    input: {}
-    output:
-      description: Successful Response
-      type: object
-    read_only: true
-  handle_update_audience_audience_post:
-    title: Controller Handle Update Audience
-    description: Controller Handle Update Audience Update an audience Calls POST /audience on the provider's
-      API.
-    category: audience
     request:
       method: POST
-      path: /audience
-      body:
-        parsed_json: ${parsed_json}
-        audience: ${audience}
-    input:
-      parsed_json:
-        type: object
-        description: The JSON SQL to update the audience with
-      audience:
-        type: object
-        description: The audience field of the request body.
-    output:
-      description: Successful Response
-      type: object
-  create_chat_explore_chart_update:
-    title: Chat Explore Chart Update Route
-    description: Chat Explore Chart Update Route Refreshes data for a given chartid by re-running the
-      most recent code we find in the associated message chain. Calls POST /chat-explore-chart-update
-      on the provider's API.
-    category: chat_explore_chart_update
-    request:
-      method: POST
-      path: /chat-explore-chart-update
-      body:
-        chart_id: ${chart_id}
-    input:
-      chart_id:
-        type: string
-        description: The chart_id field of the request body.
-    output:
-      description: Successful Response
-      type: object
-  create_chat_explore_ratings:
-    title: Chat Explore Ratings Route
-    description: Chat Explore Ratings Route Calls POST /chat-explore-ratings on the provider's API.
-    category: chat_explore_ratings
-    request:
-      method: POST
-      path: /chat-explore-ratings
+      path: /models
       body:
         id: ${id}
-        user_id: ${user_id}
-        dataset_id: ${dataset_id}
-        messages: ${messages}
-        message_index: ${message_index}
-        rating: ${rating}
-        rating_source: ${rating_source}
-        chart_data: ${chart_data}
-        feedback: ${feedback}
-        audience_id: ${audience_id}
-        datasource_id: ${datasource_id}
-        team_id: ${team_id}
+        data: ${data}
     input:
       id:
         type: string
-        description: ID of this object.
-        optional: true
-      user_id:
-        type: string
-        description: The user_id field of the request body.
-        optional: true
-      dataset_id:
-        type: string
-        description: The dataset_id field of the request body.
-      messages:
+        description: Id of the trained model to predict with.
+      data:
         type: array
-        description: The messages field of the request body.
+        description: 'Rows to predict, each an object of field name to value, e.g. [{"Age":
+          58}].'
         items:
           type: object
-      message_index:
-        type: integer
-        description: The message_index field of the request body.
-      rating:
-        type: string
-        description: The rating field of the request body.
-        enum:
-        - good
-        - bad
-      rating_source:
-        type: string
-        description: The rating_source field of the request body.
-        optional: true
-      chart_data:
-        type: string
-        description: The chart_data field of the request body.
-        optional: true
-      feedback:
-        type: string
-        description: The feedback field of the request body.
-        optional: true
-      audience_id:
-        type: string
-        description: The audience_id field of the request body.
-        optional: true
-      datasource_id:
-        type: string
-        description: The datasource_id field of the request body.
-        optional: true
-      team_id:
-        type: string
-        description: The team_id field of the request body.
-        optional: true
     output:
-      description: Successful Response
+      description: status and predictions, one per row.
       type: object
-  create_chat_explore_suggestions:
-    title: Chat Explore Suggestions Route
-    description: Chat Explore Suggestions Route Calls POST /chat-explore-suggestions on the provider's
-      API.
-    category: chat_explore_suggestions
+
+  delete_model:
+    title: Delete a model
+    description: >-
+      Delete a trained model permanently; anything calling it stops working.
+    category: models
+    destructive: true
     request:
-      method: POST
-      path: /chat-explore-suggestions
-      body:
-        source_type: ${source_type}
-        dataset_id: ${dataset_id}
-        datasource_id: ${datasource_id}
-        use_cache: ${use_cache}
-    input:
-      source_type:
-        type: string
-        description: Keep in sync with the DatasourceDatasetInfo.type in the frontend project-v2/shared/chat-explore/shared-chat-explore.ts
-        optional: true
-        enum:
-        - dataset
-        - datasource
-      dataset_id:
-        type: string
-        description: The dataset_id field of the request body.
-        optional: true
-      datasource_id:
-        type: string
-        description: The datasource_id field of the request body.
-        optional: true
-      use_cache:
-        type: boolean
-        description: The use_cache field of the request body.
-        optional: true
-    output:
-      description: Successful Response
-      type: object
-  create_cluster_suggestions:
-    title: Handle Cluster Suggestions
-    description: Handle Cluster Suggestions Calls POST /cluster-suggestions on the provider's API.
-    category: cluster_suggestions
-    request:
-      method: POST
-      path: /cluster-suggestions
-      body:
-        datasetId: ${dataset_id}
-        guidance: ${guidance}
-        suggestions: ${suggestions}
-    input:
-      dataset_id:
-        type: string
-        description: ID of the dataset to get clustering suggestions for
-      guidance:
-        type: string
-        description: Optionally provided guidance as to what clusters the user wants to create.
-        optional: true
-      suggestions:
-        type: array
-        description: Existing suggestions we should use as additional context in order to generate the
-          rest.
-        optional: true
-        items:
-          type: string
-    output:
-      description: Successful Response
-      type: object
-  dashboard_name_dashboard_name_post:
-    title: Controller Dashboard Name
-    description: Controller Dashboard Name Calls POST /dashboard-name on the provider's API.
-    category: dashboard_name
-    request:
-      method: POST
-      path: /dashboard-name
-      body:
-        chart_names: ${chart_names}
-    input:
-      chart_names:
-        type: array
-        description: The chart_names field of the request body.
-        items:
-          type: string
-    output:
-      description: Successful Response
-      type: object
-  dataset_snapshot_dataset_snapshot_post:
-    title: Controller Dataset Snapshot
-    description: Controller Dataset Snapshot Dataset snapshot, used to get a preview of the data. Often
-      used by the frontend as a proxy for whether a parse is through or not as well. Calls POST /dataset-snapshot
-      on the provider's API.
-    category: dataset_snapshot
-    request:
-      method: POST
-      path: /dataset-snapshot
-      body:
-        datasetId: ${dataset_id}
-        filter: ${filter}
-        sort: ${sort}
-        make_download: ${make_download}
-        regenerate: ${regenerate}
-        projectId: ${project_id}
-        templateId: ${template_id}
-    input:
-      dataset_id:
-        type: string
-        description: The ID of the dataset you'd like to retrieve the snapshot of.
-        optional: true
-      filter:
-        type: object
-        description: The filter field of the request body.
-        optional: true
-      sort:
-        type: object
-        description: The sort field of the request body.
-        optional: true
-      make_download:
-        type: boolean
-        description: The make_download field of the request body.
-        optional: true
-      regenerate:
-        type: boolean
-        description: The regenerate field of the request body.
-        optional: true
-      project_id:
-        type: string
-        description: The projectId field of the request body.
-        optional: true
-      template_id:
-        type: string
-        description: The templateId field of the request body.
-        optional: true
-    output:
-      description: Successful Response
-      type: object
-  get_datasource_by_org_datasources_get:
-    title: Get Datasource By Org
-    description: Get Datasource By Org Retrieve all datasource records for the user's organization. Calls
-      GET /datasources on the provider's API.
-    category: datasources
-    request:
-      method: GET
-      path: /datasources
+      method: DELETE
+      path: /models
       query:
-        org_id: ${org_id}
-    input:
-      org_id:
-        type: string
-        description: The org_id parameter.
-        optional: true
-    output:
-      description: Successful Response
-      type: object
-    read_only: true
-  create_new_datasource_datasources_post:
-    title: Create New Datasource
-    description: Create New Datasource Creates a new datasource. Calls POST /datasources on the provider's
-      API.
-    category: datasources
-    request:
-      method: POST
-      path: /datasources
-      body:
-        _owner: ${owner}
-        _org: ${org}
         id: ${id}
-        name: ${name}
-        type: ${type}
-        transient_view_sql: ${transient_view_sql}
-        creds: ${creds}
-        config: ${config}
     input:
-      owner:
-        type: string
-        description: ID of user that created this entry.
-      org:
-        type: string
-        description: ID of user's active organization when creating this entry.
       id:
         type: string
-        description: ID of this entry.
-        optional: true
-      name:
-        type: string
-        description: The name field of the request body.
-      type:
-        type: string
-        description: The type field of the request body.
-        enum:
-        - bigquery
-        - s3
-        - duckdb
-        - snowflake
-        - databricks
-        - databricks_warehouse
-        - databricks_volume
-      transient_view_sql:
-        type: string
-        description: The transient_view_sql field of the request body.
-        optional: true
-      creds:
-        type: object
-        description: The creds field of the request body.
-      config:
-        type: object
-        description: The config field of the request body.
+        description: Id of the model to delete.
     output:
-      description: Successful Response
+      description: status.
       type: object
-  get_generate_document_upload_url:
-    title: Get Document Signed Upload Url
-    description: Get Document Signed Upload Url Generate a temporary signed upload URL used by the frontend
-      to upload document directly to s3. Calls GET /generate_document_upload_url on the provider's API.
-    category: generate_document_upload_url
+
+  list_datasets:
+    title: List datasets
+    description: >-
+      List every dataset in the organization with its id and name.
+    category: datasets
+    read_only: true
     request:
       method: GET
-      path: /generate_document_upload_url
+      path: /datasets
+    input: {}
+    output:
+      description: status and datasets [{id, name}].
+      type: object
+
+  get_dataset:
+    title: Get a dataset
+    description: >-
+      Read one dataset's name, row count and fields with their types.
+    category: datasets
+    read_only: true
+    request:
+      method: GET
+      path: /datasets
       query:
-        file_path: ${file_path}
-        content_type: ${content_type}
+        id: ${id}
     input:
-      file_path:
+      id:
         type: string
-        description: The file_path parameter.
-      content_type:
+        description: Dataset id.
+    output:
+      description: status, name, rows and fields.
+      type: object
+
+  create_dataset:
+    title: Create a dataset
+    description: >-
+      Create an empty dataset; fill it with add_rows_to_dataset.
+    category: datasets
+    request:
+      method: POST
+      path: /datasets
+      body:
+        name: ${name}
+    input:
+      name:
         type: string
-        description: The content_type parameter.
+        description: Name for the new, empty dataset.
+    output:
+      description: status, dataset_id and dataset_name.
+      type: object
+
+  add_rows_to_dataset:
+    title: Add rows to a dataset
+    description: >-
+      Append rows to a dataset. The first rows ever added define its schema, so send consistent
+      field names and types.
+    category: datasets
+    request:
+      method: POST
+      path: /datasets
+      body:
+        id: ${id}
+        rows: ${rows}
+    input:
+      id:
+        type: string
+        description: Id of the dataset to append to.
+      rows:
+        type: array
+        description: Rows to add, each an object of field name to value. The first rows ever
+          added define the dataset's schema.
+        items:
+          type: object
+    output:
+      description: status.
+      type: object
+
+  delete_dataset:
+    title: Delete a dataset
+    description: >-
+      Delete a dataset permanently, along with its rows.
+    category: datasets
+    destructive: true
+    request:
+      method: DELETE
+      path: /datasets
+      query:
+        id: ${id}
+    input:
+      id:
+        type: string
+        description: Id of the dataset to delete.
+    output:
+      description: status.
+      type: object
+
+  train_model:
+    title: Train a model
+    description: >-
+      Start training a model on a dataset to predict one or more fields. Returns a task id;
+      poll get_training_status, then read get_training_result.
+    category: training
+    request:
+      method: POST
+      path: /api/v1/models/train/new
+      body:
+        dataset_id: ${dataset_id}
+        predict_fields: ${predict_fields}
+        duration: ${duration}
+        ignore_fields: ${ignore_fields}
+        extra_attention: ${extra_attention}
+        force: ${force}
+      base_url_override: https://api.akkio.com
+    input:
+      dataset_id:
+        type: string
+        description: Dataset to train on.
+      predict_fields:
+        type: array
+        description: Field names to predict, case sensitive.
+        items:
+          type: string
+      duration:
+        type: integer
+        description: 'Training effort: 10 (fastest), 60 (high quality), 300 (higher quality)
+          or 1800 (production).'
+      ignore_fields:
+        type: array
+        description: Field names to leave out of training, case sensitive.
+        optional: true
+        items:
+          type: string
+      extra_attention:
+        type: boolean
+        description: True to help the model predict rare cases.
+        optional: true
+      force:
+        type: boolean
+        description: True to train a new model even if one already exists for this dataset.
         optional: true
     output:
-      description: Successful Response
+      description: task_id.
       type: object
+
+  get_training_status:
+    title: Get training status
+    description: >-
+      Check a training task: PENDING, IN_PROGRESS (with an estimate), SUCCEEDED or FAILED.
+    category: training
     read_only: true
+    request:
+      method: GET
+      path: /api/v1/models/train/${task_id}/status
+      base_url_override: https://api.akkio.com
+    input:
+      task_id:
+        type: string
+        description: Task id returned when the task was submitted.
+    output:
+      description: status and metadata.
+      type: object
+
+  get_training_result:
+    title: Get training result
+    description: >-
+      Read a finished training task's result: the model id, field importance and accuracy
+      statistics.
+    category: training
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/models/train/${task_id}/result
+      base_url_override: https://api.akkio.com
+    input:
+      task_id:
+        type: string
+        description: Task id returned when the task was submitted.
+    output:
+      description: The trained model's details.
+      type: object
+
+  ask_chat_explore:
+    title: Ask Chat Explore
+    description: >-
+      Ask a natural-language question about a project's or dataset's data. Returns a task
+      id; poll get_chat_explore_status, then read the answer with get_chat. Use project_id
+      to apply the project's custom instructions.
+    category: chat_explore
+    read_only: true
+    request:
+      method: POST
+      path: /api/v1/chat-explore/new
+      body:
+        messages: ${messages}
+        project_id: ${project_id}
+        dataset_id: ${dataset_id}
+        chatContext: ${chat_context}
+        chatInstructions: ${chat_instructions}
+      base_url_override: https://api.akkio.com
+    input:
+      messages:
+        type: array
+        description: 'The conversation so far, each {role: user or assistant, content}; the
+          last message is the question.'
+        items:
+          type: object
+      project_id:
+        type: string
+        description: Project to ask about; its custom instructions apply. Give this or dataset_id.
+        optional: true
+      dataset_id:
+        type: string
+        description: Dataset to ask about, when not using a project.
+        optional: true
+      chat_context:
+        type: string
+        description: What Chat Explore should know about the data for this call, e.g. units
+          of a column.
+        optional: true
+      chat_instructions:
+        type: string
+        description: How Chat Explore should answer for this call, e.g. respond in Spanish.
+        optional: true
+    output:
+      description: task_id.
+      type: object
+
+  get_chat_explore_status:
+    title: Get Chat Explore status
+    description: >-
+      Check a Chat Explore task: PENDING, IN_PROGRESS, SUCCEEDED (with the location of the
+      chat) or FAILED.
+    category: chat_explore
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/chat-explore/status/${task_id}
+      base_url_override: https://api.akkio.com
+    input:
+      task_id:
+        type: string
+        description: Task id returned when the task was submitted.
+    output:
+      description: status and metadata.
+      type: object
+
+  get_chat:
+    title: Get a chat
+    description: >-
+      Read a Chat Explore conversation: each message's text, any charts (base64 PNG or Plotly
+      JSON) and tables as lists of rows.
+    category: chat_explore
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/chat-explore/chats/${id}
+      query:
+        image_format: ${image_format}
+      base_url_override: https://api.akkio.com
+    input:
+      image_format:
+        type: string
+        description: 'How charts come back: base64_png or plotly_json.'
+        optional: true
+        enum:
+        - base64_png
+        - plotly_json
+      id:
+        type: string
+        description: Chat id, from the Chat Explore task's result location.
+    output:
+      description: The chat with its messages.
+      type: object
+
+  create_project:
+    title: Create a project
+    description: >-
+      Create a project with Chat Explore custom instructions: context about the data, how
+      to answer, and suggested questions.
+    category: projects
+    request:
+      method: POST
+      path: /api/v1/projects
+      body:
+        name: ${name}
+        _org: ${org}
+        _owner: ${owner}
+        chatContext: ${chat_context}
+        chatInstructions: ${chat_instructions}
+        chatSuggestions: ${chat_suggestions}
+      base_url_override: https://api.akkio.com
+    input:
+      name:
+        type: string
+        description: Project name.
+      org:
+        type: string
+        description: Id of the organization that owns the project.
+      owner:
+        type: string
+        description: Id of the user who owns the project.
+      chat_context:
+        type: string
+        description: What Chat Explore should know about this project's data.
+        optional: true
+      chat_instructions:
+        type: string
+        description: How Chat Explore should respond in this project.
+        optional: true
+      chat_suggestions:
+        type: string
+        description: Suggested questions, one per line.
+        optional: true
+    output:
+      description: The created project.
+      type: object
+
+  get_project:
+    title: Get a project
+    description: >-
+      Read a project's name and Chat Explore custom instructions.
+    category: projects
+    read_only: true
+    request:
+      method: GET
+      path: /api/v1/projects/${project_id}
+      base_url_override: https://api.akkio.com
+    input:
+      project_id:
+        type: string
+        description: Project id.
+    output:
+      description: The project.
+      type: object
+
+  update_project:
+    title: Update a project
+    description: >-
+      Change a project's name or Chat Explore custom instructions; only the fields sent change.
+    category: projects
+    request:
+      method: PUT
+      path: /api/v1/projects/${project_id}
+      body:
+        name: ${name}
+        chatContext: ${chat_context}
+        chatInstructions: ${chat_instructions}
+        chatSuggestions: ${chat_suggestions}
+      base_url_override: https://api.akkio.com
+    input:
+      project_id:
+        type: string
+        description: Project id.
+      name:
+        type: string
+        description: New project name.
+        optional: true
+      chat_context:
+        type: string
+        description: What Chat Explore should know about this project's data.
+        optional: true
+      chat_instructions:
+        type: string
+        description: How Chat Explore should respond in this project.
+        optional: true
+      chat_suggestions:
+        type: string
+        description: Suggested questions, one per line.
+        optional: true
+    output:
+      description: The updated project.
+      type: object
+
+  delete_project:
+    title: Delete a project
+    description: >-
+      Delete a project and its chat settings permanently.
+    category: projects
+    destructive: true
+    request:
+      method: DELETE
+      path: /api/v1/projects/${project_id}
+      base_url_override: https://api.akkio.com
+    input:
+      project_id:
+        type: string
+        description: Project id.
+    output:
+      description: Confirmation.
+      type: object

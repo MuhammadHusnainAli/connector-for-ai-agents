@@ -1,0 +1,853 @@
+# Availity healthcare transaction tools.
+#
+# Every path, parameter and field below comes from Availity's own published
+# HIPAA Transactions documentation at
+# https://developer.availity.com/blog/2025/3/25/hipaa-transactions (and the API
+# guide alongside it). The connection's base url is https://api.availity.com and
+# Availity routes its REST APIs under /availity, so the paths here start
+# /availity/v1 or /availity/v2.
+#
+# Availity is a clearinghouse: each API wraps an ASC X12N transaction and
+# brokers it to the health plan.
+#
+#   coverages        270/271 eligibility and benefits
+#   claim-statuses   276/277 claim status
+#   service-reviews  278 authorizations and referrals
+#   professional- and institutional-claims, patient-cost-estimates
+#                    837 predeterminations and patient cost estimates
+#
+# Two behaviours run through all of them:
+#
+#   * Requests are asynchronous. Submitting returns 202 with an id while
+#     Availity waits on the health plan; fetch the same resource by id until it
+#     answers 200. Results are short-lived local copies, and each carries an
+#     expirationDate.
+#   * Every payer validates differently. get_payer_configuration returns the
+#     validation rules and required fields for one transaction type and payer,
+#     which is the way to find out what that plan insists on before submitting.
+#
+# One shape to watch: create_coverage_request posts
+# application/x-www-form-urlencoded, not JSON -- that is Availity's own
+# requirement for the coverages endpoint, and this pack encodes it that way.
+# The other write endpoints take a JSON object, passed here whole because the
+# X12-derived structures are deeply nested; the fields inside them are defined
+# in each API's reference section and in the corresponding X12 TR3.
+#
+# Docs: https://developer.availity.com/blog/2025/3/25/hipaa-transactions
+
+connector_id: availity
+display_name: Availity
+docs_url: https://developer.availity.com/blog/2025/3/25/hipaa-transactions
+
+tools:
+  list_payers:
+    title: List payers
+    description: >-
+      Search Availity's payer list for the health plans that support a given
+      transaction and submission mode, with their Availity payer ids -- the ids
+      every other call takes. availability separates payers that need an
+      Availity contract from those that do not.
+    category: reference
+    read_only: true
+    request:
+      method: GET
+      path: /availity/v1/availity-payer-list
+      query:
+        payerId: "${payer_id}"
+        transactionType: "${transaction_type}"
+        submissionMode: "${submission_mode}"
+        availability: "${availability}"
+        enrollmentRequired: "${enrollment_required}"
+    input:
+      payer_id:
+        type: string
+        description: Availity payer id to look up.
+        optional: true
+      transaction_type:
+        type: array
+        description: Transaction codes the payer must support, e.g. ["270", "276"].
+        optional: true
+        items: {type: string}
+      submission_mode:
+        type: array
+        description: Submission modes to require.
+        optional: true
+        items: {type: string}
+      availability:
+        type: string
+        description: Whether to list payers needing an Availity contract.
+        optional: true
+        enum: [available, contractrequired]
+      enrollment_required:
+        type: boolean
+        description: Filter on whether enrollment is required for the payer's transactions.
+        optional: true
+    output:
+      description: The matching payers with their ids and supported transactions.
+      type: object
+
+  get_payer_configuration:
+    title: Get a payer's validation rules
+    description: >-
+      Read what a transaction type requires. Send type alone for every payer
+      that supports it, or type with payerId for that plan's validation rules
+      and required fields. type takes values like 270, service-reviews-inquiry,
+      claim-statuses-inquiry, professional-claims or institutional-claims.
+    category: reference
+    read_only: true
+    request:
+      method: GET
+      path: /availity/v1/configurations
+      query:
+        type: "${type}"
+        subtypeId: "${subtype_id}"
+        payerId: "${payer_id}"
+    input:
+      type:
+        type: string
+        description: Transaction type whose configuration to read, e.g. 270.
+      subtype_id:
+        type: string
+        description: Subtype for the transaction, e.g. PRE_DETERMINATION.
+        optional: true
+      payer_id:
+        type: string
+        description: Availity payer id; omit for the list of supporting payers.
+        optional: true
+    output:
+      description: The validation rules and accepted fields for that transaction.
+      type: object
+
+  create_coverage_request:
+    title: Request a member's coverage
+    description: >-
+      Submit a 270 eligibility and benefits inquiry. payerId and the provider's
+      identity are the core of it; identify the patient by memberId or by name
+      and birth date, and use asOfDate for the date of service. Availity answers
+      202 with an id while it waits on the plan -- poll get_coverage until it
+      returns 200. This endpoint takes form encoding rather than JSON.
+    category: coverages
+    request:
+      method: POST
+      path: /availity/v1/coverages
+      encoding: form
+      body:
+        payerId: "${payer_id}"
+        providerNpi: "${provider_npi}"
+        providerLastName: "${provider_last_name}"
+        providerFirstName: "${provider_first_name}"
+        providerType: "${provider_type}"
+        providerTaxId: "${provider_tax_id}"
+        payerAssignedProviderId: "${payer_assigned_provider_id}"
+        providerSSN: "${provider_ssn}"
+        providerPIN: "${provider_pin}"
+        providerCity: "${provider_city}"
+        providerState: "${provider_state}"
+        providerZipCode: "${provider_zip_code}"
+        providerSpecialty: "${provider_specialty}"
+        placeOfService: "${place_of_service}"
+        submitterId: "${submitter_id}"
+        asOfDate: "${as_of_date}"
+        toDate: "${to_date}"
+        serviceType: "${service_type}"
+        procedureCode: "${procedure_code}"
+        cardIssueDate: "${card_issue_date}"
+        memberId: "${member_id}"
+        medicaidId: "${medicaid_id}"
+        groupNumber: "${group_number}"
+        patientSSN: "${patient_ssn}"
+        patientLastName: "${patient_last_name}"
+        patientFirstName: "${patient_first_name}"
+        patientMiddleName: "${patient_middle_name}"
+        patientSuffix: "${patient_suffix}"
+        patientGender: "${patient_gender}"
+        patientBirthDate: "${patient_birth_date}"
+        patientState: "${patient_state}"
+        subscriberRelationship: "${subscriber_relationship}"
+    input:
+      payer_id:
+        type: string
+        description: Availity payer id for the patient's health plan.
+      provider_npi:
+        type: string
+        description: Requesting provider's NPI; most plans require it.
+        optional: true
+      provider_last_name:
+        type: string
+        description: Requesting provider's last or business name.
+        optional: true
+      provider_first_name:
+        type: string
+        description: Requesting provider's first name.
+        optional: true
+      provider_type:
+        type: string
+        description: Whether the provider is professional or institutional.
+        optional: true
+      provider_tax_id:
+        type: string
+        description: Requesting provider's tax id, where the plan requires it.
+        optional: true
+      payer_assigned_provider_id:
+        type: string
+        description: Provider id the payer assigned, where the plan uses one.
+        optional: true
+      provider_ssn:
+        type: string
+        description: Requesting provider's Social Security Number, if required.
+        optional: true
+      provider_pin:
+        type: string
+        description: Requesting provider's personal identification number.
+        optional: true
+      provider_city:
+        type: string
+        description: Requesting provider's city, where the plan requires it.
+        optional: true
+      provider_state:
+        type: string
+        description: Requesting provider's two-character state code.
+        optional: true
+      provider_zip_code:
+        type: string
+        description: Requesting provider's ZIP code.
+        optional: true
+      provider_specialty:
+        type: string
+        description: Provider taxonomy code for the specialty (X12 code source 682).
+        optional: true
+      place_of_service:
+        type: string
+        description: Place of service code, where the plan requires it.
+        optional: true
+      submitter_id:
+        type: string
+        description: Payer-assigned submitter identifier, where the plan requires one.
+        optional: true
+      as_of_date:
+        type: string
+        description: Date of service to check coverage for.
+        optional: true
+      to_date:
+        type: string
+        description: End of the coverage period being asked about.
+        optional: true
+      service_type:
+        type: string
+        description: Service type code or codes the request covers.
+        optional: true
+      procedure_code:
+        type: string
+        description: Procedure code the coverage question is about.
+        optional: true
+      card_issue_date:
+        type: string
+        description: Issue date printed on the member's plan card.
+        optional: true
+      member_id:
+        type: string
+        description: Patient's health plan member id.
+        optional: true
+      medicaid_id:
+        type: string
+        description: Patient's Medicaid id.
+        optional: true
+      group_number:
+        type: string
+        description: Patient's health plan group number.
+        optional: true
+      patient_ssn:
+        type: string
+        description: Patient's Social Security Number.
+        optional: true
+      patient_last_name:
+        type: string
+        description: Patient's last name.
+        optional: true
+      patient_first_name:
+        type: string
+        description: Patient's first name.
+        optional: true
+      patient_middle_name:
+        type: string
+        description: Patient's middle name.
+        optional: true
+      patient_suffix:
+        type: string
+        description: Patient's name suffix.
+        optional: true
+      patient_gender:
+        type: string
+        description: Patient's gender.
+        optional: true
+      patient_birth_date:
+        type: string
+        description: Patient's date of birth.
+        optional: true
+      patient_state:
+        type: string
+        description: Two-character code for the patient's state of residence.
+        optional: true
+      subscriber_relationship:
+        type: string
+        description: Patient's relation to the subscriber -- 18 self, 01 spouse, 19 child, G8 other.
+        optional: true
+    output:
+      description: The coverage request, with its id and status while the plan responds.
+      type: object
+
+  search_coverages:
+    title: Search recent coverage requests
+    description: >-
+      Search the short-lived local copies of coverage requests this account has
+      made. Filter by processing status, plan status or a free-text term, and
+      sort by last update, service date or patient name.
+    category: coverages
+    read_only: true
+    request:
+      method: GET
+      path: /availity/v1/coverages
+      query:
+        payerId: "${payer_id}"
+        status: "${status}"
+        planStatus: "${plan_status}"
+        q: "${q}"
+        sortBy: "${sort_by}"
+        sortDirection: "${sort_direction}"
+        offset: "${offset}"
+        limit: "${limit}"
+    input:
+      payer_id:
+        type: string
+        description: Restrict to requests sent to this payer.
+        optional: true
+      status:
+        type: string
+        description: Processing status of the request.
+        optional: true
+        enum: [In Progress, Request Error, Communication Error, Complete]
+      plan_status:
+        type: string
+        description: Whether the returned coverage is active or inactive.
+        optional: true
+        enum: [Active, Inactive]
+      q:
+        type: string
+        description: Free-text search across the stored coverage requests.
+        optional: true
+      sort_by:
+        type: string
+        description: Field to sort by. Defaults to lastUpdateDate.
+        optional: true
+        enum: [lastUpdateDate, asOfdate, patientLastName]
+      sort_direction:
+        type: string
+        description: Sort direction for the results.
+        optional: true
+      offset:
+        type: integer
+        description: Records to skip before this page.
+        optional: true
+      limit:
+        type: integer
+        description: Records per page.
+        optional: true
+    output:
+      description: The matching coverage requests with their statuses.
+      type: object
+
+  get_coverage:
+    title: Get a coverage response
+    description: >-
+      Fetch one coverage request by the id the submission returned. A 202 means
+      the plan has not answered yet -- try again shortly; a 200 carries the
+      member's plan, benefits and patient responsibility.
+    category: coverages
+    read_only: true
+    request:
+      method: GET
+      path: /availity/v1/coverages/${id}
+    input:
+      id:
+        type: string
+        description: Coverage request id from create_coverage_request.
+    output:
+      description: The coverage record, with plan, benefits and patient details.
+      type: object
+
+  delete_coverage:
+    title: Delete a coverage request
+    description: >-
+      Remove a stored coverage request from Availity ahead of its natural
+      expiry.
+    category: coverages
+    destructive: true
+    request:
+      method: DELETE
+      path: /availity/v1/coverages/${id}
+    input:
+      id:
+        type: string
+        description: Coverage request id to delete.
+    output:
+      description: Empty on success.
+      type: object
+
+  search_claim_statuses:
+    title: Request or search claim statuses
+    description: >-
+      Run a 276 claim status inquiry, or search the ones already made. Identify
+      the payer, the service provider and the patient; Availity answers 202
+      while the plan is still working and 200 once the status is back.
+    category: claim-statuses
+    read_only: true
+    request:
+      method: GET
+      path: /availity/v1/claim-statuses
+      query:
+        payer.id: "${payer_id}"
+        submitter.id: "${submitter_id}"
+        submitter.lastName: "${submitter_last_name}"
+        submitter.firstName: "${submitter_first_name}"
+        providers.npi: "${provider_npi}"
+        providers.taxId: "${provider_tax_id}"
+        providers.payerAssignedProviderId: "${provider_payer_assigned_id}"
+        providers.lastName: "${provider_last_name}"
+        providers.firstName: "${provider_first_name}"
+        subscriber.memberId: "${subscriber_member_id}"
+        subscriber.lastName: "${subscriber_last_name}"
+        subscriber.firstName: "${subscriber_first_name}"
+        patient.lastName: "${patient_last_name}"
+        patient.firstName: "${patient_first_name}"
+        patient.birthDate: "${patient_birth_date}"
+        patient.genderCode: "${patient_gender_code}"
+        patient.accountNumber: "${patient_account_number}"
+        offset: "${offset}"
+        limit: "${limit}"
+    input:
+      payer_id:
+        type: string
+        description: Availity payer id for the patient's health plan.
+        optional: true
+      submitter_id:
+        type: string
+        description: Submitter's identifier.
+        optional: true
+      submitter_last_name:
+        type: string
+        description: Submitter's last or business name.
+        optional: true
+      submitter_first_name:
+        type: string
+        description: Submitter's first name.
+        optional: true
+      provider_npi:
+        type: string
+        description: Service provider's NPI.
+        optional: true
+      provider_tax_id:
+        type: string
+        description: Service provider's tax id.
+        optional: true
+      provider_payer_assigned_id:
+        type: string
+        description: Provider id the payer assigned.
+        optional: true
+      provider_last_name:
+        type: string
+        description: Service provider's last or business name.
+        optional: true
+      provider_first_name:
+        type: string
+        description: Service provider's first name.
+        optional: true
+      subscriber_member_id:
+        type: string
+        description: Subscriber's member id.
+        optional: true
+      subscriber_last_name:
+        type: string
+        description: Subscriber's last name.
+        optional: true
+      subscriber_first_name:
+        type: string
+        description: Subscriber's first name.
+        optional: true
+      patient_last_name:
+        type: string
+        description: Patient's last name.
+        optional: true
+      patient_first_name:
+        type: string
+        description: Patient's first name.
+        optional: true
+      patient_birth_date:
+        type: string
+        description: Patient's date of birth.
+        optional: true
+      patient_gender_code:
+        type: string
+        description: Patient's gender code -- F or M.
+        optional: true
+      patient_account_number:
+        type: string
+        description: Provider's own account number for the patient.
+        optional: true
+      offset:
+        type: integer
+        description: Records to skip before this page.
+        optional: true
+      limit:
+        type: integer
+        description: Records per page.
+        optional: true
+    output:
+      description: The matching claim statuses, with claim numbers and amounts.
+      type: object
+
+  get_claim_status:
+    title: Get a claim status
+    description: >-
+      Fetch one claim status by id. 202 means the plan has not answered yet;
+      200 carries the claim's status, tracking number and paid amounts.
+    category: claim-statuses
+    read_only: true
+    request:
+      method: GET
+      path: /availity/v1/claim-statuses/${id}
+    input:
+      id:
+        type: string
+        description: Claim status id from a search or submission.
+    output:
+      description: The claim status record.
+      type: object
+
+  delete_claim_status:
+    title: Delete a claim status
+    description: >-
+      Remove a stored claim status from Availity ahead of its natural expiry.
+    category: claim-statuses
+    destructive: true
+    request:
+      method: DELETE
+      path: /availity/v1/claim-statuses/${id}
+    input:
+      id:
+        type: string
+        description: Claim status id to delete.
+    output:
+      description: Empty on success.
+      type: object
+
+  create_service_review:
+    title: Submit an authorization or referral
+    description: >-
+      Submit a 278 service review -- an outpatient authorization (requestTypeCode
+      HS), an inpatient admission review (AR) or a referral (SC). The body is
+      the serviceReview object, whose fields follow the X12 278 structure;
+      get_payer_configuration with type service-reviews-inquiry says what the
+      plan requires.
+    category: service-reviews
+    request:
+      method: POST
+      path: /availity/v2/service-reviews
+      body: "${service_review}"
+    input:
+      service_review:
+        type: object
+        description: The service review -- payer, requestingProvider, subscriber, patient, diagnoses, requestTypeCode, dates and service details.
+    output:
+      description: The submitted review, with its id, status and any validation messages.
+      type: object
+
+  search_service_reviews:
+    title: Search authorizations and referrals
+    description: >-
+      Search submitted service reviews by payer, provider, subscriber, patient,
+      request type, service dates or certification and reference numbers.
+    category: service-reviews
+    read_only: true
+    request:
+      method: GET
+      path: /availity/v2/service-reviews
+      query:
+        payer.id: "${payer_id}"
+        requestingProvider.npi: "${provider_npi}"
+        requestingProvider.taxId: "${provider_tax_id}"
+        requestingProvider.lastName: "${provider_last_name}"
+        requestingProvider.firstName: "${provider_first_name}"
+        requestingProvider.specialtyCode: "${provider_specialty_code}"
+        subscriber.memberId: "${subscriber_member_id}"
+        subscriber.lastName: "${subscriber_last_name}"
+        subscriber.firstName: "${subscriber_first_name}"
+        patient.lastName: "${patient_last_name}"
+        patient.firstName: "${patient_first_name}"
+        patient.birthDate: "${patient_birth_date}"
+        patient.subscriberRelationshipCode: "${patient_relationship_code}"
+        requestTypeCode: "${request_type_code}"
+        fromDate: "${from_date}"
+        toDate: "${to_date}"
+        certificationNumber: "${certification_number}"
+        certificationIssueDate: "${certification_issue_date}"
+        referenceNumber: "${reference_number}"
+        statusCode: "${status_code}"
+        sessionId: "${session_id}"
+    input:
+      payer_id:
+        type: string
+        description: Availity payer id for the patient's health plan.
+        optional: true
+      provider_npi:
+        type: string
+        description: Requesting provider's NPI.
+        optional: true
+      provider_tax_id:
+        type: string
+        description: Requesting provider's tax id.
+        optional: true
+      provider_last_name:
+        type: string
+        description: Requesting provider's last or business name.
+        optional: true
+      provider_first_name:
+        type: string
+        description: Requesting provider's first name.
+        optional: true
+      provider_specialty_code:
+        type: string
+        description: Requesting provider's taxonomy code.
+        optional: true
+      subscriber_member_id:
+        type: string
+        description: Subscriber's member id.
+        optional: true
+      subscriber_last_name:
+        type: string
+        description: Subscriber's last name.
+        optional: true
+      subscriber_first_name:
+        type: string
+        description: Subscriber's first name.
+        optional: true
+      patient_last_name:
+        type: string
+        description: Patient's last name.
+        optional: true
+      patient_first_name:
+        type: string
+        description: Patient's first name.
+        optional: true
+      patient_birth_date:
+        type: string
+        description: Patient's date of birth.
+        optional: true
+      patient_relationship_code:
+        type: string
+        description: Patient's relation to the subscriber -- 18, 01, 19 or G8.
+        optional: true
+      request_type_code:
+        type: string
+        description: Kind of review -- HS outpatient, AR inpatient, SC referral.
+        optional: true
+        enum: [HS, AR, SC]
+      from_date:
+        type: string
+        description: Service start date.
+        optional: true
+      to_date:
+        type: string
+        description: Service end date.
+        optional: true
+      certification_number:
+        type: string
+        description: Number the plan assigned once the authorization was certified.
+        optional: true
+      certification_issue_date:
+        type: string
+        description: Date the certification was issued.
+        optional: true
+      reference_number:
+        type: string
+        description: Case or reference number assigned while the request is under review.
+        optional: true
+      status_code:
+        type: string
+        description: Status code of the authorization or referral.
+        optional: true
+      session_id:
+        type: string
+        description: Session id from an earlier response, to continue that session.
+        optional: true
+    output:
+      description: The matching service reviews with their statuses.
+      type: object
+
+  get_service_review:
+    title: Get an authorization or referral
+    description: >-
+      Fetch one service review by id, with its certification status, numbers
+      and the plan's notes.
+    category: service-reviews
+    read_only: true
+    request:
+      method: GET
+      path: /availity/v2/service-reviews/${id}
+    input:
+      id:
+        type: string
+        description: Service review id.
+    output:
+      description: The service review record.
+      type: object
+
+  update_service_review:
+    title: Update an authorization or referral
+    description: >-
+      Resubmit a service review with changes -- correcting a validation error
+      or adding clinical detail the plan asked for. The body is the whole
+      serviceReview object, including its id; updatableFields on the stored
+      review says what may change.
+    category: service-reviews
+    request:
+      method: PUT
+      path: /availity/v2/service-reviews
+      body: "${service_review}"
+    input:
+      service_review:
+        type: object
+        description: The complete service review, including its id, with the fields to change.
+    output:
+      description: The updated service review with its new status.
+      type: object
+
+  delete_service_review:
+    title: Delete an authorization or referral
+    description: >-
+      Remove a stored service review from Availity. Only reviews whose
+      deletable flag is set can go.
+    category: service-reviews
+    destructive: true
+    request:
+      method: DELETE
+      path: /availity/v2/service-reviews/${id}
+    input:
+      id:
+        type: string
+        description: Service review id to delete.
+    output:
+      description: Empty on success.
+      type: object
+
+  create_professional_claim_estimate:
+    title: Submit a professional claim predetermination
+    description: >-
+      Submit an 837P predetermination to find out what a plan would pay on a
+      professional claim. The body is the professionalClaim object -- submitter,
+      billing provider, subscriber, patient and claim information with its
+      service lines.
+    category: estimates
+    request:
+      method: POST
+      path: /availity/v1/professional-claims
+      body: "${professional_claim}"
+    input:
+      professional_claim:
+        type: object
+        description: The professional claim -- payer, providers, subscriber, patient and claimInformation.
+    output:
+      description: The submitted predetermination, with its id and status.
+      type: object
+
+  get_professional_claim_estimate:
+    title: Get a professional claim predetermination
+    description: >-
+      Fetch a professional predetermination by id. 202 means the plan has not
+      answered; 200 carries the allowed amounts, copay and estimated patient
+      responsibility per service line.
+    category: estimates
+    read_only: true
+    request:
+      method: GET
+      path: /availity/v1/professional-claims/${id}
+    input:
+      id:
+        type: string
+        description: Predetermination id from the submission.
+    output:
+      description: The predetermination result with per-line amounts.
+      type: object
+
+  create_institutional_claim_estimate:
+    title: Submit an institutional claim predetermination
+    description: >-
+      Submit an 837I predetermination for a facility claim. The body is the
+      institutionalClaim object, shaped like its professional counterpart with
+      institutional billing fields.
+    category: estimates
+    request:
+      method: POST
+      path: /availity/v1/institutional-claims
+      body: "${institutional_claim}"
+    input:
+      institutional_claim:
+        type: object
+        description: The institutional claim -- payer, providers, subscriber, patient and claimInformation.
+    output:
+      description: The submitted predetermination, with its id and status.
+      type: object
+
+  get_institutional_claim_estimate:
+    title: Get an institutional claim predetermination
+    description: >-
+      Fetch an institutional predetermination by id, with the plan's allowed
+      amounts and the patient's estimated responsibility.
+    category: estimates
+    read_only: true
+    request:
+      method: GET
+      path: /availity/v1/institutional-claims/${id}
+    input:
+      id:
+        type: string
+        description: Predetermination id from the submission.
+    output:
+      description: The predetermination result with per-line amounts.
+      type: object
+
+  create_patient_cost_estimate:
+    title: Submit a professional patient cost estimate
+    description: >-
+      Submit a professional claim to the v2 Patient Cost Estimator, the newer
+      endpoint for telling a patient what they will owe before treatment.
+    category: estimates
+    request:
+      method: POST
+      path: /availity/v2/patient-cost-estimates/prof
+      body: "${professional_claim}"
+    input:
+      professional_claim:
+        type: object
+        description: The professional claim -- payer, billing provider, subscriber, patient and claimInformation.
+    output:
+      description: The submitted estimate, with its id and status.
+      type: object
+
+  get_patient_cost_estimate:
+    title: Get a professional patient cost estimate
+    description: >-
+      Fetch a v2 patient cost estimate by id. 202 means the plan has not
+      answered yet; 200 carries the allowed amount, copay, coinsurance and
+      estimated patient responsibility per service line.
+    category: estimates
+    read_only: true
+    request:
+      method: GET
+      path: /availity/v2/patient-cost-estimates/prof/${id}
+    input:
+      id:
+        type: string
+        description: Estimate id from the submission.
+    output:
+      description: The estimate with its per-line patient responsibility.
+      type: object

@@ -1,0 +1,275 @@
+# HubSpot (MCP) tools.
+#
+# This connector points at HubSpot's remote Model Context Protocol server
+# (https://mcp.hubspot.com), not at the HubSpot CRM REST API. That is a
+# JSON-RPC endpoint: one URL, and the method named in the request body.
+# `GET /crm/v3/objects/contacts` means nothing here.
+#
+# So the tools below are MCP's own methods rather than CRM operations.
+# `list_server_tools` is where to start -- HubSpot decides which CRM
+# operations it exposes over MCP and what arguments each takes, and that list
+# can change without this package changing. `call_server_tool` then invokes
+# one by name.
+#
+# Two things worth knowing before driving this:
+#
+#   * **the server's tools act on a real portal.** A tool the server publishes
+#     may create, update or delete CRM records, so `call_server_tool` is marked
+#     destructive even though the protocol call itself is generic. Read the
+#     `inputSchema` and the tool's own annotations from `list_server_tools`
+#     before calling anything;
+#   * **what you can reach is what the OAuth grant allows.** The MCP server
+#     enforces the connected user's HubSpot permissions, so two connections to
+#     the same server can legitimately return different tool lists.
+#
+# For the CRM REST API itself -- typed tools for contacts, companies, deals,
+# tickets and engagements -- use the `hubspot` connector.
+#
+# The connection sends `Accept: application/json, text/event-stream`, since an
+# MCP server may answer either with a single JSON response or with a stream.
+#
+# Docs: https://modelcontextprotocol.io/specification
+
+connector_id: hubspot-mcp
+display_name: HubSpot (MCP)
+docs_url: https://modelcontextprotocol.io/specification
+
+tools:
+
+  initialize_session:
+    title: Open an MCP session
+    description: >-
+      Begin an MCP session, telling the server which protocol version and
+      capabilities the client supports and learning the server's in return.
+      The protocol expects this before other calls, and the server's reply is
+      what says whether it offers tools, prompts or resources at all.
+    category: mcp
+    request:
+      method: POST
+      path: /
+      headers:
+        Accept: application/json, text/event-stream
+      body:
+        jsonrpc: "2.0"
+        id: 1
+        method: initialize
+        params:
+          protocolVersion: "${protocol_version}"
+          capabilities: "${capabilities}"
+          clientInfo:
+            name: "${client_name}"
+            version: "${client_version}"
+    input:
+      protocol_version:
+        type: string
+        description: MCP protocol version the client speaks, e.g. "2025-06-18".
+        optional: true
+        default: "2025-06-18"
+      capabilities:
+        type: object
+        description: What the client supports, as the protocol's capabilities object.
+        optional: true
+      client_name:
+        type: string
+        description: Name the client identifies itself by.
+        optional: true
+        default: connector-for-ai-agents
+      client_version:
+        type: string
+        description: Version the client identifies itself by.
+        optional: true
+    output:
+      description: The server's JSON-RPC response, carrying its protocol version and capabilities.
+      type: object
+      properties:
+        result: {type: object, description: "protocolVersion, capabilities and serverInfo."}
+        error: {type: object}
+
+  list_server_tools:
+    title: List the MCP server's tools
+    description: >-
+      Ask HubSpot's MCP server which tools it exposes, over the protocol's
+      tools/list method. The server decides what it offers and publishes an
+      inputSchema for each, so this is how to discover the real CRM surface --
+      and the exact argument names -- before calling anything.
+    category: mcp
+    request:
+      method: POST
+      path: /
+      headers:
+        Accept: application/json, text/event-stream
+      body:
+        jsonrpc: "2.0"
+        id: 1
+        method: tools/list
+        params:
+          cursor: "${cursor}"
+    input:
+      cursor:
+        type: string
+        description: Paging cursor from a previous tools/list response.
+        optional: true
+    output:
+      description: The server's JSON-RPC response listing its tools.
+      type: object
+      properties:
+        result: {type: object, description: "`tools`, each with a name, description and inputSchema."}
+        error: {type: object}
+
+  call_server_tool:
+    title: Call a tool on the MCP server
+    description: >-
+      Invoke one of the HubSpot MCP server's tools by name. The name and the
+      shape of `arguments` come from `list_server_tools`, not from this
+      package -- and since the server's tools act on a live HubSpot portal, one
+      of them may well create, update or delete a CRM record.
+    category: mcp
+    destructive: true
+    request:
+      method: POST
+      path: /
+      headers:
+        Accept: application/json, text/event-stream
+      body:
+        jsonrpc: "2.0"
+        id: 1
+        method: tools/call
+        params:
+          name: "${name}"
+          arguments: "${arguments}"
+    input:
+      name:
+        type: string
+        description: Name of the server tool to call, from list_server_tools.
+      arguments:
+        type: object
+        description: Arguments for that tool, matching the inputSchema the server published.
+        optional: true
+    output:
+      description: The server's JSON-RPC response.
+      type: object
+      properties:
+        result: {type: object, description: "`content` blocks, and `isError` when the tool itself failed."}
+        error: {type: object}
+
+  list_server_prompts:
+    title: List the MCP server's prompts
+    description: >-
+      The prompt templates the server publishes, over the protocol's
+      prompts/list method. A server that offers none answers with an empty
+      list rather than an error.
+    category: mcp
+    request:
+      method: POST
+      path: /
+      headers:
+        Accept: application/json, text/event-stream
+      body:
+        jsonrpc: "2.0"
+        id: 1
+        method: prompts/list
+        params:
+          cursor: "${cursor}"
+    input:
+      cursor:
+        type: string
+        description: Paging cursor from a previous prompts/list response.
+        optional: true
+    output:
+      description: The server's JSON-RPC response listing its prompts.
+      type: object
+      properties:
+        result: {type: object, description: "`prompts`, each with a name, description and arguments."}
+        error: {type: object}
+
+  get_server_prompt:
+    title: Get a prompt from the MCP server
+    description: >-
+      Render one of the server's prompt templates with the arguments it
+      declares, over prompts/get. Returns the messages the template expands to.
+    category: mcp
+    request:
+      method: POST
+      path: /
+      headers:
+        Accept: application/json, text/event-stream
+      body:
+        jsonrpc: "2.0"
+        id: 1
+        method: prompts/get
+        params:
+          name: "${name}"
+          arguments: "${arguments}"
+    input:
+      name:
+        type: string
+        description: Name of the prompt, from list_server_prompts.
+      arguments:
+        type: object
+        description: Values for the arguments that prompt declares.
+        optional: true
+    output:
+      description: The server's JSON-RPC response.
+      type: object
+      properties:
+        result: {type: object, description: "`description` and the expanded `messages`."}
+        error: {type: object}
+
+  list_server_resources:
+    title: List the MCP server's resources
+    description: >-
+      The resources the server exposes for reading, over resources/list. On a
+      CRM server these are typically records and record collections addressable
+      by URI rather than by a tool call.
+    category: mcp
+    request:
+      method: POST
+      path: /
+      headers:
+        Accept: application/json, text/event-stream
+      body:
+        jsonrpc: "2.0"
+        id: 1
+        method: resources/list
+        params:
+          cursor: "${cursor}"
+    input:
+      cursor:
+        type: string
+        description: Paging cursor from a previous resources/list response.
+        optional: true
+    output:
+      description: The server's JSON-RPC response listing its resources.
+      type: object
+      properties:
+        result: {type: object, description: "`resources`, each with a uri, name and mimeType."}
+        error: {type: object}
+
+  read_server_resource:
+    title: Read a resource from the MCP server
+    description: >-
+      Fetch the contents of one resource by its URI, over resources/read. The
+      URIs come from `list_server_resources`; the server decides how it
+      addresses its own data.
+    category: mcp
+    request:
+      method: POST
+      path: /
+      headers:
+        Accept: application/json, text/event-stream
+      body:
+        jsonrpc: "2.0"
+        id: 1
+        method: resources/read
+        params:
+          uri: "${uri}"
+    input:
+      uri:
+        type: string
+        description: URI of the resource, from list_server_resources.
+    output:
+      description: The server's JSON-RPC response.
+      type: object
+      properties:
+        result: {type: object, description: "`contents`, each with a uri, mimeType and text or blob."}
+        error: {type: object}

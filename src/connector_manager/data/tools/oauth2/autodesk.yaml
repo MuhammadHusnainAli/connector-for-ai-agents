@@ -1,0 +1,5410 @@
+# Autodesk Platform Services (APS) tools.
+#
+# Every path, parameter, body field and scope below comes from Autodesk's own
+# OpenAPI descriptions, published at
+# https://github.com/autodesk-platform-services/aps-sdk-openapi:
+#
+#   datamanagement/datamanagement.yaml      hubs, projects, folders, items, versions
+#   oss/oss.yaml                            buckets and objects
+#   modelderivative/modelderivative.yaml    translation, manifests, metadata
+#   webhooks/webhooks.yaml                  event subscriptions
+#   construction/accountadmin/accountadmin.yaml   ACC/BIM 360 account administration
+#   construction/issues/Issues.yaml         ACC issues
+#
+# The connection's base url is https://developer.api.autodesk.com and every
+# service is versioned inside the path, so paths here are absolute from the
+# host. Scopes are annotated per tool because APS tokens carry exactly the
+# scopes the authorization request asked for -- data:read, data:write,
+# data:create, data:search, bucket:read, bucket:create, bucket:update,
+# bucket:delete, viewables:read, account:read and account:write.
+#
+# Three conventions worth knowing:
+#
+#   * Data Management speaks JSON:API. Its write bodies are
+#     {"jsonapi": {"version": "1.0"}, "data": {...}} sent as
+#     application/vnd.api+json, so those tools fill the envelope for you and
+#     take the data object as an argument.
+#   * URNs are URL-safe base64. Model Derivative's {urn} is the base64 of a
+#     version id or an OSS object id, and its derivative URNs come from the
+#     manifest.
+#   * Most services accept a region header (US, EMEA, AUS, CAN, DEU, IND, JPN,
+#     GBR) that decides which data centre answers. Leave it unset for US.
+#
+# This connector holds a three-legged user token. OSS bucket administration
+# (create, delete, transfer, protect, and the bucket listing) is documented as
+# two-legged only, so those tools are here for completeness but will be refused
+# unless the credential is an app token; the object-level operations are the
+# ones a user token reaches.
+#
+# Not covered: the raw signed-resource upload and download bodies, which carry
+# file bytes rather than JSON and cannot be expressed as a tool argument -- use
+# the signed S3 flows instead, which hand back URLs you PUT or GET directly;
+# project and company image uploads, for the same reason; and Design
+# Automation, Reality Capture and the ACC Sheets, RFIs and Submittals APIs,
+# which Autodesk has not published OpenAPI descriptions for.
+#
+# Docs: https://aps.autodesk.com/developer/documentation
+
+connector_id: autodesk
+display_name: Autodesk
+docs_url: https://aps.autodesk.com/developer/documentation
+
+tools:
+  list_hubs:
+    title: List hubs
+    description: >-
+      List the hubs the signed-in user can reach -- a BIM 360 or ACC account,
+      an A360 team, or a personal hub. Everything else in Data Management hangs
+      off a hub.
+    category: data-management
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /project/v1/hubs
+      query:
+        filter[id]: "${filter_id}"
+        filter[name]: "${filter_name}"
+        filter[extension.type]: "${filter_extension_type}"
+    input:
+      filter_id:
+        type: array
+        description: Hub ids to restrict the response to.
+        optional: true
+        items: {type: string}
+      filter_name:
+        type: array
+        description: Hub names to restrict the response to.
+        optional: true
+        items: {type: string}
+      filter_extension_type:
+        type: array
+        description: Extension types to restrict the response to.
+        optional: true
+        items: {type: string}
+    output:
+      description: The hubs, as JSON:API resource objects.
+      type: object
+
+  get_hub:
+    title: Get a hub
+    description: >-
+      Read one hub by id, with its name, region and the extension type that
+      says whether it is BIM 360, ACC or A360.
+    category: data-management
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /project/v1/hubs/${hub_id}
+    input:
+      hub_id:
+        type: string
+        description: Hub id, e.g. b.a1b2c3d4-....
+    output:
+      description: The hub resource object.
+      type: object
+
+  list_projects:
+    title: List projects in a hub
+    description: >-
+      Page through the projects inside a hub. Each project carries the root
+      folder ids you need before you can browse its files.
+    category: data-management
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /project/v1/hubs/${hub_id}/projects
+      query:
+        filter[id]: "${filter_id}"
+        filter[extension.type]: "${filter_extension_type}"
+        page[number]: "${page_number}"
+        page[limit]: "${page_limit}"
+    input:
+      hub_id:
+        type: string
+        description: Hub id whose projects to list.
+      filter_id:
+        type: array
+        description: Project ids to restrict the response to.
+        optional: true
+        items: {type: string}
+      filter_extension_type:
+        type: array
+        description: Extension types to restrict the response to.
+        optional: true
+        items: {type: string}
+      page_number:
+        type: integer
+        description: Zero-based page number.
+        optional: true
+        minimum: 0
+      page_limit:
+        type: integer
+        description: Projects per page, up to 200.
+        optional: true
+        maximum: 200
+    output:
+      description: A page of projects, as JSON:API resource objects.
+      type: object
+
+  get_project:
+    title: Get a project
+    description: >-
+      Read one project in a hub, with its name, root folder and the services
+      enabled on it.
+    category: data-management
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /project/v1/hubs/${hub_id}/projects/${project_id}
+    input:
+      hub_id:
+        type: string
+        description: Hub id the project lives in.
+      project_id:
+        type: string
+        description: Project id, e.g. b.a1b2c3d4-....
+    output:
+      description: The project resource object.
+      type: object
+
+  get_project_hub:
+    title: Get the hub for a project
+    description: >-
+      Read the hub a project belongs to, which is the quickest way back up the
+      tree when all you have is a project id.
+    category: data-management
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /project/v1/hubs/${hub_id}/projects/${project_id}/hub
+    input:
+      hub_id:
+        type: string
+        description: Hub id the project lives in.
+      project_id:
+        type: string
+        description: Project id.
+    output:
+      description: The hub resource object.
+      type: object
+
+  list_top_folders:
+    title: List a project's top-level folders
+    description: >-
+      List the folders at the root of a project -- Project Files, Plans and the
+      rest. Set projectFilesOnly to skip everything but the Project Files tree
+      on a BIM 360 project.
+    category: data-management
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /project/v1/hubs/${hub_id}/projects/${project_id}/topFolders
+      query:
+        excludeDeleted: "${exclude_deleted}"
+        projectFilesOnly: "${project_files_only}"
+    input:
+      hub_id:
+        type: string
+        description: Hub id the project lives in.
+      project_id:
+        type: string
+        description: Project id whose top folders to list.
+      exclude_deleted:
+        type: boolean
+        description: True to leave deleted folders out of the response.
+        optional: true
+      project_files_only:
+        type: boolean
+        description: True to return only the Project Files folder and its subfolders.
+        optional: true
+    output:
+      description: The project's top-level folders.
+      type: object
+
+  get_folder:
+    title: Get a folder
+    description: >-
+      Read one folder by id, with its name, path and whether it is hidden.
+    category: data-management
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /data/v1/projects/${project_id}/folders/${folder_id}
+    input:
+      project_id:
+        type: string
+        description: Project id the folder lives in.
+      folder_id:
+        type: string
+        description: Folder id (URN).
+    output:
+      description: The folder resource object.
+      type: object
+
+  list_folder_contents:
+    title: List a folder's contents
+    description: >-
+      Page through the items and subfolders inside a folder. filter[type]
+      separates "items" from "folders", and includeHidden brings back things
+      that were deleted.
+    category: data-management
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /data/v1/projects/${project_id}/folders/${folder_id}/contents
+      query:
+        filter[type]: "${filter_type}"
+        filter[id]: "${filter_id}"
+        filter[extension.type]: "${filter_extension_type}"
+        filter[lastModifiedTimeRollup]: "${filter_last_modified}"
+        includeHidden: "${include_hidden}"
+        page[number]: "${page_number}"
+        page[limit]: "${page_limit}"
+    input:
+      project_id:
+        type: string
+        description: Project id the folder lives in.
+      folder_id:
+        type: string
+        description: Folder id (URN) whose contents to list.
+      filter_type:
+        type: array
+        description: Restrict to "items", "folders" or both.
+        optional: true
+        items: {type: string}
+      filter_id:
+        type: array
+        description: Resource ids to restrict the response to.
+        optional: true
+        items: {type: string}
+      filter_extension_type:
+        type: array
+        description: Extension types to restrict the response to.
+        optional: true
+        items: {type: string}
+      filter_last_modified:
+        type: array
+        description: Filter on the lastModifiedTimeRollup attribute.
+        optional: true
+        items: {type: string}
+      include_hidden:
+        type: boolean
+        description: True to include items and folders that were deleted.
+        optional: true
+      page_number:
+        type: integer
+        description: Zero-based page number.
+        optional: true
+        minimum: 0
+      page_limit:
+        type: integer
+        description: Results per page, up to 200.
+        optional: true
+        maximum: 200
+    output:
+      description: A page of the folder's items and subfolders.
+      type: object
+
+  search_folder:
+    title: Search a folder and its subfolders
+    description: >-
+      Search a whole folder tree by attribute -- filter on name, file type or
+      any other property, as filter[attributes.displayName] and the like. Needs
+      a three-legged token with data:search.
+    category: data-management
+    scopes: [data:read, data:search]
+    read_only: true
+    request:
+      method: GET
+      path: /data/v1/projects/${project_id}/folders/${folder_id}/search
+      query:
+        page[number]: "${page_number}"
+    input:
+      project_id:
+        type: string
+        description: Project id the folder lives in.
+      folder_id:
+        type: string
+        description: Folder id (URN) to search under.
+      page_number:
+        type: integer
+        description: Zero-based page number.
+        optional: true
+        minimum: 0
+    output:
+      description: The matching items from the folder tree.
+      type: object
+
+  get_folder_parent:
+    title: Get a folder's parent
+    description: >-
+      Read the folder one level up, for walking back toward the project root.
+    category: data-management
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /data/v1/projects/${project_id}/folders/${folder_id}/parent
+    input:
+      project_id:
+        type: string
+        description: Project id the folder lives in.
+      folder_id:
+        type: string
+        description: Folder id (URN).
+    output:
+      description: The parent folder resource object.
+      type: object
+
+  list_folder_refs:
+    title: List a folder's related resources
+    description: >-
+      List the resources related to a folder, following the refs relationship
+      rather than the containment one.
+    category: data-management
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /data/v1/projects/${project_id}/folders/${folder_id}/refs
+      query:
+        filter[type]: "${filter_type}"
+        filter[id]: "${filter_id}"
+        filter[extension.type]: "${filter_extension_type}"
+    input:
+      project_id:
+        type: string
+        description: Project id the folder lives in.
+      folder_id:
+        type: string
+        description: Folder id (URN).
+      filter_type:
+        type: array
+        description: Restrict by the type of the ref target.
+        optional: true
+        items: {type: string}
+      filter_id:
+        type: array
+        description: Restrict by the id of the ref target.
+        optional: true
+        items: {type: string}
+      filter_extension_type:
+        type: array
+        description: Restrict by extension type.
+        optional: true
+        items: {type: string}
+    output:
+      description: The folder's related resources.
+      type: object
+
+  list_folder_relationship_refs:
+    title: List a folder's custom relationships
+    description: >-
+      List the custom relationships on a folder -- derived, dependencies,
+      auxiliary, xrefs or includes -- in either direction.
+    category: data-management
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /data/v1/projects/${project_id}/folders/${folder_id}/relationships/refs
+      query:
+        filter[type]: "${filter_type}"
+        filter[id]: "${filter_id}"
+        filter[refType]: "${ref_type}"
+        filter[direction]: "${direction}"
+        filter[extension.type]: "${filter_extension_type}"
+    input:
+      project_id:
+        type: string
+        description: Project id the folder lives in.
+      folder_id:
+        type: string
+        description: Folder id (URN).
+      filter_type:
+        type: array
+        description: Restrict by the type of the ref target.
+        optional: true
+        items: {type: string}
+      filter_id:
+        type: array
+        description: Restrict by the id of the ref target.
+        optional: true
+        items: {type: string}
+      ref_type:
+        type: string
+        description: Kind of relationship to return.
+        optional: true
+        enum: [derived, dependencies, auxiliary, xrefs, includes]
+      direction:
+        type: string
+        description: Whether the folder is the source or the target of the relationship.
+        optional: true
+        enum: [from, to]
+      filter_extension_type:
+        type: array
+        description: Restrict by extension type.
+        optional: true
+        items: {type: string}
+    output:
+      description: The folder's custom relationships.
+      type: object
+
+  create_folder_relationship:
+    title: Create a custom relationship for a folder
+    description: >-
+      Link a folder to another resource with a custom relationship. data holds
+      the JSON:API object naming the target and the refType.
+    category: data-management
+    scopes: [data:create]
+    request:
+      method: POST
+      path: /data/v1/projects/${project_id}/folders/${folder_id}/relationships/refs
+      headers:
+        content-type: application/vnd.api+json
+      body:
+        jsonapi:
+          version: "1.0"
+        data: "${data}"
+    input:
+      project_id:
+        type: string
+        description: Project id the folder lives in.
+      folder_id:
+        type: string
+        description: Folder id (URN) the relationship starts from.
+      data:
+        type: object
+        description: JSON:API data object describing the relationship target and refType.
+    output:
+      description: Empty on success.
+      type: object
+
+  list_folder_relationship_links:
+    title: List a folder's relationship links
+    description: >-
+      List the external links attached to a folder, the URLs users have
+      associated with it.
+    category: data-management
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /data/v1/projects/${project_id}/folders/${folder_id}/relationships/links
+    input:
+      project_id:
+        type: string
+        description: Project id the folder lives in.
+      folder_id:
+        type: string
+        description: Folder id (URN).
+    output:
+      description: The folder's relationship links.
+      type: object
+
+  create_folder:
+    title: Create a folder
+    description: >-
+      Create a subfolder inside a project. data is the JSON:API object naming
+      the folder -- its type, displayName attribute and the parent folder
+      relationship.
+    category: data-management
+    scopes: [data:create]
+    request:
+      method: POST
+      path: /data/v1/projects/${project_id}/folders
+      headers:
+        content-type: application/vnd.api+json
+      body:
+        jsonapi:
+          version: "1.0"
+        data: "${data}"
+    input:
+      project_id:
+        type: string
+        description: Project id to create the folder in.
+      data:
+        type: object
+        description: JSON:API data object with the folder's attributes and parent relationship.
+    output:
+      description: The created folder resource object.
+      type: object
+
+  update_folder:
+    title: Update a folder
+    description: >-
+      Rename a folder or mark it hidden. data is the JSON:API object carrying
+      the folder's id, type and the attributes to change.
+    category: data-management
+    scopes: [data:write]
+    request:
+      method: PATCH
+      path: /data/v1/projects/${project_id}/folders/${folder_id}
+      headers:
+        content-type: application/vnd.api+json
+      body:
+        jsonapi:
+          version: "1.0"
+        data: "${data}"
+    input:
+      project_id:
+        type: string
+        description: Project id the folder lives in.
+      folder_id:
+        type: string
+        description: Folder id (URN) to update.
+      data:
+        type: object
+        description: JSON:API data object with the attributes to change.
+    output:
+      description: The updated folder resource object.
+      type: object
+
+  get_item:
+    title: Get an item
+    description: >-
+      Read one item -- a file as a whole, independent of its versions -- with
+      its display name and tip version.
+    category: data-management
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /data/v1/projects/${project_id}/items/${item_id}
+      query:
+        includePathInProject: "${include_path_in_project}"
+    input:
+      project_id:
+        type: string
+        description: Project id the item lives in.
+      item_id:
+        type: string
+        description: Item id (URN).
+      include_path_in_project:
+        type: boolean
+        description: True to include the item's folder path in the response.
+        optional: true
+    output:
+      description: The item resource object.
+      type: object
+
+  create_item:
+    title: Create an item
+    description: >-
+      Create a file (item) with its first version. data describes the item and
+      included describes the version, both as JSON:API objects; a storage
+      location created with create_storage is what the version points at.
+    category: data-management
+    scopes: [data:create]
+    request:
+      method: POST
+      path: /data/v1/projects/${project_id}/items
+      headers:
+        content-type: application/vnd.api+json
+      query:
+        copyFrom: "${copy_from}"
+      body:
+        jsonapi:
+          version: "1.0"
+        data: "${data}"
+        included: "${included}"
+        meta: "${meta}"
+    input:
+      project_id:
+        type: string
+        description: Project id to create the item in.
+      data:
+        type: object
+        description: JSON:API data object describing the item and its parent folder.
+      included:
+        type: array
+        description: JSON:API objects describing the first version of the item.
+        items: {type: object}
+      copy_from:
+        type: string
+        description: Version id (URN) to copy the new item from.
+        optional: true
+      meta:
+        type: object
+        description: Meta information passed through to webhooks.
+        optional: true
+    output:
+      description: The created item, with its first version.
+      type: object
+
+  update_item:
+    title: Update an item
+    description: >-
+      Rename an item or change its tip version. data is the JSON:API object
+      carrying the item's id, type and the attributes to change.
+    category: data-management
+    scopes: [data:write]
+    request:
+      method: PATCH
+      path: /data/v1/projects/${project_id}/items/${item_id}
+      headers:
+        content-type: application/vnd.api+json
+      body:
+        jsonapi:
+          version: "1.0"
+        data: "${data}"
+    input:
+      project_id:
+        type: string
+        description: Project id the item lives in.
+      item_id:
+        type: string
+        description: Item id (URN) to update.
+      data:
+        type: object
+        description: JSON:API data object with the attributes to change.
+    output:
+      description: The updated item resource object.
+      type: object
+
+  get_item_parent:
+    title: Get an item's parent folder
+    description: >-
+      Read the folder an item sits in, which is how you locate a file in the
+      project tree.
+    category: data-management
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /data/v1/projects/${project_id}/items/${item_id}/parent
+    input:
+      project_id:
+        type: string
+        description: Project id the item lives in.
+      item_id:
+        type: string
+        description: Item id (URN).
+    output:
+      description: The parent folder resource object.
+      type: object
+
+  get_item_tip:
+    title: Get an item's tip version
+    description: >-
+      Read the most recent version of an item, which is the one to translate or
+      download when you want "the current file".
+    category: data-management
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /data/v1/projects/${project_id}/items/${item_id}/tip
+    input:
+      project_id:
+        type: string
+        description: Project id the item lives in.
+      item_id:
+        type: string
+        description: Item id (URN).
+    output:
+      description: The tip version resource object.
+      type: object
+
+  list_item_versions:
+    title: List an item's versions
+    description: >-
+      Page through every version of a file, newest first, with who created each
+      and what storage it points at.
+    category: data-management
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /data/v1/projects/${project_id}/items/${item_id}/versions
+      query:
+        filter[id]: "${filter_id}"
+        filter[extension.type]: "${filter_extension_type}"
+        filter[versionNumber]: "${filter_version_number}"
+        page[number]: "${page_number}"
+        page[limit]: "${page_limit}"
+    input:
+      project_id:
+        type: string
+        description: Project id the item lives in.
+      item_id:
+        type: string
+        description: Item id (URN) whose versions to list.
+      filter_id:
+        type: array
+        description: Version ids to restrict the response to.
+        optional: true
+        items: {type: string}
+      filter_extension_type:
+        type: array
+        description: Extension types to restrict the response to.
+        optional: true
+        items: {type: string}
+      filter_version_number:
+        type: array
+        description: Version numbers to restrict the response to.
+        optional: true
+        items: {type: integer}
+      page_number:
+        type: integer
+        description: Zero-based page number.
+        optional: true
+        minimum: 0
+      page_limit:
+        type: integer
+        description: Versions per page, up to 200.
+        optional: true
+        maximum: 200
+    output:
+      description: A page of versions of the item.
+      type: object
+
+  list_item_refs:
+    title: List an item's related resources
+    description: >-
+      List the resources related to an item, following the refs relationship.
+    category: data-management
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /data/v1/projects/${project_id}/items/${item_id}/refs
+      query:
+        filter[type]: "${filter_type}"
+        filter[id]: "${filter_id}"
+        filter[extension.type]: "${filter_extension_type}"
+    input:
+      project_id:
+        type: string
+        description: Project id the item lives in.
+      item_id:
+        type: string
+        description: Item id (URN).
+      filter_type:
+        type: array
+        description: Restrict by the type of the ref target.
+        optional: true
+        items: {type: string}
+      filter_id:
+        type: array
+        description: Restrict by the id of the ref target.
+        optional: true
+        items: {type: string}
+      filter_extension_type:
+        type: array
+        description: Restrict by extension type.
+        optional: true
+        items: {type: string}
+    output:
+      description: The item's related resources.
+      type: object
+
+  list_item_relationship_refs:
+    title: List an item's custom relationships
+    description: >-
+      List the custom relationships on an item -- xrefs between drawings,
+      derived files and the like -- in either direction.
+    category: data-management
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /data/v1/projects/${project_id}/items/${item_id}/relationships/refs
+      query:
+        filter[type]: "${filter_type}"
+        filter[id]: "${filter_id}"
+        filter[refType]: "${ref_type}"
+        filter[direction]: "${direction}"
+        filter[extension.type]: "${filter_extension_type}"
+    input:
+      project_id:
+        type: string
+        description: Project id the item lives in.
+      item_id:
+        type: string
+        description: Item id (URN).
+      filter_type:
+        type: array
+        description: Restrict by the type of the ref target.
+        optional: true
+        items: {type: string}
+      filter_id:
+        type: array
+        description: Restrict by the id of the ref target.
+        optional: true
+        items: {type: string}
+      ref_type:
+        type: string
+        description: Kind of relationship to return.
+        optional: true
+        enum: [derived, dependencies, auxiliary, xrefs, includes]
+      direction:
+        type: string
+        description: Whether the item is the source or the target of the relationship.
+        optional: true
+        enum: [from, to]
+      filter_extension_type:
+        type: array
+        description: Restrict by extension type.
+        optional: true
+        items: {type: string}
+    output:
+      description: The item's custom relationships.
+      type: object
+
+  create_item_relationship:
+    title: Create a custom relationship for an item
+    description: >-
+      Link an item to another resource with a custom relationship, which is how
+      xrefs and derived-file links are recorded.
+    category: data-management
+    scopes: [data:create]
+    request:
+      method: POST
+      path: /data/v1/projects/${project_id}/items/${item_id}/relationships/refs
+      headers:
+        content-type: application/vnd.api+json
+      body:
+        jsonapi:
+          version: "1.0"
+        data: "${data}"
+    input:
+      project_id:
+        type: string
+        description: Project id the item lives in.
+      item_id:
+        type: string
+        description: Item id (URN) the relationship starts from.
+      data:
+        type: object
+        description: JSON:API data object describing the relationship target and refType.
+    output:
+      description: Empty on success.
+      type: object
+
+  list_item_relationship_links:
+    title: List an item's relationship links
+    description: >-
+      List the external links attached to an item, the URLs users have
+      associated with the file.
+    category: data-management
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /data/v1/projects/${project_id}/items/${item_id}/relationships/links
+    input:
+      project_id:
+        type: string
+        description: Project id the item lives in.
+      item_id:
+        type: string
+        description: Item id (URN).
+    output:
+      description: The item's relationship links.
+      type: object
+
+  get_version:
+    title: Get a version
+    description: >-
+      Read one version of a file, with its version number, storage reference
+      and who created it.
+    category: data-management
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /data/v1/projects/${project_id}/versions/${version_id}
+    input:
+      project_id:
+        type: string
+        description: Project id the version lives in.
+      version_id:
+        type: string
+        description: Version id (URN).
+    output:
+      description: The version resource object.
+      type: object
+
+  create_version:
+    title: Create a version
+    description: >-
+      Add a new version to an existing item. data is the JSON:API object naming
+      the item and the storage the uploaded bytes landed in.
+    category: data-management
+    scopes: [data:create]
+    request:
+      method: POST
+      path: /data/v1/projects/${project_id}/versions
+      headers:
+        content-type: application/vnd.api+json
+      query:
+        copyFrom: "${copy_from}"
+      body:
+        jsonapi:
+          version: "1.0"
+        data: "${data}"
+        meta: "${meta}"
+    input:
+      project_id:
+        type: string
+        description: Project id the item lives in.
+      data:
+        type: object
+        description: JSON:API data object describing the version and its item relationship.
+      copy_from:
+        type: string
+        description: Version id (URN) to copy this version from.
+        optional: true
+      meta:
+        type: object
+        description: Meta information passed through to webhooks.
+        optional: true
+    output:
+      description: The created version resource object.
+      type: object
+
+  update_version:
+    title: Update a version
+    description: >-
+      Change a version's attributes, which is chiefly how a file is renamed or
+      restored.
+    category: data-management
+    scopes: [data:write]
+    request:
+      method: PATCH
+      path: /data/v1/projects/${project_id}/versions/${version_id}
+      headers:
+        content-type: application/vnd.api+json
+      body:
+        jsonapi:
+          version: "1.0"
+        data: "${data}"
+    input:
+      project_id:
+        type: string
+        description: Project id the version lives in.
+      version_id:
+        type: string
+        description: Version id (URN) to update.
+      data:
+        type: object
+        description: JSON:API data object with the attributes to change.
+    output:
+      description: The updated version resource object.
+      type: object
+
+  get_version_item:
+    title: Get the item behind a version
+    description: >-
+      Read the item a version belongs to, for going from a specific version
+      back to the file it is a version of.
+    category: data-management
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /data/v1/projects/${project_id}/versions/${version_id}/item
+    input:
+      project_id:
+        type: string
+        description: Project id the version lives in.
+      version_id:
+        type: string
+        description: Version id (URN).
+    output:
+      description: The item resource object.
+      type: object
+
+  list_version_refs:
+    title: List a version's related resources
+    description: >-
+      List the resources related to one version of a file, following the refs
+      relationship.
+    category: data-management
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /data/v1/projects/${project_id}/versions/${version_id}/refs
+      query:
+        filter[type]: "${filter_type}"
+        filter[id]: "${filter_id}"
+        filter[extension.type]: "${filter_extension_type}"
+    input:
+      project_id:
+        type: string
+        description: Project id the version lives in.
+      version_id:
+        type: string
+        description: Version id (URN).
+      filter_type:
+        type: array
+        description: Restrict by the type of the ref target.
+        optional: true
+        items: {type: string}
+      filter_id:
+        type: array
+        description: Restrict by the id of the ref target.
+        optional: true
+        items: {type: string}
+      filter_extension_type:
+        type: array
+        description: Restrict by extension type.
+        optional: true
+        items: {type: string}
+    output:
+      description: The version's related resources.
+      type: object
+
+  list_version_relationship_refs:
+    title: List a version's custom relationships
+    description: >-
+      List the custom relationships attached to one version, which is where
+      per-version xrefs and dependencies live.
+    category: data-management
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /data/v1/projects/${project_id}/versions/${version_id}/relationships/refs
+      query:
+        filter[type]: "${filter_type}"
+        filter[id]: "${filter_id}"
+        filter[refType]: "${ref_type}"
+        filter[direction]: "${direction}"
+        filter[extension.type]: "${filter_extension_type}"
+    input:
+      project_id:
+        type: string
+        description: Project id the version lives in.
+      version_id:
+        type: string
+        description: Version id (URN).
+      filter_type:
+        type: array
+        description: Restrict by the type of the ref target.
+        optional: true
+        items: {type: string}
+      filter_id:
+        type: array
+        description: Restrict by the id of the ref target.
+        optional: true
+        items: {type: string}
+      ref_type:
+        type: string
+        description: Kind of relationship to return.
+        optional: true
+        enum: [derived, dependencies, auxiliary, xrefs, includes]
+      direction:
+        type: string
+        description: Whether the version is the source or the target.
+        optional: true
+        enum: [from, to]
+      filter_extension_type:
+        type: array
+        description: Restrict by extension type.
+        optional: true
+        items: {type: string}
+    output:
+      description: The version's custom relationships.
+      type: object
+
+  create_version_relationship:
+    title: Create a custom relationship for a version
+    description: >-
+      Link one version of a file to another resource, recording a dependency
+      that applies to that version alone.
+    category: data-management
+    scopes: [data:create]
+    request:
+      method: POST
+      path: /data/v1/projects/${project_id}/versions/${version_id}/relationships/refs
+      headers:
+        content-type: application/vnd.api+json
+      body:
+        jsonapi:
+          version: "1.0"
+        data: "${data}"
+    input:
+      project_id:
+        type: string
+        description: Project id the version lives in.
+      version_id:
+        type: string
+        description: Version id (URN) the relationship starts from.
+      data:
+        type: object
+        description: JSON:API data object describing the relationship target and refType.
+    output:
+      description: Empty on success.
+      type: object
+
+  create_storage:
+    title: Create a storage location
+    description: >-
+      Reserve an OSS storage location for a file you are about to upload. The
+      response's object id is what you upload the bytes to and then reference
+      when creating the item or version.
+    category: data-management
+    scopes: [data:create]
+    request:
+      method: POST
+      path: /data/v1/projects/${project_id}/storage
+      headers:
+        content-type: application/vnd.api+json
+      body:
+        jsonapi:
+          version: "1.0"
+        data: "${data}"
+    input:
+      project_id:
+        type: string
+        description: Project id to create the storage location for.
+      data:
+        type: object
+        description: JSON:API data object with the file name and target folder relationship.
+    output:
+      description: The storage location, with the OSS object id to upload to.
+      type: object
+
+  list_download_formats:
+    title: List supported download formats
+    description: >-
+      List the formats a version can be downloaded in, before asking for a
+      download of one of them.
+    category: data-management
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /data/v1/projects/${project_id}/versions/${version_id}/downloadFormats
+    input:
+      project_id:
+        type: string
+        description: Project id the version lives in.
+      version_id:
+        type: string
+        description: Version id (URN).
+    output:
+      description: The download formats available for the version.
+      type: object
+
+  list_version_downloads:
+    title: List a version's available downloads
+    description: >-
+      List downloads already prepared for a version, optionally narrowed to one
+      file type.
+    category: data-management
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /data/v1/projects/${project_id}/versions/${version_id}/downloads
+      query:
+        filter[format.fileType]: "${file_type}"
+    input:
+      project_id:
+        type: string
+        description: Project id the version lives in.
+      version_id:
+        type: string
+        description: Version id (URN).
+      file_type:
+        type: array
+        description: File types to restrict the response to.
+        optional: true
+        items: {type: string}
+    output:
+      description: The prepared downloads for the version.
+      type: object
+
+  create_download:
+    title: Create a download
+    description: >-
+      Ask Autodesk to prepare a downloadable file from a version in a chosen
+      format. The response carries a job id -- poll get_download_job until it
+      finishes, then read the download.
+    category: data-management
+    scopes: [data:create]
+    request:
+      method: POST
+      path: /data/v1/projects/${project_id}/downloads
+      headers:
+        content-type: application/vnd.api+json
+      body:
+        jsonapi:
+          version: "1.0"
+        data: "${data}"
+    input:
+      project_id:
+        type: string
+        description: Project id the version lives in.
+      data:
+        type: object
+        description: JSON:API data object naming the version and the requested format.
+    output:
+      description: The queued download job.
+      type: object
+
+  get_download:
+    title: Get download details
+    description: >-
+      Read a prepared download, including the storage location its bytes can be
+      fetched from.
+    category: data-management
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /data/v1/projects/${project_id}/downloads/${download_id}
+    input:
+      project_id:
+        type: string
+        description: Project id the download belongs to.
+      download_id:
+        type: string
+        description: Download id from create_download.
+    output:
+      description: The download resource object.
+      type: object
+
+  get_download_job:
+    title: Check download creation progress
+    description: >-
+      Poll the job created by create_download to see whether the file is ready
+      yet.
+    category: data-management
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /data/v1/projects/${project_id}/jobs/${job_id}
+    input:
+      project_id:
+        type: string
+        description: Project id the job belongs to.
+      job_id:
+        type: string
+        description: Job id from create_download.
+    output:
+      description: The job's status and progress.
+      type: object
+
+  execute_command:
+    title: Execute a Data Management command
+    description: >-
+      Run one of the Data Management commands -- PublishModel, GetPublishModelJob,
+      CheckPermission, ListRefs, ListItems, PublishWithoutLinks and the rest.
+      data names the command type and its parameters.
+    category: data-management
+    scopes: [data:read, data:create, data:write]
+    request:
+      method: POST
+      path: /data/v1/projects/${project_id}/commands
+      headers:
+        content-type: application/vnd.api+json
+      body:
+        jsonapi:
+          version: "1.0"
+        data: "${data}"
+    input:
+      project_id:
+        type: string
+        description: Project id to run the command against.
+      data:
+        type: object
+        description: JSON:API data object naming the command type and its resources.
+    output:
+      description: The command's result.
+      type: object
+
+  list_buckets:
+    title: List OSS buckets
+    description: >-
+      List the buckets the calling application owns, paging with startAt. OSS
+      buckets belong to the app rather than a user, so this is documented for
+      two-legged app tokens.
+    category: oss
+    scopes: [bucket:read]
+    read_only: true
+    request:
+      method: GET
+      path: /oss/v2/buckets
+      query:
+        region: "${region}"
+        limit: "${limit}"
+        startAt: "${start_at}"
+    input:
+      region:
+        type: string
+        description: Data centre holding the buckets.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+      limit:
+        type: integer
+        description: Buckets per page.
+        optional: true
+      start_at:
+        type: string
+        description: Key of the last bucket from the previous page.
+        optional: true
+    output:
+      description: A page of buckets with their policies and creation dates.
+      type: object
+
+  create_bucket:
+    title: Create an OSS bucket
+    description: >-
+      Create a storage bucket. policyKey fixes how long objects survive --
+      transient is 24 hours, temporary 30 days, persistent until deleted -- and
+      cannot be changed afterwards.
+    category: oss
+    scopes: [bucket:create]
+    request:
+      method: POST
+      path: /oss/v2/buckets
+      headers:
+        x-ads-region: "${region}"
+      body:
+        bucketKey: "${bucket_key}"
+        policyKey: "${policy_key}"
+        allow: "${allow}"
+    input:
+      bucket_key:
+        type: string
+        description: Globally unique bucket name, lowercase.
+      policy_key:
+        type: string
+        description: Retention policy for objects in the bucket.
+        enum: [transient, temporary, persistent]
+      allow:
+        type: array
+        description: Entries granting other applications access to the bucket.
+        optional: true
+        items: {type: object}
+      region:
+        type: string
+        description: Data centre to create the bucket in.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The created bucket, with its key, owner and policy.
+      type: object
+
+  get_bucket_details:
+    title: Get OSS bucket details
+    description: >-
+      Read a bucket's owner, retention policy, permissions and creation date.
+    category: oss
+    scopes: [bucket:read]
+    read_only: true
+    request:
+      method: GET
+      path: /oss/v2/buckets/${bucket_key}/details
+    input:
+      bucket_key:
+        type: string
+        description: Bucket key.
+    output:
+      description: The bucket's details.
+      type: object
+
+  delete_bucket:
+    title: Delete an OSS bucket
+    description: >-
+      Delete a bucket and everything stored in it. There is no undo, and the
+      bucket key cannot be reused immediately.
+    category: oss
+    scopes: [bucket:delete]
+    destructive: true
+    request:
+      method: DELETE
+      path: /oss/v2/buckets/${bucket_key}
+    input:
+      bucket_key:
+        type: string
+        description: Bucket key to delete.
+    output:
+      description: Empty on success.
+      type: object
+
+  protect_bucket:
+    title: Set a bucket's protection
+    description: >-
+      Turn deletion protection on or off for a bucket, which is what stops an
+      accidental delete_bucket from succeeding.
+    category: oss
+    scopes: [bucket:update]
+    request:
+      method: POST
+      path: /oss/v2/buckets/${bucket_key}/protect
+      body:
+        protection: "${protection}"
+    input:
+      bucket_key:
+        type: string
+        description: Bucket key to protect or unprotect.
+      protection:
+        type: boolean
+        description: True to protect the bucket from deletion, false to allow it.
+        optional: true
+    output:
+      description: The bucket's new protection status.
+      type: object
+
+  transfer_bucket:
+    title: Transfer bucket ownership
+    description: >-
+      Move a bucket to another application in three steps -- initiate, then
+      complete from the receiving app, or cancel. key is the client id of the
+      app taking ownership.
+    category: oss
+    scopes: [bucket:update]
+    request:
+      method: POST
+      path: /oss/v2/buckets/${bucket_key}/transfer
+      body:
+        operation: "${operation}"
+        key: "${key}"
+    input:
+      bucket_key:
+        type: string
+        description: Bucket key whose ownership is moving.
+      operation:
+        type: string
+        description: Which step of the transfer to perform.
+        enum: [initiate, complete, cancel]
+      key:
+        type: string
+        description: Client id of the application taking ownership.
+        optional: true
+    output:
+      description: The transfer's state.
+      type: object
+
+  list_objects:
+    title: List objects in a bucket
+    description: >-
+      Page through the objects in a bucket, optionally only those whose key
+      starts with a prefix.
+    category: oss
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /oss/v2/buckets/${bucket_key}/objects
+      query:
+        limit: "${limit}"
+        beginsWith: "${begins_with}"
+        startAt: "${start_at}"
+    input:
+      bucket_key:
+        type: string
+        description: Bucket key whose objects to list.
+      limit:
+        type: integer
+        description: Objects per page.
+        optional: true
+      begins_with:
+        type: string
+        description: Only objects whose key starts with this prefix.
+        optional: true
+      start_at:
+        type: string
+        description: Key of the last object from the previous page.
+        optional: true
+    output:
+      description: A page of objects with their sizes and sha1 values.
+      type: object
+
+  get_object_details:
+    title: Get object details
+    description: >-
+      Read one object's size, sha1, content type and timestamps. The with
+      parameter adds created, accessed or modified dates and user metadata.
+    category: oss
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /oss/v2/buckets/${bucket_key}/objects/${object_key}/details
+      query:
+        with: "${with}"
+    input:
+      bucket_key:
+        type: string
+        description: Bucket key holding the object.
+      object_key:
+        type: string
+        description: URL-encoded object key.
+      with:
+        type: string
+        description: Extra attribute group to include.
+        optional: true
+        enum: [createdDate, lastAccessedDate, lastModifiedDate, userDefinedMetadata]
+    output:
+      description: The object's details.
+      type: object
+
+  delete_object:
+    title: Delete an object
+    description: >-
+      Delete one object from a bucket. Anything referencing it -- a Data
+      Management version, a translated derivative -- stops resolving.
+    category: oss
+    scopes: [data:write]
+    destructive: true
+    request:
+      method: DELETE
+      path: /oss/v2/buckets/${bucket_key}/objects/${object_key}
+    input:
+      bucket_key:
+        type: string
+        description: Bucket key holding the object.
+      object_key:
+        type: string
+        description: URL-encoded object key to delete.
+    output:
+      description: Empty on success.
+      type: object
+
+  copy_object:
+    title: Copy an object
+    description: >-
+      Copy an object to a new key inside the same bucket, which is the cheapest
+      way to snapshot a file.
+    category: oss
+    scopes: [data:write, data:create]
+    request:
+      method: PUT
+      path: /oss/v2/buckets/${bucket_key}/objects/${object_key}/copyto/${new_obj_name}
+    input:
+      bucket_key:
+        type: string
+        description: Bucket key holding the object.
+      object_key:
+        type: string
+        description: URL-encoded key of the object to copy.
+      new_obj_name:
+        type: string
+        description: URL-encoded key for the copy.
+    output:
+      description: The new object's details.
+      type: object
+
+  create_signed_object_url:
+    title: Create a signed OSS URL for an object
+    description: >-
+      Mint a URL that lets someone without a token read or write one object.
+      access decides which, and singleUse expires the URL after one use.
+    category: oss
+    scopes: [data:write]
+    request:
+      method: POST
+      path: /oss/v2/buckets/${bucket_key}/objects/${object_key}/signed
+      query:
+        access: "${access}"
+        useCdn: "${use_cdn}"
+      body:
+        minutesExpiration: "${minutes_expiration}"
+        singleUse: "${single_use}"
+    input:
+      bucket_key:
+        type: string
+        description: Bucket key holding the object.
+      object_key:
+        type: string
+        description: URL-encoded object key.
+      access:
+        type: string
+        description: What the signed URL may do.
+        optional: true
+        enum: [Read, Write, ReadWrite]
+      use_cdn:
+        type: boolean
+        description: True to return a CloudFront URL rather than a direct one.
+        optional: true
+      minutes_expiration:
+        type: integer
+        description: How many minutes the URL stays usable.
+        optional: true
+      single_use:
+        type: boolean
+        description: True to expire the URL after a single use.
+        optional: true
+    output:
+      description: The signed URL and its expiry.
+      type: object
+
+  delete_signed_resource:
+    title: Delete a signed resource
+    description: >-
+      Revoke a signed URL by its hash, so the link stops working before its
+      expiry.
+    category: oss
+    scopes: [data:write]
+    destructive: true
+    request:
+      method: DELETE
+      path: /oss/v2/signedresources/${hash}
+      headers:
+        x-ads-region: "${region}"
+    input:
+      hash:
+        type: string
+        description: Hash component of the signed URL.
+      region:
+        type: string
+        description: Data centre holding the bucket.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: Empty on success.
+      type: object
+
+  get_signed_s3_download_url:
+    title: Get a signed S3 download URL
+    description: >-
+      Get a direct S3 URL for downloading an object, which is the supported way
+      to pull large files without proxying them through OSS.
+    category: oss
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /oss/v2/buckets/${bucket_key}/objects/${object_key}/signeds3download
+      query:
+        minutesExpiration: "${minutes_expiration}"
+        response-content-type: "${response_content_type}"
+        response-content-disposition: "${response_content_disposition}"
+        response-cache-control: "${response_cache_control}"
+        public-resource-fallback: "${public_resource_fallback}"
+        useCdn: "${use_cdn}"
+    input:
+      bucket_key:
+        type: string
+        description: Bucket key holding the object.
+      object_key:
+        type: string
+        description: URL-encoded object key.
+      minutes_expiration:
+        type: integer
+        description: How many minutes the URL stays usable.
+        optional: true
+      response_content_type:
+        type: string
+        description: Content-Type the download should come back with.
+        optional: true
+      response_content_disposition:
+        type: string
+        description: Content-Disposition the download should come back with.
+        optional: true
+      response_cache_control:
+        type: string
+        description: Cache-Control the download should come back with.
+        optional: true
+      public_resource_fallback:
+        type: boolean
+        description: How to answer when the object's chunks are not yet assembled.
+        optional: true
+      use_cdn:
+        type: boolean
+        description: True to return a CloudFront URL rather than a direct S3 one.
+        optional: true
+    output:
+      description: The signed S3 download URL.
+      type: object
+
+  get_signed_s3_upload_url:
+    title: Get a signed S3 upload URL
+    description: >-
+      Start an upload by getting signed S3 URLs to PUT the bytes to. parts
+      splits a large file into chunks; keep the uploadKey it returns for
+      complete_s3_upload.
+    category: oss
+    scopes: [data:write, data:create]
+    read_only: true
+    request:
+      method: GET
+      path: /oss/v2/buckets/${bucket_key}/objects/${object_key}/signeds3upload
+      query:
+        parts: "${parts}"
+        firstPart: "${first_part}"
+        uploadKey: "${upload_key}"
+        minutesExpiration: "${minutes_expiration}"
+        useAcceleration: "${use_acceleration}"
+    input:
+      bucket_key:
+        type: string
+        description: Bucket key to upload into.
+      object_key:
+        type: string
+        description: URL-encoded key for the new object.
+      parts:
+        type: integer
+        description: How many chunks the object will be split into.
+        optional: true
+      first_part:
+        type: integer
+        description: Index of the first chunk to upload.
+        optional: true
+      upload_key:
+        type: string
+        description: uploadKey from an earlier call, to get more URLs for the same upload.
+        optional: true
+      minutes_expiration:
+        type: integer
+        description: How many minutes the URLs stay usable.
+        optional: true
+      use_acceleration:
+        type: boolean
+        description: True to use S3 Transfer Acceleration.
+        optional: true
+    output:
+      description: The signed upload URLs and the uploadKey for this session.
+      type: object
+
+  complete_s3_upload:
+    title: Complete a signed S3 upload
+    description: >-
+      Tell OSS the chunks are uploaded so it assembles the object. uploadKey
+      comes from get_signed_s3_upload_url and eTags from the S3 PUT responses.
+    category: oss
+    scopes: [data:write, data:create]
+    request:
+      method: POST
+      path: /oss/v2/buckets/${bucket_key}/objects/${object_key}/signeds3upload
+      headers:
+        x-ads-meta-Content-Type: "${content_type}"
+        x-ads-meta-Content-Disposition: "${content_disposition}"
+        x-ads-user-defined-metadata: "${user_metadata}"
+      body:
+        uploadKey: "${upload_key}"
+        size: "${size}"
+        eTags: "${etags}"
+    input:
+      bucket_key:
+        type: string
+        description: Bucket key the object is being uploaded into.
+      object_key:
+        type: string
+        description: URL-encoded object key.
+      upload_key:
+        type: string
+        description: uploadKey identifying the upload session.
+      size:
+        type: integer
+        description: Expected size of the finished object, in bytes.
+        optional: true
+      etags:
+        type: array
+        description: eTags S3 returned for each uploaded chunk, in order.
+        optional: true
+        items: {type: string}
+      content_type:
+        type: string
+        description: Content-Type to record on the object.
+        optional: true
+      content_disposition:
+        type: string
+        description: Content-Disposition to record on the object.
+        optional: true
+      user_metadata:
+        type: string
+        description: Custom metadata to store with the object, as a JSON string.
+        optional: true
+    output:
+      description: The assembled object's details.
+      type: object
+
+  batch_signed_s3_upload_urls:
+    title: Batch signed S3 upload URLs
+    description: >-
+      Get signed upload URLs for several objects in one call, which is how bulk
+      uploads avoid a round trip per file.
+    category: oss
+    scopes: [data:write, data:create]
+    request:
+      method: POST
+      path: /oss/v2/buckets/${bucket_key}/objects/batchsigneds3upload
+      query:
+        minutesExpiration: "${minutes_expiration}"
+        useAcceleration: "${use_acceleration}"
+      body:
+        requests: "${requests}"
+    input:
+      bucket_key:
+        type: string
+        description: Bucket key to upload into.
+      requests:
+        type: array
+        description: One entry per object, each with its objectKey and part count.
+        items: {type: object}
+      minutes_expiration:
+        type: integer
+        description: How many minutes the URLs stay usable.
+        optional: true
+      use_acceleration:
+        type: boolean
+        description: True to use S3 Transfer Acceleration.
+        optional: true
+    output:
+      description: Signed upload URLs and upload keys, keyed by object.
+      type: object
+
+  batch_complete_s3_upload:
+    title: Complete a batch of S3 uploads
+    description: >-
+      Finish several uploads at once, handing back each object's uploadKey so
+      OSS assembles them all.
+    category: oss
+    scopes: [data:write, data:create]
+    request:
+      method: POST
+      path: /oss/v2/buckets/${bucket_key}/objects/batchcompleteupload
+      body:
+        requests: "${requests}"
+    input:
+      bucket_key:
+        type: string
+        description: Bucket key the objects were uploaded into.
+      requests:
+        type: array
+        description: One entry per upload, each with its objectKey and uploadKey.
+        items: {type: object}
+    output:
+      description: The result for each completed upload.
+      type: object
+
+  batch_signed_s3_download_urls:
+    title: Batch signed S3 download URLs
+    description: >-
+      Get signed download URLs for several objects in one call, for pulling a
+      folder's worth of files without a round trip each.
+    category: oss
+    scopes: [data:read]
+    request:
+      method: POST
+      path: /oss/v2/buckets/${bucket_key}/objects/batchsigneds3download
+      query:
+        minutesExpiration: "${minutes_expiration}"
+        public-resource-fallback: "${public_resource_fallback}"
+      body:
+        requests: "${requests}"
+    input:
+      bucket_key:
+        type: string
+        description: Bucket key holding the objects.
+      requests:
+        type: array
+        description: One entry per object, each naming its objectKey.
+        items: {type: object}
+      minutes_expiration:
+        type: integer
+        description: How many minutes the URLs stay usable.
+        optional: true
+      public_resource_fallback:
+        type: boolean
+        description: How to answer when an object's chunks are not yet assembled.
+        optional: true
+    output:
+      description: Signed download URLs, keyed by object.
+      type: object
+
+  list_translation_formats:
+    title: List supported translation formats
+    description: >-
+      List the source formats Model Derivative can read and the output formats
+      it can produce from each. Needs no scope of its own.
+    category: model-derivative
+    read_only: true
+    request:
+      method: GET
+      path: /modelderivative/v2/designdata/formats
+    output:
+      description: The source-to-output format matrix.
+      type: object
+
+  create_translation_job:
+    title: Create a translation job
+    description: >-
+      Translate a design into viewable derivatives -- SVF2 for the viewer, or
+      OBJ, STL, IFC, DWG and the rest for download. input names the source URN
+      and output the formats and views wanted.
+    category: model-derivative
+    scopes: [data:read, data:write, data:create]
+    request:
+      method: POST
+      path: /modelderivative/v2/designdata/job
+      headers:
+        x-ads-force: "${force}"
+        x-ads-derivative-format: "${derivative_format}"
+        region: "${region}"
+      body:
+        input: "${input}"
+        output: "${output}"
+        misc: "${misc}"
+    input:
+      input:
+        type: object
+        description: Source design -- its base64 urn, and compressedUrn and rootFilename for archives.
+      output:
+        type: object
+        description: Requested derivatives, as formats with their types and views.
+      misc:
+        type: object
+        description: Webhook settings for job notifications.
+        optional: true
+      force:
+        type: boolean
+        description: True to retranslate even when derivatives already exist.
+        optional: true
+      derivative_format:
+        type: string
+        description: Which Object ID set to produce for designs with legacy ids.
+        optional: true
+        enum: [latest, fallback]
+      region:
+        type: string
+        description: Data centre to store the manifest and derivatives in.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The job's status and the urn its derivatives will appear under.
+      type: object
+
+  get_manifest:
+    title: Get a translation manifest
+    description: >-
+      Read the manifest for a translated design -- overall progress, and the
+      status, type and URN of every derivative produced.
+    category: model-derivative
+    scopes: [data:read, viewable:read]
+    read_only: true
+    request:
+      method: GET
+      path: /modelderivative/v2/designdata/${urn}/manifest
+      headers:
+        region: "${region}"
+    input:
+      urn:
+        type: string
+        description: URL-safe base64 URN of the source design.
+      region:
+        type: string
+        description: Data centre holding the manifest.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The manifest with per-derivative status and URNs.
+      type: object
+
+  delete_manifest:
+    title: Delete a translation manifest
+    description: >-
+      Delete a design's manifest and every derivative translated from it. The
+      source file is untouched, but the viewer has nothing left to load.
+    category: model-derivative
+    scopes: [data:write, data:read]
+    destructive: true
+    request:
+      method: DELETE
+      path: /modelderivative/v2/designdata/${urn}/manifest
+      headers:
+        region: "${region}"
+    input:
+      urn:
+        type: string
+        description: URL-safe base64 URN of the source design.
+      region:
+        type: string
+        description: Data centre holding the manifest.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: Confirmation that the manifest was deleted.
+      type: object
+
+  list_model_views:
+    title: List a design's model views
+    description: >-
+      List the viewables inside a translated design, each with the model GUID
+      the metadata and property endpoints take.
+    category: model-derivative
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /modelderivative/v2/designdata/${urn}/metadata
+      headers:
+        region: "${region}"
+    input:
+      urn:
+        type: string
+        description: URL-safe base64 URN of the source design.
+      region:
+        type: string
+        description: Data centre holding the derivatives.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The design's model views with their GUIDs.
+      type: object
+
+  get_object_tree:
+    title: Get a model view's object tree
+    description: >-
+      Fetch the hierarchy of objects in one model view. level limits how deep
+      the tree comes back, and forceget pushes past the 20 MB response cap.
+    category: model-derivative
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /modelderivative/v2/designdata/${urn}/metadata/${model_guid}
+      headers:
+        region: "${region}"
+        x-ads-force: "${force}"
+        x-ads-derivative-format: "${derivative_format}"
+      query:
+        objectid: "${objectid}"
+        level: "${level}"
+        forceget: "${forceget}"
+    input:
+      urn:
+        type: string
+        description: URL-safe base64 URN of the source design.
+      model_guid:
+        type: string
+        description: Model view GUID from list_model_views.
+      objectid:
+        type: integer
+        description: Return only the sub-tree under this Object ID.
+        optional: true
+      level:
+        type: string
+        description: How many child levels of the hierarchy to return.
+        optional: true
+      forceget:
+        type: string
+        description: Set to true to retrieve results larger than 20 MB.
+        optional: true
+      force:
+        type: boolean
+        description: True to re-extract the data rather than use the cache.
+        optional: true
+      derivative_format:
+        type: string
+        description: Which Object ID set to return for designs with legacy ids.
+        optional: true
+        enum: [latest, fallback]
+      region:
+        type: string
+        description: Data centre holding the derivatives.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The object tree for the model view.
+      type: object
+
+  get_all_properties:
+    title: Get all properties of a model view
+    description: >-
+      Fetch every property of every object in a model view, or of one object
+      when objectid is given. Large models need forceget.
+    category: model-derivative
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /modelderivative/v2/designdata/${urn}/metadata/${model_guid}/properties
+      headers:
+        region: "${region}"
+        x-ads-force: "${force}"
+        x-ads-derivative-format: "${derivative_format}"
+      query:
+        objectid: "${objectid}"
+        forceget: "${forceget}"
+    input:
+      urn:
+        type: string
+        description: URL-safe base64 URN of the source design.
+      model_guid:
+        type: string
+        description: Model view GUID from list_model_views.
+      objectid:
+        type: integer
+        description: Restrict the response to this Object ID.
+        optional: true
+      forceget:
+        type: string
+        description: Set to true to retrieve results larger than 20 MB.
+        optional: true
+      force:
+        type: boolean
+        description: True to re-extract the data rather than use the cache.
+        optional: true
+      derivative_format:
+        type: string
+        description: Which Object ID set to return for designs with legacy ids.
+        optional: true
+        enum: [latest, fallback]
+      region:
+        type: string
+        description: Data centre holding the derivatives.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The properties of the objects in the model view.
+      type: object
+
+  query_properties:
+    title: Query specific properties
+    description: >-
+      Ask for just the properties you need, with a query expression over object
+      attributes and a fields list. Far cheaper than pulling every property of
+      a large model.
+    category: model-derivative
+    scopes: [data:read]
+    request:
+      method: POST
+      path: /modelderivative/v2/designdata/${urn}/metadata/${model_guid}/properties:query
+      headers:
+        region: "${region}"
+        x-ads-derivative-format: "${derivative_format}"
+      body:
+        pagination: "${pagination}"
+        query: "${query}"
+        fields: "${fields}"
+        payload: "${payload}"
+    input:
+      urn:
+        type: string
+        description: URL-safe base64 URN of the source design.
+      model_guid:
+        type: string
+        description: Model view GUID from list_model_views.
+      pagination:
+        type: object
+        description: How to split the response, as offset and limit.
+      query:
+        type: object
+        description: Match expression selecting the objects to return.
+      fields:
+        type: array
+        description: Property names to return for each matching object.
+        items: {type: string}
+      payload:
+        type: string
+        description: Whether numeric values come back as text or with units.
+        optional: true
+        enum: [text, unit]
+      derivative_format:
+        type: string
+        description: Which Object ID set to return for designs with legacy ids.
+        optional: true
+        enum: [latest, fallback]
+      region:
+        type: string
+        description: Data centre holding the derivatives.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The matching objects with the requested properties.
+      type: object
+
+  get_thumbnail:
+    title: Get a design's thumbnail
+    description: >-
+      Fetch the thumbnail image generated during translation, at 100, 200 or
+      400 pixels square.
+    category: model-derivative
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /modelderivative/v2/designdata/${urn}/thumbnail
+      headers:
+        region: "${region}"
+      query:
+        width: "${width}"
+        height: "${height}"
+    input:
+      urn:
+        type: string
+        description: URL-safe base64 URN of the source design.
+      width:
+        type: integer
+        description: Thumbnail width in pixels.
+        optional: true
+        enum: [100, 200, 400]
+      height:
+        type: integer
+        description: Thumbnail height in pixels.
+        optional: true
+        enum: [100, 200, 400]
+      region:
+        type: string
+        description: Data centre holding the derivatives.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The thumbnail image bytes.
+      type: object
+
+  get_derivative_download_url:
+    title: Get a derivative download URL
+    description: >-
+      Get signed cookies and a URL for downloading one derivative listed in the
+      manifest, such as an OBJ or IFC output.
+    category: model-derivative
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /modelderivative/v2/designdata/${urn}/manifest/${derivative_urn}/signedcookies
+      headers:
+        region: "${region}"
+      query:
+        minutes-expiration: "${minutes_expiration}"
+        response-content-disposition: "${response_content_disposition}"
+    input:
+      urn:
+        type: string
+        description: URL-safe base64 URN of the source design.
+      derivative_urn:
+        type: string
+        description: URL-encoded URN of the derivative, from the manifest.
+      minutes_expiration:
+        type: integer
+        description: How many minutes the signed cookies stay valid.
+        optional: true
+      response_content_disposition:
+        type: string
+        description: Content-Disposition the download should come back with.
+        optional: true
+      region:
+        type: string
+        description: Data centre holding the derivatives.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The download URL with its signed cookies.
+      type: object
+
+  specify_references:
+    title: Specify a design's references
+    description: >-
+      Tell Model Derivative where a composite design's referenced files live,
+      so a translation job can resolve xrefs and linked models.
+    category: model-derivative
+    scopes: [data:read, data:write, data:create]
+    request:
+      method: POST
+      path: /modelderivative/v2/designdata/${urn}/references
+      headers:
+        region: "${region}"
+      body:
+        urn: "${source_urn}"
+        filename: "${filename}"
+        references: "${references}"
+        region: "${body_region}"
+    input:
+      urn:
+        type: string
+        description: URL-safe base64 URN of the source design, in the path.
+      source_urn:
+        type: string
+        description: URL-safe base64 URN of the source design, repeated in the body.
+      filename:
+        type: string
+        description: File name of the top level component.
+      references:
+        type: array
+        description: One entry per referenced file, with its urn and relative path.
+        items: {type: object}
+      body_region:
+        type: string
+        description: Data centre the referenced files are stored in.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+      region:
+        type: string
+        description: Data centre to route the request to.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: Confirmation that the references were recorded.
+      type: object
+
+  list_all_webhooks:
+    title: List all webhooks
+    description: >-
+      List every webhook this credential can see across all systems and
+      events, paging with pageState.
+    category: webhooks
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /webhooks/v1/hooks
+      headers:
+        region: "${region}"
+      query:
+        status: "${status}"
+        pageState: "${page_state}"
+    input:
+      status:
+        type: string
+        description: Restrict to webhooks in this state.
+        optional: true
+        enum: [active, inactive, reactivated]
+      page_state:
+        type: string
+        description: Base64 cursor from a previous response.
+        optional: true
+      region:
+        type: string
+        description: Data centre to query.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: A page of webhooks with their events, scopes and callback URLs.
+      type: object
+
+  list_app_webhooks:
+    title: List an app's webhooks
+    description: >-
+      List the webhooks created by the calling application, sorted by creation
+      time.
+    category: webhooks
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /webhooks/v1/app/hooks
+      headers:
+        region: "${region}"
+      query:
+        status: "${status}"
+        sort: "${sort}"
+        pageState: "${page_state}"
+    input:
+      status:
+        type: string
+        description: Restrict to webhooks in this state.
+        optional: true
+        enum: [active, inactive, reactivated]
+      sort:
+        type: string
+        description: Sort by creation time, ascending or descending.
+        optional: true
+        enum: [asc, desc]
+      page_state:
+        type: string
+        description: Base64 cursor from a previous response.
+        optional: true
+      region:
+        type: string
+        description: Data centre to query.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: A page of the application's webhooks.
+      type: object
+
+  list_system_webhooks:
+    title: List a system's webhooks
+    description: >-
+      List every webhook on one system -- data, derivative, adsk.c4r,
+      autodesk.construction.cost and the rest -- across all its events.
+    category: webhooks
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /webhooks/v1/systems/${system}/hooks
+      headers:
+        region: "${region}"
+      query:
+        status: "${status}"
+        pageState: "${page_state}"
+    input:
+      system:
+        type: string
+        description: System name, e.g. data or derivative.
+      status:
+        type: string
+        description: Restrict to webhooks in this state.
+        optional: true
+        enum: [active, inactive, reactivated]
+      page_state:
+        type: string
+        description: Base64 cursor from a previous response.
+        optional: true
+      region:
+        type: string
+        description: Data centre to query.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: A page of the system's webhooks.
+      type: object
+
+  list_event_webhooks:
+    title: List an event's webhooks
+    description: >-
+      List the webhooks watching one event on one system, optionally narrowed
+      to a scope such as a folder id.
+    category: webhooks
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /webhooks/v1/systems/${system}/events/${event}/hooks
+      headers:
+        region: "${region}"
+      query:
+        scopeName: "${scope_name}"
+        scopeValue: "${scope_value}"
+        status: "${status}"
+        pageState: "${page_state}"
+    input:
+      system:
+        type: string
+        description: System name, e.g. data or derivative.
+      event:
+        type: string
+        description: Event name, e.g. dm.version.added.
+      scope_name:
+        type: string
+        description: Scope name the webhook was created with, e.g. folder.
+        optional: true
+      scope_value:
+        type: string
+        description: Scope value the webhook was created with, e.g. a folder URN.
+        optional: true
+      status:
+        type: string
+        description: Restrict to webhooks in this state.
+        optional: true
+        enum: [active, inactive, reactivated]
+      page_state:
+        type: string
+        description: Base64 cursor from a previous response.
+        optional: true
+      region:
+        type: string
+        description: Data centre to query.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: A page of webhooks for that event.
+      type: object
+
+  get_webhook:
+    title: Get a webhook
+    description: >-
+      Read one webhook by id, with its callback URL, scope, filter and current
+      status.
+    category: webhooks
+    scopes: [data:read]
+    read_only: true
+    request:
+      method: GET
+      path: /webhooks/v1/systems/${system}/events/${event}/hooks/${hook_id}
+      headers:
+        region: "${region}"
+    input:
+      system:
+        type: string
+        description: System name, e.g. data.
+      event:
+        type: string
+        description: Event name, e.g. dm.version.added.
+      hook_id:
+        type: string
+        description: Webhook id.
+      region:
+        type: string
+        description: Data centre holding the webhook.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The webhook's details.
+      type: object
+
+  create_event_webhook:
+    title: Create a webhook for an event
+    description: >-
+      Subscribe a callback URL to one event. scope narrows what is watched --
+      {"folder": "urn:..."} for a folder, {"workflow": "..."} for a workflow --
+      and filter is a JSONPath expression over the payload.
+    category: webhooks
+    scopes: [data:read, data:write]
+    request:
+      method: POST
+      path: /webhooks/v1/systems/${system}/events/${event}/hooks
+      headers:
+        region: "${region}"
+      body:
+        callbackUrl: "${callback_url}"
+        scope: "${scope}"
+        filter: "${filter}"
+        hookAttribute: "${hook_attribute}"
+        token: "${token}"
+        hookExpiry: "${hook_expiry}"
+        autoReactivateHook: "${auto_reactivate}"
+        hubId: "${hub_id}"
+        projectId: "${project_id}"
+        tenant: "${tenant}"
+    input:
+      system:
+        type: string
+        description: System name, e.g. data.
+      event:
+        type: string
+        description: Event name, e.g. dm.version.added.
+      callback_url:
+        type: string
+        description: HTTPS URL Autodesk posts the event to.
+      scope:
+        type: object
+        description: What to watch, e.g. {"folder" - "urn:adsk.wipprod:fs.folder:co.xyz"}.
+      filter:
+        type: string
+        description: JSONPath expression limiting which events are delivered.
+        optional: true
+      hook_attribute:
+        type: object
+        description: Custom data stored with the webhook and echoed in deliveries.
+        optional: true
+      token:
+        type: string
+        description: Secret used to sign the delivery so you can verify it.
+        optional: true
+      hook_expiry:
+        type: string
+        description: ISO 8601 timestamp after which the webhook stops firing.
+        optional: true
+      auto_reactivate:
+        type: boolean
+        description: True to reactivate the webhook automatically after repeated failures.
+        optional: true
+      hub_id:
+        type: string
+        description: Hub containing the entity being watched.
+        optional: true
+      project_id:
+        type: string
+        description: Project containing the entity being watched.
+        optional: true
+      tenant:
+        type: string
+        description: Tenant to associate the event with.
+        optional: true
+      region:
+        type: string
+        description: Data centre to create the webhook in.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The created webhook, with its id.
+      type: object
+
+  create_system_webhooks:
+    title: Create webhooks for all events in a system
+    description: >-
+      Subscribe one callback URL to every event a system emits, rather than
+      creating a webhook per event.
+    category: webhooks
+    scopes: [data:read, data:write]
+    request:
+      method: POST
+      path: /webhooks/v1/systems/${system}/hooks
+      headers:
+        region: "${region}"
+      body:
+        callbackUrl: "${callback_url}"
+        scope: "${scope}"
+        filter: "${filter}"
+        hookAttribute: "${hook_attribute}"
+        token: "${token}"
+        hookExpiry: "${hook_expiry}"
+        autoReactivateHook: "${auto_reactivate}"
+        hubId: "${hub_id}"
+        projectId: "${project_id}"
+        tenant: "${tenant}"
+    input:
+      system:
+        type: string
+        description: System name, e.g. data.
+      callback_url:
+        type: string
+        description: HTTPS URL Autodesk posts events to.
+      scope:
+        type: object
+        description: What to watch, e.g. a folder URN.
+      filter:
+        type: string
+        description: JSONPath expression limiting which events are delivered.
+        optional: true
+      hook_attribute:
+        type: object
+        description: Custom data stored with the webhooks.
+        optional: true
+      token:
+        type: string
+        description: Secret used to sign deliveries.
+        optional: true
+      hook_expiry:
+        type: string
+        description: ISO 8601 timestamp after which the webhooks stop firing.
+        optional: true
+      auto_reactivate:
+        type: boolean
+        description: True to reactivate automatically after repeated failures.
+        optional: true
+      hub_id:
+        type: string
+        description: Hub containing the entity being watched.
+        optional: true
+      project_id:
+        type: string
+        description: Project containing the entity being watched.
+        optional: true
+      tenant:
+        type: string
+        description: Tenant to associate the events with.
+        optional: true
+      region:
+        type: string
+        description: Data centre to create the webhooks in.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The created webhooks.
+      type: object
+
+  update_webhook:
+    title: Update a webhook
+    description: >-
+      Change a webhook's status, filter, expiry or custom attributes. Setting
+      status to inactive pauses delivery without deleting the subscription.
+    category: webhooks
+    scopes: [data:read, data:write]
+    request:
+      method: PATCH
+      path: /webhooks/v1/systems/${system}/events/${event}/hooks/${hook_id}
+      headers:
+        region: "${region}"
+      body:
+        status: "${status}"
+        filter: "${filter}"
+        hookAttribute: "${hook_attribute}"
+        token: "${token}"
+        hookExpiry: "${hook_expiry}"
+        autoReactivateHook: "${auto_reactivate}"
+    input:
+      system:
+        type: string
+        description: System name, e.g. data.
+      event:
+        type: string
+        description: Event name, e.g. dm.version.added.
+      hook_id:
+        type: string
+        description: Webhook id to update.
+      status:
+        type: string
+        description: New delivery state for the webhook.
+        optional: true
+        enum: [active, inactive]
+      filter:
+        type: string
+        description: New JSONPath filter over the payload.
+        optional: true
+      hook_attribute:
+        type: object
+        description: Replacement custom data stored with the webhook.
+        optional: true
+      token:
+        type: string
+        description: New signing secret for deliveries.
+        optional: true
+      hook_expiry:
+        type: string
+        description: New ISO 8601 expiry for the webhook.
+        optional: true
+      auto_reactivate:
+        type: boolean
+        description: True to reactivate automatically after repeated failures.
+        optional: true
+      region:
+        type: string
+        description: Data centre holding the webhook.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: Empty on success.
+      type: object
+
+  delete_webhook:
+    title: Delete a webhook
+    description: >-
+      Remove a webhook, which stops Autodesk delivering that event to the
+      callback URL for good.
+    category: webhooks
+    scopes: [data:read, data:write]
+    destructive: true
+    request:
+      method: DELETE
+      path: /webhooks/v1/systems/${system}/events/${event}/hooks/${hook_id}
+      headers:
+        region: "${region}"
+    input:
+      system:
+        type: string
+        description: System name, e.g. data.
+      event:
+        type: string
+        description: Event name, e.g. dm.version.added.
+      hook_id:
+        type: string
+        description: Webhook id to delete.
+      region:
+        type: string
+        description: Data centre holding the webhook.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: Empty on success.
+      type: object
+
+  create_webhook_secret_token:
+    title: Create the webhook secret token
+    description: >-
+      Set the secret Autodesk uses to sign webhook deliveries for this
+      application, so your receiver can verify them.
+    category: webhooks
+    scopes: [data:read, data:write]
+    request:
+      method: POST
+      path: /webhooks/v1/tokens
+      headers:
+        region: "${region}"
+      body:
+        token: "${token}"
+    input:
+      token:
+        type: string
+        description: The secret to sign deliveries with.
+      region:
+        type: string
+        description: Data centre to store the token in.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: Confirmation that the token was stored.
+      type: object
+
+  update_webhook_secret_token:
+    title: Update the webhook secret token
+    description: >-
+      Replace the signing secret for webhook deliveries. Deliveries signed with
+      the old secret stop verifying at once.
+    category: webhooks
+    scopes: [data:read, data:write]
+    request:
+      method: PUT
+      path: /webhooks/v1/tokens/@me
+      headers:
+        region: "${region}"
+      body:
+        token: "${token}"
+    input:
+      token:
+        type: string
+        description: The new secret to sign deliveries with.
+      region:
+        type: string
+        description: Data centre holding the token.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: Confirmation that the token was replaced.
+      type: object
+
+  delete_webhook_secret_token:
+    title: Delete the webhook secret token
+    description: >-
+      Remove the webhook signing secret, leaving deliveries unsigned and
+      unverifiable.
+    category: webhooks
+    scopes: [data:read, data:write]
+    destructive: true
+    request:
+      method: DELETE
+      path: /webhooks/v1/tokens/@me
+      headers:
+        region: "${region}"
+    input:
+      region:
+        type: string
+        description: Data centre holding the token.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: Empty on success.
+      type: object
+
+  list_account_projects:
+    title: List ACC projects in an account
+    description: >-
+      Page through an ACC or BIM 360 account's projects, filtered by name,
+      type, status, classification, platform, product or business unit.
+      filterTextMatch decides whether text filters match loosely or exactly.
+    category: acc-admin
+    scopes: [account:read]
+    read_only: true
+    request:
+      method: GET
+      path: /construction/admin/v1/accounts/${account_id}/projects
+      headers:
+        Region: "${region}"
+      query:
+        fields: "${fields}"
+        filter[name]: "${filter_name}"
+        filter[type]: "${filter_type}"
+        filter[status]: "${filter_status}"
+        filter[platform]: "${filter_platform}"
+        filter[products]: "${filter_products}"
+        filter[classification]: "${filter_classification}"
+        filter[businessUnitId]: "${business_unit_id}"
+        filter[jobNumber]: "${job_number}"
+        filter[updatedAt]: "${updated_at}"
+        filterTextMatch: "${filter_text_match}"
+        sort: "${sort}"
+        limit: "${limit}"
+        offset: "${offset}"
+    input:
+      account_id:
+        type: string
+        description: ACC or BIM 360 account id, without the "b." prefix.
+      fields:
+        type: array
+        description: Project fields to include in the response.
+        optional: true
+        items: {type: string}
+      filter_name:
+        type: string
+        description: Project name or name pattern to match.
+        optional: true
+      filter_type:
+        type: array
+        description: Project types to include; prefix a type with - to exclude it.
+        optional: true
+        items: {type: string}
+      filter_status:
+        type: array
+        description: Project statuses to include, e.g. active or archived.
+        optional: true
+        items: {type: string}
+      filter_platform:
+        type: array
+        description: Platforms to include -- acc, bim360 or both.
+        optional: true
+        items: {type: string}
+      filter_products:
+        type: array
+        description: Products the returned projects must have activated.
+        optional: true
+        items: {type: string}
+      filter_classification:
+        type: array
+        description: Classifications to include, e.g. production or template.
+        optional: true
+        items: {type: string}
+      business_unit_id:
+        type: string
+        description: Business unit the projects must belong to.
+        optional: true
+      job_number:
+        type: string
+        description: User-defined project identifier to match.
+        optional: true
+      updated_at:
+        type: string
+        description: ISO 8601 date range the projects must have been updated in.
+        optional: true
+      filter_text_match:
+        type: string
+        description: How text filters match.
+        optional: true
+        enum: [contains, startsWith, endsWith, equals]
+      sort:
+        type: array
+        description: Fields to sort by; suffix with desc for descending.
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: Records per page.
+        optional: true
+      offset:
+        type: integer
+        description: Record number to start the page at.
+        optional: true
+      region:
+        type: string
+        description: Data centre holding the account.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: A page of projects with their attributes and pagination block.
+      type: object
+
+  get_acc_project:
+    title: Get an ACC project
+    description: >-
+      Read one ACC project by id, with its dates, type, classification,
+      address and the products activated on it.
+    category: acc-admin
+    scopes: [account:read]
+    read_only: true
+    request:
+      method: GET
+      path: /construction/admin/v1/projects/${project_id}
+      headers:
+        Region: "${region}"
+      query:
+        fields: "${fields}"
+    input:
+      project_id:
+        type: string
+        description: ACC project id.
+      fields:
+        type: array
+        description: Project fields to include in the response.
+        optional: true
+        items: {type: string}
+      region:
+        type: string
+        description: Data centre holding the project.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The project record.
+      type: object
+
+  create_acc_project:
+    title: Create an ACC project
+    description: >-
+      Create a project in an ACC or BIM 360 account. name and type are
+      required; pass template to clone an existing project's settings, and
+      products to decide which modules are switched on.
+    category: acc-admin
+    scopes: [account:write]
+    request:
+      method: POST
+      path: /construction/admin/v1/accounts/${account_id}/projects
+      headers:
+        Region: "${region}"
+      body:
+        name: "${name}"
+        type: "${type}"
+        classification: "${classification}"
+        startDate: "${start_date}"
+        endDate: "${end_date}"
+        projectValue: "${project_value}"
+        jobNumber: "${job_number}"
+        addressLine1: "${address_line_1}"
+        addressLine2: "${address_line_2}"
+        city: "${city}"
+        stateOrProvince: "${state_or_province}"
+        postalCode: "${postal_code}"
+        country: "${country}"
+        latitude: "${latitude}"
+        longitude: "${longitude}"
+        timezone: "${timezone}"
+        constructionType: "${construction_type}"
+        deliveryMethod: "${delivery_method}"
+        contractType: "${contract_type}"
+        currentPhase: "${current_phase}"
+        businessUnitId: "${business_unit_id}"
+        sheetCount: "${sheet_count}"
+        products: "${products}"
+        platform: "${platform}"
+        template: "${template}"
+    input:
+      account_id:
+        type: string
+        description: Account id to create the project in.
+      name:
+        type: string
+        description: Name of the project, up to 255 characters.
+      type:
+        type: string
+        description: Project type, from Autodesk's list, e.g. Office or Bridge.
+      classification:
+        type: string
+        description: What kind of project record this is.
+        optional: true
+        enum: [production, template, component, sample]
+      start_date:
+        type: string
+        description: Estimated start date, as an ISO 8601 date.
+        optional: true
+      end_date:
+        type: string
+        description: Estimated end date, as an ISO 8601 date.
+        optional: true
+      project_value:
+        type: object
+        description: Project value, as an amount and currency.
+        optional: true
+      job_number:
+        type: string
+        description: Your own identifier for the project.
+        optional: true
+      address_line_1:
+        type: string
+        description: First line of the project address.
+        optional: true
+      address_line_2:
+        type: string
+        description: Second line of the project address.
+        optional: true
+      city:
+        type: string
+        description: City the project is in.
+        optional: true
+      state_or_province:
+        type: string
+        description: State or province the project is in.
+        optional: true
+      postal_code:
+        type: string
+        description: Postal or ZIP code of the project.
+        optional: true
+      country:
+        type: string
+        description: Country the project is in.
+        optional: true
+      latitude:
+        type: string
+        description: Latitude of the project's location.
+        optional: true
+      longitude:
+        type: string
+        description: Longitude of the project's location.
+        optional: true
+      timezone:
+        type: string
+        description: Time zone the project runs on.
+        optional: true
+      construction_type:
+        type: string
+        description: Construction type, from Autodesk's list.
+        optional: true
+      delivery_method:
+        type: string
+        description: Delivery method, from Autodesk's list.
+        optional: true
+      contract_type:
+        type: string
+        description: Contract type, from Autodesk's list.
+        optional: true
+      current_phase:
+        type: string
+        description: Current project phase, from Autodesk's list.
+        optional: true
+      business_unit_id:
+        type: string
+        description: Business unit the project belongs to.
+        optional: true
+      sheet_count:
+        type: integer
+        description: Expected number of sheets on the project.
+        optional: true
+      products:
+        type: array
+        description: Products to activate, each with its key and access level.
+        optional: true
+        items: {type: object}
+      platform:
+        type: string
+        description: Whether to create an ACC or a BIM 360 project.
+        optional: true
+        enum: [acc, bim360]
+      template:
+        type: object
+        description: Template project to clone settings from.
+        optional: true
+      region:
+        type: string
+        description: Data centre to create the project in.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The created project record.
+      type: object
+
+  list_project_users:
+    title: List ACC project members
+    description: >-
+      Page through the members of an ACC project, filtered by name, email,
+      company, role, status, product or access level.
+    category: acc-admin
+    scopes: [account:read]
+    read_only: true
+    request:
+      method: GET
+      path: /construction/admin/v1/projects/${project_id}/users
+      headers:
+        Region: "${region}"
+      query:
+        filter[name]: "${filter_name}"
+        filter[email]: "${filter_email}"
+        filter[status]: "${filter_status}"
+        filter[accessLevels]: "${access_levels}"
+        filter[companyId]: "${company_id}"
+        filter[companyName]: "${company_name}"
+        filter[products]: "${filter_products}"
+        filter[roleId]: "${role_id}"
+        filter[roleIds]: "${role_ids}"
+        filter[autodeskId]: "${autodesk_id}"
+        filter[id]: "${filter_id}"
+        filterTextMatch: "${filter_text_match}"
+        orFilters: "${or_filters}"
+        fields: "${fields}"
+        sort: "${sort}"
+        limit: "${limit}"
+        offset: "${offset}"
+    input:
+      project_id:
+        type: string
+        description: ACC project id whose members to list.
+      filter_name:
+        type: string
+        description: User name or name pattern to match.
+        optional: true
+      filter_email:
+        type: string
+        description: Email address or pattern to match.
+        optional: true
+      filter_status:
+        type: array
+        description: Membership statuses to include, e.g. active or pending.
+        optional: true
+        items: {type: string}
+      access_levels:
+        type: array
+        description: Access levels the users must have, e.g. projectAdmin.
+        optional: true
+        items: {type: string}
+      company_id:
+        type: string
+        description: Company the users must represent.
+        optional: true
+      company_name:
+        type: string
+        description: Company name the users must be associated with.
+        optional: true
+      filter_products:
+        type: array
+        description: Products the users must have access to.
+        optional: true
+        items: {type: string}
+      role_id:
+        type: string
+        description: Role the users must hold.
+        optional: true
+      role_ids:
+        type: array
+        description: Roles the users must hold, any of them.
+        optional: true
+        items: {type: string}
+      autodesk_id:
+        type: array
+        description: Autodesk ids of the users to retrieve.
+        optional: true
+        items: {type: string}
+      filter_id:
+        type: array
+        description: ACC ids of the users to retrieve.
+        optional: true
+        items: {type: string}
+      filter_text_match:
+        type: string
+        description: How text filters match.
+        optional: true
+        enum: [contains, startsWith, endsWith, equals]
+      or_filters:
+        type: array
+        description: Fields to combine with OR rather than AND.
+        optional: true
+        items: {type: string}
+      fields:
+        type: array
+        description: User fields to include in the response.
+        optional: true
+        items: {type: string}
+      sort:
+        type: array
+        description: Fields to sort by; suffix with desc for descending.
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: Records per page.
+        optional: true
+      offset:
+        type: integer
+        description: Record number to start the page at.
+        optional: true
+      region:
+        type: string
+        description: Data centre holding the project.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: A page of project members with their roles and products.
+      type: object
+
+  get_project_user:
+    title: Get an ACC project member
+    description: >-
+      Read one member of an ACC project, with the company they represent, their
+      roles and their product access.
+    category: acc-admin
+    scopes: [account:read]
+    read_only: true
+    request:
+      method: GET
+      path: /construction/admin/v1/projects/${project_id}/users/${user_id}
+      headers:
+        Region: "${region}"
+      query:
+        fields: "${fields}"
+    input:
+      project_id:
+        type: string
+        description: ACC project id.
+      user_id:
+        type: string
+        description: Project member id.
+      fields:
+        type: array
+        description: User fields to include in the response.
+        optional: true
+        items: {type: string}
+      region:
+        type: string
+        description: Data centre holding the project.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The project member record.
+      type: object
+
+  add_project_user:
+    title: Add a member to an ACC project
+    description: >-
+      Invite someone to a project by email and give them product access.
+      products is required -- each entry names a product key and the access
+      level on it.
+    category: acc-admin
+    scopes: [account:write]
+    request:
+      method: POST
+      path: /construction/admin/v1/projects/${project_id}/users
+      headers:
+        Region: "${region}"
+      body:
+        email: "${email}"
+        companyId: "${company_id}"
+        roleIds: "${role_ids}"
+        products: "${products}"
+    input:
+      project_id:
+        type: string
+        description: ACC project id to add the member to.
+      email:
+        type: string
+        description: Email address of the person to invite.
+      company_id:
+        type: string
+        description: Company the member represents on the project.
+        optional: true
+      role_ids:
+        type: array
+        description: Role ids to give the member.
+        optional: true
+        items: {type: string}
+      products:
+        type: array
+        description: Product access entries, each with a key and an access level.
+        items: {type: object}
+      region:
+        type: string
+        description: Data centre holding the project.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The created project membership.
+      type: object
+
+  import_project_users:
+    title: Import members into an ACC project
+    description: >-
+      Add many members to a project in one call, each with their company, roles
+      and product access. The response reports per-user success and failure.
+    category: acc-admin
+    scopes: [account:write]
+    request:
+      method: POST
+      path: /construction/admin/v2/projects/${project_id}/users:import
+      headers:
+        Region: "${region}"
+      body:
+        users: "${users}"
+    input:
+      project_id:
+        type: string
+        description: ACC project id to import members into.
+      users:
+        type: array
+        description: One entry per member, each with email, products and optional roles.
+        items: {type: object}
+      region:
+        type: string
+        description: Data centre holding the project.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: Per-user import results, with successes and failures.
+      type: object
+
+  update_project_user:
+    title: Update an ACC project member
+    description: >-
+      Change a member's company, roles or product access on one project. The
+      products array replaces what is stored.
+    category: acc-admin
+    scopes: [account:write]
+    request:
+      method: PATCH
+      path: /construction/admin/v1/projects/${project_id}/users/${user_id}
+      headers:
+        Region: "${region}"
+      body:
+        email: "${email}"
+        companyId: "${company_id}"
+        roleIds: "${role_ids}"
+        products: "${products}"
+    input:
+      project_id:
+        type: string
+        description: ACC project id.
+      user_id:
+        type: string
+        description: Project member id to update.
+      email:
+        type: string
+        description: New email address for the member.
+        optional: true
+      company_id:
+        type: string
+        description: Company the member represents.
+        optional: true
+      role_ids:
+        type: array
+        description: Replacement list of role ids.
+        optional: true
+        items: {type: string}
+      products:
+        type: array
+        description: Replacement product access entries.
+        optional: true
+        items: {type: object}
+      region:
+        type: string
+        description: Data centre holding the project.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The updated project membership.
+      type: object
+
+  remove_project_user:
+    title: Remove a member from an ACC project
+    description: >-
+      Take someone off a project. Their account membership stays; only the
+      project access goes.
+    category: acc-admin
+    scopes: [account:write]
+    destructive: true
+    request:
+      method: DELETE
+      path: /construction/admin/v1/projects/${project_id}/users/${user_id}
+      headers:
+        Region: "${region}"
+    input:
+      project_id:
+        type: string
+        description: ACC project id.
+      user_id:
+        type: string
+        description: Project member id to remove.
+      region:
+        type: string
+        description: Data centre holding the project.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: Empty on success.
+      type: object
+
+  list_account_companies:
+    title: List ACC account companies
+    description: >-
+      Page through the companies in an ACC account, filtered by name, trade,
+      ERP id or tax id, with the newer filtering and sorting syntax.
+    category: acc-admin
+    scopes: [account:read]
+    read_only: true
+    request:
+      method: GET
+      path: /construction/admin/v1/accounts/${account_id}/companies
+      headers:
+        Region: "${region}"
+      query:
+        filter[name]: "${filter_name}"
+        filter[trade]: "${filter_trade}"
+        filter[erpId]: "${erp_id}"
+        filter[taxId]: "${tax_id}"
+        filter[updatedAt]: "${updated_at}"
+        orFilters: "${or_filters}"
+        filterTextMatch: "${filter_text_match}"
+        fields: "${fields}"
+        sort: "${sort}"
+        limit: "${limit}"
+        offset: "${offset}"
+    input:
+      account_id:
+        type: string
+        description: ACC account id.
+      filter_name:
+        type: string
+        description: Company name to match.
+        optional: true
+      filter_trade:
+        type: string
+        description: Trade to match.
+        optional: true
+      erp_id:
+        type: string
+        description: ERP id to match.
+        optional: true
+      tax_id:
+        type: string
+        description: Tax id to match.
+        optional: true
+      updated_at:
+        type: string
+        description: ISO 8601 date range the companies must have been updated in.
+        optional: true
+      or_filters:
+        type: array
+        description: Fields to combine with OR rather than AND.
+        optional: true
+        items: {type: string}
+      filter_text_match:
+        type: string
+        description: How text filters match.
+        optional: true
+        enum: [contains, startsWith, endsWith, equals]
+      fields:
+        type: array
+        description: Company fields to include in the response.
+        optional: true
+        items: {type: string}
+      sort:
+        type: array
+        description: Fields to sort by.
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: Records per page.
+        optional: true
+      offset:
+        type: integer
+        description: Record number to start the page at.
+        optional: true
+      region:
+        type: string
+        description: Data centre holding the account.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: A page of companies with their details.
+      type: object
+
+  list_hq_companies:
+    title: List companies (BIM 360 HQ)
+    description: >-
+      List the partner companies in an account through the BIM 360 HQ API,
+      which is the endpoint that also creates and updates them.
+    category: acc-admin
+    scopes: [account:read]
+    read_only: true
+    request:
+      method: GET
+      path: /hq/v1/accounts/${account_id}/companies
+      headers:
+        Region: "${region}"
+      query:
+        limit: "${limit}"
+        offset: "${offset}"
+        sort: "${sort}"
+        field: "${field}"
+    input:
+      account_id:
+        type: string
+        description: Account id, without the "b." prefix.
+      limit:
+        type: integer
+        description: Companies per page, up to 100.
+        optional: true
+        maximum: 100
+      offset:
+        type: integer
+        description: Offset into the result set.
+        optional: true
+      sort:
+        type: string
+        description: Comma-separated fields to sort by; prefix a field with - for descending.
+        optional: true
+      field:
+        type: string
+        description: Comma-separated fields to include in the response.
+        optional: true
+      region:
+        type: string
+        description: Data centre holding the account.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The account's partner companies.
+      type: object
+
+  get_company:
+    title: Get a company
+    description: >-
+      Read one partner company by id, with its address, trade, contact details
+      and ERP and tax ids.
+    category: acc-admin
+    scopes: [account:read]
+    read_only: true
+    request:
+      method: GET
+      path: /hq/v1/accounts/${account_id}/companies/${company_id}
+      headers:
+        Region: "${region}"
+    input:
+      account_id:
+        type: string
+        description: Account id.
+      company_id:
+        type: string
+        description: Company id.
+      region:
+        type: string
+        description: Data centre holding the account.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The company record.
+      type: object
+
+  create_company:
+    title: Create a partner company
+    description: >-
+      Add a partner company to an account. The name must be unique within the
+      account, and trade comes from Autodesk's fixed list.
+    category: acc-admin
+    scopes: [account:write]
+    request:
+      method: POST
+      path: /hq/v1/accounts/${account_id}/companies
+      headers:
+        Region: "${region}"
+      body:
+        name: "${name}"
+        trade: "${trade}"
+        address_line_1: "${address_line_1}"
+        address_line_2: "${address_line_2}"
+        city: "${city}"
+        state_or_province: "${state_or_province}"
+        postal_code: "${postal_code}"
+        country: "${country}"
+        phone: "${phone}"
+        website_url: "${website_url}"
+        description: "${description}"
+        erp_id: "${erp_id}"
+        tax_id: "${tax_id}"
+    input:
+      account_id:
+        type: string
+        description: Account id to create the company in.
+      name:
+        type: string
+        description: Company name, unique within the account.
+      trade:
+        type: string
+        description: Trade the company works in, from Autodesk's list.
+      address_line_1:
+        type: string
+        description: First line of the company address.
+        optional: true
+      address_line_2:
+        type: string
+        description: Second line of the company address.
+        optional: true
+      city:
+        type: string
+        description: City the company is in.
+        optional: true
+      state_or_province:
+        type: string
+        description: State or province the company is in.
+        optional: true
+      postal_code:
+        type: string
+        description: Postal code for the company.
+        optional: true
+      country:
+        type: string
+        description: Country the company is in.
+        optional: true
+      phone:
+        type: string
+        description: Business phone number.
+        optional: true
+      website_url:
+        type: string
+        description: Company website.
+        optional: true
+      description:
+        type: string
+        description: Short description of the company.
+        optional: true
+      erp_id:
+        type: string
+        description: Id linking the company to your ERP system.
+        optional: true
+      tax_id:
+        type: string
+        description: Tax identifier for the company.
+        optional: true
+      region:
+        type: string
+        description: Data centre holding the account.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The created company record.
+      type: object
+
+  update_company:
+    title: Update a company
+    description: >-
+      Change a partner company's details -- address, trade, contact information
+      or the ids that tie it to your own systems.
+    category: acc-admin
+    scopes: [account:write]
+    request:
+      method: PATCH
+      path: /hq/v1/accounts/${account_id}/companies/${company_id}
+      headers:
+        Region: "${region}"
+      body:
+        name: "${name}"
+        trade: "${trade}"
+        address_line_1: "${address_line_1}"
+        address_line_2: "${address_line_2}"
+        city: "${city}"
+        state_or_province: "${state_or_province}"
+        postal_code: "${postal_code}"
+        country: "${country}"
+        phone: "${phone}"
+        website_url: "${website_url}"
+        description: "${description}"
+        erp_id: "${erp_id}"
+        tax_id: "${tax_id}"
+    input:
+      account_id:
+        type: string
+        description: Account id.
+      company_id:
+        type: string
+        description: Company id to update.
+      name:
+        type: string
+        description: New company name.
+        optional: true
+      trade:
+        type: string
+        description: New trade for the company.
+        optional: true
+      address_line_1:
+        type: string
+        description: New first line of the address.
+        optional: true
+      address_line_2:
+        type: string
+        description: New second line of the address.
+        optional: true
+      city:
+        type: string
+        description: New city.
+        optional: true
+      state_or_province:
+        type: string
+        description: New state or province.
+        optional: true
+      postal_code:
+        type: string
+        description: New postal code.
+        optional: true
+      country:
+        type: string
+        description: New country.
+        optional: true
+      phone:
+        type: string
+        description: New business phone number.
+        optional: true
+      website_url:
+        type: string
+        description: New company website.
+        optional: true
+      description:
+        type: string
+        description: New description of the company.
+        optional: true
+      erp_id:
+        type: string
+        description: New ERP id.
+        optional: true
+      tax_id:
+        type: string
+        description: New tax identifier.
+        optional: true
+      region:
+        type: string
+        description: Data centre holding the account.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The updated company record.
+      type: object
+
+  search_companies:
+    title: Search companies by name
+    description: >-
+      Fuzzy-search an account's companies by name or trade. operator picks AND
+      or OR across the criteria, and partial turns the fuzzy match off.
+    category: acc-admin
+    scopes: [account:read]
+    read_only: true
+    request:
+      method: GET
+      path: /hq/v1/accounts/${account_id}/companies/search
+      headers:
+        Region: "${region}"
+      query:
+        name: "${name}"
+        trade: "${trade}"
+        operator: "${operator}"
+        partial: "${partial}"
+        limit: "${limit}"
+        offset: "${offset}"
+        sort: "${sort}"
+        field: "${field}"
+    input:
+      account_id:
+        type: string
+        description: Account id to search in.
+      name:
+        type: string
+        description: Company name to match.
+        optional: true
+      trade:
+        type: string
+        description: Trade to match.
+        optional: true
+      operator:
+        type: string
+        description: Whether the criteria combine with OR (default) or AND.
+        optional: true
+      partial:
+        type: boolean
+        description: True (default) for a fuzzy match, false for exact.
+        optional: true
+      limit:
+        type: integer
+        description: Results per page, up to 100.
+        optional: true
+        maximum: 100
+      offset:
+        type: integer
+        description: Offset into the result set.
+        optional: true
+      sort:
+        type: string
+        description: Comma-separated fields to sort by.
+        optional: true
+      field:
+        type: string
+        description: Comma-separated fields to include in the response.
+        optional: true
+      region:
+        type: string
+        description: Data centre holding the account.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The matching companies.
+      type: object
+
+  list_project_companies:
+    title: List companies on a project
+    description: >-
+      List the partner companies working on one project, which is what the
+      project member records point at.
+    category: acc-admin
+    scopes: [account:read]
+    read_only: true
+    request:
+      method: GET
+      path: /hq/v1/accounts/${account_id}/projects/${project_id}/companies
+      headers:
+        Region: "${region}"
+      query:
+        limit: "${limit}"
+        offset: "${offset}"
+        sort: "${sort}"
+        field: "${field}"
+    input:
+      account_id:
+        type: string
+        description: Account id.
+      project_id:
+        type: string
+        description: Project id whose companies to list.
+      limit:
+        type: integer
+        description: Companies per page, up to 100.
+        optional: true
+        maximum: 100
+      offset:
+        type: integer
+        description: Offset into the result set.
+        optional: true
+      sort:
+        type: string
+        description: Comma-separated fields to sort by.
+        optional: true
+      field:
+        type: string
+        description: Comma-separated fields to include in the response.
+        optional: true
+      region:
+        type: string
+        description: Data centre holding the account.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The companies on the project.
+      type: object
+
+  import_companies:
+    title: Bulk import companies
+    description: >-
+      Create many partner companies in one call. The body is an array of
+      company objects shaped like create_company's.
+    category: acc-admin
+    scopes: [account:write]
+    request:
+      method: POST
+      path: /hq/v1/accounts/${account_id}/companies/import
+      headers:
+        Region: "${region}"
+      body: "${companies}"
+    input:
+      account_id:
+        type: string
+        description: Account id to import the companies into.
+      companies:
+        type: array
+        description: Company objects to create, each with at least a name and trade.
+        items: {type: object}
+      region:
+        type: string
+        description: Data centre holding the account.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: Per-company import results, with successes and failures.
+      type: object
+
+  list_account_users:
+    title: List account users
+    description: >-
+      Page through the users in an account, with their email, default company
+      and status.
+    category: acc-admin
+    scopes: [account:read]
+    read_only: true
+    request:
+      method: GET
+      path: /hq/v1/accounts/${account_id}/users
+      headers:
+        Region: "${region}"
+      query:
+        limit: "${limit}"
+        offset: "${offset}"
+        sort: "${sort}"
+        field: "${field}"
+    input:
+      account_id:
+        type: string
+        description: Account id.
+      limit:
+        type: integer
+        description: Users per page, up to 100.
+        optional: true
+        maximum: 100
+      offset:
+        type: integer
+        description: Offset into the result set.
+        optional: true
+      sort:
+        type: string
+        description: Comma-separated fields to sort by.
+        optional: true
+      field:
+        type: string
+        description: Comma-separated fields to include in the response.
+        optional: true
+      region:
+        type: string
+        description: Data centre holding the account.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: A page of account users.
+      type: object
+
+  get_account_user:
+    title: Get an account user
+    description: >-
+      Read one account user by id, with their profile, default company and
+      status.
+    category: acc-admin
+    scopes: [account:read]
+    read_only: true
+    request:
+      method: GET
+      path: /hq/v1/accounts/${account_id}/users/${user_id}
+      headers:
+        Region: "${region}"
+    input:
+      account_id:
+        type: string
+        description: Account id.
+      user_id:
+        type: string
+        description: User id.
+      region:
+        type: string
+        description: Data centre holding the account.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The account user record.
+      type: object
+
+  create_account_user:
+    title: Create an account user
+    description: >-
+      Add a user to the account directory by email. They still need adding to
+      individual projects before they can do anything in them.
+    category: acc-admin
+    scopes: [account:write]
+    request:
+      method: POST
+      path: /hq/v1/accounts/${account_id}/users
+      headers:
+        Region: "${region}"
+      body:
+        email: "${email}"
+        company_id: "${company_id}"
+        name: "${name}"
+        nickname: "${nickname}"
+        first_name: "${first_name}"
+        last_name: "${last_name}"
+        image_url: "${image_url}"
+        address_line_1: "${address_line_1}"
+        address_line_2: "${address_line_2}"
+        city: "${city}"
+        state_or_province: "${state_or_province}"
+        postal_code: "${postal_code}"
+        country: "${country}"
+        phone: "${phone}"
+        company: "${company}"
+        job_title: "${job_title}"
+        industry: "${industry}"
+        about_me: "${about_me}"
+    input:
+      account_id:
+        type: string
+        description: Account id to create the user in.
+      email:
+        type: string
+        description: The user's email address.
+      company_id:
+        type: string
+        description: Default company for the user.
+        optional: true
+      name:
+        type: string
+        description: Display name for the user.
+        optional: true
+      nickname:
+        type: string
+        description: Nickname for the user.
+        optional: true
+      first_name:
+        type: string
+        description: Given name.
+        optional: true
+      last_name:
+        type: string
+        description: Family name.
+        optional: true
+      image_url:
+        type: string
+        description: URL of the user's profile image.
+        optional: true
+      address_line_1:
+        type: string
+        description: First line of the user's address.
+        optional: true
+      address_line_2:
+        type: string
+        description: Second line of the user's address.
+        optional: true
+      city:
+        type: string
+        description: City the user is in.
+        optional: true
+      state_or_province:
+        type: string
+        description: State or province the user is in.
+        optional: true
+      postal_code:
+        type: string
+        description: Postal code for the user.
+        optional: true
+      country:
+        type: string
+        description: Country the user is in.
+        optional: true
+      phone:
+        type: string
+        description: Contact phone number.
+        optional: true
+      company:
+        type: string
+        description: Company name from the Autodesk profile.
+        optional: true
+      job_title:
+        type: string
+        description: The user's job title.
+        optional: true
+      industry:
+        type: string
+        description: Industry the user works in.
+        optional: true
+      about_me:
+        type: string
+        description: Short description of the user.
+        optional: true
+      region:
+        type: string
+        description: Data centre holding the account.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The created account user.
+      type: object
+
+  update_account_user:
+    title: Update an account user
+    description: >-
+      Activate or deactivate an account user, or change their default company.
+      Setting status to inactive is how a leaver is switched off.
+    category: acc-admin
+    scopes: [account:write]
+    request:
+      method: PATCH
+      path: /hq/v1/accounts/${account_id}/users/${user_id}
+      headers:
+        Region: "${region}"
+      body:
+        status: "${status}"
+        company_id: "${company_id}"
+    input:
+      account_id:
+        type: string
+        description: Account id.
+      user_id:
+        type: string
+        description: User id to update.
+      status:
+        type: string
+        description: Whether the user is active in the account.
+        optional: true
+        enum: [active, inactive]
+      company_id:
+        type: string
+        description: New default company for the user.
+        optional: true
+      region:
+        type: string
+        description: Data centre holding the account.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The updated account user.
+      type: object
+
+  import_account_users:
+    title: Bulk import account users
+    description: >-
+      Create many account users in one call, each shaped like
+      create_account_user's body.
+    category: acc-admin
+    scopes: [account:write]
+    request:
+      method: POST
+      path: /hq/v1/accounts/${account_id}/users/import
+      headers:
+        Region: "${region}"
+      body: "${users}"
+    input:
+      account_id:
+        type: string
+        description: Account id to import the users into.
+      users:
+        type: array
+        description: User objects to create, each with at least an email address.
+        items: {type: object}
+      region:
+        type: string
+        description: Data centre holding the account.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: Per-user import results, with successes and failures.
+      type: object
+
+  search_account_users:
+    title: Search account users
+    description: >-
+      Fuzzy-search the account directory by name, email or company. operator
+      picks AND or OR across the criteria.
+    category: acc-admin
+    scopes: [account:read]
+    read_only: true
+    request:
+      method: GET
+      path: /hq/v1/accounts/${account_id}/users/search
+      headers:
+        Region: "${region}"
+      query:
+        name: "${name}"
+        email: "${email}"
+        company_name: "${company_name}"
+        operator: "${operator}"
+        partial: "${partial}"
+        limit: "${limit}"
+        offset: "${offset}"
+        sort: "${sort}"
+        field: "${field}"
+    input:
+      account_id:
+        type: string
+        description: Account id to search in.
+      name:
+        type: string
+        description: User name to match.
+        optional: true
+      email:
+        type: string
+        description: Email address to match.
+        optional: true
+      company_name:
+        type: string
+        description: Company name to match.
+        optional: true
+      operator:
+        type: string
+        description: Whether the criteria combine with OR (default) or AND.
+        optional: true
+      partial:
+        type: boolean
+        description: True (default) for a fuzzy match, false for exact.
+        optional: true
+      limit:
+        type: integer
+        description: Results per page, up to 100.
+        optional: true
+        maximum: 100
+      offset:
+        type: integer
+        description: Offset into the result set.
+        optional: true
+      sort:
+        type: string
+        description: Comma-separated fields to sort by.
+        optional: true
+      field:
+        type: string
+        description: Comma-separated fields to include in the response.
+        optional: true
+      region:
+        type: string
+        description: Data centre holding the account.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The matching account users.
+      type: object
+
+  list_user_projects:
+    title: List a user's projects
+    description: >-
+      List the projects one account user belongs to, with the access level they
+      hold on each.
+    category: acc-admin
+    scopes: [account:read]
+    read_only: true
+    request:
+      method: GET
+      path: /construction/admin/v1/accounts/${account_id}/users/${user_id}/projects
+      headers:
+        Region: "${region}"
+      query:
+        filter[id]: "${filter_id}"
+        filter[name]: "${filter_name}"
+        filter[type]: "${filter_type}"
+        filter[status]: "${filter_status}"
+        filter[platform]: "${filter_platform}"
+        filter[classification]: "${filter_classification}"
+        filter[accessLevels]: "${access_levels}"
+        filter[jobNumber]: "${job_number}"
+        filter[updatedAt]: "${updated_at}"
+        filterTextMatch: "${filter_text_match}"
+        fields: "${fields}"
+        sort: "${sort}"
+        limit: "${limit}"
+        offset: "${offset}"
+    input:
+      account_id:
+        type: string
+        description: ACC account id.
+      user_id:
+        type: string
+        description: User id whose projects to list.
+      filter_id:
+        type: array
+        description: Project ids to restrict the response to.
+        optional: true
+        items: {type: string}
+      filter_name:
+        type: string
+        description: Project name or pattern to match.
+        optional: true
+      filter_type:
+        type: array
+        description: Project types to include; prefix with - to exclude.
+        optional: true
+        items: {type: string}
+      filter_status:
+        type: array
+        description: Project statuses to include.
+        optional: true
+        items: {type: string}
+      filter_platform:
+        type: array
+        description: Platforms to include -- acc or bim360.
+        optional: true
+        items: {type: string}
+      filter_classification:
+        type: array
+        description: Classifications to include.
+        optional: true
+        items: {type: string}
+      access_levels:
+        type: array
+        description: Access levels the user must hold on the project.
+        optional: true
+        items: {type: string}
+      job_number:
+        type: string
+        description: User-defined project identifier to match.
+        optional: true
+      updated_at:
+        type: string
+        description: ISO 8601 date range the projects must have been updated in.
+        optional: true
+      filter_text_match:
+        type: string
+        description: How text filters match.
+        optional: true
+        enum: [contains, startsWith, endsWith, equals]
+      fields:
+        type: array
+        description: Fields to include in the response.
+        optional: true
+        items: {type: string}
+      sort:
+        type: array
+        description: Fields to sort by.
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: Records per page.
+        optional: true
+      offset:
+        type: integer
+        description: Record number to start the page at.
+        optional: true
+      region:
+        type: string
+        description: Data centre holding the account.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: A page of the user's projects.
+      type: object
+
+  list_user_products:
+    title: List a user's products
+    description: >-
+      List the ACC products one user has access to, optionally narrowed to
+      particular projects.
+    category: acc-admin
+    scopes: [account:read]
+    read_only: true
+    request:
+      method: GET
+      path: /construction/admin/v1/accounts/${account_id}/users/${user_id}/products
+      headers:
+        Region: "${region}"
+      query:
+        filter[projectId]: "${project_ids}"
+        filter[key]: "${product_keys}"
+        fields: "${fields}"
+        sort: "${sort}"
+        limit: "${limit}"
+        offset: "${offset}"
+    input:
+      account_id:
+        type: string
+        description: ACC account id.
+      user_id:
+        type: string
+        description: User id whose products to list.
+      project_ids:
+        type: array
+        description: Project ids to restrict the response to.
+        optional: true
+        items: {type: string}
+      product_keys:
+        type: array
+        description: Product keys to restrict the response to.
+        optional: true
+        items: {type: string}
+      fields:
+        type: array
+        description: Fields to include in the response.
+        optional: true
+        items: {type: string}
+      sort:
+        type: array
+        description: Fields to sort by.
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: Records per page.
+        optional: true
+      offset:
+        type: integer
+        description: Record number to start the page at.
+        optional: true
+      region:
+        type: string
+        description: Data centre holding the account.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: A page of the user's product access.
+      type: object
+
+  list_user_roles:
+    title: List a user's roles
+    description: >-
+      List the roles one user holds, optionally narrowed to particular projects
+      or role statuses.
+    category: acc-admin
+    scopes: [account:read]
+    read_only: true
+    request:
+      method: GET
+      path: /construction/admin/v1/accounts/${account_id}/users/${user_id}/roles
+      headers:
+        Region: "${region}"
+      query:
+        filter[projectId]: "${project_ids}"
+        filter[status]: "${filter_status}"
+        filter[name]: "${filter_name}"
+        filterTextMatch: "${filter_text_match}"
+        fields: "${fields}"
+        sort: "${sort}"
+        limit: "${limit}"
+        offset: "${offset}"
+    input:
+      account_id:
+        type: string
+        description: ACC account id.
+      user_id:
+        type: string
+        description: User id whose roles to list.
+      project_ids:
+        type: array
+        description: Project ids to restrict the response to.
+        optional: true
+        items: {type: string}
+      filter_status:
+        type: array
+        description: Role statuses to include.
+        optional: true
+        items: {type: string}
+      filter_name:
+        type: string
+        description: Role name to match.
+        optional: true
+      filter_text_match:
+        type: string
+        description: How text filters match.
+        optional: true
+        enum: [contains, startsWith, endsWith, equals]
+      fields:
+        type: array
+        description: Fields to include in the response.
+        optional: true
+        items: {type: string}
+      sort:
+        type: array
+        description: Fields to sort by.
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: Records per page.
+        optional: true
+      offset:
+        type: integer
+        description: Record number to start the page at.
+        optional: true
+      region:
+        type: string
+        description: Data centre holding the account.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: A page of the user's roles.
+      type: object
+
+  get_business_units:
+    title: Get the account's business units
+    description: >-
+      Read the business unit hierarchy of an account, which projects are
+      assigned to for reporting.
+    category: acc-admin
+    scopes: [account:read]
+    read_only: true
+    request:
+      method: GET
+      path: /hq/v1/accounts/${account_id}/business_units_structure
+      headers:
+        Region: "${region}"
+    input:
+      account_id:
+        type: string
+        description: Account id.
+      region:
+        type: string
+        description: Data centre holding the account.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The business unit structure.
+      type: object
+
+  set_business_units:
+    title: Replace the account's business units
+    description: >-
+      Replace the whole business unit structure. Every unit you want to keep
+      must be in the array, since this overwrites what is stored.
+    category: acc-admin
+    scopes: [account:write]
+    request:
+      method: PUT
+      path: /hq/v1/accounts/${account_id}/business_units_structure
+      headers:
+        Region: "${region}"
+      body:
+        business_units: "${business_units}"
+    input:
+      account_id:
+        type: string
+        description: Account id.
+      business_units:
+        type: array
+        description: The complete business unit list, each with id, name and parent.
+        items: {type: object}
+      region:
+        type: string
+        description: Data centre holding the account.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The stored business unit structure.
+      type: object
+
+  get_issues_permissions:
+    title: Get your issue permissions
+    description: >-
+      Read what the signed-in user may do with issues on a project -- which
+      actions are permitted and which issues they can see.
+    category: acc-issues
+    read_only: true
+    request:
+      method: GET
+      path: /construction/issues/v1/projects/${project_id}/users/me
+      headers:
+        x-ads-region: "${region}"
+    input:
+      project_id:
+        type: string
+        description: ACC project id.
+      region:
+        type: string
+        description: Data centre holding the project.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The user's issue permissions on the project.
+      type: object
+
+  list_issues:
+    title: List issues
+    description: >-
+      Page through a project's issues, filtered by status, type, assignee,
+      location, root cause, dates or a free-text search. Issue status values
+      depend on the project's workflow -- read them from list_issue_types.
+    category: acc-issues
+    read_only: true
+    request:
+      method: GET
+      path: /construction/issues/v1/projects/${project_id}/issues
+      headers:
+        x-ads-region: "${region}"
+      query:
+        filter[id]: "${filter_id}"
+        filter[issueTypeId]: "${issue_type_id}"
+        filter[issueSubtypeId]: "${issue_subtype_id}"
+        filter[status]: "${status}"
+        filter[assignedTo]: "${assigned_to}"
+        filter[assignedToType]: "${assigned_to_type}"
+        filter[createdBy]: "${created_by}"
+        filter[createdAt]: "${created_at}"
+        filter[updatedBy]: "${updated_by}"
+        filter[updatedAt]: "${updated_at}"
+        filter[closedBy]: "${closed_by}"
+        filter[closedAt]: "${closed_at}"
+        filter[dueDate]: "${due_date}"
+        filter[startDate]: "${start_date}"
+        filter[locationId]: "${location_id}"
+        filter[rootCauseId]: "${root_cause_id}"
+        filter[linkedDocumentUrn]: "${linked_document_urn}"
+        filter[search]: "${search}"
+        filter[displayId]: "${display_id}"
+        filter[deleted]: "${deleted}"
+        filter[valid]: "${valid}"
+        fields: "${fields}"
+        sortBy: "${sort_by}"
+        limit: "${limit}"
+        offset: "${offset}"
+    input:
+      project_id:
+        type: string
+        description: ACC project id whose issues to list.
+      filter_id:
+        type: array
+        description: Issue ids to restrict the response to.
+        optional: true
+        items: {type: string}
+      issue_type_id:
+        type: array
+        description: Issue category ids to restrict the response to.
+        optional: true
+        items: {type: string}
+      issue_subtype_id:
+        type: array
+        description: Issue type (subtype) ids to restrict the response to.
+        optional: true
+        items: {type: string}
+      status:
+        type: string
+        description: Comma-separated statuses to include, e.g. open,answered.
+        optional: true
+      assigned_to:
+        type: array
+        description: Autodesk ids of assignees to filter by.
+        optional: true
+        items: {type: string}
+      assigned_to_type:
+        type: string
+        description: Whether the assignee is a user, company or role.
+        optional: true
+      created_by:
+        type: array
+        description: Autodesk ids of the issue creators to filter by.
+        optional: true
+        items: {type: string}
+      created_at:
+        type: string
+        description: Creation date or ISO 8601 range to filter by.
+        optional: true
+      updated_by:
+        type: array
+        description: Autodesk ids of the last updaters to filter by.
+        optional: true
+        items: {type: string}
+      updated_at:
+        type: string
+        description: Update date or ISO 8601 range to filter by.
+        optional: true
+      closed_by:
+        type: array
+        description: Autodesk ids of the users who closed the issues.
+        optional: true
+        items: {type: string}
+      closed_at:
+        type: string
+        description: Closure date or ISO 8601 range to filter by.
+        optional: true
+      due_date:
+        type: string
+        description: Due date or ISO 8601 range to filter by.
+        optional: true
+      start_date:
+        type: string
+        description: Start date or ISO 8601 range to filter by.
+        optional: true
+      location_id:
+        type: array
+        description: Location breakdown structure ids to filter by.
+        optional: true
+        items: {type: string}
+      root_cause_id:
+        type: array
+        description: Root cause ids to filter by.
+        optional: true
+        items: {type: string}
+      linked_document_urn:
+        type: array
+        description: Document URNs whose pushpin issues to return.
+        optional: true
+        items: {type: string}
+      search:
+        type: string
+        description: Free-text search across issue title and description.
+        optional: true
+      display_id:
+        type: integer
+        description: The user-facing sequential issue number.
+        optional: true
+      deleted:
+        type: boolean
+        description: True to return deleted issues.
+        optional: true
+      valid:
+        type: boolean
+        description: False to include issues with no type or subtype.
+        optional: true
+      fields:
+        type: array
+        description: Issue fields to return.
+        optional: true
+        items: {type: string}
+      sort_by:
+        type: array
+        description: Fields to sort by; prefix with - for descending.
+        optional: true
+        items: {type: string}
+      limit:
+        type: integer
+        description: Issues per page, 1 to 100.
+        optional: true
+        maximum: 100
+      offset:
+        type: integer
+        description: Offset into the result set.
+        optional: true
+      region:
+        type: string
+        description: Data centre holding the project.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: A page of issues with their status, assignee and dates.
+      type: object
+
+  get_issue:
+    title: Get an issue
+    description: >-
+      Read one issue by id, with its status, assignee, dates, location, custom
+      attributes and permitted actions.
+    category: acc-issues
+    read_only: true
+    request:
+      method: GET
+      path: /construction/issues/v1/projects/${project_id}/issues/${issue_id}
+      headers:
+        x-ads-region: "${region}"
+    input:
+      project_id:
+        type: string
+        description: ACC project id.
+      issue_id:
+        type: string
+        description: Issue id.
+      region:
+        type: string
+        description: Data centre holding the project.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The issue record.
+      type: object
+
+  create_issue:
+    title: Create an issue
+    description: >-
+      Raise an issue on a project. title, issueSubtypeId and status are
+      required -- get valid subtype ids from list_issue_types and the statuses
+      its workflow allows.
+    category: acc-issues
+    request:
+      method: POST
+      path: /construction/issues/v1/projects/${project_id}/issues
+      headers:
+        x-ads-region: "${region}"
+      body:
+        title: "${title}"
+        description: "${description}"
+        issueSubtypeId: "${issue_subtype_id}"
+        status: "${status}"
+        assignedTo: "${assigned_to}"
+        assignedToType: "${assigned_to_type}"
+        dueDate: "${due_date}"
+        startDate: "${start_date}"
+        locationId: "${location_id}"
+        locationDetails: "${location_details}"
+        rootCauseId: "${root_cause_id}"
+        issueTemplateId: "${issue_template_id}"
+        published: "${published}"
+        watchers: "${watchers}"
+        customAttributes: "${custom_attributes}"
+        gpsCoordinates: "${gps_coordinates}"
+        snapshotUrn: "${snapshot_urn}"
+    input:
+      project_id:
+        type: string
+        description: ACC project id to raise the issue on.
+      title:
+        type: string
+        description: Short statement of the issue.
+      description:
+        type: string
+        description: Full description of the issue.
+        optional: true
+      issue_subtype_id:
+        type: string
+        description: Issue type (subtype) id the issue belongs to.
+      status:
+        type: string
+        description: Status to open the issue in, e.g. open or draft.
+      assigned_to:
+        type: string
+        description: Autodesk id of the user, role or company to assign it to.
+        optional: true
+      assigned_to_type:
+        type: string
+        description: What kind of assignee assignedTo names.
+        optional: true
+        enum: [user, company, role]
+      due_date:
+        type: string
+        description: Due date, as an ISO 8601 date.
+        optional: true
+      start_date:
+        type: string
+        description: Start date, as an ISO 8601 date.
+        optional: true
+      location_id:
+        type: string
+        description: Location breakdown structure id the issue sits at.
+        optional: true
+      location_details:
+        type: string
+        description: Free-text description of where the issue is.
+        optional: true
+      root_cause_id:
+        type: string
+        description: Root cause id for the issue.
+        optional: true
+      issue_template_id:
+        type: string
+        description: Template to create the issue from.
+        optional: true
+      published:
+        type: boolean
+        description: False to create the issue as a draft.
+        optional: true
+      watchers:
+        type: array
+        description: Autodesk ids of people to add as watchers.
+        optional: true
+        items: {type: string}
+      custom_attributes:
+        type: array
+        description: Custom attribute values, each with its attributeDefinitionId and value.
+        optional: true
+        items: {type: object}
+      gps_coordinates:
+        type: object
+        description: Latitude and longitude of the issue.
+        optional: true
+      snapshot_urn:
+        type: string
+        description: URN of a snapshot image attached to the issue.
+        optional: true
+      region:
+        type: string
+        description: Data centre holding the project.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The created issue, with its id and display id.
+      type: object
+
+  update_issue:
+    title: Update an issue
+    description: >-
+      Change an issue -- reassign it, move its status, set a due date or fill
+      in custom attributes. title, issueSubtypeId and status must be present
+      even when unchanged.
+    category: acc-issues
+    request:
+      method: PATCH
+      path: /construction/issues/v1/projects/${project_id}/issues/${issue_id}
+      headers:
+        x-ads-region: "${region}"
+      body:
+        title: "${title}"
+        description: "${description}"
+        issueSubtypeId: "${issue_subtype_id}"
+        status: "${status}"
+        assignedTo: "${assigned_to}"
+        assignedToType: "${assigned_to_type}"
+        dueDate: "${due_date}"
+        startDate: "${start_date}"
+        locationId: "${location_id}"
+        locationDetails: "${location_details}"
+        rootCauseId: "${root_cause_id}"
+        published: "${published}"
+        watchers: "${watchers}"
+        customAttributes: "${custom_attributes}"
+        gpsCoordinates: "${gps_coordinates}"
+    input:
+      project_id:
+        type: string
+        description: ACC project id.
+      issue_id:
+        type: string
+        description: Issue id to update.
+      title:
+        type: string
+        description: Short statement of the issue.
+      issue_subtype_id:
+        type: string
+        description: Issue type (subtype) id the issue belongs to.
+      status:
+        type: string
+        description: Status the issue should be in.
+      description:
+        type: string
+        description: New description of the issue.
+        optional: true
+      assigned_to:
+        type: string
+        description: Autodesk id of the new assignee.
+        optional: true
+      assigned_to_type:
+        type: string
+        description: What kind of assignee assignedTo names.
+        optional: true
+        enum: [user, company, role]
+      due_date:
+        type: string
+        description: New due date, as an ISO 8601 date.
+        optional: true
+      start_date:
+        type: string
+        description: New start date, as an ISO 8601 date.
+        optional: true
+      location_id:
+        type: string
+        description: New location breakdown structure id.
+        optional: true
+      location_details:
+        type: string
+        description: New free-text location description.
+        optional: true
+      root_cause_id:
+        type: string
+        description: New root cause id.
+        optional: true
+      published:
+        type: boolean
+        description: True to publish a draft issue.
+        optional: true
+      watchers:
+        type: array
+        description: Replacement list of watcher Autodesk ids.
+        optional: true
+        items: {type: string}
+      custom_attributes:
+        type: array
+        description: Custom attribute values to set.
+        optional: true
+        items: {type: object}
+      gps_coordinates:
+        type: object
+        description: New latitude and longitude for the issue.
+        optional: true
+      region:
+        type: string
+        description: Data centre holding the project.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The updated issue record.
+      type: object
+
+  list_issue_comments:
+    title: List an issue's comments
+    description: >-
+      Page through the comments on one issue, oldest first unless you sort
+      otherwise.
+    category: acc-issues
+    read_only: true
+    request:
+      method: GET
+      path: /construction/issues/v1/projects/${project_id}/issues/${issue_id}/comments
+      headers:
+        x-ads-region: "${region}"
+      query:
+        sortBy: "${sort_by}"
+        limit: "${limit}"
+        offset: "${offset}"
+    input:
+      project_id:
+        type: string
+        description: ACC project id.
+      issue_id:
+        type: string
+        description: Issue id whose comments to list.
+      sort_by:
+        type: array
+        description: Fields to sort by; prefix with - for descending.
+        optional: true
+        items: {type: string}
+      limit:
+        type: string
+        description: Comments per page.
+        optional: true
+      offset:
+        type: string
+        description: Offset into the result set.
+        optional: true
+      region:
+        type: string
+        description: Data centre holding the project.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: A page of comments with their authors and timestamps.
+      type: object
+
+  create_issue_comment:
+    title: Comment on an issue
+    description: >-
+      Add a comment to an issue, which is how the back and forth on a defect is
+      recorded.
+    category: acc-issues
+    request:
+      method: POST
+      path: /construction/issues/v1/projects/${project_id}/issues/${issue_id}/comments
+      headers:
+        x-ads-region: "${region}"
+      body:
+        body: "${body}"
+    input:
+      project_id:
+        type: string
+        description: ACC project id.
+      issue_id:
+        type: string
+        description: Issue id to comment on.
+      body:
+        type: string
+        description: Text of the comment.
+      region:
+        type: string
+        description: Data centre holding the project.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The created comment.
+      type: object
+
+  list_issue_types:
+    title: List issue types
+    description: >-
+      List a project's issue categories, and with include=subtypes the types
+      under each -- the ids create_issue needs.
+    category: acc-issues
+    read_only: true
+    request:
+      method: GET
+      path: /construction/issues/v1/projects/${project_id}/issue-types
+      headers:
+        x-ads-region: "${region}"
+      query:
+        include: "${include}"
+        filter[isActive]: "${is_active}"
+        filter[updatedAt]: "${updated_at}"
+        limit: "${limit}"
+        offset: "${offset}"
+    input:
+      project_id:
+        type: string
+        description: ACC project id.
+      include:
+        type: string
+        description: Set to subtypes to include each category's types.
+        optional: true
+      is_active:
+        type: boolean
+        description: True for active categories only.
+        optional: true
+      updated_at:
+        type: string
+        description: ISO 8601 date or range the types must have been updated in.
+        optional: true
+      limit:
+        type: integer
+        description: Types per page.
+        optional: true
+      offset:
+        type: integer
+        description: Offset into the result set.
+        optional: true
+      region:
+        type: string
+        description: Data centre holding the project.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The project's issue categories and types.
+      type: object
+
+  list_issue_attribute_definitions:
+    title: List issue custom attribute definitions
+    description: >-
+      List the custom attributes defined for issues on a project, with their
+      data types and, for list attributes, their allowed values.
+    category: acc-issues
+    read_only: true
+    request:
+      method: GET
+      path: /construction/issues/v1/projects/${project_id}/issue-attribute-definitions
+      headers:
+        x-ads-region: "${region}"
+      query:
+        filter[dataType]: "${data_type}"
+        filter[createdAt]: "${created_at}"
+        filter[updatedAt]: "${updated_at}"
+        filter[deletedAt]: "${deleted_at}"
+        limit: "${limit}"
+        offset: "${offset}"
+    input:
+      project_id:
+        type: string
+        description: ACC project id.
+      data_type:
+        type: array
+        description: Data types to restrict the response to, e.g. list or text.
+        optional: true
+        items: {type: string}
+      created_at:
+        type: string
+        description: ISO 8601 date or range the definitions were created in.
+        optional: true
+      updated_at:
+        type: string
+        description: ISO 8601 date or range the definitions were updated in.
+        optional: true
+      deleted_at:
+        type: string
+        description: ISO 8601 date or range the definitions were deleted in.
+        optional: true
+      limit:
+        type: integer
+        description: Definitions per page.
+        optional: true
+      offset:
+        type: integer
+        description: Offset into the result set.
+        optional: true
+      region:
+        type: string
+        description: Data centre holding the project.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The custom attribute definitions.
+      type: object
+
+  list_issue_attribute_mappings:
+    title: List issue custom attribute mappings
+    description: >-
+      List which custom attributes apply to which issue types, since a
+      definition only shows up on the types it is mapped to.
+    category: acc-issues
+    read_only: true
+    request:
+      method: GET
+      path: /construction/issues/v1/projects/${project_id}/issue-attribute-mappings
+      headers:
+        x-ads-region: "${region}"
+      query:
+        filter[attributeDefinitionId]: "${attribute_definition_id}"
+        filter[mappedItemId]: "${mapped_item_id}"
+        filter[createdAt]: "${created_at}"
+        filter[updatedAt]: "${updated_at}"
+        filter[deletedAt]: "${deleted_at}"
+        limit: "${limit}"
+        offset: "${offset}"
+    input:
+      project_id:
+        type: string
+        description: ACC project id.
+      attribute_definition_id:
+        type: string
+        description: Attribute definition whose mappings to return.
+        optional: true
+      mapped_item_id:
+        type: string
+        description: Issue type or category the attributes are mapped to.
+        optional: true
+      created_at:
+        type: string
+        description: ISO 8601 date or range the mappings were created in.
+        optional: true
+      updated_at:
+        type: string
+        description: ISO 8601 date or range the mappings were updated in.
+        optional: true
+      deleted_at:
+        type: string
+        description: ISO 8601 date or range the mappings were deleted in.
+        optional: true
+      limit:
+        type: integer
+        description: Mappings per page.
+        optional: true
+      offset:
+        type: integer
+        description: Offset into the result set.
+        optional: true
+      region:
+        type: string
+        description: Data centre holding the project.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The custom attribute mappings.
+      type: object
+
+  list_issue_root_causes:
+    title: List issue root cause categories
+    description: >-
+      List the root cause categories on a project, and with
+      include=rootcauses the individual causes under each.
+    category: acc-issues
+    read_only: true
+    request:
+      method: GET
+      path: /construction/issues/v1/projects/${project_id}/issue-root-cause-categories
+      headers:
+        x-ads-region: "${region}"
+      query:
+        include: "${include}"
+        filter[updatedAt]: "${updated_at}"
+        limit: "${limit}"
+        offset: "${offset}"
+    input:
+      project_id:
+        type: string
+        description: ACC project id.
+      include:
+        type: string
+        description: Set to rootcauses to include each category's causes.
+        optional: true
+      updated_at:
+        type: string
+        description: ISO 8601 date or range the categories were updated in.
+        optional: true
+      limit:
+        type: integer
+        description: Categories per page.
+        optional: true
+      offset:
+        type: integer
+        description: Offset into the result set.
+        optional: true
+      region:
+        type: string
+        description: Data centre holding the project.
+        optional: true
+        enum: [US, EMEA, AUS, CAN, DEU, IND, JPN, GBR]
+    output:
+      description: The root cause categories and their causes.
+      type: object
+
+  list_issue_attachments:
+    title: List an issue's attachments
+    description: >-
+      List the files attached to one issue, with their names and storage
+      references.
+    category: acc-issues
+    read_only: true
+    request:
+      method: GET
+      path: /construction/issues/v1/projects/${project_id}/attachments/${issue_id}/items
+    input:
+      project_id:
+        type: string
+        description: ACC project id.
+      issue_id:
+        type: string
+        description: Issue id whose attachments to list.
+    output:
+      description: The issue's attachments.
+      type: object
+
+  add_issue_attachments:
+    title: Attach files to an issue
+    description: >-
+      Attach already-uploaded files to an issue. Each attachment entry names
+      the stored document, so upload the bytes through Data Management first.
+    category: acc-issues
+    request:
+      method: POST
+      path: /construction/issues/v1/projects/${project_id}/attachments
+      body:
+        domainEntityId: "${domain_entity_id}"
+        attachments: "${attachments}"
+    input:
+      project_id:
+        type: string
+        description: ACC project id.
+      domain_entity_id:
+        type: string
+        description: Issue id the attachments belong to.
+        optional: true
+      attachments:
+        type: array
+        description: Attachment entries naming the uploaded files.
+        optional: true
+        items: {type: object}
+    output:
+      description: The attachments now on the issue.
+      type: object
+
+  delete_issue_attachment:
+    title: Delete an issue attachment
+    description: >-
+      Remove one attachment from an issue. The underlying document in the
+      project's files is untouched.
+    category: acc-issues
+    destructive: true
+    request:
+      method: DELETE
+      path: /construction/issues/v1/projects/${project_id}/attachments/${issue_id}/items/${attachment_id}
+    input:
+      project_id:
+        type: string
+        description: ACC project id.
+      issue_id:
+        type: string
+        description: Issue id the attachment is on.
+      attachment_id:
+        type: string
+        description: Attachment id to remove.
+    output:
+      description: Empty on success.
+      type: object

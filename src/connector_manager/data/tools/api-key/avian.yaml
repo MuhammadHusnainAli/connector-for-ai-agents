@@ -1,0 +1,94 @@
+# Avian LLM inference tools.
+#
+# Avian is an OpenAI-compatible inference endpoint: one base url, one bearer
+# key, and the same request and response shapes the OpenAI SDK sends. Its
+# published reference at https://avian.io/docs/ documents a single endpoint,
+# POST /v1/chat/completions, with the model catalogue listed alongside it.
+#
+# The connection's base url is https://api.avian.io, so paths start at /v1.
+#
+# list_models is the standard OpenAI-compatible catalogue route. Avian's own
+# page does not describe it, but the endpoint is live and answers with the
+# model ids, context lengths and per-million prices -- which is what makes it
+# worth having, since the catalogue turns over faster than the docs page.
+#
+# Models are named vendor/model: deepseek/deepseek-v4-flash,
+# deepseek/deepseek-v4-pro, deepseek/deepseek-v3.2, minimax/minimax-m2.5,
+# z-ai/glm-5.2, moonshotai/kimi-k2.6, xiaomi/mimo-v2.5-pro and so on. Read the
+# current list rather than hard-coding one.
+#
+# Streaming is supported by the API (stream: true returns server-sent events)
+# but not by this tool layer, which reads a whole response before returning it;
+# the argument is here because the API takes it, and a streamed call simply
+# comes back complete.
+#
+# Docs: https://avian.io/docs/
+
+connector_id: avian
+display_name: Avian
+docs_url: https://avian.io/docs/
+
+tools:
+  create_chat_completion:
+    title: Create a chat completion
+    description: >-
+      Send a conversation and get a model's reply. The request is
+      OpenAI-compatible -- messages carry role and content, tools declares
+      functions the model may call, and the response arrives as choices with a
+      usage block of prompt and completion tokens.
+    category: inference
+    request:
+      method: POST
+      path: /v1/chat/completions
+      body:
+        model: "${model}"
+        messages: "${messages}"
+        temperature: "${temperature}"
+        max_tokens: "${max_tokens}"
+        tools: "${tools}"
+        stream: "${stream}"
+    input:
+      model:
+        type: string
+        description: Model id to run, e.g. deepseek/deepseek-v3.2.
+      messages:
+        type: array
+        description: Conversation so far, each entry with a role and content.
+        items: {type: object}
+      temperature:
+        type: number
+        description: Sampling temperature between 0 and 2. Defaults to 1.
+        optional: true
+        minimum: 0
+        maximum: 2
+      max_tokens:
+        type: integer
+        description: Maximum tokens to generate in the reply.
+        optional: true
+      tools:
+        type: array
+        description: Function definitions the model may call, in OpenAI tool format.
+        optional: true
+        items: {type: object}
+      stream:
+        type: boolean
+        description: True to ask for server-sent events; the reply still arrives complete here.
+        optional: true
+    output:
+      description: The completion, with choices, finish reason and token usage.
+      type: object
+
+  list_models:
+    title: List available models
+    description: >-
+      Read the models Avian currently serves, each with its id, context length,
+      maximum output, whether it reasons, and its per-million input, output and
+      cache-read prices.
+    category: inference
+    read_only: true
+    request:
+      method: GET
+      path: /v1/models
+    output:
+      description: The model catalogue with context lengths and pricing.
+      type: object

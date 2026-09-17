@@ -1,0 +1,1126 @@
+# Aidbase tools -- AI customer support: knowledge sources and their training,
+# chatbots and their conversations, ticket forms and tickets, and email inboxes.
+#
+# Aidbase publishes no OpenAPI description. Every path, parameter and body field
+# below is taken from its API reference pages (Knowledge, Chatbot, Ticket Form
+# and Email Inbox, at https://docs.aidbase.ai/apis/), which document 42
+# endpoints; all 42 are here, plus the /status check from the get-started guide.
+# The API is marked beta.
+#
+# The connection's base url is https://api.aidbase.ai, so paths start at /v1.
+# Keys carry permissions chosen when they are created; the write endpoints name
+# the one they need (CHATBOTS_WRITE, TICKETFORMS_WRITE, TICKETS_WRITE,
+# EMAILINBOXES_WRITE, EMAILS_WRITE).
+#
+# How the pieces fit:
+#
+#   * **knowledge must be trained before it is used.** Create a website, video,
+#     FAQ or document knowledge item, call train_knowledge, poll get_knowledge
+#     until is_training is false, then attach it to a chatbot, ticket form or
+#     email inbox;
+#   * **documents upload in three steps**: create_document_knowledge returns an
+#     id and a signed upload_url, the file is PUT to that URL outside this API,
+#     then finalize_document_knowledge completes it;
+#   * **lists page by cursor**: limit sets the page size (default 25), and
+#     has_more with next_cursor says whether and how to fetch the next page;
+#   * every response is {success, data}; the tools unwrap data.
+#
+# Replies are real: reply_to_ticket and reply_to_email reach the customer, and
+# chatbot_reply spends AI credits.
+#
+# Docs: https://docs.aidbase.ai/apis/introduction/
+
+connector_id: aidbase
+display_name: Aidbase
+docs_url: https://docs.aidbase.ai/apis/introduction/
+tools:
+
+  check_status:
+    title: Check API status
+    description: >-
+      Confirm the API is up and the key is valid; returns ok with the key's masked token.
+    category: account
+    read_only: true
+    request:
+      method: GET
+      path: /v1/status
+    input: {}
+    output:
+      description: status and the masked token.
+      type: object
+      response_path: data
+
+  list_knowledge:
+    title: List knowledge items
+    description: >-
+      List the account's knowledge sources -- websites, videos, documents and FAQs -- with
+      their training state.
+    category: knowledge
+    read_only: true
+    request:
+      method: GET
+      path: /v1/knowledge
+      query:
+        limit: ${limit}
+        next_cursor: ${next_cursor}
+    input:
+      limit:
+        type: integer
+        description: Items per page (default 25).
+        optional: true
+      next_cursor:
+        type: string
+        description: next_cursor from the previous page.
+        optional: true
+    output:
+      description: A page of knowledge items.
+      type: object
+      response_path: data
+
+  get_knowledge:
+    title: Get a knowledge item
+    description: >-
+      Read a knowledge item's type, source and training state: trained_at, is_training and
+      any training failure. Poll it after train_knowledge.
+    category: knowledge
+    read_only: true
+    request:
+      method: GET
+      path: /v1/knowledge/${id}
+    input:
+      id:
+        type: string
+        description: Knowledge item id.
+    output:
+      description: The knowledge item.
+      type: object
+      response_path: data
+
+  list_knowledge_sub_pages:
+    title: List a website's pages
+    description: >-
+      List the pages crawled for a website knowledge item and whether each trained.
+    category: knowledge
+    read_only: true
+    request:
+      method: GET
+      path: /v1/knowledge/${id}/sub-pages
+      query:
+        limit: ${limit}
+        next_cursor: ${next_cursor}
+    input:
+      limit:
+        type: integer
+        description: Items per page (default 25).
+        optional: true
+      next_cursor:
+        type: string
+        description: next_cursor from the previous page.
+        optional: true
+      id:
+        type: string
+        description: Knowledge item id.
+    output:
+      description: A page of sub-pages.
+      type: object
+      response_path: data
+
+  list_faq_items:
+    title: List FAQ items
+    description: >-
+      List the questions and answers in an FAQ knowledge item.
+    category: knowledge
+    read_only: true
+    request:
+      method: GET
+      path: /v1/knowledge/${id}/faq-items
+      query:
+        limit: ${limit}
+        next_cursor: ${next_cursor}
+    input:
+      limit:
+        type: integer
+        description: Items per page (default 25).
+        optional: true
+      next_cursor:
+        type: string
+        description: next_cursor from the previous page.
+        optional: true
+      id:
+        type: string
+        description: Knowledge item id.
+    output:
+      description: A page of FAQ items.
+      type: object
+      response_path: data
+
+  create_website_knowledge:
+    title: Add a website
+    description: >-
+      Create a knowledge item from a website, which Aidbase crawls. Train it before use.
+    category: knowledge
+    request:
+      method: POST
+      path: /v1/knowledge/website
+      body:
+        website_url: ${website_url}
+    input:
+      website_url:
+        type: string
+        description: Website to crawl, starting with http:// or https://.
+    output:
+      description: The created knowledge item.
+      type: object
+      response_path: data
+
+  create_video_knowledge:
+    title: Add a YouTube video
+    description: >-
+      Create a knowledge item from a YouTube video's content. Train it before use.
+    category: knowledge
+    request:
+      method: POST
+      path: /v1/knowledge/video
+      body:
+        video_url: ${video_url}
+        video_type: ${video_type}
+    input:
+      video_url:
+        type: string
+        description: YouTube video URL; only YouTube is accepted.
+      video_type:
+        type: string
+        description: Video platform; YOUTUBE.
+        enum:
+        - YOUTUBE
+    output:
+      description: The created knowledge item.
+      type: object
+      response_path: data
+
+  create_document_knowledge:
+    title: Start a document upload
+    description: >-
+      Create a document knowledge item (PDF, Word, plain text or CSV) and get a signed upload_url.
+      PUT the file there, then call finalize_document_knowledge.
+    category: knowledge
+    request:
+      method: POST
+      path: /v1/knowledge/document
+      body:
+        file_type: ${file_type}
+        file_name: ${file_name}
+    input:
+      file_type:
+        type: string
+        description: MIME type of the file.
+        enum:
+        - application/pdf
+        - application/msword
+        - text/plain
+        - text/csv
+      file_name:
+        type: string
+        description: Name for the document.
+        optional: true
+    output:
+      description: The item id and signed upload_url.
+      type: object
+      response_path: data
+
+  finalize_document_knowledge:
+    title: Finalize a document upload
+    description: >-
+      Complete a document knowledge item once its file has been uploaded to the signed URL.
+    category: knowledge
+    request:
+      method: POST
+      path: /v1/knowledge/${id}/finalize
+    input:
+      id:
+        type: string
+        description: Knowledge item id.
+    output:
+      description: The finalized knowledge item.
+      type: object
+      response_path: data
+
+  create_faq_knowledge:
+    title: Create an FAQ
+    description: >-
+      Create an empty FAQ knowledge item; add questions with add_faq_item.
+    category: knowledge
+    request:
+      method: POST
+      path: /v1/knowledge/faq
+      body:
+        title: ${title}
+        description: ${description}
+    input:
+      title:
+        type: string
+        description: FAQ title.
+      description:
+        type: string
+        description: FAQ description.
+        optional: true
+    output:
+      description: The created FAQ knowledge item.
+      type: object
+      response_path: data
+
+  add_faq_item:
+    title: Add an FAQ item
+    description: >-
+      Add a question and answer to an FAQ knowledge item, with optional categories and source
+      URL.
+    category: knowledge
+    request:
+      method: POST
+      path: /v1/knowledge/${id}/faq-item
+      body:
+        question: ${question}
+        answer: ${answer}
+        source_url: ${source_url}
+        categories: ${categories}
+    input:
+      id:
+        type: string
+        description: Knowledge item id.
+      question:
+        type: string
+        description: The question.
+      answer:
+        type: string
+        description: The answer.
+      source_url:
+        type: string
+        description: URL the answer comes from.
+        optional: true
+      categories:
+        type: array
+        description: Category names; missing ones are created.
+        optional: true
+        items:
+          type: string
+    output:
+      description: The created FAQ item.
+      type: object
+      response_path: data
+
+  delete_knowledge:
+    title: Delete a knowledge item
+    description: >-
+      Delete a knowledge item; every chatbot, ticket form and inbox using it loses that knowledge.
+    category: knowledge
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/knowledge/${id}
+    input:
+      id:
+        type: string
+        description: Knowledge item id.
+    output:
+      description: Confirmation.
+      type: object
+      response_path: data
+
+  delete_faq_item:
+    title: Delete an FAQ item
+    description: >-
+      Delete one question and answer from an FAQ knowledge item.
+    category: knowledge
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/knowledge/${id}/faq-item/${faq_item_id}
+    input:
+      id:
+        type: string
+        description: Knowledge item id.
+      faq_item_id:
+        type: string
+        description: FAQ item id.
+    output:
+      description: Confirmation.
+      type: object
+      response_path: data
+
+  train_knowledge:
+    title: Train a knowledge item
+    description: >-
+      Start training a knowledge item so it can answer questions. It takes a while; poll get_knowledge
+      until is_training is false.
+    category: knowledge
+    request:
+      method: PUT
+      path: /v1/knowledge/${id}/train
+    input:
+      id:
+        type: string
+        description: Knowledge item id.
+    output:
+      description: Confirmation that training started.
+      type: object
+      response_path: data
+
+  list_chatbots:
+    title: List chatbots
+    description: >-
+      List the account's chatbots with the ids the other chatbot tools need.
+    category: chatbots
+    read_only: true
+    request:
+      method: GET
+      path: /v1/chatbots/
+      query:
+        limit: ${limit}
+        next_cursor: ${next_cursor}
+    input:
+      limit:
+        type: integer
+        description: Items per page (default 25).
+        optional: true
+      next_cursor:
+        type: string
+        description: next_cursor from the previous page.
+        optional: true
+    output:
+      description: A page of chatbots.
+      type: object
+      response_path: data
+
+  get_chatbot:
+    title: Get a chatbot
+    description: >-
+      Read one chatbot's configuration: name, behaviour and settings.
+    category: chatbots
+    read_only: true
+    request:
+      method: GET
+      path: /v1/chatbot/${id}/
+    input:
+      id:
+        type: string
+        description: Chatbot id.
+    output:
+      description: The chatbot.
+      type: object
+      response_path: data
+
+  chatbot_reply:
+    title: Get a chatbot reply
+    description: >-
+      Ask a chatbot a question and get its AI answer, drawn from its trained knowledge. Pass
+      the returned session_id to continue the conversation.
+    category: chatbots
+    request:
+      method: POST
+      path: /v1/chatbot/${id}/reply
+      body:
+        message: ${message}
+        session_id: ${session_id}
+    input:
+      id:
+        type: string
+        description: Chatbot id.
+      message:
+        type: string
+        description: The user's message.
+      session_id:
+        type: string
+        description: session_id from a previous reply, to continue that conversation.
+        optional: true
+    output:
+      description: The reply, its id and the session_id.
+      type: object
+      response_path: data
+
+  list_chatbot_knowledge:
+    title: List a chatbot's knowledge
+    description: >-
+      List the knowledge items a chatbot answers from.
+    category: chatbots
+    read_only: true
+    request:
+      method: GET
+      path: /v1/chatbot/${id}/knowledge
+      query:
+        limit: ${limit}
+        next_cursor: ${next_cursor}
+    input:
+      limit:
+        type: integer
+        description: Items per page (default 25).
+        optional: true
+      next_cursor:
+        type: string
+        description: next_cursor from the previous page.
+        optional: true
+      id:
+        type: string
+        description: Chatbot id.
+    output:
+      description: A page of knowledge items.
+      type: object
+      response_path: data
+
+  add_chatbot_knowledge:
+    title: Attach knowledge to a chatbot
+    description: >-
+      Let a chatbot answer from a trained knowledge item.
+    category: chatbots
+    request:
+      method: PUT
+      path: /v1/chatbot/${id}/knowledge
+      body:
+        knowledge_id: ${knowledge_id}
+    input:
+      id:
+        type: string
+        description: Chatbot id.
+      knowledge_id:
+        type: string
+        description: Knowledge item id; it must already be trained.
+    output:
+      description: Confirmation.
+      type: object
+
+  remove_chatbot_knowledge:
+    title: Detach knowledge from a chatbot
+    description: >-
+      Stop a chatbot using a knowledge item; the item itself is kept.
+    category: chatbots
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/chatbot/${id}/knowledge
+      body:
+        knowledge_id: ${knowledge_id}
+    input:
+      id:
+        type: string
+        description: Chatbot id.
+      knowledge_id:
+        type: string
+        description: Knowledge item id to detach.
+    output:
+      description: Confirmation.
+      type: object
+
+  list_chatbot_chats:
+    title: List chatbot chats
+    description: >-
+      List a chatbot's conversations, optionally within a creation window.
+    category: chatbots
+    read_only: true
+    request:
+      method: GET
+      path: /v1/chatbot/${id}/chats
+      query:
+        created_after: ${created_after}
+        created_before: ${created_before}
+        limit: ${limit}
+        next_cursor: ${next_cursor}
+    input:
+      created_after:
+        type: string
+        description: Only chats created after this ISO 8601 date or date-time.
+        optional: true
+      created_before:
+        type: string
+        description: Only chats created before this ISO 8601 date or date-time.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page (default 25).
+        optional: true
+      next_cursor:
+        type: string
+        description: next_cursor from the previous page.
+        optional: true
+      id:
+        type: string
+        description: Chatbot id.
+    output:
+      description: A page of chats.
+      type: object
+      response_path: data
+
+  get_chatbot_chat:
+    title: Get a chatbot chat
+    description: >-
+      Read one chatbot conversation with its messages.
+    category: chatbots
+    read_only: true
+    request:
+      method: GET
+      path: /v1/chatbot/${id}/chats/${chat_id}
+    input:
+      id:
+        type: string
+        description: Chatbot id.
+      chat_id:
+        type: string
+        description: Chat id.
+    output:
+      description: The chat.
+      type: object
+      response_path: data
+
+  block_chatbot_chat:
+    title: Block a chat
+    description: >-
+      Block the user behind a chatbot conversation from interacting further. Needs CHATBOTS_WRITE.
+    category: chatbots
+    destructive: true
+    request:
+      method: PUT
+      path: /v1/chatbot/${id}/chats/${chat_id}/block
+    input:
+      id:
+        type: string
+        description: Chatbot id.
+      chat_id:
+        type: string
+        description: Chat id.
+    output:
+      description: Confirmation.
+      type: object
+
+  list_ticket_forms:
+    title: List ticket forms
+    description: >-
+      List the account's ticket forms with the ids the ticket tools need.
+    category: ticket_forms
+    read_only: true
+    request:
+      method: GET
+      path: /v1/ticket-forms/
+      query:
+        limit: ${limit}
+        next_cursor: ${next_cursor}
+    input:
+      limit:
+        type: integer
+        description: Items per page (default 25).
+        optional: true
+      next_cursor:
+        type: string
+        description: next_cursor from the previous page.
+        optional: true
+    output:
+      description: A page of ticket forms.
+      type: object
+      response_path: data
+
+  get_ticket_form:
+    title: Get a ticket form
+    description: >-
+      Read one ticket form's configuration: name, fields and settings.
+    category: ticket_forms
+    read_only: true
+    request:
+      method: GET
+      path: /v1/ticket-form/${id}/
+    input:
+      id:
+        type: string
+        description: Ticket form id.
+    output:
+      description: The ticket form.
+      type: object
+      response_path: data
+
+  list_ticket_form_knowledge:
+    title: List a ticket form's knowledge
+    description: >-
+      List the knowledge items a ticket form's AI draws on.
+    category: ticket_forms
+    read_only: true
+    request:
+      method: GET
+      path: /v1/ticket-form/${id}/knowledge
+      query:
+        limit: ${limit}
+        next_cursor: ${next_cursor}
+    input:
+      limit:
+        type: integer
+        description: Items per page (default 25).
+        optional: true
+      next_cursor:
+        type: string
+        description: next_cursor from the previous page.
+        optional: true
+      id:
+        type: string
+        description: Ticket form id.
+    output:
+      description: A page of knowledge items.
+      type: object
+      response_path: data
+
+  add_ticket_form_knowledge:
+    title: Attach knowledge to a ticket form
+    description: >-
+      Let a ticket form's AI use a trained knowledge item.
+    category: ticket_forms
+    request:
+      method: PUT
+      path: /v1/ticket-form/${id}/knowledge
+      body:
+        knowledge_id: ${knowledge_id}
+    input:
+      id:
+        type: string
+        description: Ticket form id.
+      knowledge_id:
+        type: string
+        description: Knowledge item id; it must already be trained.
+    output:
+      description: Confirmation.
+      type: object
+
+  remove_ticket_form_knowledge:
+    title: Detach knowledge from a ticket form
+    description: >-
+      Stop a ticket form using a knowledge item; the item itself is kept.
+    category: ticket_forms
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/ticket-form/${id}/knowledge
+      body:
+        knowledge_id: ${knowledge_id}
+    input:
+      id:
+        type: string
+        description: Ticket form id.
+      knowledge_id:
+        type: string
+        description: Knowledge item id to detach.
+    output:
+      description: Confirmation.
+      type: object
+
+  list_tickets:
+    title: List tickets
+    description: >-
+      List a ticket form's tickets, optionally by status and creation window.
+    category: tickets
+    read_only: true
+    request:
+      method: GET
+      path: /v1/ticket-form/${id}/tickets
+      query:
+        status: ${status}
+        created_after: ${created_after}
+        created_before: ${created_before}
+        limit: ${limit}
+        next_cursor: ${next_cursor}
+    input:
+      status:
+        type: string
+        description: 'Statuses, comma-separated: open, assigned, need_more_info, resolved,
+          closed.'
+        optional: true
+      created_after:
+        type: string
+        description: Only tickets created after this ISO 8601 date or date-time.
+        optional: true
+      created_before:
+        type: string
+        description: Only tickets created before this ISO 8601 date or date-time.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page (default 25).
+        optional: true
+      next_cursor:
+        type: string
+        description: next_cursor from the previous page.
+        optional: true
+      id:
+        type: string
+        description: Ticket form id.
+    output:
+      description: A page of tickets.
+      type: object
+      response_path: data
+
+  get_ticket:
+    title: Get a ticket
+    description: >-
+      Read one ticket with its messages, status and priority.
+    category: tickets
+    read_only: true
+    request:
+      method: GET
+      path: /v1/ticket-form/${id}/tickets/${ticket_id}
+    input:
+      id:
+        type: string
+        description: Ticket form id.
+      ticket_id:
+        type: string
+        description: Ticket id.
+    output:
+      description: The ticket.
+      type: object
+      response_path: data
+
+  update_ticket:
+    title: Update a ticket
+    description: >-
+      Change a ticket's status, priority or both -- at least one -- with the same history
+      and side effects as in the app. Needs TICKETS_WRITE.
+    category: tickets
+    request:
+      method: PUT
+      path: /v1/ticket-form/${id}/tickets/${ticket_id}
+      body:
+        status: ${status}
+        priority: ${priority}
+    input:
+      id:
+        type: string
+        description: Ticket form id.
+      ticket_id:
+        type: string
+        description: Ticket id.
+      status:
+        type: string
+        description: New status.
+        optional: true
+        enum:
+        - open
+        - assigned
+        - need_more_info
+        - resolved
+        - closed
+      priority:
+        type: string
+        description: New priority, e.g. low, medium or high.
+        optional: true
+    output:
+      description: The updated ticket.
+      type: object
+      response_path: data
+
+  block_ticket:
+    title: Block a ticket
+    description: >-
+      Block the customer behind a ticket from interacting further. Needs TICKETFORMS_WRITE.
+    category: tickets
+    destructive: true
+    request:
+      method: PUT
+      path: /v1/ticket-form/${id}/tickets/${ticket_id}/block
+    input:
+      id:
+        type: string
+        description: Ticket form id.
+      ticket_id:
+        type: string
+        description: Ticket id.
+    output:
+      description: Confirmation.
+      type: object
+
+  reply_to_ticket:
+    title: Reply to a ticket
+    description: >-
+      Send a reply to a ticket's customer as the form owner or a chosen persona. Needs TICKETS_WRITE.
+    category: tickets
+    destructive: true
+    request:
+      method: POST
+      path: /v1/ticket-form/${id}/tickets/${ticket_id}/reply
+      body:
+        message: ${message}
+        persona_id: ${persona_id}
+    input:
+      id:
+        type: string
+        description: Ticket form id.
+      ticket_id:
+        type: string
+        description: Ticket id.
+      message:
+        type: string
+        description: Reply text sent to the customer.
+      persona_id:
+        type: string
+        description: Persona to send as; defaults to the account's name and picture.
+        optional: true
+    output:
+      description: The sent reply.
+      type: object
+      response_path: data
+
+  list_email_inboxes:
+    title: List email inboxes
+    description: >-
+      List the account's email inboxes with the ids the email tools need.
+    category: email_inboxes
+    read_only: true
+    request:
+      method: GET
+      path: /v1/email-inboxes/
+      query:
+        limit: ${limit}
+        next_cursor: ${next_cursor}
+    input:
+      limit:
+        type: integer
+        description: Items per page (default 25).
+        optional: true
+      next_cursor:
+        type: string
+        description: next_cursor from the previous page.
+        optional: true
+    output:
+      description: A page of inboxes.
+      type: object
+      response_path: data
+
+  get_email_inbox:
+    title: Get an email inbox
+    description: >-
+      Read one email inbox's configuration, by id or alias.
+    category: email_inboxes
+    read_only: true
+    request:
+      method: GET
+      path: /v1/email-inbox/${id}/
+    input:
+      id:
+        type: string
+        description: Email inbox id (or its alias).
+    output:
+      description: The inbox.
+      type: object
+      response_path: data
+
+  list_email_inbox_knowledge:
+    title: List an inbox's knowledge
+    description: >-
+      List the knowledge items an email inbox's AI draws on.
+    category: email_inboxes
+    read_only: true
+    request:
+      method: GET
+      path: /v1/email-inbox/${id}/knowledge
+      query:
+        limit: ${limit}
+        next_cursor: ${next_cursor}
+    input:
+      limit:
+        type: integer
+        description: Items per page (default 25).
+        optional: true
+      next_cursor:
+        type: string
+        description: next_cursor from the previous page.
+        optional: true
+      id:
+        type: string
+        description: Email inbox id (or its alias).
+    output:
+      description: A page of knowledge items.
+      type: object
+      response_path: data
+
+  add_email_inbox_knowledge:
+    title: Attach knowledge to an inbox
+    description: >-
+      Let an email inbox's AI use a trained knowledge item.
+    category: email_inboxes
+    request:
+      method: PUT
+      path: /v1/email-inbox/${id}/knowledge
+      body:
+        knowledge_id: ${knowledge_id}
+    input:
+      id:
+        type: string
+        description: Email inbox id (or its alias).
+      knowledge_id:
+        type: string
+        description: Knowledge item id; it must already be trained.
+    output:
+      description: Confirmation.
+      type: object
+
+  remove_email_inbox_knowledge:
+    title: Detach knowledge from an inbox
+    description: >-
+      Stop an email inbox using a knowledge item; the item itself is kept.
+    category: email_inboxes
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/email-inbox/${id}/knowledge
+      body:
+        knowledge_id: ${knowledge_id}
+    input:
+      id:
+        type: string
+        description: Email inbox id (or its alias).
+      knowledge_id:
+        type: string
+        description: Knowledge item id to detach.
+    output:
+      description: Confirmation.
+      type: object
+
+  list_emails:
+    title: List emails
+    description: >-
+      List an inbox's email conversations, optionally by status and creation window.
+    category: emails
+    read_only: true
+    request:
+      method: GET
+      path: /v1/email-inbox/${id}/emails
+      query:
+        status: ${status}
+        created_after: ${created_after}
+        created_before: ${created_before}
+        limit: ${limit}
+        next_cursor: ${next_cursor}
+    input:
+      status:
+        type: string
+        description: 'Statuses, comma-separated: open, assigned, need_more_info, resolved,
+          closed.'
+        optional: true
+      created_after:
+        type: string
+        description: Only emails created after this ISO 8601 date or date-time.
+        optional: true
+      created_before:
+        type: string
+        description: Only emails created before this ISO 8601 date or date-time.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page (default 25).
+        optional: true
+      next_cursor:
+        type: string
+        description: next_cursor from the previous page.
+        optional: true
+      id:
+        type: string
+        description: Email inbox id (or its alias).
+    output:
+      description: A page of emails.
+      type: object
+      response_path: data
+
+  get_email:
+    title: Get an email
+    description: >-
+      Read one email conversation with its messages, status and priority.
+    category: emails
+    read_only: true
+    request:
+      method: GET
+      path: /v1/email-inbox/${id}/emails/${email_id}
+    input:
+      id:
+        type: string
+        description: Email inbox id (or its alias).
+      email_id:
+        type: string
+        description: Email id.
+    output:
+      description: The email.
+      type: object
+      response_path: data
+
+  update_email:
+    title: Update an email
+    description: >-
+      Change an email conversation's status, priority or both -- at least one. Needs EMAILS_WRITE.
+    category: emails
+    request:
+      method: PUT
+      path: /v1/email-inbox/${id}/emails/${email_id}
+      body:
+        status: ${status}
+        priority: ${priority}
+    input:
+      id:
+        type: string
+        description: Email inbox id (or its alias).
+      email_id:
+        type: string
+        description: Email id.
+      status:
+        type: string
+        description: New status.
+        optional: true
+        enum:
+        - open
+        - assigned
+        - need_more_info
+        - resolved
+        - closed
+      priority:
+        type: string
+        description: New priority, e.g. low, medium or high.
+        optional: true
+    output:
+      description: The updated email.
+      type: object
+      response_path: data
+
+  block_email:
+    title: Block an email sender
+    description: >-
+      Block the sender of an email conversation from interacting further. Needs EMAILINBOXES_WRITE.
+    category: emails
+    destructive: true
+    request:
+      method: PUT
+      path: /v1/email-inbox/${id}/emails/${email_id}/block
+    input:
+      id:
+        type: string
+        description: Email inbox id (or its alias).
+      email_id:
+        type: string
+        description: Email id.
+    output:
+      description: Confirmation.
+      type: object
+
+  reply_to_email:
+    title: Reply to an email
+    description: >-
+      Send a reply to an email conversation as the inbox owner. Needs EMAILS_WRITE.
+    category: emails
+    destructive: true
+    request:
+      method: POST
+      path: /v1/email-inbox/${id}/emails/${email_id}/reply
+      body:
+        message: ${message}
+    input:
+      id:
+        type: string
+        description: Email inbox id (or its alias).
+      email_id:
+        type: string
+        description: Email id.
+      message:
+        type: string
+        description: Reply text sent to the customer.
+    output:
+      description: The sent reply.
+      type: object
+      response_path: data

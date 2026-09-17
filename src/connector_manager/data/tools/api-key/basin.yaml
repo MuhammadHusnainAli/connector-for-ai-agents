@@ -1,0 +1,913 @@
+# Basin tools -- form backend, submissions and notification settings.
+#
+# Basin is a form backend: your HTML form posts to `https://usebasin.com/f/<uuid>`
+# and Basin stores the submission, emails you, and fires your webhooks. This
+# API is the *management* side of that. It deliberately has no "create
+# submission" call, because real submissions arrive through the public form
+# endpoint, not here.
+#
+# Two things worth knowing:
+#
+#   * **which forms you can see depends on the key.** An account key reaches
+#     every form and project; a form key is scoped to one form and will 404 on
+#     the others;
+#   * **`update_form` replaces what you send.** The form object is large --
+#     notification recipients, autoreply, spam protection, redirect styling --
+#     and each field you include overwrites the current value, so read the form
+#     first and send back the fields you mean to keep.
+#
+# Submissions are not deleted so much as moved: `update_submission` sets
+# `trash`, `spam` and `read`, which is how the dashboard's inbox, spam and
+# trash views are populated.
+#
+# The connection's base url already ends in `/api`, so paths start at `/v1`.
+#
+# Docs: https://docs.usebasin.com/developer-features/api-reference/
+
+connector_id: basin
+display_name: Basin
+docs_url: https://docs.usebasin.com/developer-features/api-reference/
+
+tools:
+
+  # -- forms ---------------------------------------------------------------
+
+  list_forms:
+    title: List forms
+    description: >-
+      Read the forms this key can reach, each with its uuid (the public
+      endpoint your HTML posts to), name, project and inbox, spam and trash
+      counts. The cheapest call that proves the key works.
+    category: forms
+    read_only: true
+    request:
+      method: GET
+      path: /v1/forms
+      query:
+        page: "${page}"
+        query: "${query}"
+    input:
+      page:
+        type: integer
+        description: Page number, starting at 1.
+        optional: true
+        minimum: 1
+      query:
+        type: string
+        description: Match forms by name.
+        optional: true
+    output:
+      description: A page of forms.
+      type: object
+      properties:
+        forms: {type: array}
+
+  get_form:
+    title: Get a form
+    description: >-
+      Read one form's full configuration -- notification recipients, autoreply,
+      spam protection, redirect behaviour and retention. Read this before
+      update_form, which overwrites whatever it is sent.
+    category: forms
+    read_only: true
+    request:
+      method: GET
+      path: /v1/forms/${form_id}
+    input:
+      form_id:
+        type: string
+        description: The form's id, from list_forms.
+    output:
+      description: The form and its settings.
+      type: object
+
+  create_form:
+    title: Create a form
+    description: >-
+      Create a form under a project. The response carries the `uuid` your HTML
+      form must post to. `notification_emails` is a comma-separated recipient
+      list, and `redirect_url` is where the submitter lands after a successful
+      post.
+    category: forms
+    request:
+      method: POST
+      path: /v1/forms/
+      body:
+        name: "${name}"
+        project_id: "${project_id}"
+        timezone: "${timezone}"
+        notification_emails: "${notification_emails}"
+        notification_subject: "${notification_subject}"
+        redirect_url: "${redirect_url}"
+        use_ajax: "${use_ajax}"
+        honeypot_field: "${honeypot_field}"
+        retention_days: "${retention_days}"
+    input:
+      name:
+        type: string
+        description: The form's name, as it appears in the dashboard.
+      project_id:
+        type: integer
+        description: The project to create the form under, from list_projects.
+        optional: true
+      timezone:
+        type: string
+        description: Timezone submission timestamps are shown in, e.g. "Europe/London".
+        optional: true
+      notification_emails:
+        type: string
+        description: Comma-separated list of addresses to email on each submission.
+        optional: true
+      notification_subject:
+        type: string
+        description: Subject line of the notification email.
+        optional: true
+      redirect_url:
+        type: string
+        description: Where to send the submitter after a successful post.
+        optional: true
+      use_ajax:
+        type: boolean
+        description: Answer submissions with JSON rather than a redirect, for fetch-based forms.
+        optional: true
+      honeypot_field:
+        type: string
+        description: Name of a hidden field bots fill in; submissions that fill it are treated as spam.
+        optional: true
+      retention_days:
+        type: integer
+        description: How long to keep submissions before deleting them automatically.
+        optional: true
+        minimum: 1
+    output:
+      description: The created form, including the uuid to post to.
+      type: object
+
+  update_form:
+    title: Update a form
+    description: >-
+      Change a form's settings. Every field you send replaces the current
+      value, so read the form with get_form first and include what you want
+      kept. Useful for switching notification recipients, turning on captcha
+      enforcement, or changing retention.
+    category: forms
+    request:
+      method: PUT
+      path: /v1/forms/${form_id}
+      body:
+        name: "${name}"
+        project_id: "${project_id}"
+        timezone: "${timezone}"
+        notification_emails: "${notification_emails}"
+        notification_cc_emails: "${notification_cc_emails}"
+        notification_bcc_emails: "${notification_bcc_emails}"
+        notification_subject: "${notification_subject}"
+        notification_from_name: "${notification_from_name}"
+        redirect_url: "${redirect_url}"
+        use_ajax: "${use_ajax}"
+        autoreply: "${autoreply}"
+        autoreply_subject: "${autoreply_subject}"
+        autoreply_body: "${autoreply_body}"
+        force_recaptcha: "${force_recaptcha}"
+        force_hcaptcha: "${force_hcaptcha}"
+        force_turnstile: "${force_turnstile}"
+        honeypot_field: "${honeypot_field}"
+        duplicate_filter: "${duplicate_filter}"
+        retention_days: "${retention_days}"
+        allowed_domains: "${allowed_domains}"
+        blocked_domains: "${blocked_domains}"
+        content_blacklist: "${content_blacklist}"
+    input:
+      form_id:
+        type: string
+        description: The form's id.
+      name:
+        type: string
+        description: New form name.
+        optional: true
+      project_id:
+        type: integer
+        description: Move the form to this project.
+        optional: true
+      timezone:
+        type: string
+        description: Timezone for submission timestamps.
+        optional: true
+      notification_emails:
+        type: string
+        description: Comma-separated "to" recipients for submission notifications.
+        optional: true
+      notification_cc_emails:
+        type: string
+        description: Comma-separated "cc" recipients.
+        optional: true
+      notification_bcc_emails:
+        type: string
+        description: Comma-separated "bcc" recipients.
+        optional: true
+      notification_subject:
+        type: string
+        description: Notification email subject.
+        optional: true
+      notification_from_name:
+        type: string
+        description: From-name on the notification email.
+        optional: true
+      redirect_url:
+        type: string
+        description: Where the submitter lands after a successful post.
+        optional: true
+      use_ajax:
+        type: boolean
+        description: Answer with JSON instead of redirecting.
+        optional: true
+      autoreply:
+        type: boolean
+        description: Email the submitter a confirmation.
+        optional: true
+      autoreply_subject:
+        type: string
+        description: Subject of the autoreply email.
+        optional: true
+      autoreply_body:
+        type: string
+        description: Body of the autoreply email.
+        optional: true
+      force_recaptcha:
+        type: boolean
+        description: Require Google reCAPTCHA on submissions.
+        optional: true
+      force_hcaptcha:
+        type: boolean
+        description: Require hCaptcha on submissions.
+        optional: true
+      force_turnstile:
+        type: boolean
+        description: Require Cloudflare Turnstile on submissions.
+        optional: true
+      honeypot_field:
+        type: string
+        description: Hidden field name used as a bot trap.
+        optional: true
+      duplicate_filter:
+        type: boolean
+        description: Reject submissions identical to a recent one.
+        optional: true
+      retention_days:
+        type: integer
+        description: Days to keep submissions before automatic deletion.
+        optional: true
+        minimum: 1
+      allowed_domains:
+        type: array
+        description: Only accept posts from these domains.
+        optional: true
+        items: {type: string}
+      blocked_domains:
+        type: array
+        description: Reject posts from these domains.
+        optional: true
+        items: {type: string}
+      content_blacklist:
+        type: array
+        description: Words that mark a submission as spam.
+        optional: true
+        items: {type: string}
+    output:
+      description: The updated form.
+      type: object
+
+  delete_form:
+    title: Delete a form
+    description: >-
+      Delete a form and every submission stored against it. The public endpoint
+      stops accepting posts immediately, and there is no undo.
+    category: forms
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/forms/${form_id}
+    input:
+      form_id:
+        type: string
+        description: The form's id.
+    output:
+      description: Confirmation that the form was deleted.
+      type: object
+
+  # -- submissions ---------------------------------------------------------
+
+  list_submissions:
+    title: List submissions
+    description: >-
+      Read stored form submissions, newest first. `form_id` narrows to one
+      form, `filter_by` picks the inbox, spam or trash view, and `query`
+      searches the submitted values -- which is how you find one person's
+      message.
+    category: submissions
+    read_only: true
+    request:
+      method: GET
+      path: /v1/submissions/
+      query:
+        form_id: "${form_id}"
+        filter_by: "${filter_by}"
+        query: "${query}"
+        order_by: "${order_by}"
+        date_range: "${date_range}"
+    input:
+      form_id:
+        type: string
+        description: Only submissions to this form.
+        optional: true
+      filter_by:
+        type: string
+        description: Which view to read -- the inbox, spam or trash.
+        optional: true
+      query:
+        type: string
+        description: Search text matched against the submitted field values.
+        optional: true
+      order_by:
+        type: string
+        description: Sort order for the results.
+        optional: true
+      date_range:
+        type: string
+        description: Restrict to submissions in a date range.
+        optional: true
+    output:
+      description: A page of submissions, each with its submitted values.
+      type: object
+      properties:
+        submissions: {type: array}
+
+  get_submission:
+    title: Get a submission
+    description: >-
+      Read one submission in full -- every submitted field, the submitter's IP,
+      referrer and user agent, any attachments, and whether Basin flagged it as
+      spam.
+    category: submissions
+    read_only: true
+    request:
+      method: GET
+      path: /v1/submissions/${submission_id}
+    input:
+      submission_id:
+        type: integer
+        description: The submission's id, from list_submissions.
+    output:
+      description: The submission.
+      type: object
+
+  update_submission:
+    title: Mark a submission read, spam or trashed
+    description: >-
+      Change a submission's state. `read` marks it seen, `spam` teaches Basin's
+      filter (and moves it to the spam view), and `trash` moves it to the
+      trash. This is how the dashboard's three views are managed.
+    category: submissions
+    request:
+      method: PATCH
+      path: /v1/submissions/${submission_id}
+      body:
+        read: "${read}"
+        spam: "${spam}"
+        trash: "${trash}"
+    input:
+      submission_id:
+        type: integer
+        description: The submission's id.
+      read:
+        type: boolean
+        description: Mark the submission as read (or unread).
+        optional: true
+      spam:
+        type: boolean
+        description: Flag it as spam, or clear the flag to move it back to the inbox.
+        optional: true
+      trash:
+        type: boolean
+        description: Move it to the trash, or restore it.
+        optional: true
+    output:
+      description: The updated submission.
+      type: object
+
+  delete_submission:
+    title: Delete a submission
+    description: >-
+      Delete a submission outright, including its attachments. To keep it
+      recoverable, set `trash` with update_submission instead.
+    category: submissions
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/submissions/${submission_id}
+    input:
+      submission_id:
+        type: integer
+        description: The submission's id.
+    output:
+      description: Confirmation that the submission was deleted.
+      type: object
+
+  refire_submission_webhooks:
+    title: Re-fire one submission's webhooks
+    description: >-
+      Re-send a single submission to the form's webhooks. The fix for a
+      downstream endpoint that was down when the submission first arrived --
+      the receiver will see the payload again, so expect duplicates if it did
+      process the first delivery.
+    category: submissions
+    request:
+      method: POST
+      path: /v1/submissions/${submission_id}/refire_webhooks
+    input:
+      submission_id:
+        type: integer
+        description: The submission whose webhooks should fire again.
+    output:
+      description: Confirmation that the webhooks were queued.
+      type: object
+
+  refire_submissions_webhooks:
+    title: Re-fire webhooks for many submissions
+    description: >-
+      Re-send a batch of submissions to their forms' webhooks in one call --
+      the backfill after an outage. Each receiver sees every payload again.
+    category: submissions
+    request:
+      method: POST
+      path: /v1/submissions/refire_webhooks
+      body:
+        submission_ids: "${submission_ids}"
+    input:
+      submission_ids:
+        type: array
+        description: Ids of the submissions to re-deliver.
+        items: {type: integer}
+    output:
+      description: Confirmation that the webhooks were queued.
+      type: object
+
+  # -- webhooks ------------------------------------------------------------
+
+  list_form_webhooks:
+    title: List form webhooks
+    description: >-
+      Read the webhooks configured across your forms, with their url, payload
+      format, whether spam triggers them, and their recent failure count --
+      which is where a silent integration shows itself.
+    category: webhooks
+    read_only: true
+    request:
+      method: GET
+      path: /v1/form_webhooks
+      query:
+        page: "${page}"
+        query: "${query}"
+    input:
+      page:
+        type: integer
+        description: Page number, starting at 1.
+        optional: true
+        minimum: 1
+      query:
+        type: string
+        description: Match webhooks by name.
+        optional: true
+    output:
+      description: A page of form webhooks.
+      type: object
+      properties:
+        form_webhooks: {type: array}
+
+  get_form_webhook:
+    title: Get a form webhook
+    description: Read one webhook -- its url, format, enabled state and last failure.
+    category: webhooks
+    read_only: true
+    request:
+      method: GET
+      path: /v1/form_webhooks/${webhook_id}
+    input:
+      webhook_id:
+        type: string
+        description: The webhook's id, from list_form_webhooks.
+    output:
+      description: The webhook.
+      type: object
+
+  create_form_webhook:
+    title: Create a form webhook
+    description: >-
+      Point a form's submissions at an HTTP endpoint. `trigger_when_spam`
+      decides whether flagged submissions are delivered too -- leave it off
+      unless the receiver does its own filtering.
+    category: webhooks
+    request:
+      method: POST
+      path: /v1/form_webhooks/
+      body:
+        form_id: "${form_id}"
+        name: "${name}"
+        url: "${url}"
+        format: "${format}"
+        trigger_when_spam: "${trigger_when_spam}"
+        enabled: "${enabled}"
+    input:
+      form_id:
+        type: integer
+        description: The form whose submissions should be delivered.
+      url:
+        type: string
+        description: The endpoint Basin should POST each submission to.
+      name:
+        type: string
+        description: A label for the webhook.
+        optional: true
+      format:
+        type: string
+        description: Payload format Basin sends, e.g. "json".
+        optional: true
+      trigger_when_spam:
+        type: boolean
+        description: Also deliver submissions Basin flagged as spam.
+        optional: true
+      enabled:
+        type: boolean
+        description: Whether the webhook starts enabled.
+        optional: true
+    output:
+      description: The created webhook.
+      type: object
+
+  update_form_webhook:
+    title: Update a form webhook
+    description: >-
+      Change a webhook's url, format or enabled state -- the way to pause
+      deliveries without deleting the configuration.
+    category: webhooks
+    request:
+      method: PUT
+      path: /v1/form_webhooks/${webhook_id}
+      body:
+        form_id: "${form_id}"
+        name: "${name}"
+        url: "${url}"
+        format: "${format}"
+        trigger_when_spam: "${trigger_when_spam}"
+        enabled: "${enabled}"
+    input:
+      webhook_id:
+        type: string
+        description: The webhook's id.
+      form_id:
+        type: integer
+        description: Move the webhook to this form.
+        optional: true
+      name:
+        type: string
+        description: New label.
+        optional: true
+      url:
+        type: string
+        description: New endpoint url.
+        optional: true
+      format:
+        type: string
+        description: New payload format.
+        optional: true
+      trigger_when_spam:
+        type: boolean
+        description: Whether spam submissions are delivered.
+        optional: true
+      enabled:
+        type: boolean
+        description: Set false to pause deliveries.
+        optional: true
+    output:
+      description: The updated webhook.
+      type: object
+
+  delete_form_webhook:
+    title: Delete a form webhook
+    description: >-
+      Remove a webhook. Deliveries stop at once and past submissions cannot be
+      replayed to it afterwards -- disable it instead if you may want it back.
+    category: webhooks
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/form_webhooks/${webhook_id}
+    input:
+      webhook_id:
+        type: string
+        description: The webhook's id.
+    output:
+      description: Confirmation that the webhook was deleted.
+      type: object
+
+  # -- projects, domains, views, templates ---------------------------------
+
+  list_projects:
+    title: List projects
+    description: >-
+      Read the projects forms are grouped into. A project id is what create_form
+      and update_form's `project_id` takes.
+    category: projects
+    read_only: true
+    request:
+      method: GET
+      path: /v1/projects
+      query:
+        page: "${page}"
+        query: "${query}"
+    input:
+      page:
+        type: integer
+        description: Page number, starting at 1.
+        optional: true
+        minimum: 1
+      query:
+        type: string
+        description: Match projects by name.
+        optional: true
+    output:
+      description: A page of projects.
+      type: object
+      properties:
+        projects: {type: array}
+
+  get_project:
+    title: Get a project
+    description: Read one project by id, with its name and creation date.
+    category: projects
+    read_only: true
+    request:
+      method: GET
+      path: /v1/projects/${project_id}
+    input:
+      project_id:
+        type: string
+        description: The project's id, from list_projects.
+    output:
+      description: The project.
+      type: object
+
+  create_project:
+    title: Create a project
+    description: Create a project to group forms under; its id is what create_form takes.
+    category: projects
+    request:
+      method: POST
+      path: /v1/projects/
+      body:
+        name: "${name}"
+    input:
+      name:
+        type: string
+        description: The project's name.
+    output:
+      description: The created project.
+      type: object
+
+  update_project:
+    title: Rename a project
+    description: Change a project's name. The forms inside it are untouched.
+    category: projects
+    request:
+      method: PUT
+      path: /v1/projects/${project_id}
+      body:
+        name: "${name}"
+    input:
+      project_id:
+        type: string
+        description: The project's id.
+      name:
+        type: string
+        description: The project's new name.
+    output:
+      description: The updated project.
+      type: object
+
+  delete_project:
+    title: Delete a project
+    description: >-
+      Delete a project. Its forms and their submissions go with it, so move
+      any form you want to keep to another project first.
+    category: projects
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/projects/${project_id}
+    input:
+      project_id:
+        type: string
+        description: The project's id.
+    output:
+      description: Confirmation that the project was deleted.
+      type: object
+
+  list_domains:
+    title: List sending domains
+    description: >-
+      Read the verified domains Basin can send notification and autoreply email
+      from. A domain id is what a form's `domain_id` refers to.
+    category: settings
+    read_only: true
+    request:
+      method: GET
+      path: /v1/domains
+      query:
+        page: "${page}"
+        query: "${query}"
+    input:
+      page:
+        type: integer
+        description: Page number, starting at 1.
+        optional: true
+        minimum: 1
+      query:
+        type: string
+        description: Match domains by name.
+        optional: true
+    output:
+      description: A page of sending domains.
+      type: object
+      properties:
+        domains: {type: array}
+
+  list_form_views:
+    title: List form views
+    description: >-
+      Read the recorded views of your forms -- how often each form was
+      rendered, which is the denominator behind a conversion rate.
+    category: analytics
+    read_only: true
+    request:
+      method: GET
+      path: /v1/form_views
+      query:
+        page: "${page}"
+        query: "${query}"
+    input:
+      page:
+        type: integer
+        description: Page number, starting at 1.
+        optional: true
+        minimum: 1
+      query:
+        type: string
+        description: Narrow the view records.
+        optional: true
+    output:
+      description: A page of form view records.
+      type: object
+      properties:
+        form_views: {type: array}
+
+  get_form_view:
+    title: Get a form view record
+    description: Read one form view record by id, with its timestamp and referring page.
+    category: analytics
+    read_only: true
+    request:
+      method: GET
+      path: /v1/form_views/${form_view_id}
+    input:
+      form_view_id:
+        type: string
+        description: The form view record's id, from list_form_views.
+    output:
+      description: The form view record.
+      type: object
+
+  list_mail_templates:
+    title: List mail templates
+    description: >-
+      Read the HTML email templates in one project. `project_id` is required.
+      Template ids are what a form's notification, autoreply and confirmation
+      template fields point at.
+    category: templates
+    read_only: true
+    request:
+      method: GET
+      path: /v1/mail_templates
+      query:
+        project_id: "${project_id}"
+        page: "${page}"
+        page_size: "${page_size}"
+    input:
+      project_id:
+        type: integer
+        description: The project whose templates to list.
+      page:
+        type: integer
+        description: Page number, starting at 1.
+        optional: true
+        minimum: 1
+      page_size:
+        type: integer
+        description: Templates per page.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of mail templates.
+      type: object
+
+  get_mail_template:
+    title: Get a mail template
+    description: Read one mail template -- its name and raw HTML body.
+    category: templates
+    read_only: true
+    request:
+      method: GET
+      path: /v1/mail_templates/${mail_template_id}
+    input:
+      mail_template_id:
+        type: integer
+        description: The template's id, from list_mail_templates.
+    output:
+      description: The mail template.
+      type: object
+
+  create_mail_template:
+    title: Create a mail template
+    description: >-
+      Create an HTML email template in a project, which a form can then use for
+      its notification, autoreply or confirmation email. `body` is raw HTML and
+      is capped at 256KB; leave it blank to start from Basin's default.
+    category: templates
+    request:
+      method: POST
+      path: /v1/mail_templates
+      body:
+        mail_template:
+          name: "${name}"
+          project_id: "${project_id}"
+          body: "${body}"
+    input:
+      name:
+        type: string
+        description: The template's name.
+      project_id:
+        type: integer
+        description: The project the template belongs to.
+      body:
+        type: string
+        description: Raw HTML for the email, up to 256KB. Blank uses Basin's default layout.
+        optional: true
+    output:
+      description: The created mail template.
+      type: object
+
+  update_mail_template:
+    title: Update a mail template
+    description: >-
+      Change a mail template's name or HTML. The body is replaced wholesale, so
+      read it first if you mean to edit rather than replace.
+    category: templates
+    request:
+      method: PUT
+      path: /v1/mail_templates/${mail_template_id}
+      body:
+        mail_template:
+          name: "${name}"
+          body: "${body}"
+    input:
+      mail_template_id:
+        type: integer
+        description: The template's id.
+      name:
+        type: string
+        description: New template name.
+        optional: true
+      body:
+        type: string
+        description: New raw HTML for the email, up to 256KB.
+        optional: true
+    output:
+      description: The updated mail template.
+      type: object
+
+  delete_mail_template:
+    title: Delete a mail template
+    description: >-
+      Delete a mail template. Forms pointing at it fall back to Basin's default
+      layout, so check no live form depends on it first.
+    category: templates
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/mail_templates/${mail_template_id}
+    input:
+      mail_template_id:
+        type: integer
+        description: The template's id.
+    output:
+      description: Confirmation that the template was deleted.
+      type: object

@@ -1,0 +1,1494 @@
+# Baremetrics tools -- subscription data in, metrics out.
+#
+# Two halves, and it matters which one you are in:
+#
+#   * **the write side is scoped to a source.** Baremetrics models each billing
+#     system it reads as a "source", and every customer, plan, subscription,
+#     charge and refund lives under one. `${source_id}` is the first path
+#     segment of all of them, and `list_sources` is the only way to learn it --
+#     nothing else works until you have. A source of `provider: baremetrics`
+#     is the one you may write to; a Stripe or Recurly source is a mirror and
+#     rejects writes;
+#   * **the read side is account-wide.** `show_summary`, `show_metric` and
+#     `show_plan_breakout` take no source: they answer over everything the
+#     account has connected.
+#
+# Objects you create carry *your* ids, not Baremetrics's: `oid` is your own
+# identifier for the record and is what every later call addresses it by. Money
+# is always in minor units -- 1000 is $10.00.
+#
+# Amounts, dates and ids aside, three things trip people up:
+#
+#   * `create_subscription` needs the plan and the customer to exist first, by
+#     `plan_oid` and `customer_oid`;
+#   * cancelling is not deleting. `cancel_subscription` records a
+#     `canceled_at` and keeps the history, which is what the churn metrics
+#     read; `delete_subscription` erases it and the metrics change behind you;
+#   * lists are paginated at 30 and cap at 200 (`per_page`), and the cursor is
+#     a plain `page` number.
+#
+# Docs: https://developers.baremetrics.com/reference
+
+connector_id: baremetrics
+display_name: Baremetrics
+docs_url: https://developers.baremetrics.com/reference
+
+tools:
+
+  # -- account and sources -------------------------------------------------
+
+  get_account:
+    title: Get the account
+    description: >-
+      Read the account behind the credentials -- its id, company name and
+      default currency. The cheapest call that proves the token works.
+    category: account
+    read_only: true
+    request:
+      method: GET
+      path: /v1/account
+    input: {}
+    output:
+      description: The account, under `account`.
+      type: object
+      properties:
+        account: {type: object, description: "id, company, default_currency and created_at."}
+
+  list_sources:
+    title: List sources
+    description: >-
+      Read every billing source connected to the account. Start here: the
+      `id` of a source is the `source_id` every customer, plan, subscription
+      and charge call needs, and the `provider` field tells you whether it is
+      writable (`baremetrics`) or a read-only mirror of Stripe, Recurly or
+      Braintree.
+    category: account
+    read_only: true
+    request:
+      method: GET
+      path: /v1/sources
+    input: {}
+    output:
+      description: The connected sources, under `sources`.
+      type: object
+      properties:
+        sources: {type: array, description: "Each with id and provider."}
+
+  list_users:
+    title: List Baremetrics users
+    description: >-
+      Read the people who have access to this Baremetrics account, with their
+      names and email addresses. Use it to resolve the `user_id` an annotation
+      can be attributed to.
+    category: account
+    read_only: true
+    request:
+      method: GET
+      path: /v1/users
+    input: {}
+    output:
+      description: The account's users, under `users`.
+      type: object
+      properties:
+        users: {type: array, description: "Each with id, name and email."}
+
+  get_user:
+    title: Get a Baremetrics user
+    description: Read one Baremetrics user by id -- name, email and role on the account.
+    category: account
+    read_only: true
+    request:
+      method: GET
+      path: /v1/users/${user_id}
+    input:
+      user_id:
+        type: string
+        description: The user's Baremetrics id, from list_users.
+    output:
+      description: The user, under `user`.
+      type: object
+      properties:
+        user: {type: object}
+
+  # -- metrics -------------------------------------------------------------
+
+  show_summary:
+    title: Get the metrics summary
+    description: >-
+      Read every headline metric -- MRR, ARR, active customers, churn, ARPU,
+      LTV -- over one date range, across the whole account. This is the call
+      for "how is the business doing"; use show_metric when you want one
+      metric's day-by-day series instead.
+    category: metrics
+    read_only: true
+    request:
+      method: GET
+      path: /v1/metrics
+      query:
+        start_date: "${start_date}"
+        end_date: "${end_date}"
+    input:
+      start_date:
+        type: string
+        description: Start of the range as YYYY-MM-DD.
+        example: "2026-01-01"
+      end_date:
+        type: string
+        description: End of the range as YYYY-MM-DD.
+        example: "2026-01-31"
+    output:
+      description: The summary metrics for the range, under `metrics`.
+      type: object
+      properties:
+        metrics: {type: object}
+
+  show_metric:
+    title: Get one metric over time
+    description: >-
+      Read a single metric's series over a date range -- mrr, active_customers,
+      churn, arpu, ltv and the rest. `compare_to` adds the previous period
+      alongside it, which is how you answer "is this up or down".
+    category: metrics
+    read_only: true
+    request:
+      method: GET
+      path: /v1/metrics/${metric}
+      query:
+        start_date: "${start_date}"
+        end_date: "${end_date}"
+        compare_to: "${compare_to}"
+    input:
+      metric:
+        type: string
+        description: The metric to read.
+        enum: [active_customers, active_subscriptions, active_trials, arpu, arr, cancellations,
+               churned_customers, converted_trials, coupons, downgrades, failed_charges, fees,
+               ltv, mrr, mrr_growth_rate, net_revenue, net_revenue_churn, new_customers,
+               new_subscriptions, new_trials, other_revenue, plan_quantities, quick_ratio,
+               reactivations, refunds, revenue_churn, trial_conversion,
+               trial_time_to_cancelation, trial_time_to_conversion, upgrades, user_churn]
+      start_date:
+        type: string
+        description: Start of the range as YYYY-MM-DD.
+      end_date:
+        type: string
+        description: End of the range as YYYY-MM-DD.
+      compare_to:
+        type: boolean
+        description: Also return the preceding period, for a like-for-like comparison.
+        optional: true
+    output:
+      description: The metric's series, under `metrics`.
+      type: object
+      properties:
+        metrics: {type: array, description: "One entry per interval, with value and date."}
+
+  show_plan_breakout:
+    title: Break a metric out by plan
+    description: >-
+      Read one metric split per plan over a date range -- which plans carry the
+      MRR, where the churn is concentrated. Same metric names as show_metric.
+    category: metrics
+    read_only: true
+    request:
+      method: GET
+      path: /v1/metrics/${metric}/plans
+      query:
+        start_date: "${start_date}"
+        end_date: "${end_date}"
+    input:
+      metric:
+        type: string
+        description: The metric to break out, e.g. "mrr" or "active_customers".
+        example: mrr
+      start_date:
+        type: string
+        description: Start of the range as YYYY-MM-DD.
+      end_date:
+        type: string
+        description: End of the range as YYYY-MM-DD.
+    output:
+      description: The metric per plan, under `metrics`.
+      type: object
+      properties:
+        metrics: {type: array}
+
+  # -- customers -----------------------------------------------------------
+
+  list_customers:
+    title: List customers
+    description: >-
+      Read a source's customers, newest first by default. `search` matches name
+      and email, so it doubles as customer lookup when you only have an address.
+    category: customers
+    read_only: true
+    request:
+      method: GET
+      path: /v1/${source_id}/customers
+      query:
+        search: "${search}"
+        sort: "${sort}"
+        order: "${order}"
+        page: "${page}"
+        per_page: "${per_page}"
+    input:
+      source_id:
+        type: string
+        description: The source's id, from list_sources.
+      search:
+        type: string
+        description: Match against customer name and email.
+        optional: true
+      sort:
+        type: string
+        description: Field to sort by, e.g. "created" or "name".
+        optional: true
+      order:
+        type: string
+        description: Sort direction.
+        optional: true
+        enum: [asc, desc]
+      page:
+        type: integer
+        description: Zero-based page number.
+        optional: true
+        minimum: 0
+      per_page:
+        type: integer
+        description: Customers per page (1-200). Defaults to 30.
+        optional: true
+        minimum: 1
+        maximum: 200
+    output:
+      description: A page of customers, with pagination under `meta`.
+      type: object
+      properties:
+        customers: {type: array}
+        meta: {type: object, description: "Holds pagination.has_more, page and per_page."}
+
+  get_customer:
+    title: Get a customer
+    description: >-
+      Read one customer by the `oid` you created them with -- profile,
+      current plan and lifetime value.
+    category: customers
+    read_only: true
+    request:
+      method: GET
+      path: /v1/${source_id}/customers/${oid}
+    input:
+      source_id:
+        type: string
+        description: The source's id, from list_sources.
+      oid:
+        type: string
+        description: Your own identifier for the customer.
+    output:
+      description: The customer, under `customer`.
+      type: object
+      properties:
+        customer: {type: object}
+
+  create_customer:
+    title: Create a customer
+    description: >-
+      Create a customer record in a Baremetrics-provider source. `oid` is your
+      own identifier and is how every later call addresses this customer, so
+      use the id your own system already has. Create the customer before the
+      subscription that references it.
+    category: customers
+    request:
+      method: POST
+      path: /v1/${source_id}/customers
+      body:
+        oid: "${oid}"
+        name: "${name}"
+        email: "${email}"
+        notes: "${notes}"
+        created: "${created}"
+    input:
+      source_id:
+        type: string
+        description: The source's id. Must be a source whose provider is `baremetrics`.
+      oid:
+        type: string
+        description: Your own unique identifier for this customer.
+      name:
+        type: string
+        description: Customer or company name.
+        optional: true
+      email:
+        type: string
+        description: Customer email address, used for the profile lookup.
+        optional: true
+        format: email
+      notes:
+        type: string
+        description: Free-text notes shown on the customer.
+        optional: true
+      created:
+        type: string
+        description: When the customer signed up, as an ISO 8601 timestamp. Defaults to now.
+        optional: true
+    output:
+      description: The created customer, under `customer`.
+      type: object
+      properties:
+        customer: {type: object}
+
+  update_customer:
+    title: Update a customer
+    description: >-
+      Change a customer's name, email, notes or signup date. Only the fields
+      you send are touched; the customer is addressed by the `oid` you created
+      them with.
+    category: customers
+    request:
+      method: PUT
+      path: /v1/${source_id}/customers/${customer_oid}
+      body:
+        name: "${name}"
+        email: "${email}"
+        notes: "${notes}"
+        created: "${created}"
+    input:
+      source_id:
+        type: string
+        description: The source's id.
+      customer_oid:
+        type: string
+        description: Your own identifier for the customer.
+      name:
+        type: string
+        description: New name.
+        optional: true
+      email:
+        type: string
+        description: New email address.
+        optional: true
+        format: email
+      notes:
+        type: string
+        description: New notes.
+        optional: true
+      created:
+        type: string
+        description: New signup timestamp, ISO 8601.
+        optional: true
+    output:
+      description: The updated customer, under `customer`.
+      type: object
+      properties:
+        customer: {type: object}
+
+  delete_customer:
+    title: Delete a customer
+    description: >-
+      Erase a customer and everything hanging off them. Their history leaves
+      the metrics, so past MRR and churn numbers change -- there is no undo.
+    category: customers
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/${source_id}/customers/${oid}
+    input:
+      source_id:
+        type: string
+        description: The source's id.
+      oid:
+        type: string
+        description: Your own identifier for the customer.
+    output:
+      description: Confirmation that the customer was deleted.
+      type: object
+
+  # -- plans ---------------------------------------------------------------
+
+  list_plans:
+    title: List plans
+    description: >-
+      Read a source's plans -- name, amount, currency and billing interval.
+      Needed before creating a subscription, which references a plan by `oid`.
+    category: plans
+    read_only: true
+    request:
+      method: GET
+      path: /v1/${source_id}/plans
+      query:
+        search: "${search}"
+        page: "${page}"
+        per_page: "${per_page}"
+    input:
+      source_id:
+        type: string
+        description: The source's id, from list_sources.
+      search:
+        type: string
+        description: Match against plan name.
+        optional: true
+      page:
+        type: integer
+        description: Zero-based page number.
+        optional: true
+        minimum: 0
+      per_page:
+        type: integer
+        description: Plans per page (1-200).
+        optional: true
+        minimum: 1
+        maximum: 200
+    output:
+      description: A page of plans, with pagination under `meta`.
+      type: object
+      properties:
+        plans: {type: array}
+        meta: {type: object}
+
+  get_plan:
+    title: Get a plan
+    description: Read one plan by the `oid` you created it with -- price, interval and trial length.
+    category: plans
+    read_only: true
+    request:
+      method: GET
+      path: /v1/${source_id}/plans/${oid}
+    input:
+      source_id:
+        type: string
+        description: The source's id.
+      oid:
+        type: string
+        description: Your own identifier for the plan.
+    output:
+      description: The plan, under `plan`.
+      type: object
+      properties:
+        plan: {type: object}
+
+  create_plan:
+    title: Create a plan
+    description: >-
+      Create a plan in a Baremetrics-provider source. `amount` is in minor
+      units of `currency` -- 1000 is $10.00 -- and `interval` with
+      `interval_count` sets the billing period (month/1 is monthly, month/3 is
+      quarterly).
+    category: plans
+    request:
+      method: POST
+      path: /v1/${source_id}/plans
+      body:
+        oid: "${oid}"
+        name: "${name}"
+        currency: "${currency}"
+        amount: "${amount}"
+        interval: "${interval}"
+        interval_count: "${interval_count}"
+        trial_duration: "${trial_duration}"
+        trial_duration_unit: "${trial_duration_unit}"
+    input:
+      source_id:
+        type: string
+        description: The source's id. Must be a `baremetrics` provider source.
+      oid:
+        type: string
+        description: Your own unique identifier for this plan.
+      name:
+        type: string
+        description: Plan name as it should appear in Baremetrics.
+      currency:
+        type: string
+        description: ISO 4217 currency code, lower case, e.g. "usd".
+        example: usd
+      amount:
+        type: integer
+        description: Price in minor units of the currency (1000 = $10.00).
+        minimum: 0
+      interval:
+        type: string
+        description: Billing interval.
+        enum: [day, week, month, year]
+      interval_count:
+        type: integer
+        description: How many intervals per billing cycle -- 1 with "month" is monthly.
+        minimum: 1
+      trial_duration:
+        type: integer
+        description: Length of the free trial, in `trial_duration_unit`s.
+        optional: true
+        minimum: 0
+      trial_duration_unit:
+        type: string
+        description: Unit for `trial_duration`.
+        optional: true
+        enum: [day, week, month, year]
+    output:
+      description: The created plan, under `plan`.
+      type: object
+      properties:
+        plan: {type: object}
+
+  update_plan:
+    title: Rename a plan
+    description: >-
+      Change a plan's name. Baremetrics does not let the price or interval of
+      an existing plan be edited -- create a new plan and move subscriptions to
+      it instead, so historic revenue stays attributed correctly.
+    category: plans
+    request:
+      method: PUT
+      path: /v1/${source_id}/plans/${plan_oid}
+      body:
+        name: "${name}"
+    input:
+      source_id:
+        type: string
+        description: The source's id.
+      plan_oid:
+        type: string
+        description: Your own identifier for the plan.
+      name:
+        type: string
+        description: The plan's new name.
+    output:
+      description: The updated plan, under `plan`.
+      type: object
+      properties:
+        plan: {type: object}
+
+  delete_plan:
+    title: Delete a plan
+    description: >-
+      Erase a plan. Subscriptions on it lose their plan, so revenue attributed
+      to it disappears from the plan breakout -- there is no undo.
+    category: plans
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/${source_id}/plans/${oid}
+    input:
+      source_id:
+        type: string
+        description: The source's id.
+      oid:
+        type: string
+        description: Your own identifier for the plan.
+    output:
+      description: Confirmation that the plan was deleted.
+      type: object
+
+  # -- subscriptions -------------------------------------------------------
+
+  list_subscriptions:
+    title: List subscriptions
+    description: >-
+      Read a source's subscriptions -- who is on which plan, when they started
+      and whether they have cancelled. Filter by `customer_oid` to get one
+      customer's history.
+    category: subscriptions
+    read_only: true
+    request:
+      method: GET
+      path: /v1/${source_id}/subscriptions
+      query:
+        customer_oid: "${customer_oid}"
+        order: "${order}"
+        page: "${page}"
+        per_page: "${per_page}"
+    input:
+      source_id:
+        type: string
+        description: The source's id, from list_sources.
+      customer_oid:
+        type: string
+        description: Only this customer's subscriptions.
+        optional: true
+      order:
+        type: string
+        description: Sort direction by start date.
+        optional: true
+        enum: [asc, desc]
+      page:
+        type: integer
+        description: Zero-based page number.
+        optional: true
+        minimum: 0
+      per_page:
+        type: integer
+        description: Subscriptions per page (1-200).
+        optional: true
+        minimum: 1
+        maximum: 200
+    output:
+      description: A page of subscriptions, with pagination under `meta`.
+      type: object
+      properties:
+        subscriptions: {type: array}
+        meta: {type: object}
+
+  get_subscription:
+    title: Get a subscription
+    description: Read one subscription by the `oid` you created it with -- plan, customer, quantity and dates.
+    category: subscriptions
+    read_only: true
+    request:
+      method: GET
+      path: /v1/${source_id}/subscriptions/${oid}
+    input:
+      source_id:
+        type: string
+        description: The source's id.
+      oid:
+        type: string
+        description: Your own identifier for the subscription.
+    output:
+      description: The subscription, under `subscription`.
+      type: object
+      properties:
+        subscription: {type: object}
+
+  create_subscription:
+    title: Create a subscription
+    description: >-
+      Put a customer on a plan. The customer and the plan must already exist in
+      the same source -- create them first -- and `started_at` is what the new
+      and active subscription metrics count from.
+    category: subscriptions
+    request:
+      method: POST
+      path: /v1/${source_id}/subscriptions
+      body:
+        oid: "${oid}"
+        started_at: "${started_at}"
+        canceled_at: "${canceled_at}"
+        plan_oid: "${plan_oid}"
+        customer_oid: "${customer_oid}"
+        quantity: "${quantity}"
+        discount: "${discount}"
+        addons: "${addons}"
+    input:
+      source_id:
+        type: string
+        description: The source's id. Must be a `baremetrics` provider source.
+      oid:
+        type: string
+        description: Your own unique identifier for this subscription.
+      started_at:
+        type: string
+        description: When the subscription began, as an ISO 8601 timestamp or a Unix time.
+      plan_oid:
+        type: string
+        description: The plan's `oid`, which must already exist in this source.
+      customer_oid:
+        type: string
+        description: The customer's `oid`, which must already exist in this source.
+      canceled_at:
+        type: string
+        description: When it was cancelled, if you are backfilling a churned subscription.
+        optional: true
+      quantity:
+        type: integer
+        description: How many seats or units of the plan. Defaults to 1.
+        optional: true
+        minimum: 1
+      discount:
+        type: integer
+        description: Discount in minor units, subtracted from the plan amount.
+        optional: true
+        minimum: 0
+      addons:
+        type: array
+        description: >-
+          Extra recurring charges alongside the plan, each
+          {"oid": ..., "amount": <minor units>, "quantity": 1}.
+        optional: true
+        items: {type: object}
+    output:
+      description: The created subscription, under `subscription`.
+      type: object
+      properties:
+        subscription: {type: object}
+
+  update_subscription:
+    title: Move a subscription to another plan
+    description: >-
+      Change a subscription's plan, quantity, discount or add-ons. This is how
+      upgrades and downgrades are recorded: `occurred_at` dates the change, so
+      the upgrade and downgrade metrics land in the right period.
+    category: subscriptions
+    request:
+      method: PUT
+      path: /v1/${source_id}/subscriptions/${subscription_oid}
+      body:
+        plan_oid: "${plan_oid}"
+        occurred_at: "${occurred_at}"
+        quantity: "${quantity}"
+        discount: "${discount}"
+        addons: "${addons}"
+    input:
+      source_id:
+        type: string
+        description: The source's id.
+      subscription_oid:
+        type: string
+        description: Your own identifier for the subscription.
+      plan_oid:
+        type: string
+        description: The plan to move the subscription onto.
+      occurred_at:
+        type: string
+        description: When the change happened, ISO 8601. Defaults to now.
+        optional: true
+      quantity:
+        type: integer
+        description: New seat or unit count.
+        optional: true
+        minimum: 1
+      discount:
+        type: integer
+        description: New discount in minor units.
+        optional: true
+        minimum: 0
+      addons:
+        type: array
+        description: Replacement add-on list; omit to leave the add-ons alone.
+        optional: true
+        items: {type: object}
+    output:
+      description: The updated subscription, under `subscription`.
+      type: object
+      properties:
+        subscription: {type: object}
+
+  cancel_subscription:
+    title: Cancel a subscription
+    description: >-
+      Record a cancellation, keeping the subscription and its history. This is
+      what the churn and cancellation metrics read, so prefer it to
+      delete_subscription for anything that really happened.
+    category: subscriptions
+    request:
+      method: PUT
+      path: /v1/${source_id}/subscriptions/${subscription_oid}/cancel
+      body:
+        canceled_at: "${canceled_at}"
+    input:
+      source_id:
+        type: string
+        description: The source's id.
+      subscription_oid:
+        type: string
+        description: Your own identifier for the subscription.
+      canceled_at:
+        type: string
+        description: When the cancellation took effect, ISO 8601 or Unix time.
+    output:
+      description: The cancelled subscription, under `subscription`.
+      type: object
+      properties:
+        subscription: {type: object}
+
+  delete_subscription:
+    title: Delete a subscription
+    description: >-
+      Erase a subscription outright. Its revenue leaves the metrics as if it
+      never existed, which is almost never what you want -- use
+      cancel_subscription for a real churn event.
+    category: subscriptions
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/${source_id}/subscriptions/${oid}
+    input:
+      source_id:
+        type: string
+        description: The source's id.
+      oid:
+        type: string
+        description: Your own identifier for the subscription.
+    output:
+      description: Confirmation that the subscription was deleted.
+      type: object
+
+  # -- charges and refunds -------------------------------------------------
+
+  list_charges:
+    title: List charges
+    description: >-
+      Read a source's charges over a date range, optionally narrowed to one
+      customer or subscription. This is the transaction-level view behind the
+      revenue metrics.
+    category: charges
+    read_only: true
+    request:
+      method: GET
+      path: /v1/${source_id}/charges
+      query:
+        start: "${start}"
+        end: "${end}"
+        customer_oid: "${customer_oid}"
+        subscription_oid: "${subscription_oid}"
+        page: "${page}"
+        per_page: "${per_page}"
+    input:
+      source_id:
+        type: string
+        description: The source's id, from list_sources.
+      start:
+        type: string
+        description: Only charges created at or after this date (YYYY-MM-DD).
+        optional: true
+      end:
+        type: string
+        description: Only charges created at or before this date (YYYY-MM-DD).
+        optional: true
+      customer_oid:
+        type: string
+        description: Only this customer's charges.
+        optional: true
+      subscription_oid:
+        type: string
+        description: Only this subscription's charges.
+        optional: true
+      page:
+        type: integer
+        description: Zero-based page number.
+        optional: true
+        minimum: 0
+      per_page:
+        type: integer
+        description: Charges per page (1-200).
+        optional: true
+        minimum: 1
+        maximum: 200
+    output:
+      description: A page of charges, with pagination under `meta`.
+      type: object
+      properties:
+        charges: {type: array}
+        meta: {type: object}
+
+  get_charge:
+    title: Get a charge
+    description: Read one charge by the `oid` you created it with -- amount, currency, fee and status.
+    category: charges
+    read_only: true
+    request:
+      method: GET
+      path: /v1/${source_id}/charges/${oid}
+    input:
+      source_id:
+        type: string
+        description: The source's id.
+      oid:
+        type: string
+        description: Your own identifier for the charge.
+    output:
+      description: The charge, under `charge`.
+      type: object
+      properties:
+        charge: {type: object}
+
+  create_charge:
+    title: Create a charge
+    description: >-
+      Record a payment against a customer. `amount` and `fee` are in minor
+      units; a `status` of "paid" counts toward revenue while "failed" feeds
+      the failed-charge metric. Link it to a subscription to attribute it to a
+      plan.
+    category: charges
+    request:
+      method: POST
+      path: /v1/${source_id}/charges
+      body:
+        oid: "${oid}"
+        amount: "${amount}"
+        currency: "${currency}"
+        customer_oid: "${customer_oid}"
+        subscription_oid: "${subscription_oid}"
+        created: "${created}"
+        status: "${status}"
+        fee: "${fee}"
+    input:
+      source_id:
+        type: string
+        description: The source's id. Must be a `baremetrics` provider source.
+      oid:
+        type: string
+        description: Your own unique identifier for this charge.
+      amount:
+        type: integer
+        description: Charge amount in minor units (1000 = $10.00).
+        minimum: 0
+      currency:
+        type: string
+        description: ISO 4217 currency code, lower case.
+        example: usd
+      customer_oid:
+        type: string
+        description: The customer's `oid`.
+      subscription_oid:
+        type: string
+        description: The subscription this charge pays for, if any.
+        optional: true
+      created:
+        type: string
+        description: When the charge happened, ISO 8601. Defaults to now.
+        optional: true
+      status:
+        type: string
+        description: Whether the charge succeeded.
+        optional: true
+        enum: [paid, failed]
+      fee:
+        type: integer
+        description: Processor fee in minor units, subtracted from net revenue.
+        optional: true
+        minimum: 0
+    output:
+      description: The created charge, under `charge`.
+      type: object
+      properties:
+        charge: {type: object}
+
+  delete_charge:
+    title: Delete a charge
+    description: >-
+      Erase a charge. The revenue it carried leaves the metrics for that
+      period -- there is no undo.
+    category: charges
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/${source_id}/charges/${oid}
+    input:
+      source_id:
+        type: string
+        description: The source's id.
+      oid:
+        type: string
+        description: Your own identifier for the charge.
+    output:
+      description: Confirmation that the charge was deleted.
+      type: object
+
+  list_refunds:
+    title: List refunds
+    description: Read a source's refunds over a date range, which is what the refund metric aggregates.
+    category: charges
+    read_only: true
+    request:
+      method: GET
+      path: /v1/${source_id}/refunds
+      query:
+        start: "${start}"
+        end: "${end}"
+        page: "${page}"
+        per_page: "${per_page}"
+    input:
+      source_id:
+        type: string
+        description: The source's id, from list_sources.
+      start:
+        type: string
+        description: Only refunds at or after this date (YYYY-MM-DD).
+        optional: true
+      end:
+        type: string
+        description: Only refunds at or before this date (YYYY-MM-DD).
+        optional: true
+      page:
+        type: integer
+        description: Zero-based page number.
+        optional: true
+        minimum: 0
+      per_page:
+        type: integer
+        description: Refunds per page (1-200).
+        optional: true
+        minimum: 1
+        maximum: 200
+    output:
+      description: A page of refunds, with pagination under `meta`.
+      type: object
+      properties:
+        refunds: {type: array}
+        meta: {type: object}
+
+  create_refund:
+    title: Create a refund
+    description: >-
+      Record money given back on a charge. `amount` is in minor units and may
+      be less than the charge for a partial refund; the charge must already
+      exist in the same source.
+    category: charges
+    request:
+      method: POST
+      path: /v1/${source_id}/refunds
+      body:
+        oid: "${oid}"
+        amount: "${amount}"
+        currency: "${currency}"
+        customer_oid: "${customer_oid}"
+        charge_oid: "${charge_oid}"
+        created: "${created}"
+    input:
+      source_id:
+        type: string
+        description: The source's id. Must be a `baremetrics` provider source.
+      oid:
+        type: string
+        description: Your own unique identifier for this refund.
+      amount:
+        type: integer
+        description: Refunded amount in minor units.
+        minimum: 0
+      currency:
+        type: string
+        description: ISO 4217 currency code, lower case.
+        example: usd
+      customer_oid:
+        type: string
+        description: The customer's `oid`.
+      charge_oid:
+        type: string
+        description: The `oid` of the charge being refunded.
+      created:
+        type: string
+        description: When the refund happened, ISO 8601. Defaults to now.
+        optional: true
+    output:
+      description: The created refund, under `refund`.
+      type: object
+      properties:
+        refund: {type: object}
+
+  # -- annotations and goals -----------------------------------------------
+
+  list_annotations:
+    title: List annotations
+    description: >-
+      Read the notes pinned to metric charts -- "raised prices", "launched on
+      Product Hunt" -- with the metric and date each is attached to.
+    category: annotations
+    read_only: true
+    request:
+      method: GET
+      path: /v1/annotations
+    input: {}
+    output:
+      description: The account's annotations, under `annotations`.
+      type: object
+      properties:
+        annotations: {type: array}
+
+  create_annotation:
+    title: Create an annotation
+    description: >-
+      Pin a note to a metric chart on a date, so a jump in the numbers carries
+      its explanation. `global: true` shows it on every metric rather than the
+      one named.
+    category: annotations
+    request:
+      method: POST
+      path: /v1/annotations
+      body:
+        metric: "${metric}"
+        annotation: "${annotation}"
+        date: "${date}"
+        global: "${is_global}"
+        user_id: "${user_id}"
+    input:
+      metric:
+        type: string
+        description: The metric the note belongs to, e.g. "mrr".
+        example: mrr
+      annotation:
+        type: string
+        description: The note itself.
+      date:
+        type: string
+        description: The date it applies to, YYYY-MM-DD.
+      is_global:
+        type: boolean
+        description: Show the note on every metric chart rather than just `metric`.
+        optional: true
+      user_id:
+        type: string
+        description: Baremetrics user to attribute the note to, from list_users.
+        optional: true
+    output:
+      description: The created annotation, under `annotation`.
+      type: object
+      properties:
+        annotation: {type: object}
+
+  delete_annotation:
+    title: Delete an annotation
+    description: Remove a note from the metric charts. Deleting it does not affect any metric value.
+    category: annotations
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/annotations/${annotation_id}
+    input:
+      annotation_id:
+        type: string
+        description: The annotation's id, from list_annotations.
+    output:
+      description: Confirmation that the annotation was deleted.
+      type: object
+
+  list_goals:
+    title: List goals
+    description: >-
+      Read the account's metric goals -- the target each metric is meant to
+      reach and by when -- so progress can be reported against them.
+    category: goals
+    read_only: true
+    request:
+      method: GET
+      path: /v1/goals
+    input: {}
+    output:
+      description: The account's goals, under `goals`.
+      type: object
+      properties:
+        goals: {type: array}
+
+  create_goal:
+    title: Create a goal
+    description: >-
+      Set a target for a metric between two dates. Amounts are in minor units
+      for money metrics (100000 is $1,000 MRR) and plain counts otherwise.
+    category: goals
+    request:
+      method: POST
+      path: /v1/goals
+      body:
+        metric: "${metric}"
+        name: "${name}"
+        start_amount: "${start_amount}"
+        end_amount: "${end_amount}"
+        start_date: "${start_date}"
+        end_date: "${end_date}"
+    input:
+      metric:
+        type: string
+        description: The metric the goal tracks, e.g. "mrr".
+        example: mrr
+      name:
+        type: string
+        description: Name for the goal.
+      start_amount:
+        type: integer
+        description: Where the goal starts from -- minor units for money metrics.
+      end_amount:
+        type: integer
+        description: The target value.
+      start_date:
+        type: string
+        description: Goal start date, YYYY-MM-DD.
+      end_date:
+        type: string
+        description: Goal end date, YYYY-MM-DD.
+    output:
+      description: The created goal, under `goal`.
+      type: object
+      properties:
+        goal: {type: object}
+
+  delete_goal:
+    title: Delete a goal
+    description: Remove a metric goal. The metric itself is untouched; only the target goes away.
+    category: goals
+    destructive: true
+    request:
+      method: DELETE
+      path: /v1/goals/${goal_id}
+    input:
+      goal_id:
+        type: string
+        description: The goal's id, from list_goals.
+    output:
+      description: Confirmation that the goal was deleted.
+      type: object
+
+  # -- segments and attributes ---------------------------------------------
+
+  list_segments:
+    title: List segments
+    description: >-
+      Read the saved customer segments on the account, each with the query that
+      defines it. Segments are how Baremetrics slices metrics by customer
+      attribute.
+    category: segments
+    read_only: true
+    request:
+      method: GET
+      path: /v1/segments
+    input: {}
+    output:
+      description: The account's segments, under `segments`.
+      type: object
+      properties:
+        segments: {type: array}
+
+  list_segment_fields:
+    title: List the fields a segment can filter on
+    description: >-
+      Read every field a segment query may reference, with its type. Read this
+      before writing a `query` for create_segment or search_segment.
+    category: segments
+    read_only: true
+    request:
+      method: GET
+      path: /v1/segments/fields
+    input: {}
+    output:
+      description: The available segment fields, under `fields`.
+      type: object
+      properties:
+        fields: {type: array}
+
+  create_segment:
+    title: Create a segment
+    description: >-
+      Save a customer segment from a filter query. `query` is a list of filter
+      objects over the fields list_segment_fields returns, e.g.
+      [{"field": "plan_name", "operator": "eq", "value": "Pro"}].
+    category: segments
+    request:
+      method: POST
+      path: /v1/segments
+      body:
+        query: "${query}"
+        name: "${name}"
+    input:
+      query:
+        type: array
+        description: Filter objects defining the segment, over the fields list_segment_fields names.
+        items: {type: object}
+      name:
+        type: string
+        description: Name for the saved segment.
+        optional: true
+    output:
+      description: The created segment, under `segment`.
+      type: object
+      properties:
+        segment: {type: object}
+
+  search_segment:
+    title: Search customers by segment query
+    description: >-
+      Run a segment query without saving it and get the matching customers
+      back, paginated. The read-only way to answer "who is on this plan and
+      spending over X" before committing to a segment.
+    category: segments
+    read_only: true
+    request:
+      method: POST
+      path: /v1/segments/search
+      query:
+        per_page: "${per_page}"
+        page: "${page}"
+        sort: "${sort}"
+        order: "${order}"
+      body:
+        query: "${query}"
+    input:
+      query:
+        type: array
+        description: Filter objects to match on, same shape as create_segment's `query`.
+        items: {type: object}
+      per_page:
+        type: integer
+        description: Customers per page (1-200).
+        optional: true
+        minimum: 1
+        maximum: 200
+      page:
+        type: integer
+        description: Zero-based page number.
+        optional: true
+        minimum: 0
+      sort:
+        type: string
+        description: Field to sort the matches by.
+        optional: true
+      order:
+        type: string
+        description: Sort direction.
+        optional: true
+        enum: [asc, desc]
+    output:
+      description: The matching customers, with pagination under `meta`.
+      type: object
+      properties:
+        customers: {type: array}
+        meta: {type: object}
+
+  list_attribute_fields:
+    title: List custom attribute fields
+    description: >-
+      Read the custom attribute fields defined on the account, with their ids.
+      You need a field id before you can set its value on a customer.
+    category: attributes
+    read_only: true
+    request:
+      method: GET
+      path: /v1/attributes/fields
+    input: {}
+    output:
+      description: The account's attribute fields, under `fields`.
+      type: object
+      properties:
+        fields: {type: array}
+
+  set_attributes:
+    title: Set custom attributes on customers
+    description: >-
+      Write custom attribute values against customers, which is what makes them
+      segmentable. Each entry is
+      {"customer_oid": ..., "field_id": ..., "value": ...} using ids from
+      list_attribute_fields.
+    category: attributes
+    request:
+      method: POST
+      path: /v1/attributes
+      body:
+        attributes: "${attributes}"
+    input:
+      attributes:
+        type: array
+        description: Attribute assignments, each with customer_oid, field_id and value.
+        items: {type: object}
+    output:
+      description: The result of the write, listing what was set.
+      type: object
+
+  # -- cancellation insights -----------------------------------------------
+
+  list_cancellation_reasons:
+    title: List cancellation reasons
+    description: >-
+      Read the churn reasons offered in the cancellation survey, with their
+      ids and sort order -- the vocabulary behind the cancellation insight
+      events.
+    category: cancellation_insights
+    read_only: true
+    request:
+      method: GET
+      path: /v1/cancellation_insights/reasons
+    input: {}
+    output:
+      description: The configured cancellation reasons.
+      type: object
+
+  create_cancellation_reason:
+    title: Create a cancellation reason
+    description: >-
+      Add a reason to the cancellation survey. `sort_key` decides where it sits
+      in the list shown to a churning customer.
+    category: cancellation_insights
+    request:
+      method: POST
+      path: /v1/cancellation_insights/reasons
+      body:
+        text: "${text}"
+        sort_key: "${sort_key}"
+    input:
+      text:
+        type: string
+        description: The reason as the customer sees it.
+      sort_key:
+        type: integer
+        description: Position in the survey list.
+        optional: true
+        minimum: 0
+    output:
+      description: The created reason.
+      type: object
+
+  list_cancellation_events:
+    title: List cancellation events
+    description: >-
+      Read the cancellation survey responses -- who churned and what reason
+      they gave. This is the qualitative half of the churn story the metrics
+      only count.
+    category: cancellation_insights
+    read_only: true
+    request:
+      method: GET
+      path: /v1/cancellation_insights/events
+    input: {}
+    output:
+      description: The cancellation events.
+      type: object
+
+  get_cancellation_event:
+    title: Get a cancellation event
+    description: Read one cancellation survey response by id, with its reason and free-text comment.
+    category: cancellation_insights
+    read_only: true
+    request:
+      method: GET
+      path: /v1/cancellation_insights/events/${event_id}
+    input:
+      event_id:
+        type: string
+        description: The event's id, from list_cancellation_events.
+    output:
+      description: The cancellation event.
+      type: object
+
+  list_source_events:
+    title: List source events
+    description: >-
+      Read the raw event stream a source has produced -- the imports and
+      changes Baremetrics recorded -- over a date range. Useful for auditing
+      why a metric moved.
+    category: events
+    read_only: true
+    request:
+      method: GET
+      path: /v1/${source_id}/events
+      query:
+        start: "${start}"
+        end: "${end}"
+        live_stream: "${live_stream}"
+        page: "${page}"
+        per_page: "${per_page}"
+    input:
+      source_id:
+        type: string
+        description: The source's id, from list_sources.
+      start:
+        type: string
+        description: Only events at or after this date (YYYY-MM-DD).
+        optional: true
+      end:
+        type: string
+        description: Only events at or before this date (YYYY-MM-DD).
+        optional: true
+      live_stream:
+        type: boolean
+        description: Restrict to the live event stream rather than the full history.
+        optional: true
+      page:
+        type: integer
+        description: Zero-based page number.
+        optional: true
+        minimum: 0
+      per_page:
+        type: integer
+        description: Events per page (1-200).
+        optional: true
+        minimum: 1
+        maximum: 200
+    output:
+      description: A page of events, with pagination under `meta`.
+      type: object
+      properties:
+        events: {type: array}
+        meta: {type: object}

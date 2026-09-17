@@ -1,0 +1,946 @@
+# AfterShip Tracking tools -- shipment tracking across 1,300+ carriers, carrier
+# detection, carrier account connections and estimated delivery dates.
+#
+# AfterShip publishes the Tracking API as a Stoplight reference rather than a
+# downloadable spec, and generates its official SDKs from it. Every path, query
+# parameter and body field below is taken from the official Python SDK,
+# AfterShip/tracking-sdk-python (tracking/api/*.py and tracking/models/*.py),
+# which covers the 16 operations of API version 2026-07; all 16 are here.
+#
+# The connection's base url is https://api.aftership.com and the key goes in
+# the as-api-key header, so paths start at /tracking/2026-07. The version is in
+# the path: AfterShip ships a new one every six months and keeps the old ones
+# running, so these tools stay pinned until the pack is moved deliberately. (The
+# catalogue's verification call still uses the legacy /v4 API, which the same
+# key reaches.)
+#
+# Things that matter when tracking:
+#
+#   * **a tracking is identified by AfterShip's id**, returned when you create
+#     it. To find one by tracking number, list_trackings with
+#     tracking_numbers;
+#   * **slug is the carrier code** (ups, dhl, usps, fedex ...). Leave it out on
+#     create_tracking and AfterShip detects the carrier, or call detect_courier
+#     first. Some carriers also need destination_postal_code, tracking_ship_date,
+#     tracking_account_number or tracking_key -- list_couriers says which;
+#   * **tag is the normalized status**: Pending, InfoReceived, InTransit,
+#     OutForDelivery, AttemptFail, Delivered, AvailableForPickup, Exception,
+#     Expired;
+#   * AfterShip keeps tracking data for 120 days.
+#
+# Every write here changes what customers are told: creating a tracking with
+# customers[].email or phone can trigger AfterShip's shipment notifications.
+#
+# Docs: https://www.aftership.com/docs/tracking/quickstart/api-quick-start
+
+connector_id: aftership
+display_name: Aftership
+docs_url: https://www.aftership.com/docs/tracking/quickstart/api-quick-start
+tools:
+
+  list_trackings:
+    title: List trackings
+    description: >-
+      Search trackings by tracking number, carrier, status tag, origin, destination, order,
+      tags, keyword or created and updated dates. Cursor-paginated, up to 200 per page. The
+      way to find a tracking's id from its tracking number.
+    category: trackings
+    read_only: true
+    request:
+      method: GET
+      path: /tracking/2026-07/trackings
+      query:
+        cursor: ${cursor}
+        limit: ${limit}
+        keyword: ${keyword}
+        tracking_numbers: ${tracking_numbers}
+        slug: ${slug}
+        transit_time: ${transit_time}
+        origin: ${origin}
+        destination: ${destination}
+        tag: ${tag}
+        created_at_min: ${created_at_min}
+        created_at_max: ${created_at_max}
+        updated_at_min: ${updated_at_min}
+        updated_at_max: ${updated_at_max}
+        fields: ${fields}
+        return_to_sender: ${return_to_sender}
+        courier_destination_country_region: ${courier_destination_country_region}
+        shipment_tags: ${shipment_tags}
+        order_id: ${order_id}
+    input:
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination.next_cursor.
+        optional: true
+      limit:
+        type: integer
+        description: Trackings per page, up to 200 (default 100).
+        optional: true
+      keyword:
+        type: string
+        description: Search tracking number, title, order id, customer name, email, phone
+          and custom fields.
+        optional: true
+      tracking_numbers:
+        type: string
+        description: Tracking numbers, comma-separated, up to 50.
+        optional: true
+      slug:
+        type: string
+        description: Carrier slugs, comma-separated, e.g. dhl,ups,usps.
+        optional: true
+      transit_time:
+        type: integer
+        description: 'Days in transit: delivered date minus pickup date, or today minus pickup
+          date while undelivered.'
+        optional: true
+      origin:
+        type: string
+        description: Origin ISO 3166-1 alpha-3 country or region codes, comma-separated, e.g.
+          USA,HKG.
+        optional: true
+      destination:
+        type: string
+        description: Destination ISO 3166-1 alpha-3 country or region codes, comma-separated,
+          e.g. USA,HKG.
+        optional: true
+      tag:
+        type: string
+        description: 'Status tags, comma-separated: Pending, InfoReceived, InTransit, OutForDelivery,
+          AttemptFail, Delivered, AvailableForPickup, Exception, Expired.'
+        optional: true
+      created_at_min:
+        type: string
+        description: Created at or after, ISO 8601 (data is kept 120 days).
+        optional: true
+      created_at_max:
+        type: string
+        description: Created at or before, ISO 8601.
+        optional: true
+      updated_at_min:
+        type: string
+        description: Updated at or after, ISO 8601.
+        optional: true
+      updated_at_max:
+        type: string
+        description: Updated at or before, ISO 8601.
+        optional: true
+      fields:
+        type: string
+        description: 'Fields to include, comma-separated: title, order_id, tag, checkpoints.'
+        optional: true
+      return_to_sender:
+        type: string
+        description: true or false, comma-separated for both.
+        optional: true
+      courier_destination_country_region:
+        type: string
+        description: Destination as reported by the carrier; ISO 3166-1 alpha-3 country or
+          region codes, comma-separated, e.g. USA,HKG.
+        optional: true
+      shipment_tags:
+        type: string
+        description: Shipment tags, comma-separated.
+        optional: true
+      order_id:
+        type: string
+        description: Order ids, comma-separated.
+        optional: true
+    output:
+      description: Trackings with a pagination cursor.
+      type: object
+      response_path: data
+
+  create_tracking:
+    title: Create a tracking
+    description: >-
+      Start tracking a shipment by its tracking number. Give slug if you know the carrier,
+      or let AfterShip detect it; add order, customer and address details so notifications
+      and delivery estimates work. Customers with email or phone may start receiving notifications.
+    category: trackings
+    request:
+      method: POST
+      path: /tracking/2026-07/trackings
+      body:
+        tracking_number: ${tracking_number}
+        slug_group: ${slug_group}
+        shipment_tags: ${shipment_tags}
+        courier_connection_id: ${courier_connection_id}
+        last_mile: ${last_mile}
+        title: ${title}
+        order_id: ${order_id}
+        order_number: ${order_number}
+        order_date: ${order_date}
+        order_id_path: ${order_id_path}
+        order_promised_delivery_date: ${order_promised_delivery_date}
+        custom_fields: ${custom_fields}
+        note: ${note}
+        language: ${language}
+        delivery_type: ${delivery_type}
+        pickup_location: ${pickup_location}
+        pickup_note: ${pickup_note}
+        slug: ${slug}
+        tracking_account_number: ${tracking_account_number}
+        tracking_key: ${tracking_key}
+        tracking_ship_date: ${tracking_ship_date}
+        shipment_type: ${shipment_type}
+        origin_country_region: ${origin_country_region}
+        origin_state: ${origin_state}
+        origin_city: ${origin_city}
+        origin_postal_code: ${origin_postal_code}
+        origin_raw_location: ${origin_raw_location}
+        destination_country_region: ${destination_country_region}
+        destination_state: ${destination_state}
+        destination_city: ${destination_city}
+        destination_postal_code: ${destination_postal_code}
+        destination_raw_location: ${destination_raw_location}
+        location_id: ${location_id}
+        shipping_method: ${shipping_method}
+        customers: ${customers}
+        shipment_direction: ${shipment_direction}
+    input:
+      tracking_number:
+        type: string
+        description: The carrier's tracking number.
+      slug:
+        type: string
+        description: Carrier slug, e.g. ups. Omit on create to let AfterShip detect it.
+        optional: true
+      slug_group:
+        type: string
+        description: Carrier group to detect within, e.g. fedex-group, when slug is omitted.
+        optional: true
+      shipment_tags:
+        type: array
+        description: Tags for grouping and filtering shipments.
+        optional: true
+        items:
+          type: string
+      courier_connection_id:
+        type: string
+        description: Id of the carrier account connection to track through.
+        optional: true
+      last_mile:
+        type: object
+        description: 'Last-mile hand-off: {tracking_number, slug} of the local carrier.'
+        optional: true
+      title:
+        type: string
+        description: Title for the tracking, shown to customers; defaults to the tracking
+          number.
+        optional: true
+      order_id:
+        type: string
+        description: Your order id, for matching the tracking to an order.
+        optional: true
+      order_number:
+        type: string
+        description: Your human-readable order number.
+        optional: true
+      order_date:
+        type: string
+        description: When the order was placed, ISO 8601.
+        optional: true
+      order_id_path:
+        type: string
+        description: URL of the order page in your store.
+        optional: true
+      order_promised_delivery_date:
+        type: object
+        description: 'Delivery promised at checkout: {promised_delivery_date, promised_delivery_date_min,
+          promised_delivery_date_max} as YYYY-MM-DD.'
+        optional: true
+      custom_fields:
+        type: object
+        description: Your own key-value data, searchable with list_trackings keyword.
+        optional: true
+      note:
+        type: string
+        description: Internal note about the shipment.
+        optional: true
+      language:
+        type: string
+        description: ISO 639-1 language for customer notifications, e.g. en.
+        optional: true
+      delivery_type:
+        type: string
+        description: How the parcel reaches the customer.
+        optional: true
+        enum:
+        - pickup_at_store
+        - door_to_door
+        - pickup_at_courier
+      pickup_location:
+        type: string
+        description: Pickup location, for store or courier pickup.
+        optional: true
+      pickup_note:
+        type: string
+        description: Pickup instructions.
+        optional: true
+      tracking_account_number:
+        type: string
+        description: Carrier account number, for carriers that require it.
+        optional: true
+      tracking_key:
+        type: string
+        description: Carrier-specific tracking key, for carriers that require one.
+        optional: true
+      tracking_ship_date:
+        type: string
+        description: Ship date as YYYYMMDD, for carriers that require it.
+        optional: true
+      shipment_type:
+        type: string
+        description: Service type, e.g. Express.
+        optional: true
+      origin_country_region:
+        type: string
+        description: Origin country or region, ISO 3166-1 alpha-3.
+        optional: true
+      origin_state:
+        type: string
+        description: Origin state or province.
+        optional: true
+      origin_city:
+        type: string
+        description: Origin city.
+        optional: true
+      origin_postal_code:
+        type: string
+        description: Origin postal code.
+        optional: true
+      origin_raw_location:
+        type: string
+        description: Free-text origin address.
+        optional: true
+      destination_country_region:
+        type: string
+        description: Destination country or region, ISO 3166-1 alpha-3.
+        optional: true
+      destination_state:
+        type: string
+        description: Destination state or province.
+        optional: true
+      destination_city:
+        type: string
+        description: Destination city.
+        optional: true
+      destination_postal_code:
+        type: string
+        description: Destination postal code; some carriers need it to track.
+        optional: true
+      destination_raw_location:
+        type: string
+        description: Free-text destination address.
+        optional: true
+      location_id:
+        type: string
+        description: Id of your fulfilment location in AfterShip.
+        optional: true
+      shipping_method:
+        type: string
+        description: Shipping method the customer chose, e.g. Standard.
+        optional: true
+      customers:
+        type: array
+        description: 'People on the shipment, each {role: buyer|receiver, name, email, phone_number,
+          language}. Emails and phone numbers receive notifications when enabled.'
+        optional: true
+        items:
+          type: object
+      shipment_direction:
+        type: string
+        description: forward for an outbound shipment, return for a return.
+        optional: true
+        enum:
+        - forward
+        - return
+    output:
+      description: The created tracking, with its id.
+      type: object
+      response_path: data
+
+  get_tracking:
+    title: Get a tracking
+    description: >-
+      Read a tracking by id: current status tag and subtag, every checkpoint the carrier reported,
+      expected delivery dates, addresses and customers. Optionally translate checkpoint messages.
+    category: trackings
+    read_only: true
+    request:
+      method: GET
+      path: /tracking/2026-07/trackings/${id}
+      query:
+        fields: ${fields}
+        lang: ${lang}
+    input:
+      fields:
+        type: string
+        description: 'Fields to include, comma-separated: title, order_id, tag, checkpoints,
+          destination_postal_code, tracking_ship_date, tracking_account_number, tracking_key,
+          origin_country_region, destination_country_region, destination_state.'
+        optional: true
+      lang:
+        type: string
+        description: Translate checkpoint messages into this language, e.g. en, fr, de, es,
+          ja, zh-Hans.
+        optional: true
+      id:
+        type: string
+        description: AfterShip tracking id -- not the tracking number.
+    output:
+      description: The tracking.
+      type: object
+      response_path: data
+
+  update_tracking:
+    title: Update a tracking
+    description: >-
+      Change a tracking's order details, customers, addresses, carrier or carrier-required
+      fields. Correcting slug or the required carrier fields makes AfterShip re-fetch from
+      the right carrier.
+    category: trackings
+    request:
+      method: PUT
+      path: /tracking/2026-07/trackings/${id}
+      body:
+        title: ${title}
+        order_id: ${order_id}
+        order_number: ${order_number}
+        order_date: ${order_date}
+        order_id_path: ${order_id_path}
+        order_promised_delivery_date: ${order_promised_delivery_date}
+        custom_fields: ${custom_fields}
+        note: ${note}
+        language: ${language}
+        delivery_type: ${delivery_type}
+        pickup_location: ${pickup_location}
+        pickup_note: ${pickup_note}
+        slug: ${slug}
+        tracking_account_number: ${tracking_account_number}
+        tracking_key: ${tracking_key}
+        tracking_ship_date: ${tracking_ship_date}
+        shipment_type: ${shipment_type}
+        origin_country_region: ${origin_country_region}
+        origin_state: ${origin_state}
+        origin_city: ${origin_city}
+        origin_postal_code: ${origin_postal_code}
+        origin_raw_location: ${origin_raw_location}
+        destination_country_region: ${destination_country_region}
+        destination_state: ${destination_state}
+        destination_city: ${destination_city}
+        destination_postal_code: ${destination_postal_code}
+        destination_raw_location: ${destination_raw_location}
+        location_id: ${location_id}
+        shipping_method: ${shipping_method}
+        customers: ${customers}
+        shipment_direction: ${shipment_direction}
+    input:
+      id:
+        type: string
+        description: AfterShip tracking id -- not the tracking number.
+      title:
+        type: string
+        description: Title for the tracking, shown to customers; defaults to the tracking
+          number.
+        optional: true
+      order_id:
+        type: string
+        description: Your order id, for matching the tracking to an order.
+        optional: true
+      order_number:
+        type: string
+        description: Your human-readable order number.
+        optional: true
+      order_date:
+        type: string
+        description: When the order was placed, ISO 8601.
+        optional: true
+      order_id_path:
+        type: string
+        description: URL of the order page in your store.
+        optional: true
+      order_promised_delivery_date:
+        type: object
+        description: 'Delivery promised at checkout: {promised_delivery_date, promised_delivery_date_min,
+          promised_delivery_date_max} as YYYY-MM-DD.'
+        optional: true
+      custom_fields:
+        type: object
+        description: Your own key-value data, searchable with list_trackings keyword.
+        optional: true
+      note:
+        type: string
+        description: Internal note about the shipment.
+        optional: true
+      language:
+        type: string
+        description: ISO 639-1 language for customer notifications, e.g. en.
+        optional: true
+      delivery_type:
+        type: string
+        description: How the parcel reaches the customer.
+        optional: true
+        enum:
+        - pickup_at_store
+        - door_to_door
+        - pickup_at_courier
+      pickup_location:
+        type: string
+        description: Pickup location, for store or courier pickup.
+        optional: true
+      pickup_note:
+        type: string
+        description: Pickup instructions.
+        optional: true
+      slug:
+        type: string
+        description: Carrier slug, e.g. ups. Omit on create to let AfterShip detect it.
+        optional: true
+      tracking_account_number:
+        type: string
+        description: Carrier account number, for carriers that require it.
+        optional: true
+      tracking_key:
+        type: string
+        description: Carrier-specific tracking key, for carriers that require one.
+        optional: true
+      tracking_ship_date:
+        type: string
+        description: Ship date as YYYYMMDD, for carriers that require it.
+        optional: true
+      shipment_type:
+        type: string
+        description: Service type, e.g. Express.
+        optional: true
+      origin_country_region:
+        type: string
+        description: Origin country or region, ISO 3166-1 alpha-3.
+        optional: true
+      origin_state:
+        type: string
+        description: Origin state or province.
+        optional: true
+      origin_city:
+        type: string
+        description: Origin city.
+        optional: true
+      origin_postal_code:
+        type: string
+        description: Origin postal code.
+        optional: true
+      origin_raw_location:
+        type: string
+        description: Free-text origin address.
+        optional: true
+      destination_country_region:
+        type: string
+        description: Destination country or region, ISO 3166-1 alpha-3.
+        optional: true
+      destination_state:
+        type: string
+        description: Destination state or province.
+        optional: true
+      destination_city:
+        type: string
+        description: Destination city.
+        optional: true
+      destination_postal_code:
+        type: string
+        description: Destination postal code; some carriers need it to track.
+        optional: true
+      destination_raw_location:
+        type: string
+        description: Free-text destination address.
+        optional: true
+      location_id:
+        type: string
+        description: Id of your fulfilment location in AfterShip.
+        optional: true
+      shipping_method:
+        type: string
+        description: Shipping method the customer chose, e.g. Standard.
+        optional: true
+      customers:
+        type: array
+        description: 'People on the shipment, each {role: buyer|receiver, name, email, phone_number,
+          language}. Emails and phone numbers receive notifications when enabled.'
+        optional: true
+        items:
+          type: object
+      shipment_direction:
+        type: string
+        description: forward for an outbound shipment, return for a return.
+        optional: true
+        enum:
+        - forward
+        - return
+    output:
+      description: The updated tracking.
+      type: object
+      response_path: data
+
+  delete_tracking:
+    title: Delete a tracking
+    description: >-
+      Delete a tracking and its history. It stops updating and notifying and cannot be restored.
+    category: trackings
+    destructive: true
+    request:
+      method: DELETE
+      path: /tracking/2026-07/trackings/${id}
+    input:
+      id:
+        type: string
+        description: AfterShip tracking id -- not the tracking number.
+    output:
+      description: The deleted tracking.
+      type: object
+      response_path: data
+
+  retrack_tracking:
+    title: Retrack an expired tracking
+    description: >-
+      Resume tracking a shipment AfterShip stopped updating because it expired. AfterShip
+      caps how many times a single tracking can be retracked.
+    category: trackings
+    request:
+      method: POST
+      path: /tracking/2026-07/trackings/${id}/retrack
+    input:
+      id:
+        type: string
+        description: AfterShip tracking id -- not the tracking number.
+    output:
+      description: The retracked tracking.
+      type: object
+      response_path: data
+
+  mark_tracking_completed:
+    title: Mark a tracking completed
+    description: >-
+      Stop tracking a shipment and set its final state -- delivered, lost or returned to sender
+      -- when the carrier will not report it.
+    category: trackings
+    request:
+      method: POST
+      path: /tracking/2026-07/trackings/${id}/mark-as-completed
+      body:
+        reason: ${reason}
+        event_datetime: ${event_datetime}
+    input:
+      id:
+        type: string
+        description: AfterShip tracking id -- not the tracking number.
+      reason:
+        type: string
+        description: 'Why tracking stops: DELIVERED, LOST or RETURNED_TO_SENDER.'
+        enum:
+        - DELIVERED
+        - LOST
+        - RETURNED_TO_SENDER
+      event_datetime:
+        type: string
+        description: When it happened, ISO 8601; defaults to now.
+        optional: true
+    output:
+      description: The completed tracking.
+      type: object
+      response_path: data
+
+  list_couriers:
+    title: List couriers
+    description: >-
+      List the carriers AfterShip supports, or only those activated on this account, with
+      each one's slug, name, supported languages and the extra fields it requires to track
+      (postal code, ship date, account number, key).
+    category: couriers
+    read_only: true
+    request:
+      method: GET
+      path: /tracking/2026-07/couriers
+      query:
+        active: ${active}
+        slug: ${slug}
+    input:
+      active:
+        type: boolean
+        description: True for only the carriers activated on this account.
+        optional: true
+      slug:
+        type: string
+        description: Carrier slugs, comma-separated, e.g. dhl,ups,usps.
+        optional: true
+    output:
+      description: Couriers.
+      type: object
+      response_path: data
+
+  detect_courier:
+    title: Detect the courier
+    description: >-
+      Work out which carriers a tracking number could belong to from its format, optionally
+      narrowed by slugs, a carrier group or destination details. Detection does not create
+      a tracking.
+    category: couriers
+    read_only: true
+    request:
+      method: POST
+      path: /tracking/2026-07/couriers/detect
+      body:
+        tracking_number: ${tracking_number}
+        slug: ${slug}
+        slug_group: ${slug_group}
+        destination_postal_code: ${destination_postal_code}
+        destination_state: ${destination_state}
+        destination_country_region: ${destination_country_region}
+        origin_country_region: ${origin_country_region}
+        tracking_ship_date: ${tracking_ship_date}
+        tracking_account_number: ${tracking_account_number}
+        tracking_key: ${tracking_key}
+    input:
+      tracking_number:
+        type: string
+        description: Tracking number to detect the carrier of.
+      slug:
+        type: array
+        description: Carrier slugs to restrict detection to; defaults to the account's active
+          carriers.
+        optional: true
+        items:
+          type: string
+      slug_group:
+        type: string
+        description: Carrier group to detect within, e.g. fedex-group.
+        optional: true
+      destination_postal_code:
+        type: string
+        description: Destination postal code, which sharpens detection for some carriers.
+        optional: true
+      destination_state:
+        type: string
+        description: Destination state.
+        optional: true
+      destination_country_region:
+        type: string
+        description: Destination country or region, ISO 3166-1 alpha-3.
+        optional: true
+      origin_country_region:
+        type: string
+        description: Origin country or region, ISO 3166-1 alpha-3.
+        optional: true
+      tracking_ship_date:
+        type: string
+        description: Ship date as YYYYMMDD.
+        optional: true
+      tracking_account_number:
+        type: string
+        description: Carrier account number.
+        optional: true
+      tracking_key:
+        type: string
+        description: Carrier-specific tracking key.
+        optional: true
+    output:
+      description: Matching couriers.
+      type: object
+      response_path: data
+
+  list_courier_connections:
+    title: List courier connections
+    description: >-
+      List the carrier accounts connected to AfterShip, which let it track through your own
+      carrier API credentials, optionally for one carrier.
+    category: courier_connections
+    read_only: true
+    request:
+      method: GET
+      path: /tracking/2026-07/courier-connections
+      query:
+        courier_slug: ${courier_slug}
+        cursor: ${cursor}
+        limit: ${limit}
+    input:
+      courier_slug:
+        type: string
+        description: Only connections to this carrier, e.g. dhl-api.
+        optional: true
+      cursor:
+        type: string
+        description: Cursor from the previous page.
+        optional: true
+      limit:
+        type: string
+        description: Connections per page, up to 200 (default 100).
+        optional: true
+    output:
+      description: Courier connections with pagination.
+      type: object
+      response_path: data
+
+  create_courier_connection:
+    title: Connect a courier account
+    description: >-
+      Connect a carrier account by giving AfterShip that carrier's API credentials, so trackings
+      can use the account's data.
+    category: courier_connections
+    request:
+      method: POST
+      path: /tracking/2026-07/courier-connections
+      body:
+        courier_slug: ${courier_slug}
+        credentials: ${credentials}
+    input:
+      courier_slug:
+        type: string
+        description: Carrier to connect, e.g. dhl-api or fedex-api.
+      credentials:
+        type: object
+        description: The carrier's account credentials, with the keys that carrier requires
+          (list_couriers shows them).
+    output:
+      description: The created connection.
+      type: object
+      response_path: data
+
+  get_courier_connection:
+    title: Get a courier connection
+    description: >-
+      Read one connected carrier account -- its carrier and status. Credentials are not returned.
+    category: courier_connections
+    read_only: true
+    request:
+      method: GET
+      path: /tracking/2026-07/courier-connections/${id}
+    input:
+      id:
+        type: string
+        description: Courier connection id.
+    output:
+      description: The connection.
+      type: object
+      response_path: data
+
+  update_courier_connection:
+    title: Update a courier connection
+    description: >-
+      Replace the credentials of a connected carrier account, e.g. after rotating its API
+      key.
+    category: courier_connections
+    request:
+      method: PUT
+      path: /tracking/2026-07/courier-connections/${id}
+      body:
+        credentials: ${credentials}
+    input:
+      id:
+        type: string
+        description: Courier connection id.
+      credentials:
+        type: object
+        description: Replacement credentials for the carrier account.
+    output:
+      description: The updated connection.
+      type: object
+      response_path: data
+
+  delete_courier_connection:
+    title: Delete a courier connection
+    description: >-
+      Disconnect a carrier account; trackings stop using its credentials.
+    category: courier_connections
+    destructive: true
+    request:
+      method: DELETE
+      path: /tracking/2026-07/courier-connections/${id}
+    input:
+      id:
+        type: string
+        description: Courier connection id.
+    output:
+      description: The deleted connection.
+      type: object
+      response_path: data
+
+  predict_delivery_date:
+    title: Predict a delivery date
+    description: >-
+      Predict when a shipment will arrive from its carrier, service, origin and destination,
+      and either a pickup time or your order handling rules. Useful at checkout, before any
+      tracking exists.
+    category: estimated_delivery_date
+    read_only: true
+    request:
+      method: POST
+      path: /tracking/2026-07/estimated-delivery-date/predict
+      body:
+        slug: ${slug}
+        service_type_name: ${service_type_name}
+        origin_address: ${origin_address}
+        destination_address: ${destination_address}
+        weight: ${weight}
+        package_count: ${package_count}
+        pickup_time: ${pickup_time}
+        estimated_pickup: ${estimated_pickup}
+    input:
+      slug:
+        type: string
+        description: Carrier slug.
+      service_type_name:
+        type: string
+        description: Carrier service, e.g. FEDEX GROUND.
+        optional: true
+      origin_address:
+        type: object
+        description: '{country_region (alpha-3), state, city, postal_code, raw_location}.'
+      destination_address:
+        type: object
+        description: '{country_region (alpha-3), state, city, postal_code, raw_location}.'
+      weight:
+        type: object
+        description: '{unit: lb|kg, value}.'
+        optional: true
+      package_count:
+        type: integer
+        description: Number of packages.
+        optional: true
+      pickup_time:
+        type: string
+        description: When the carrier picks up, ISO 8601 with offset. Give this or estimated_pickup.
+        optional: true
+      estimated_pickup:
+        type: object
+        description: 'Work out pickup from order handling: {order_time, order_cutoff_time,
+          business_days: [1-7], order_processing_time: {unit: day, value}}.'
+        optional: true
+    output:
+      description: The estimated delivery date range.
+      type: object
+      response_path: data
+
+  predict_delivery_dates:
+    title: Predict delivery dates in bulk
+    description: >-
+      Predict delivery dates for several shipments or shipping options in one request, e.g.
+      every service shown at checkout.
+    category: estimated_delivery_date
+    read_only: true
+    request:
+      method: POST
+      path: /tracking/2026-07/estimated-delivery-date/predict-batch
+      body:
+        estimated_delivery_dates: ${estimated_delivery_dates}
+    input:
+      estimated_delivery_dates:
+        type: array
+        description: 'Shipments to predict, each with the fields predict_delivery_date takes:
+          slug, service_type_name, origin_address, destination_address, weight, package_count,
+          pickup_time or estimated_pickup.'
+        items:
+          type: object
+    output:
+      description: One estimate per requested shipment.
+      type: object
+      response_path: data

@@ -1,0 +1,605 @@
+# AWS IAM Identity Center SCIM 2.0 tools -- provisioning users and groups.
+#
+# This is SCIM 2.0 (RFC 7644) as IAM Identity Center implements it: the
+# connection's SCIM endpoint is the base url and the access token is a bearer
+# token, so unlike the other AWS connectors here **these calls work today** --
+# no SigV4 involved.
+#
+# Identity Center supports a deliberate subset of SCIM, and the omissions
+# matter:
+#
+#   * **supported**: create, read, list, replace (PUT) and update (PATCH) for
+#     users; create, read, list, update (PATCH) and delete for groups; plus the
+#     discovery endpoints (`/ServiceProviderConfig`, `/Schemas`,
+#     `/ResourceTypes`);
+#   * **not supported**: PUT on a group -- membership is changed with
+#     `patch_group` and its add/remove/replace operations, which is the part
+#     most SCIM clients get wrong;
+#   * **filtering is narrow**: `filter` accepts an `eq` match on `userName`
+#     for users and `displayName` for groups, and nothing more. There is no
+#     search by email or by name substring, so directory-wide search has to be
+#     done by paging with `start_index` and `count`.
+#
+# Two operational notes. Identity Center is the *system of record* once SCIM
+# provisioning is on: a user you delete here loses access to every account and
+# application assigned through Identity Center, and a user removed from a group
+# loses whatever permission sets that group carried. And `user_name` must stay
+# stable -- it is the key an external directory is reconciled against, so
+# changing it looks like a new person.
+#
+# Docs: https://docs.aws.amazon.com/singlesignon/latest/developerguide/supported-apis.html
+
+connector_id: aws-scim
+display_name: AWS (SCIM)
+docs_url: https://docs.aws.amazon.com/singlesignon/latest/developerguide/supported-apis.html
+
+tools:
+
+  # -- users ---------------------------------------------------------------
+
+  list_users:
+    title: List users
+    description: >-
+      Read the users provisioned into Identity Center, paged. `filter` supports
+      only an equality match on userName -- `userName eq "ada@example.com"` --
+      which is how you check whether a person already exists before creating
+      them. Paging is 1-based via `start_index`.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /Users
+      query:
+        filter: "${filter}"
+        startIndex: "${start_index}"
+        count: "${count}"
+        attributes: "${attributes}"
+        excludedAttributes: "${excluded_attributes}"
+    input:
+      filter:
+        type: string
+        description: >-
+          A SCIM filter. Identity Center accepts only `userName eq "value"` --
+          anything else is rejected.
+        optional: true
+        example: userName eq "ada@example.com"
+      start_index:
+        type: integer
+        description: 1-based index of the first result to return.
+        optional: true
+        minimum: 1
+      count:
+        type: integer
+        description: How many users to return per page.
+        optional: true
+        minimum: 1
+      attributes:
+        type: string
+        description: Comma-separated attributes to include, to keep the response small.
+        optional: true
+      excluded_attributes:
+        type: string
+        description: Comma-separated attributes to leave out.
+        optional: true
+    output:
+      description: >-
+        A SCIM list response -- `Resources` with the users, plus
+        `totalResults`, `startIndex` and `itemsPerPage`.
+      type: object
+      properties:
+        totalResults: {type: integer}
+        itemsPerPage: {type: integer}
+        startIndex: {type: integer}
+        Resources: {type: array}
+
+  get_user:
+    title: Get a user
+    description: >-
+      Read one user by their Identity Center id -- the id SCIM assigned, not
+      their userName. list_users with a filter is how you go the other way.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /Users/${user_id}
+    input:
+      user_id:
+        type: string
+        description: The user's Identity Center id, from list_users or create_user.
+    output:
+      description: The user resource.
+      type: object
+      properties:
+        id: {type: string}
+        userName: {type: string}
+        name: {type: object}
+        emails: {type: array}
+        active: {type: boolean}
+
+  create_user:
+    title: Create a user
+    description: >-
+      Provision a user into Identity Center. `user_name` is the immutable key
+      an external directory reconciles against -- usually the work email --
+      and `emails` must carry exactly one entry marked primary. The user gains
+      no account access until a permission set is assigned to them or to a
+      group they are in.
+    category: users
+    request:
+      method: POST
+      path: /Users
+      body:
+        schemas: "${schemas}"
+        userName: "${user_name}"
+        name:
+          givenName: "${given_name}"
+          familyName: "${family_name}"
+        displayName: "${display_name}"
+        emails: "${emails}"
+        active: "${active}"
+        externalId: "${external_id}"
+        title: "${title}"
+        phoneNumbers: "${phone_numbers}"
+        addresses: "${addresses}"
+        locale: "${locale}"
+        timezone: "${timezone}"
+    input:
+      user_name:
+        type: string
+        description: >-
+          The user's unique login name, normally their work email. Treat it as
+          immutable -- changing it reads as a different person.
+      given_name:
+        type: string
+        description: First name.
+      family_name:
+        type: string
+        description: Last name.
+      display_name:
+        type: string
+        description: The name shown in the Identity Center console.
+        optional: true
+      emails:
+        type: array
+        description: >-
+          Email addresses, each {"value": ..., "type": "work", "primary":
+          true}. Exactly one must be primary.
+        optional: true
+        items: {type: object}
+      active:
+        type: boolean
+        description: >-
+          Whether the user can sign in. Setting false is the standard
+          suspension -- it keeps the record and the group memberships.
+        optional: true
+      external_id:
+        type: string
+        description: Your own directory's id for this person, kept for reconciliation.
+        optional: true
+      title:
+        type: string
+        description: Job title.
+        optional: true
+      phone_numbers:
+        type: array
+        description: 'Phone numbers, each {"value": ..., "type": "work"}.'
+        optional: true
+        items: {type: object}
+      addresses:
+        type: array
+        description: Addresses in SCIM's address shape.
+        optional: true
+        items: {type: object}
+      locale:
+        type: string
+        description: The user's locale, e.g. "en-US".
+        optional: true
+      timezone:
+        type: string
+        description: The user's timezone, e.g. "Europe/London".
+        optional: true
+      schemas:
+        type: array
+        description: >-
+          SCIM schema urns. Defaults to the core user schema; only set this to
+          add an extension schema.
+        optional: true
+        default: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        items: {type: string}
+    output:
+      description: The created user, including the id every later call uses.
+      type: object
+
+  replace_user:
+    title: Replace a user
+    description: >-
+      Overwrite a user's attributes wholesale. This is a **full replace** --
+      anything you leave out is cleared -- so read the user first and send the
+      complete resource back. For a single-field change, update_user is the
+      safer call.
+    category: users
+    request:
+      method: PUT
+      path: /Users/${user_id}
+      body:
+        schemas: "${schemas}"
+        userName: "${user_name}"
+        name:
+          givenName: "${given_name}"
+          familyName: "${family_name}"
+        displayName: "${display_name}"
+        emails: "${emails}"
+        active: "${active}"
+        externalId: "${external_id}"
+        title: "${title}"
+        phoneNumbers: "${phone_numbers}"
+    input:
+      user_id:
+        type: string
+        description: The user's Identity Center id.
+      user_name:
+        type: string
+        description: The user's login name. Must be sent even when unchanged.
+      given_name:
+        type: string
+        description: First name.
+      family_name:
+        type: string
+        description: Last name.
+      display_name:
+        type: string
+        description: Display name.
+        optional: true
+      emails:
+        type: array
+        description: The complete email list after the replace.
+        optional: true
+        items: {type: object}
+      active:
+        type: boolean
+        description: Whether the user can sign in.
+        optional: true
+      external_id:
+        type: string
+        description: Your own directory's id for this person.
+        optional: true
+      title:
+        type: string
+        description: Job title.
+        optional: true
+      phone_numbers:
+        type: array
+        description: The complete phone list after the replace.
+        optional: true
+        items: {type: object}
+      schemas:
+        type: array
+        description: SCIM schema urns for the resource.
+        optional: true
+        default: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        items: {type: string}
+    output:
+      description: The user after the replace.
+      type: object
+
+  update_user:
+    title: Update a user
+    description: >-
+      Change specific attributes with a SCIM PATCH. `operations` is a list of
+      {"op": "replace", "path": "active", "value": false} entries -- which is
+      how a user is suspended or reactivated without touching anything else.
+      Setting `active` to false is the correct offboarding step; deleting is
+      not.
+    category: users
+    request:
+      method: PATCH
+      path: /Users/${user_id}
+      body:
+        schemas: "${schemas}"
+        Operations: "${operations}"
+    input:
+      user_id:
+        type: string
+        description: The user's Identity Center id.
+      operations:
+        type: array
+        description: >-
+          The PATCH operations, each {"op": "add" | "replace" | "remove",
+          "path": <attribute>, "value": <new value>} -- e.g.
+          {"op": "replace", "path": "active", "value": false}.
+        items: {type: object}
+      schemas:
+        type: array
+        description: SCIM schema urn for the patch operation.
+        optional: true
+        default: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        items: {type: string}
+    output:
+      description: The user after the patch.
+      type: object
+
+  delete_user:
+    title: Delete a user
+    description: >-
+      Remove a user from Identity Center entirely. They lose access to every
+      AWS account and application assigned through it, their group memberships
+      go, and the record cannot be restored -- suspend with
+      `update_user` (`active: false`) unless the person is really gone.
+    category: users
+    destructive: true
+    request:
+      method: DELETE
+      path: /Users/${user_id}
+    input:
+      user_id:
+        type: string
+        description: The user's Identity Center id.
+    output:
+      description: Empty on success -- SCIM answers 204.
+      type: object
+
+  # -- groups --------------------------------------------------------------
+
+  list_groups:
+    title: List groups
+    description: >-
+      Read the groups in Identity Center, paged. As with users, `filter`
+      supports only an equality match -- `displayName eq "Engineering"` -- so
+      finding a group by partial name means paging.
+    category: groups
+    read_only: true
+    request:
+      method: GET
+      path: /Groups
+      query:
+        filter: "${filter}"
+        startIndex: "${start_index}"
+        count: "${count}"
+    input:
+      filter:
+        type: string
+        description: >-
+          A SCIM filter. Identity Center accepts only
+          `displayName eq "value"`.
+        optional: true
+        example: displayName eq "Engineering"
+      start_index:
+        type: integer
+        description: 1-based index of the first result.
+        optional: true
+        minimum: 1
+      count:
+        type: integer
+        description: How many groups to return per page.
+        optional: true
+        minimum: 1
+    output:
+      description: A SCIM list response with the groups under `Resources`.
+      type: object
+      properties:
+        totalResults: {type: integer}
+        Resources: {type: array}
+
+  get_group:
+    title: Get a group
+    description: >-
+      Read one group by its Identity Center id, including its members. Group
+      membership is what permission sets are usually assigned through, so this
+      is the "who has this access" call.
+    category: groups
+    read_only: true
+    request:
+      method: GET
+      path: /Groups/${group_id}
+      query:
+        filter: "${filter}"
+    input:
+      group_id:
+        type: string
+        description: The group's Identity Center id.
+      filter:
+        type: string
+        description: >-
+          Optional member filter, e.g. `id eq "<user id>"` to test one
+          membership rather than reading the whole list.
+        optional: true
+    output:
+      description: The group resource and its members.
+      type: object
+      properties:
+        id: {type: string}
+        displayName: {type: string}
+        members: {type: array}
+
+  create_group:
+    title: Create a group
+    description: >-
+      Create a group in Identity Center. It starts empty and grants nothing
+      until a permission set is assigned to it -- add members with
+      update_group.
+    category: groups
+    request:
+      method: POST
+      path: /Groups
+      body:
+        schemas: "${schemas}"
+        displayName: "${display_name}"
+        externalId: "${external_id}"
+        members: "${members}"
+        description: "${description}"
+    input:
+      display_name:
+        type: string
+        description: The group's name, which must be unique.
+      external_id:
+        type: string
+        description: Your own directory's id for the group, kept for reconciliation.
+        optional: true
+      members:
+        type: array
+        description: 'Initial members, each {"value": "<user id>"}.'
+        optional: true
+        items: {type: object}
+      description:
+        type: string
+        description: What the group is for.
+        optional: true
+      schemas:
+        type: array
+        description: SCIM schema urns for the resource.
+        optional: true
+        default: ["urn:ietf:params:scim:schemas:core:2.0:Group"]
+        items: {type: string}
+    output:
+      description: The created group, including its id.
+      type: object
+
+  update_group:
+    title: Update a group or its membership
+    description: >-
+      Change a group with a SCIM PATCH -- this is the **only** way to add or
+      remove members, since Identity Center does not support PUT on groups.
+      Adding a member is {"op": "add", "path": "members", "value":
+      [{"value": "<user id>"}]}; removing one is
+      {"op": "remove", "path": "members[value eq \"<user id>\"]"}. Membership
+      changes grant or revoke real AWS access.
+    category: groups
+    request:
+      method: PATCH
+      path: /Groups/${group_id}
+      body:
+        schemas: "${schemas}"
+        Operations: "${operations}"
+    input:
+      group_id:
+        type: string
+        description: The group's Identity Center id.
+      operations:
+        type: array
+        description: >-
+          The PATCH operations -- add or remove `members`, or replace
+          `displayName`. See the description for the exact shapes.
+        items: {type: object}
+      schemas:
+        type: array
+        description: SCIM schema urn for the patch operation.
+        optional: true
+        default: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        items: {type: string}
+    output:
+      description: The group after the patch.
+      type: object
+
+  delete_group:
+    title: Delete a group
+    description: >-
+      Delete a group. Its members keep their accounts but lose every
+      permission set assigned through the group -- so this revokes access for
+      everyone in it at once. The users themselves are untouched.
+    category: groups
+    destructive: true
+    request:
+      method: DELETE
+      path: /Groups/${group_id}
+    input:
+      group_id:
+        type: string
+        description: The group's Identity Center id.
+    output:
+      description: Empty on success -- SCIM answers 204.
+      type: object
+
+  # -- discovery -----------------------------------------------------------
+
+  get_service_provider_config:
+    title: Get the SCIM service provider configuration
+    description: >-
+      Read what this SCIM endpoint actually supports -- patch, bulk, filter,
+      sort, and the authentication schemes. The authoritative answer to
+      "does Identity Center support that operation", and a cheap way to prove
+      the token works.
+    category: discovery
+    read_only: true
+    request:
+      method: GET
+      path: /ServiceProviderConfig
+    input: {}
+    output:
+      description: The endpoint's supported features and limits.
+      type: object
+
+  list_schemas:
+    title: List SCIM schemas
+    description: >-
+      Read the schemas this endpoint implements -- core User and Group, plus
+      the enterprise user extension. Tells you which attributes are legal in a
+      create or patch.
+    category: discovery
+    read_only: true
+    request:
+      method: GET
+      path: /Schemas
+      query:
+        startIndex: "${start_index}"
+        attributes: "${attributes}"
+    input:
+      start_index:
+        type: integer
+        description: 1-based index of the first result.
+        optional: true
+        minimum: 1
+      attributes:
+        type: string
+        description: Comma-separated attributes to include.
+        optional: true
+    output:
+      description: The supported schemas.
+      type: object
+
+  get_schema:
+    title: Get one SCIM schema
+    description: >-
+      Read a single schema by urn -- every attribute with its type, mutability
+      and whether it is required. What to consult before a create or patch is
+      rejected for an unknown attribute.
+    category: discovery
+    read_only: true
+    request:
+      method: GET
+      path: /Schemas/${schema_id}
+      query:
+        attributes: "${attributes}"
+    input:
+      schema_id:
+        type: string
+        description: The schema urn, e.g. "urn:ietf:params:scim:schemas:core:2.0:User".
+        example: urn:ietf:params:scim:schemas:core:2.0:User
+      attributes:
+        type: string
+        description: Comma-separated attributes to include.
+        optional: true
+    output:
+      description: The schema definition.
+      type: object
+
+  list_resource_types:
+    title: List SCIM resource types
+    description: >-
+      Read the resource types this endpoint exposes -- User and Group -- with
+      their endpoints and schema urns. The machine-readable map of the API.
+    category: discovery
+    read_only: true
+    request:
+      method: GET
+      path: /ResourceTypes
+      query:
+        startIndex: "${start_index}"
+    input:
+      start_index:
+        type: integer
+        description: 1-based index of the first result.
+        optional: true
+        minimum: 1
+    output:
+      description: The supported resource types.
+      type: object

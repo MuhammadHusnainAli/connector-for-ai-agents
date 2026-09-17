@@ -913,9 +913,9 @@ def test_every_connector_with_a_base_url_is_drivable(manager: ConnectorManager) 
 
 #: A connector with a plain base url, an x-api-key header and no pack of its own,
 #: which is what these tests need: the raw tier only shows where nothing authored
-#: covers the connector. Swap it if `aiprise` ever gains a pack -- the neighbouring
+#: covers the connector. Swap it if `defastra` ever gains a pack -- the neighbouring
 #: test_raw_tools_never_shadow_an_authored_pack is what will tell you.
-RAW_TIER_CONNECTOR = "aiprise"
+RAW_TIER_CONNECTOR = "defastra"
 
 
 def test_the_raw_tier_fixture_still_has_no_pack(manager: ConnectorManager) -> None:
@@ -932,7 +932,7 @@ def test_raw_tools_build_a_real_authenticated_request(manager: ConnectorManager)
         conn, "get_from_api", {"path": "/v1/leads", "query": {"limit": 25}}
     )
     assert request.method == "GET"
-    assert request.url == "https://api.aiprise.com/v1/leads"
+    assert request.url == "https://api.defastra.com/v1/leads"
     assert request.params == {"limit": "25"}
     assert request.headers["x-api-key"] == "secret-key"
 

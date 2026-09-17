@@ -1,0 +1,724 @@
+# DailyBot tools -- async standups, kudos, forms and workflows.
+#
+# The connection's base url already ends in /v1, so paths here start at
+# /users/, /checkins/ and friends. Two mechanical details matter:
+#
+#   * **every path ends in a trailing slash.** DailyBot's API answers a
+#     slashless path with a 301 rather than the resource, so the tools below
+#     keep the slash;
+#   * **records are addressed by uuid**, which comes from the corresponding
+#     list tool -- there are no numeric ids anywhere in this API.
+#
+# The thing to keep in mind when writing: DailyBot lives inside a chat
+# platform. `send_kudos` posts publicly into Slack, Teams or Discord, and
+# creating a check-in or a workflow starts messaging real people on its
+# schedule. These are not quiet database writes.
+#
+# The endpoints and the methods each one accepts were confirmed against the
+# live API's own `Allow` headers, so a method that is absent below is absent
+# because DailyBot does not offer it -- not because it was overlooked.
+#
+# Docs: https://www.dailybot.com/
+
+connector_id: dailybot
+display_name: Dailybot
+docs_url: https://www.dailybot.com/
+
+tools:
+
+  get_me:
+    title: Get the authenticated account
+    description: >-
+      The account this API key belongs to. The cheapest call that proves the
+      key works and says which DailyBot organisation it reaches.
+    category: account
+    read_only: true
+    request:
+      method: GET
+      path: /me/
+    output:
+      description: The requested record.
+      type: object
+
+  list_users:
+    title: List users
+    description: >-
+      The people in the DailyBot organisation, with their ids and
+      chat-platform handles. The uuid here is what the kudos and check-in
+      tools take.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /users/
+      query:
+        page: "${page}"
+        page_size: "${page_size}"
+    input:
+      page:
+        type: integer
+        description: Which page of results to return.
+        optional: true
+        default: '1'
+      page_size:
+        type: integer
+        description: How many records per page.
+        optional: true
+        default: '50'
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  get_user:
+    title: Get a user
+    description: >-
+      One user's profile, including the chat platform they are connected
+      through.
+    category: users
+    read_only: true
+    request:
+      method: GET
+      path: /users/${uuid}/
+    input:
+      uuid:
+        type: string
+        description: The record's uuid, as returned by the corresponding list tool.
+    output:
+      description: The requested record.
+      type: object
+
+  update_user:
+    title: Update a user
+    description: >-
+      Change one user's profile fields. Only the fields you send are changed.
+    category: users
+    request:
+      method: PATCH
+      path: /users/${uuid}/
+      body: "${attributes}"
+    input:
+      uuid:
+        type: string
+        description: The record's uuid, as returned by the corresponding list tool.
+      attributes:
+        type: object
+        description: The user fields to change.
+    output:
+      description: The record after the update.
+      type: object
+
+  list_teams:
+    title: List teams
+    description: >-
+      The teams defined in the organisation. Check-ins and reports are usually
+      scoped to a team rather than to the whole organisation.
+    category: teams
+    read_only: true
+    request:
+      method: GET
+      path: /teams/
+      query:
+        page: "${page}"
+        page_size: "${page_size}"
+    input:
+      page:
+        type: integer
+        description: Which page of results to return.
+        optional: true
+        default: '1'
+      page_size:
+        type: integer
+        description: How many records per page.
+        optional: true
+        default: '50'
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  get_team:
+    title: Get a team
+    description: >-
+      One team's details and membership, for resolving which people a
+      team-scoped check-in or report actually covers.
+    category: teams
+    read_only: true
+    request:
+      method: GET
+      path: /teams/${uuid}/
+    input:
+      uuid:
+        type: string
+        description: The record's uuid, as returned by the corresponding list tool.
+    output:
+      description: The requested record.
+      type: object
+
+  list_checkins:
+    title: List check-ins
+    description: >-
+      The recurring check-ins configured in the organisation -- DailyBot's
+      standups and surveys, with their questions and schedules.
+    category: checkins
+    read_only: true
+    request:
+      method: GET
+      path: /checkins/
+      query:
+        page: "${page}"
+        page_size: "${page_size}"
+    input:
+      page:
+        type: integer
+        description: Which page of results to return.
+        optional: true
+        default: '1'
+      page_size:
+        type: integer
+        description: How many records per page.
+        optional: true
+        default: '50'
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  create_checkin:
+    title: Create a check-in
+    description: >-
+      Create a recurring check-in with its questions, participants and
+      schedule. Once created it starts messaging the participants on its
+      schedule, so this reaches real people.
+    category: checkins
+    request:
+      method: POST
+      path: /checkins/
+      body: "${attributes}"
+    input:
+      attributes:
+        type: object
+        description: The check-in to create -- its name, questions, participants and schedule.
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  get_checkin:
+    title: Get a check-in
+    description: >-
+      One check-in's questions, schedule and participants.
+    category: checkins
+    read_only: true
+    request:
+      method: GET
+      path: /checkins/${uuid}/
+    input:
+      uuid:
+        type: string
+        description: The record's uuid, as returned by the corresponding list tool.
+    output:
+      description: The requested record.
+      type: object
+
+  update_checkin:
+    title: Update a check-in
+    description: >-
+      Change a check-in's questions, schedule or participants. Only the fields
+      you send are changed; the next run picks up the change.
+    category: checkins
+    request:
+      method: PATCH
+      path: /checkins/${uuid}/
+      body: "${attributes}"
+    input:
+      uuid:
+        type: string
+        description: The record's uuid, as returned by the corresponding list tool.
+      attributes:
+        type: object
+        description: The check-in fields to change.
+    output:
+      description: The record after the update.
+      type: object
+
+  delete_checkin:
+    title: Delete a check-in
+    description: >-
+      Delete a check-in. It stops prompting participants immediately, and its
+      historical responses go with it.
+    category: checkins
+    destructive: true
+    request:
+      method: DELETE
+      path: /checkins/${uuid}/
+    input:
+      uuid:
+        type: string
+        description: The record's uuid, as returned by the corresponding list tool.
+    output:
+      description: Confirmation that the record was deleted.
+      type: object
+
+  list_checkin_responses:
+    title: List a check-in's responses
+    description: >-
+      What people answered in one check-in, which is the data every standup
+      report is built from.
+    category: checkins
+    read_only: true
+    request:
+      method: GET
+      path: /checkins/${uuid}/responses/
+      query:
+        page: "${page}"
+        page_size: "${page_size}"
+        date_start: "${date_start}"
+        date_end: "${date_end}"
+    input:
+      uuid:
+        type: string
+        description: The record's uuid, as returned by the corresponding list tool.
+      page:
+        type: integer
+        description: Which page of results to return.
+        optional: true
+        default: '1'
+      page_size:
+        type: integer
+        description: How many records per page.
+        optional: true
+        default: '50'
+      date_start:
+        type: string
+        description: Only responses on or after this date.
+        optional: true
+      date_end:
+        type: string
+        description: Only responses on or before this date.
+        optional: true
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  create_checkin_response:
+    title: Submit a check-in response
+    description: >-
+      Answer a check-in on someone's behalf -- for example from a system that
+      already knows what they did, so they are not asked twice.
+    category: checkins
+    request:
+      method: POST
+      path: /checkins/${uuid}/responses/
+      body: "${attributes}"
+    input:
+      uuid:
+        type: string
+        description: The record's uuid, as returned by the corresponding list tool.
+      attributes:
+        type: object
+        description: The response -- the user it is for and the answers to the check-in's questions.
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  update_checkin_response:
+    title: Update a check-in response
+    description: >-
+      Correct an already-submitted check-in response, leaving the fields you
+      do not send alone.
+    category: checkins
+    request:
+      method: PATCH
+      path: /checkins/${uuid}/responses/
+      body: "${attributes}"
+    input:
+      uuid:
+        type: string
+        description: The record's uuid, as returned by the corresponding list tool.
+      attributes:
+        type: object
+        description: The response fields to change.
+    output:
+      description: The record after the update.
+      type: object
+
+  replace_checkin_response:
+    title: Replace a check-in response
+    description: >-
+      Replace a check-in response wholesale. Anything omitted is cleared,
+      which is the difference from the PATCH counterpart.
+    category: checkins
+    request:
+      method: PUT
+      path: /checkins/${uuid}/responses/
+      body: "${attributes}"
+    input:
+      uuid:
+        type: string
+        description: The record's uuid, as returned by the corresponding list tool.
+      attributes:
+        type: object
+        description: The full replacement response.
+    output:
+      description: The record after the update.
+      type: object
+
+  delete_checkin_response:
+    title: Delete a check-in response
+    description: >-
+      Remove a submitted check-in response. The report for that day loses the
+      entry, so team history changes.
+    category: checkins
+    destructive: true
+    request:
+      method: DELETE
+      path: /checkins/${uuid}/responses/
+    input:
+      uuid:
+        type: string
+        description: The record's uuid, as returned by the corresponding list tool.
+    output:
+      description: Confirmation that the record was deleted.
+      type: object
+
+  list_kudos:
+    title: List kudos
+    description: >-
+      The kudos given in the organisation, with who sent each one, who
+      received it and why. The raw data behind recognition reports.
+    category: kudos
+    read_only: true
+    request:
+      method: GET
+      path: /kudos/
+      query:
+        page: "${page}"
+        page_size: "${page_size}"
+    input:
+      page:
+        type: integer
+        description: Which page of results to return.
+        optional: true
+        default: '1'
+      page_size:
+        type: integer
+        description: How many records per page.
+        optional: true
+        default: '50'
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  send_kudos:
+    title: Send kudos
+    description: >-
+      Give kudos to a teammate. DailyBot posts it into the connected chat
+      platform, so this is visible to other people the moment it succeeds.
+    category: kudos
+    request:
+      method: POST
+      path: /kudos/
+      body: "${attributes}"
+    input:
+      attributes:
+        type: object
+        description: The kudos -- the recipient, the category and the message.
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  get_kudos:
+    title: Get one kudos
+    description: >-
+      A single kudos with its sender, recipient, category and message.
+    category: kudos
+    read_only: true
+    request:
+      method: GET
+      path: /kudos/${uuid}/
+    input:
+      uuid:
+        type: string
+        description: The record's uuid, as returned by the corresponding list tool.
+    output:
+      description: The requested record.
+      type: object
+
+  update_kudos:
+    title: Update a kudos
+    description: >-
+      Change a kudos after the fact -- typically its message or category.
+    category: kudos
+    request:
+      method: PATCH
+      path: /kudos/${uuid}/
+      body: "${attributes}"
+    input:
+      uuid:
+        type: string
+        description: The record's uuid, as returned by the corresponding list tool.
+      attributes:
+        type: object
+        description: The kudos fields to change.
+    output:
+      description: The record after the update.
+      type: object
+
+  list_kudos_categories:
+    title: List kudos categories
+    description: >-
+      The categories kudos can be given under, which is what recognition is
+      grouped by in reports.
+    category: kudos
+    read_only: true
+    request:
+      method: GET
+      path: /kudos/categories/
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  update_kudos_categories:
+    title: Update kudos categories
+    description: >-
+      Change the organisation's kudos categories. Existing kudos keep the
+      category they were given under.
+    category: kudos
+    request:
+      method: PATCH
+      path: /kudos/categories/
+      body: "${attributes}"
+    input:
+      attributes:
+        type: object
+        description: The category changes to apply.
+    output:
+      description: The record after the update.
+      type: object
+
+  list_forms:
+    title: List forms
+    description: >-
+      The forms defined in the organisation -- DailyBot's structured request
+      and survey flows, as opposed to recurring check-ins.
+    category: forms
+    read_only: true
+    request:
+      method: GET
+      path: /forms/
+      query:
+        page: "${page}"
+        page_size: "${page_size}"
+    input:
+      page:
+        type: integer
+        description: Which page of results to return.
+        optional: true
+        default: '1'
+      page_size:
+        type: integer
+        description: How many records per page.
+        optional: true
+        default: '50'
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  get_form:
+    title: Get a form
+    description: >-
+      One form's fields and configuration, so a caller knows what a submission
+      must contain.
+    category: forms
+    read_only: true
+    request:
+      method: GET
+      path: /forms/${uuid}/
+    input:
+      uuid:
+        type: string
+        description: The record's uuid, as returned by the corresponding list tool.
+    output:
+      description: The requested record.
+      type: object
+
+  list_form_responses:
+    title: List a form's responses
+    description: >-
+      The submissions made to one form, with each respondent's answers.
+    category: forms
+    read_only: true
+    request:
+      method: GET
+      path: /forms/${uuid}/responses/
+      query:
+        page: "${page}"
+        page_size: "${page_size}"
+        date_start: "${date_start}"
+        date_end: "${date_end}"
+    input:
+      uuid:
+        type: string
+        description: The record's uuid, as returned by the corresponding list tool.
+      page:
+        type: integer
+        description: Which page of results to return.
+        optional: true
+        default: '1'
+      page_size:
+        type: integer
+        description: How many records per page.
+        optional: true
+        default: '50'
+      date_start:
+        type: string
+        description: Only responses on or after this date.
+        optional: true
+      date_end:
+        type: string
+        description: Only responses on or before this date.
+        optional: true
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  create_form_response:
+    title: Submit a form response
+    description: >-
+      Submit a response to a form on someone's behalf. Whatever the form is
+      wired to trigger -- a notification, a workflow -- runs as a result.
+    category: forms
+    request:
+      method: POST
+      path: /forms/${uuid}/responses/
+      body: "${attributes}"
+    input:
+      uuid:
+        type: string
+        description: The record's uuid, as returned by the corresponding list tool.
+      attributes:
+        type: object
+        description: The submission -- the user it is for and the answers to the form's fields.
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  list_workflows:
+    title: List workflows
+    description: >-
+      The workflows configured in the organisation, each with its trigger and
+      the steps it runs.
+    category: workflows
+    read_only: true
+    request:
+      method: GET
+      path: /workflows/
+      query:
+        page: "${page}"
+        page_size: "${page_size}"
+    input:
+      page:
+        type: integer
+        description: Which page of results to return.
+        optional: true
+        default: '1'
+      page_size:
+        type: integer
+        description: How many records per page.
+        optional: true
+        default: '50'
+    output:
+      description: A page of matching records, with whatever cursor or paging fields the provider returns.
+      type: object
+
+  create_workflow:
+    title: Create a workflow
+    description: >-
+      Create a workflow with its trigger and steps. It becomes live as soon as
+      it is created, so it can start acting on real events immediately.
+    category: workflows
+    request:
+      method: POST
+      path: /workflows/
+      body: "${attributes}"
+    input:
+      attributes:
+        type: object
+        description: The workflow to create -- its trigger, steps and settings.
+    output:
+      description: The provider's response to the call.
+      type: object
+
+  get_workflow:
+    title: Get a workflow
+    description: >-
+      One workflow's trigger, steps and current state.
+    category: workflows
+    read_only: true
+    request:
+      method: GET
+      path: /workflows/${uuid}/
+    input:
+      uuid:
+        type: string
+        description: The record's uuid, as returned by the corresponding list tool.
+    output:
+      description: The requested record.
+      type: object
+
+  update_workflow:
+    title: Update a workflow
+    description: >-
+      Change part of a workflow's trigger or steps, leaving the rest as they
+      are.
+    category: workflows
+    request:
+      method: PATCH
+      path: /workflows/${uuid}/
+      body: "${attributes}"
+    input:
+      uuid:
+        type: string
+        description: The record's uuid, as returned by the corresponding list tool.
+      attributes:
+        type: object
+        description: The workflow fields to change.
+    output:
+      description: The record after the update.
+      type: object
+
+  replace_workflow:
+    title: Replace a workflow
+    description: >-
+      Replace a workflow's definition wholesale. Anything omitted is cleared,
+      which is the difference from the PATCH counterpart.
+    category: workflows
+    request:
+      method: PUT
+      path: /workflows/${uuid}/
+      body: "${attributes}"
+    input:
+      uuid:
+        type: string
+        description: The record's uuid, as returned by the corresponding list tool.
+      attributes:
+        type: object
+        description: The full replacement workflow definition.
+    output:
+      description: The record after the update.
+      type: object
+
+  delete_workflow:
+    title: Delete a workflow
+    description: >-
+      Delete a workflow. It stops running immediately and its configuration
+      cannot be recovered.
+    category: workflows
+    destructive: true
+    request:
+      method: DELETE
+      path: /workflows/${uuid}/
+    input:
+      uuid:
+        type: string
+        description: The record's uuid, as returned by the corresponding list tool.
+    output:
+      description: Confirmation that the record was deleted.
+      type: object

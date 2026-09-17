@@ -1,0 +1,5036 @@
+# Datto Autotask PSA REST API tools.
+#
+# Every path, method and field below comes from Autotask's own Swagger 2.0
+# description, which each zone publishes unauthenticated at
+# https://webservices2.autotask.net/atservicesrest/swagger/docs/v1
+# (2,083 paths over 240 entities). The connection's base url already carries the
+# zone host and /atservicesrest, so paths here start at /V1.0.
+#
+# The API is uniform rather than hand-shaped, and three of its habits matter:
+#
+#   * Reads go through /query. POST /V1.0/{Entity}/query takes a queryModel of
+#     {filter: [{op, field, value}], maxRecords, includeFields}; the GET form
+#     takes the same JSON as a single url-encoded "search" parameter. Every
+#     query needs at least one filter, and "id gte 0" is the idiomatic way to
+#     ask for everything.
+#   * Writes are body-only. POST /V1.0/{Entity} creates, PATCH /V1.0/{Entity}
+#     updates the record whose id is *in the body*, and PUT replaces it -- there
+#     is no /V1.0/{Entity}/{id} write path, so update_* tools take id as a body
+#     field.
+#   * Only a handful of entities can be deleted at all (time entries, service
+#     calls, appointments, subscriptions, webhooks, a few others). Child
+#     collections are deletable through their parent path.
+#
+# Entities that Autotask treats as children -- contacts, tasks, ticket notes,
+# project phases, contract services and so on -- can be *queried* at the top
+# level but only written under their parent (/V1.0/Companies/{id}/Contacts,
+# /V1.0/Projects/{id}/Tasks, /V1.0/Tickets/{id}/Notes). The tools here follow
+# that split exactly.
+#
+# Named tools cover the PSA surface most integrations touch: tickets and their
+# notes, charges, checklists, secondary resources and attachments; companies
+# with their contacts, locations, notes, to-dos and alerts; contracts with their
+# services, blocks and rates; projects with phases, tasks and notes; time
+# entries; configuration items; opportunities and quotes; service calls and
+# appointments; products, services and billing items; resources and roles. The
+# generic entity tools at the top of the pack reach the remaining 200-odd
+# entities by name, which is the only sane way to cover a catalogue this size.
+#
+# Not covered: attachment *uploads*, which want base64 data plus an
+# entity-specific parent route, and the V2.0 ContractServiceBundleUnits
+# variant, which duplicates its V1.0 sibling.
+#
+# Docs: https://ww3.autotask.net/help/developerhelp/Content/APIs/REST/REST_API_Home.htm
+
+connector_id: autotask
+display_name: AutoTask
+docs_url: https://ww3.autotask.net/help/developerhelp/Content/APIs/REST/REST_API_Home.htm
+
+tools:
+  query_entity:
+    title: Query any entity
+    description: >-
+      Run a filtered query against any Autotask entity by name -- Tickets,
+      Companies, InventoryItems, whatever the catalogue holds. filter is an
+      array of {op, field, value} conditions; use [{"op":"gte","field":"id","value":0}]
+      to match everything.
+    category: entities
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/${entity}/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+        includeFields: "${include_fields}"
+    input:
+      entity:
+        type: string
+        description: Entity name as Autotask spells it, e.g. Tickets or ConfigurationItems.
+      filter:
+        type: array
+        description: Conditions of op, field and value; udf true for user-defined fields.
+        items: {type: object}
+      max_records:
+        type: integer
+        description: Records to return, up to 500 per page.
+        optional: true
+        maximum: 500
+      include_fields:
+        type: array
+        description: Field names to return; omit for the whole record.
+        optional: true
+        items: {type: string}
+    output:
+      description: The matching records, with a pageDetails block for paging.
+      type: object
+
+  search_entity:
+    title: Search any entity with a URL query
+    description: >-
+      The GET form of the entity query, taking the whole search document as one
+      JSON string. Useful when you already have a search expression to hand;
+      prefer query_entity for anything you are building up yourself.
+    category: entities
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/${entity}/query
+      query:
+        search: "${search}"
+    input:
+      entity:
+        type: string
+        description: Entity name as Autotask spells it, e.g. Tickets.
+      search:
+        type: string
+        description: Search document as JSON, e.g. {"filter":[{"op":"eq","field":"id","value":1}]}.
+    output:
+      description: The matching records, with a pageDetails block for paging.
+      type: object
+
+  count_entity:
+    title: Count matching entity records
+    description: >-
+      Count the records a filter would return, without pulling them. The same
+      filter syntax as query_entity, and the cheap way to size a result set.
+    category: entities
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/${entity}/query/count
+      body:
+        filter: "${filter}"
+    input:
+      entity:
+        type: string
+        description: Entity name as Autotask spells it, e.g. Tickets.
+      filter:
+        type: array
+        description: Conditions of op, field and value.
+        items: {type: object}
+    output:
+      description: The number of matching records, as queryCount.
+      type: object
+
+  get_entity_record:
+    title: Get any entity record by id
+    description: >-
+      Read a single record of any entity by its id, which is the cheapest read
+      in the API when you already know the id.
+    category: entities
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/${entity}/${id}
+    input:
+      entity:
+        type: string
+        description: Entity name as Autotask spells it, e.g. Tickets.
+      id:
+        type: integer
+        description: Record id.
+    output:
+      description: The record, under an item key.
+      type: object
+
+  create_entity_record:
+    title: Create any entity record
+    description: >-
+      Create a record of any entity from a field map. Call get_entity_fields
+      first to see which fields are required and which picklist values are
+      valid.
+    category: entities
+    request:
+      method: POST
+      path: /V1.0/${entity}
+      body: "${record}"
+    input:
+      entity:
+        type: string
+        description: Entity name as Autotask spells it, e.g. Tickets.
+      record:
+        type: object
+        description: Field values for the new record.
+    output:
+      description: The id of the created record.
+      type: object
+
+  update_entity_record:
+    title: Update any entity record
+    description: >-
+      Patch a record of any entity. The record object must carry the id of the
+      row to change along with the fields being set -- Autotask takes the id
+      from the body, not the path.
+    category: entities
+    request:
+      method: PATCH
+      path: /V1.0/${entity}
+      body: "${record}"
+    input:
+      entity:
+        type: string
+        description: Entity name as Autotask spells it, e.g. Tickets.
+      record:
+        type: object
+        description: Field values to change, including the record's id.
+    output:
+      description: The id of the updated record.
+      type: object
+
+  replace_entity_record:
+    title: Replace any entity record
+    description: >-
+      Replace a record of any entity wholesale. Fields you leave out are reset
+      to their defaults, so patch instead unless you really mean to.
+    category: entities
+    request:
+      method: PUT
+      path: /V1.0/${entity}
+      body: "${record}"
+    input:
+      entity:
+        type: string
+        description: Entity name as Autotask spells it, e.g. Tickets.
+      record:
+        type: object
+        description: The complete record, including its id.
+    output:
+      description: The id of the replaced record.
+      type: object
+
+  get_entity_information:
+    title: Get an entity's capabilities
+    description: >-
+      Read what the API allows on an entity -- whether it can be created,
+      updated, deleted or queried, and whether it supports user-defined fields
+      and webhooks.
+    category: entities
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/${entity}/entityInformation
+    input:
+      entity:
+        type: string
+        description: Entity name as Autotask spells it, e.g. Tickets.
+    output:
+      description: The entity's capability flags.
+      type: object
+
+  get_entity_fields:
+    title: Get an entity's field definitions
+    description: >-
+      List an entity's fields with their data types, lengths, required flags,
+      whether they are read-only, and the picklist values any picklist field
+      accepts. This is how you learn what an integer status code means.
+    category: entities
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/${entity}/entityInformation/fields
+    input:
+      entity:
+        type: string
+        description: Entity name as Autotask spells it, e.g. Tickets.
+    output:
+      description: The field definitions, with picklist values where applicable.
+      type: object
+
+  get_entity_udf_fields:
+    title: Get an entity's user-defined fields
+    description: >-
+      List the user-defined fields configured on an entity in this Autotask
+      instance, with their types and picklist values.
+    category: entities
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/${entity}/entityInformation/userDefinedFields
+    input:
+      entity:
+        type: string
+        description: Entity name as Autotask spells it, e.g. Tickets.
+    output:
+      description: The user-defined field definitions.
+      type: object
+
+  get_api_version:
+    title: Get the API version
+    description: >-
+      Read the REST API version this zone is running, which is the simplest
+      call to confirm the credentials and zone are wired up correctly.
+    category: meta
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/Version
+    output:
+      description: The API version string.
+      type: object
+
+  get_threshold_information:
+    title: Get the API request threshold
+    description: >-
+      Read how much of the hourly API request allowance this integration has
+      used. Autotask throttles per integration code, so check here when calls
+      start failing.
+    category: meta
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/ThresholdInformation
+    output:
+      description: The threshold, current usage and time frame.
+      type: object
+
+  get_zone_information:
+    title: Get a user's zone information
+    description: >-
+      Look up which Autotask zone hosts a given API user, returning the web url
+      and REST base url for it. Use it to confirm the connection's subdomain is
+      the right zone.
+    category: meta
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/ZoneInformation
+      query:
+        user: "${user}"
+    input:
+      user:
+        type: string
+        description: API user name (email address) to look the zone up for.
+    output:
+      description: The zone's name, url, web url and CI number.
+      type: object
+
+  query_tickets:
+    title: Query tickets
+    description: >-
+      Search service tickets with a filter -- by company, status, queue,
+      assigned resource, priority or create date. Status and priority are
+      integer picklist ids; get_entity_fields on Tickets maps them to labels.
+    category: tickets
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/Tickets/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+        includeFields: "${include_fields}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value, e.g. [{"op":"eq","field":"status","value":1}].
+        items: {type: object}
+      max_records:
+        type: integer
+        description: Tickets to return, up to 500 per page.
+        optional: true
+        maximum: 500
+      include_fields:
+        type: array
+        description: Field names to return; omit for the whole ticket.
+        optional: true
+        items: {type: string}
+    output:
+      description: The matching tickets, with a pageDetails block for paging.
+      type: object
+
+  count_tickets:
+    title: Count tickets
+    description: >-
+      Count the tickets a filter matches without fetching them -- the way to
+      size a queue or a backlog before pulling it.
+    category: tickets
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/Tickets/query/count
+      body:
+        filter: "${filter}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value.
+        items: {type: object}
+    output:
+      description: The number of matching tickets, as queryCount.
+      type: object
+
+  get_ticket:
+    title: Get a ticket
+    description: >-
+      Read one ticket by id, with its company, contact, status, queue,
+      assignment, SLA timestamps and description.
+    category: tickets
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/Tickets/${id}
+    input:
+      id:
+        type: integer
+        description: Ticket id.
+    output:
+      description: The ticket record.
+      type: object
+
+  create_ticket:
+    title: Create a ticket
+    description: >-
+      Open a service ticket. companyID, title, status and priority are the
+      fields Autotask insists on for most configurations; queueID or
+      assignedResourceID decides who picks it up.
+    category: tickets
+    request:
+      method: POST
+      path: /V1.0/Tickets
+      body:
+        companyID: "${company_id}"
+        title: "${title}"
+        description: "${description}"
+        status: "${status}"
+        priority: "${priority}"
+        queueID: "${queue_id}"
+        assignedResourceID: "${assigned_resource_id}"
+        assignedResourceRoleID: "${assigned_resource_role_id}"
+        contactID: "${contact_id}"
+        configurationItemID: "${configuration_item_id}"
+        contractID: "${contract_id}"
+        ticketType: "${ticket_type}"
+        ticketCategory: "${ticket_category}"
+        issueType: "${issue_type}"
+        subIssueType: "${sub_issue_type}"
+        source: "${source}"
+        dueDateTime: "${due_date_time}"
+        estimatedHours: "${estimated_hours}"
+        billingCodeID: "${billing_code_id}"
+        purchaseOrderNumber: "${purchase_order_number}"
+        externalID: "${external_id}"
+        userDefinedFields: "${user_defined_fields}"
+    input:
+      company_id:
+        type: integer
+        description: Company the ticket belongs to.
+      title:
+        type: string
+        description: Short summary of the issue.
+      description:
+        type: string
+        description: Full description of the issue.
+        optional: true
+      status:
+        type: integer
+        description: Status picklist id, e.g. 1 for New.
+      priority:
+        type: integer
+        description: Priority picklist id.
+      queue_id:
+        type: integer
+        description: Queue picklist id to route the ticket to.
+        optional: true
+      assigned_resource_id:
+        type: integer
+        description: Resource id to assign the ticket to.
+        optional: true
+      assigned_resource_role_id:
+        type: integer
+        description: Role the assigned resource works this ticket under.
+        optional: true
+      contact_id:
+        type: integer
+        description: Contact who reported the issue.
+        optional: true
+      configuration_item_id:
+        type: integer
+        description: Configuration item (asset) the ticket concerns.
+        optional: true
+      contract_id:
+        type: integer
+        description: Contract the work bills against.
+        optional: true
+      ticket_type:
+        type: integer
+        description: Ticket type picklist id, e.g. service request or incident.
+        optional: true
+      ticket_category:
+        type: integer
+        description: Ticket category id, which controls the form layout.
+        optional: true
+      issue_type:
+        type: integer
+        description: Issue type picklist id.
+        optional: true
+      sub_issue_type:
+        type: integer
+        description: Sub-issue type picklist id, valid for the chosen issue type.
+        optional: true
+      source:
+        type: integer
+        description: Source picklist id saying how the ticket arrived.
+        optional: true
+      due_date_time:
+        type: string
+        description: When the ticket is due, as an ISO 8601 timestamp.
+        optional: true
+      estimated_hours:
+        type: number
+        description: Estimated hours of work.
+        optional: true
+      billing_code_id:
+        type: integer
+        description: Work type or billing code for the ticket.
+        optional: true
+      purchase_order_number:
+        type: string
+        description: Customer purchase order number.
+        optional: true
+      external_id:
+        type: string
+        description: Your own identifier for the ticket.
+        optional: true
+      user_defined_fields:
+        type: array
+        description: Entries of name and value for user-defined fields.
+        optional: true
+        items: {type: object}
+    output:
+      description: The id of the created ticket.
+      type: object
+
+  update_ticket:
+    title: Update a ticket
+    description: >-
+      Change a ticket -- status, assignment, priority, resolution and so on.
+      The id goes in the body, and only the fields you send are touched.
+    category: tickets
+    request:
+      method: PATCH
+      path: /V1.0/Tickets
+      body:
+        id: "${id}"
+        title: "${title}"
+        description: "${description}"
+        status: "${status}"
+        priority: "${priority}"
+        queueID: "${queue_id}"
+        assignedResourceID: "${assigned_resource_id}"
+        assignedResourceRoleID: "${assigned_resource_role_id}"
+        contactID: "${contact_id}"
+        configurationItemID: "${configuration_item_id}"
+        contractID: "${contract_id}"
+        resolution: "${resolution}"
+        dueDateTime: "${due_date_time}"
+        estimatedHours: "${estimated_hours}"
+        ticketType: "${ticket_type}"
+        issueType: "${issue_type}"
+        subIssueType: "${sub_issue_type}"
+        billingCodeID: "${billing_code_id}"
+        userDefinedFields: "${user_defined_fields}"
+    input:
+      id:
+        type: integer
+        description: Ticket id to update.
+      title:
+        type: string
+        description: New summary for the ticket.
+        optional: true
+      description:
+        type: string
+        description: New description for the ticket.
+        optional: true
+      status:
+        type: integer
+        description: New status picklist id.
+        optional: true
+      priority:
+        type: integer
+        description: New priority picklist id.
+        optional: true
+      queue_id:
+        type: integer
+        description: Queue to move the ticket to.
+        optional: true
+      assigned_resource_id:
+        type: integer
+        description: Resource to assign the ticket to.
+        optional: true
+      assigned_resource_role_id:
+        type: integer
+        description: Role the assigned resource works under.
+        optional: true
+      contact_id:
+        type: integer
+        description: Contact on the ticket.
+        optional: true
+      configuration_item_id:
+        type: integer
+        description: Configuration item the ticket concerns.
+        optional: true
+      contract_id:
+        type: integer
+        description: Contract the work bills against.
+        optional: true
+      resolution:
+        type: string
+        description: Resolution text, needed by most statuses that close a ticket.
+        optional: true
+      due_date_time:
+        type: string
+        description: New due date as an ISO 8601 timestamp.
+        optional: true
+      estimated_hours:
+        type: number
+        description: New estimate of hours of work.
+        optional: true
+      ticket_type:
+        type: integer
+        description: New ticket type picklist id.
+        optional: true
+      issue_type:
+        type: integer
+        description: New issue type picklist id.
+        optional: true
+      sub_issue_type:
+        type: integer
+        description: New sub-issue type picklist id.
+        optional: true
+      billing_code_id:
+        type: integer
+        description: New work type or billing code.
+        optional: true
+      user_defined_fields:
+        type: array
+        description: Entries of name and value for user-defined fields.
+        optional: true
+        items: {type: object}
+    output:
+      description: The id of the updated ticket.
+      type: object
+
+  query_ticket_notes:
+    title: Query ticket notes
+    description: >-
+      Search notes across tickets, for instance every note on one ticket or
+      everything a resource wrote this week. publish decides who can see a
+      note.
+    category: tickets
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/TicketNotes/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value, e.g. on ticketID.
+        items: {type: object}
+      max_records:
+        type: integer
+        description: Notes to return, up to 500 per page.
+        optional: true
+        maximum: 500
+    output:
+      description: The matching ticket notes.
+      type: object
+
+  create_ticket_note:
+    title: Add a note to a ticket
+    description: >-
+      Add a note to a ticket. noteType and publish are picklist ids -- publish
+      is what controls whether the customer sees it in the client portal.
+    category: tickets
+    request:
+      method: POST
+      path: /V1.0/Tickets/${parent_id}/Notes
+      body:
+        ticketID: "${ticket_id}"
+        title: "${title}"
+        description: "${description}"
+        noteType: "${note_type}"
+        publish: "${publish}"
+    input:
+      parent_id:
+        type: integer
+        description: Ticket id the note belongs to.
+      ticket_id:
+        type: integer
+        description: Ticket id, repeated in the body as Autotask expects.
+      title:
+        type: string
+        description: Title of the note.
+      description:
+        type: string
+        description: Body text of the note.
+      note_type:
+        type: integer
+        description: Note type picklist id.
+      publish:
+        type: integer
+        description: Publish picklist id deciding who can see the note.
+    output:
+      description: The id of the created note.
+      type: object
+
+  list_ticket_charges:
+    title: List a ticket's charges
+    description: >-
+      Read the product and cost charges posted against a ticket, with unit
+      price, quantity and billing status.
+    category: tickets
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/Tickets/${parent_id}/Charges
+    input:
+      parent_id:
+        type: integer
+        description: Ticket id whose charges to list.
+    output:
+      description: The charges on the ticket.
+      type: object
+
+  create_ticket_charge:
+    title: Add a charge to a ticket
+    description: >-
+      Post a product or cost charge onto a ticket, which is how materials and
+      one-off fees reach the invoice.
+    category: tickets
+    request:
+      method: POST
+      path: /V1.0/Tickets/${parent_id}/Charges
+      body:
+        ticketID: "${ticket_id}"
+        name: "${name}"
+        description: "${description}"
+        productID: "${product_id}"
+        unitQuantity: "${unit_quantity}"
+        unitPrice: "${unit_price}"
+        unitCost: "${unit_cost}"
+        billingCodeID: "${billing_code_id}"
+        datePurchased: "${date_purchased}"
+        isBillableToCompany: "${is_billable_to_company}"
+    input:
+      parent_id:
+        type: integer
+        description: Ticket id to charge.
+      ticket_id:
+        type: integer
+        description: Ticket id, repeated in the body as Autotask expects.
+      name:
+        type: string
+        description: Name of the charge.
+      description:
+        type: string
+        description: Description of what is being charged.
+        optional: true
+      product_id:
+        type: integer
+        description: Product being charged, when it comes from the catalogue.
+        optional: true
+      unit_quantity:
+        type: number
+        description: How many units are being charged.
+        optional: true
+      unit_price:
+        type: number
+        description: Price per unit charged to the customer.
+        optional: true
+      unit_cost:
+        type: number
+        description: Your cost per unit.
+        optional: true
+      billing_code_id:
+        type: integer
+        description: Billing code the charge posts under.
+        optional: true
+      date_purchased:
+        type: string
+        description: Purchase date as an ISO 8601 timestamp.
+        optional: true
+      is_billable_to_company:
+        type: boolean
+        description: True to bill the charge to the customer.
+        optional: true
+    output:
+      description: The id of the created charge.
+      type: object
+
+  list_ticket_checklist_items:
+    title: List a ticket's checklist items
+    description: >-
+      Read the checklist on a ticket, with each item's name, position and
+      whether it is complete.
+    category: tickets
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/Tickets/${parent_id}/ChecklistItems
+    input:
+      parent_id:
+        type: integer
+        description: Ticket id whose checklist to read.
+    output:
+      description: The ticket's checklist items.
+      type: object
+
+  create_ticket_checklist_item:
+    title: Add a checklist item to a ticket
+    description: >-
+      Add one item to a ticket's checklist, optionally pointing at a knowledge
+      base article for the step.
+    category: tickets
+    request:
+      method: POST
+      path: /V1.0/Tickets/${parent_id}/ChecklistItems
+      body:
+        ticketID: "${ticket_id}"
+        itemName: "${item_name}"
+        position: "${position}"
+        isImportant: "${is_important}"
+        isCompleted: "${is_completed}"
+        knowledgebaseArticleID: "${knowledgebase_article_id}"
+    input:
+      parent_id:
+        type: integer
+        description: Ticket id to add the item to.
+      ticket_id:
+        type: integer
+        description: Ticket id, repeated in the body as Autotask expects.
+      item_name:
+        type: string
+        description: Text of the checklist item.
+      position:
+        type: integer
+        description: Where the item sits in the list.
+        optional: true
+      is_important:
+        type: boolean
+        description: True to flag the item as important.
+        optional: true
+      is_completed:
+        type: boolean
+        description: True to add the item already ticked off.
+        optional: true
+      knowledgebase_article_id:
+        type: integer
+        description: Knowledge base article that explains the step.
+        optional: true
+    output:
+      description: The id of the created checklist item.
+      type: object
+
+  list_ticket_secondary_resources:
+    title: List a ticket's secondary resources
+    description: >-
+      Read the resources helping on a ticket alongside its primary assignee,
+      each with the role they work under.
+    category: tickets
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/Tickets/${parent_id}/SecondaryResources
+    input:
+      parent_id:
+        type: integer
+        description: Ticket id whose secondary resources to list.
+    output:
+      description: The secondary resources on the ticket.
+      type: object
+
+  add_ticket_secondary_resource:
+    title: Add a secondary resource to a ticket
+    description: >-
+      Put another resource on a ticket without taking it away from its primary
+      assignee, so both can log time against it.
+    category: tickets
+    request:
+      method: POST
+      path: /V1.0/Tickets/${parent_id}/SecondaryResources
+      body:
+        ticketID: "${ticket_id}"
+        resourceID: "${resource_id}"
+        roleID: "${role_id}"
+    input:
+      parent_id:
+        type: integer
+        description: Ticket id to add the resource to.
+      ticket_id:
+        type: integer
+        description: Ticket id, repeated in the body as Autotask expects.
+      resource_id:
+        type: integer
+        description: Resource to add to the ticket.
+      role_id:
+        type: integer
+        description: Role the resource works this ticket under.
+    output:
+      description: The id of the created association.
+      type: object
+
+  list_ticket_attachments:
+    title: List a ticket's attachments
+    description: >-
+      Read the attachment records on a ticket -- file names, types, sizes and
+      who attached them. The file data itself is fetched per attachment.
+    category: tickets
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/Tickets/${parent_id}/Attachments
+    input:
+      parent_id:
+        type: integer
+        description: Ticket id whose attachments to list.
+    output:
+      description: The attachment records on the ticket.
+      type: object
+
+  get_ticket_attachment:
+    title: Get a ticket attachment
+    description: >-
+      Read one attachment on a ticket, including its base64 data when Autotask
+      stores the file inline rather than as a URL.
+    category: tickets
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/Tickets/${parent_id}/Attachments/${id}
+    input:
+      parent_id:
+        type: integer
+        description: Ticket id the attachment belongs to.
+      id:
+        type: integer
+        description: Attachment id.
+    output:
+      description: The attachment record with its data.
+      type: object
+
+  delete_ticket_attachment:
+    title: Delete a ticket attachment
+    description: >-
+      Remove an attachment from a ticket. The file is deleted along with the
+      record.
+    category: tickets
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1.0/Tickets/${parent_id}/Attachments/${id}
+    input:
+      parent_id:
+        type: integer
+        description: Ticket id the attachment belongs to.
+      id:
+        type: integer
+        description: Attachment id to delete.
+    output:
+      description: The id of the deleted attachment.
+      type: object
+
+  query_ticket_history:
+    title: Query ticket history
+    description: >-
+      Search the audit trail of field changes on tickets, which is how you see
+      who changed a status or reassigned a ticket and when.
+    category: tickets
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/TicketHistory/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value, e.g. on ticketID.
+        items: {type: object}
+      max_records:
+        type: integer
+        description: History rows to return, up to 500 per page.
+        optional: true
+        maximum: 500
+    output:
+      description: The matching history rows with their before and after values.
+      type: object
+
+  query_companies:
+    title: Query companies
+    description: >-
+      Search companies (accounts) with a filter -- by name, type, owner,
+      territory or active flag. companyType separates customers from prospects,
+      vendors and partners.
+    category: companies
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/Companies/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+        includeFields: "${include_fields}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value, e.g. on companyName or isActive.
+        items: {type: object}
+      max_records:
+        type: integer
+        description: Companies to return, up to 500 per page.
+        optional: true
+        maximum: 500
+      include_fields:
+        type: array
+        description: Field names to return; omit for the whole record.
+        optional: true
+        items: {type: string}
+    output:
+      description: The matching companies, with a pageDetails block for paging.
+      type: object
+
+  get_company:
+    title: Get a company
+    description: >-
+      Read one company by id, with its addresses, billing settings, owner,
+      territory and classification.
+    category: companies
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/Companies/${id}
+    input:
+      id:
+        type: integer
+        description: Company id.
+    output:
+      description: The company record.
+      type: object
+
+  create_company:
+    title: Create a company
+    description: >-
+      Create a company (account). companyName, companyType, ownerResourceID and
+      phone are the fields Autotask normally requires; companyType 1 is
+      Customer, 2 Lead, 3 Prospect, 4 Dead, 6 Vendor and 7 Partner.
+    category: companies
+    request:
+      method: POST
+      path: /V1.0/Companies
+      body:
+        companyName: "${company_name}"
+        companyType: "${company_type}"
+        ownerResourceID: "${owner_resource_id}"
+        phone: "${phone}"
+        fax: "${fax}"
+        webAddress: "${web_address}"
+        address1: "${address1}"
+        address2: "${address2}"
+        city: "${city}"
+        state: "${state}"
+        postalCode: "${postal_code}"
+        countryID: "${country_id}"
+        companyNumber: "${company_number}"
+        parentCompanyID: "${parent_company_id}"
+        territoryID: "${territory_id}"
+        marketSegmentID: "${market_segment_id}"
+        companyCategoryID: "${company_category_id}"
+        classification: "${classification}"
+        currencyID: "${currency_id}"
+        taxRegionID: "${tax_region_id}"
+        isTaxExempt: "${is_tax_exempt}"
+        isActive: "${is_active}"
+        userDefinedFields: "${user_defined_fields}"
+    input:
+      company_name:
+        type: string
+        description: Name of the company.
+      company_type:
+        type: integer
+        description: Company type picklist id, e.g. 1 for Customer.
+      owner_resource_id:
+        type: integer
+        description: Resource who owns the account.
+      phone:
+        type: string
+        description: Main phone number.
+      fax:
+        type: string
+        description: Fax number.
+        optional: true
+      web_address:
+        type: string
+        description: Company website URL.
+        optional: true
+      address1:
+        type: string
+        description: First line of the street address.
+        optional: true
+      address2:
+        type: string
+        description: Second line of the street address.
+        optional: true
+      city:
+        type: string
+        description: City.
+        optional: true
+      state:
+        type: string
+        description: State or province.
+        optional: true
+      postal_code:
+        type: string
+        description: Postal or ZIP code.
+        optional: true
+      country_id:
+        type: integer
+        description: Country id, from the Countries entity.
+        optional: true
+      company_number:
+        type: string
+        description: Your own account number for the company.
+        optional: true
+      parent_company_id:
+        type: integer
+        description: Parent company, for a subsidiary.
+        optional: true
+      territory_id:
+        type: integer
+        description: Territory the company belongs to.
+        optional: true
+      market_segment_id:
+        type: integer
+        description: Market segment picklist id.
+        optional: true
+      company_category_id:
+        type: integer
+        description: Company category, which controls the form layout.
+        optional: true
+      classification:
+        type: integer
+        description: Classification picklist id.
+        optional: true
+      currency_id:
+        type: integer
+        description: Currency the company is billed in.
+        optional: true
+      tax_region_id:
+        type: integer
+        description: Tax region for invoicing.
+        optional: true
+      is_tax_exempt:
+        type: boolean
+        description: True if the company pays no tax.
+        optional: true
+      is_active:
+        type: boolean
+        description: False to create the company inactive.
+        optional: true
+      user_defined_fields:
+        type: array
+        description: Entries of name and value for user-defined fields.
+        optional: true
+        items: {type: object}
+    output:
+      description: The id of the created company.
+      type: object
+
+  update_company:
+    title: Update a company
+    description: >-
+      Change a company's details -- address, owner, classification, billing
+      settings or active flag. The id goes in the body.
+    category: companies
+    request:
+      method: PATCH
+      path: /V1.0/Companies
+      body:
+        id: "${id}"
+        companyName: "${company_name}"
+        companyType: "${company_type}"
+        ownerResourceID: "${owner_resource_id}"
+        phone: "${phone}"
+        webAddress: "${web_address}"
+        address1: "${address1}"
+        address2: "${address2}"
+        city: "${city}"
+        state: "${state}"
+        postalCode: "${postal_code}"
+        countryID: "${country_id}"
+        territoryID: "${territory_id}"
+        companyCategoryID: "${company_category_id}"
+        isActive: "${is_active}"
+        userDefinedFields: "${user_defined_fields}"
+    input:
+      id:
+        type: integer
+        description: Company id to update.
+      company_name:
+        type: string
+        description: New name for the company.
+        optional: true
+      company_type:
+        type: integer
+        description: New company type picklist id.
+        optional: true
+      owner_resource_id:
+        type: integer
+        description: New account owner.
+        optional: true
+      phone:
+        type: string
+        description: New main phone number.
+        optional: true
+      web_address:
+        type: string
+        description: New website URL.
+        optional: true
+      address1:
+        type: string
+        description: New first line of the street address.
+        optional: true
+      address2:
+        type: string
+        description: New second line of the street address.
+        optional: true
+      city:
+        type: string
+        description: New city.
+        optional: true
+      state:
+        type: string
+        description: New state or province.
+        optional: true
+      postal_code:
+        type: string
+        description: New postal or ZIP code.
+        optional: true
+      country_id:
+        type: integer
+        description: New country id.
+        optional: true
+      territory_id:
+        type: integer
+        description: New territory.
+        optional: true
+      company_category_id:
+        type: integer
+        description: New company category.
+        optional: true
+      is_active:
+        type: boolean
+        description: False to deactivate the company.
+        optional: true
+      user_defined_fields:
+        type: array
+        description: Entries of name and value for user-defined fields.
+        optional: true
+        items: {type: object}
+    output:
+      description: The id of the updated company.
+      type: object
+
+  list_company_contacts:
+    title: List a company's contacts
+    description: >-
+      Read the contacts attached to one company, each with their email, phone
+      numbers and whether they are the primary contact.
+    category: companies
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/Companies/${parent_id}/Contacts
+    input:
+      parent_id:
+        type: integer
+        description: Company id whose contacts to list.
+    output:
+      description: The company's contacts.
+      type: object
+
+  list_company_locations:
+    title: List a company's locations
+    description: >-
+      Read the sites on one company, with their addresses, time zones and which
+      is the primary location.
+    category: companies
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/Companies/${parent_id}/Locations
+    input:
+      parent_id:
+        type: integer
+        description: Company id whose locations to list.
+    output:
+      description: The company's locations.
+      type: object
+
+  list_company_notes:
+    title: List a company's notes
+    description: >-
+      Read the account notes on one company, with their action type, author and
+      activity dates.
+    category: companies
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/Companies/${parent_id}/Notes
+    input:
+      parent_id:
+        type: integer
+        description: Company id whose notes to list.
+    output:
+      description: The company's notes.
+      type: object
+
+  create_company_note:
+    title: Add a note to a company
+    description: >-
+      Write an account note against a company, optionally tied to a contact or
+      opportunity and given an action type such as a call or a meeting.
+    category: companies
+    request:
+      method: POST
+      path: /V1.0/Companies/${parent_id}/Notes
+      body:
+        companyID: "${company_id}"
+        name: "${name}"
+        note: "${note}"
+        actionType: "${action_type}"
+        assignedResourceID: "${assigned_resource_id}"
+        contactID: "${contact_id}"
+        opportunityID: "${opportunity_id}"
+        startDateTime: "${start_date_time}"
+        endDateTime: "${end_date_time}"
+        completedDateTime: "${completed_date_time}"
+    input:
+      parent_id:
+        type: integer
+        description: Company id the note belongs to.
+      company_id:
+        type: integer
+        description: Company id, repeated in the body as Autotask expects.
+      name:
+        type: string
+        description: Title of the note.
+      note:
+        type: string
+        description: Body text of the note.
+      action_type:
+        type: integer
+        description: Action type picklist id, e.g. a call or a meeting.
+      assigned_resource_id:
+        type: integer
+        description: Resource the note is assigned to.
+        optional: true
+      contact_id:
+        type: integer
+        description: Contact the note concerns.
+        optional: true
+      opportunity_id:
+        type: integer
+        description: Opportunity the note concerns.
+        optional: true
+      start_date_time:
+        type: string
+        description: When the activity starts, as an ISO 8601 timestamp.
+        optional: true
+      end_date_time:
+        type: string
+        description: When the activity ends, as an ISO 8601 timestamp.
+        optional: true
+      completed_date_time:
+        type: string
+        description: When the activity was completed, as an ISO 8601 timestamp.
+        optional: true
+    output:
+      description: The id of the created note.
+      type: object
+
+  list_company_todos:
+    title: List a company's to-dos
+    description: >-
+      Read the CRM to-do activities on a company, with their assignee, action
+      type and due dates.
+    category: companies
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/Companies/${parent_id}/ToDos
+    input:
+      parent_id:
+        type: integer
+        description: Company id whose to-dos to list.
+    output:
+      description: The company's to-do activities.
+      type: object
+
+  create_company_todo:
+    title: Add a to-do to a company
+    description: >-
+      Schedule a CRM to-do against a company -- a call to make, a meeting to
+      hold -- assigned to a resource with a start and end time.
+    category: companies
+    request:
+      method: POST
+      path: /V1.0/Companies/${parent_id}/ToDos
+      body:
+        companyID: "${company_id}"
+        actionType: "${action_type}"
+        activityDescription: "${activity_description}"
+        assignedToResourceID: "${assigned_to_resource_id}"
+        startDateTime: "${start_date_time}"
+        endDateTime: "${end_date_time}"
+        contactID: "${contact_id}"
+        opportunityID: "${opportunity_id}"
+        ticketID: "${ticket_id}"
+        contractID: "${contract_id}"
+    input:
+      parent_id:
+        type: integer
+        description: Company id the to-do belongs to.
+      company_id:
+        type: integer
+        description: Company id, repeated in the body as Autotask expects.
+      action_type:
+        type: integer
+        description: Action type picklist id for the activity.
+      activity_description:
+        type: string
+        description: What needs doing.
+        optional: true
+      assigned_to_resource_id:
+        type: integer
+        description: Resource responsible for the to-do.
+      start_date_time:
+        type: string
+        description: When the activity starts, as an ISO 8601 timestamp.
+      end_date_time:
+        type: string
+        description: When the activity ends, as an ISO 8601 timestamp.
+      contact_id:
+        type: integer
+        description: Contact the activity concerns.
+        optional: true
+      opportunity_id:
+        type: integer
+        description: Opportunity the activity concerns.
+        optional: true
+      ticket_id:
+        type: integer
+        description: Ticket the activity concerns.
+        optional: true
+      contract_id:
+        type: integer
+        description: Contract the activity concerns.
+        optional: true
+    output:
+      description: The id of the created to-do.
+      type: object
+
+  list_company_alerts:
+    title: List a company's alerts
+    description: >-
+      Read the alerts configured on a company -- the banners Autotask shows
+      users who open a ticket or an opportunity for it.
+    category: companies
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/Companies/${parent_id}/Alerts
+    input:
+      parent_id:
+        type: integer
+        description: Company id whose alerts to list.
+    output:
+      description: The company's alerts and where each is displayed.
+      type: object
+
+  list_company_site_configurations:
+    title: List a company's site configuration
+    description: >-
+      Read the site configuration values recorded against a company, the
+      free-form technical detail MSPs keep about a customer's environment.
+    category: companies
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/Companies/${parent_id}/SiteConfigurations
+    input:
+      parent_id:
+        type: integer
+        description: Company id whose site configuration to read.
+    output:
+      description: The company's site configuration values.
+      type: object
+
+  query_contacts:
+    title: Query contacts
+    description: >-
+      Search contacts with a filter -- by company, email address, name or
+      active flag. isActive is an integer here rather than a boolean.
+    category: contacts
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/Contacts/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+        includeFields: "${include_fields}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value, e.g. on emailAddress.
+        items: {type: object}
+      max_records:
+        type: integer
+        description: Contacts to return, up to 500 per page.
+        optional: true
+        maximum: 500
+      include_fields:
+        type: array
+        description: Field names to return; omit for the whole record.
+        optional: true
+        items: {type: string}
+    output:
+      description: The matching contacts, with a pageDetails block for paging.
+      type: object
+
+  get_contact:
+    title: Get a contact
+    description: >-
+      Read one contact by id, with their company, email addresses, phone
+      numbers, address and opt-out flags.
+    category: contacts
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/Contacts/${id}
+    input:
+      id:
+        type: integer
+        description: Contact id.
+    output:
+      description: The contact record.
+      type: object
+
+  create_contact:
+    title: Create a contact
+    description: >-
+      Add a contact to a company. Autotask treats contacts as children of a
+      company, so the company id appears in the path as well as the body.
+    category: contacts
+    request:
+      method: POST
+      path: /V1.0/Companies/${parent_id}/Contacts
+      body:
+        companyID: "${company_id}"
+        firstName: "${first_name}"
+        lastName: "${last_name}"
+        emailAddress: "${email_address}"
+        emailAddress2: "${email_address2}"
+        title: "${title}"
+        phone: "${phone}"
+        mobilePhone: "${mobile_phone}"
+        alternatePhone: "${alternate_phone}"
+        extension: "${extension}"
+        faxNumber: "${fax_number}"
+        addressLine: "${address_line}"
+        addressLine1: "${address_line1}"
+        city: "${city}"
+        state: "${state}"
+        zipCode: "${zip_code}"
+        countryID: "${country_id}"
+        companyLocationID: "${company_location_id}"
+        primaryContact: "${primary_contact}"
+        billingContact: "${billing_contact}"
+        receivesEmailNotifications: "${receives_email_notifications}"
+        note: "${note}"
+        externalID: "${external_id}"
+        isActive: "${is_active}"
+        userDefinedFields: "${user_defined_fields}"
+    input:
+      parent_id:
+        type: integer
+        description: Company id the contact belongs to.
+      company_id:
+        type: integer
+        description: Company id, repeated in the body as Autotask expects.
+      first_name:
+        type: string
+        description: Given name.
+      last_name:
+        type: string
+        description: Family name.
+      email_address:
+        type: string
+        description: Primary email address.
+        optional: true
+      email_address2:
+        type: string
+        description: Secondary email address.
+        optional: true
+      title:
+        type: string
+        description: Job title.
+        optional: true
+      phone:
+        type: string
+        description: Main phone number.
+        optional: true
+      mobile_phone:
+        type: string
+        description: Mobile phone number.
+        optional: true
+      alternate_phone:
+        type: string
+        description: Alternate phone number.
+        optional: true
+      extension:
+        type: string
+        description: Phone extension.
+        optional: true
+      fax_number:
+        type: string
+        description: Fax number.
+        optional: true
+      address_line:
+        type: string
+        description: First line of the address.
+        optional: true
+      address_line1:
+        type: string
+        description: Second line of the address.
+        optional: true
+      city:
+        type: string
+        description: City.
+        optional: true
+      state:
+        type: string
+        description: State or province.
+        optional: true
+      zip_code:
+        type: string
+        description: Postal or ZIP code.
+        optional: true
+      country_id:
+        type: integer
+        description: Country id, from the Countries entity.
+        optional: true
+      company_location_id:
+        type: integer
+        description: Company location the contact sits at.
+        optional: true
+      primary_contact:
+        type: boolean
+        description: True to make this the company's primary contact.
+        optional: true
+      billing_contact:
+        type: boolean
+        description: True to make this the company's billing contact.
+        optional: true
+      receives_email_notifications:
+        type: boolean
+        description: True to send ticket notifications to this contact.
+        optional: true
+      note:
+        type: string
+        description: Free-text note about the contact.
+        optional: true
+      external_id:
+        type: string
+        description: Your own identifier for the contact.
+        optional: true
+      is_active:
+        type: integer
+        description: 1 for active, 0 for inactive.
+        optional: true
+      user_defined_fields:
+        type: array
+        description: Entries of name and value for user-defined fields.
+        optional: true
+        items: {type: object}
+    output:
+      description: The id of the created contact.
+      type: object
+
+  update_contact:
+    title: Update a contact
+    description: >-
+      Change a contact's details. Like creation this goes through the owning
+      company's path, and the contact's own id goes in the body.
+    category: contacts
+    request:
+      method: PATCH
+      path: /V1.0/Companies/${parent_id}/Contacts
+      body:
+        id: "${id}"
+        firstName: "${first_name}"
+        lastName: "${last_name}"
+        emailAddress: "${email_address}"
+        title: "${title}"
+        phone: "${phone}"
+        mobilePhone: "${mobile_phone}"
+        city: "${city}"
+        state: "${state}"
+        zipCode: "${zip_code}"
+        companyLocationID: "${company_location_id}"
+        primaryContact: "${primary_contact}"
+        billingContact: "${billing_contact}"
+        receivesEmailNotifications: "${receives_email_notifications}"
+        note: "${note}"
+        isActive: "${is_active}"
+        userDefinedFields: "${user_defined_fields}"
+    input:
+      parent_id:
+        type: integer
+        description: Company id the contact belongs to.
+      id:
+        type: integer
+        description: Contact id to update.
+      first_name:
+        type: string
+        description: New given name.
+        optional: true
+      last_name:
+        type: string
+        description: New family name.
+        optional: true
+      email_address:
+        type: string
+        description: New primary email address.
+        optional: true
+      title:
+        type: string
+        description: New job title.
+        optional: true
+      phone:
+        type: string
+        description: New main phone number.
+        optional: true
+      mobile_phone:
+        type: string
+        description: New mobile phone number.
+        optional: true
+      city:
+        type: string
+        description: New city.
+        optional: true
+      state:
+        type: string
+        description: New state or province.
+        optional: true
+      zip_code:
+        type: string
+        description: New postal or ZIP code.
+        optional: true
+      company_location_id:
+        type: integer
+        description: New company location for the contact.
+        optional: true
+      primary_contact:
+        type: boolean
+        description: True to make this the company's primary contact.
+        optional: true
+      billing_contact:
+        type: boolean
+        description: True to make this the company's billing contact.
+        optional: true
+      receives_email_notifications:
+        type: boolean
+        description: True to send ticket notifications to this contact.
+        optional: true
+      note:
+        type: string
+        description: New free-text note.
+        optional: true
+      is_active:
+        type: integer
+        description: 1 for active, 0 for inactive.
+        optional: true
+      user_defined_fields:
+        type: array
+        description: Entries of name and value for user-defined fields.
+        optional: true
+        items: {type: object}
+    output:
+      description: The id of the updated contact.
+      type: object
+
+  query_time_entries:
+    title: Query time entries
+    description: >-
+      Search logged time with a filter -- by resource, ticket, task, date
+      worked or billing approval state. This is the entity payroll and
+      invoicing reports are built on.
+    category: time
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/TimeEntries/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+        includeFields: "${include_fields}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value, e.g. on dateWorked or resourceID.
+        items: {type: object}
+      max_records:
+        type: integer
+        description: Entries to return, up to 500 per page.
+        optional: true
+        maximum: 500
+      include_fields:
+        type: array
+        description: Field names to return; omit for the whole record.
+        optional: true
+        items: {type: string}
+    output:
+      description: The matching time entries, with a pageDetails block for paging.
+      type: object
+
+  get_time_entry:
+    title: Get a time entry
+    description: >-
+      Read one time entry by id, with its hours, dates, notes, role and
+      billing state.
+    category: time
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/TimeEntries/${id}
+    input:
+      id:
+        type: integer
+        description: Time entry id.
+    output:
+      description: The time entry record.
+      type: object
+
+  create_time_entry:
+    title: Log a time entry
+    description: >-
+      Log worked time against a ticket or a task. Pass exactly one of ticketID
+      or taskID; dateWorked plus hoursWorked is the minimum, and billingCodeID
+      with roleID is what makes it billable correctly.
+    category: time
+    request:
+      method: POST
+      path: /V1.0/TimeEntries
+      body:
+        ticketID: "${ticket_id}"
+        taskID: "${task_id}"
+        resourceID: "${resource_id}"
+        dateWorked: "${date_worked}"
+        startDateTime: "${start_date_time}"
+        endDateTime: "${end_date_time}"
+        hoursWorked: "${hours_worked}"
+        hoursToBill: "${hours_to_bill}"
+        offsetHours: "${offset_hours}"
+        summaryNotes: "${summary_notes}"
+        internalNotes: "${internal_notes}"
+        billingCodeID: "${billing_code_id}"
+        roleID: "${role_id}"
+        contractID: "${contract_id}"
+        timeEntryType: "${time_entry_type}"
+        isNonBillable: "${is_non_billable}"
+        showOnInvoice: "${show_on_invoice}"
+    input:
+      ticket_id:
+        type: integer
+        description: Ticket the time was worked on.
+        optional: true
+      task_id:
+        type: integer
+        description: Project task the time was worked on.
+        optional: true
+      resource_id:
+        type: integer
+        description: Resource who did the work; defaults to the API user.
+        optional: true
+      date_worked:
+        type: string
+        description: Date the work happened, as an ISO 8601 timestamp.
+      start_date_time:
+        type: string
+        description: When work started, where the contract requires start and stop times.
+        optional: true
+      end_date_time:
+        type: string
+        description: When work stopped, where the contract requires start and stop times.
+        optional: true
+      hours_worked:
+        type: number
+        description: Hours actually worked.
+      hours_to_bill:
+        type: number
+        description: Hours to charge the customer, when different from hours worked.
+        optional: true
+      offset_hours:
+        type: number
+        description: Unbilled hours deducted from the entry.
+        optional: true
+      summary_notes:
+        type: string
+        description: Customer-visible notes on the work.
+        optional: true
+      internal_notes:
+        type: string
+        description: Internal-only notes on the work.
+        optional: true
+      billing_code_id:
+        type: integer
+        description: Work type the time bills under.
+        optional: true
+      role_id:
+        type: integer
+        description: Role the resource worked under, which sets the rate.
+        optional: true
+      contract_id:
+        type: integer
+        description: Contract the time bills against.
+        optional: true
+      time_entry_type:
+        type: integer
+        description: Time entry type picklist id.
+        optional: true
+      is_non_billable:
+        type: boolean
+        description: True to log the time as non-billable.
+        optional: true
+      show_on_invoice:
+        type: boolean
+        description: True to print the entry's notes on the invoice.
+        optional: true
+    output:
+      description: The id of the created time entry.
+      type: object
+
+  update_time_entry:
+    title: Update a time entry
+    description: >-
+      Change logged time -- hours, notes, billing code or role. The id goes in
+      the body, and entries already approved and posted are locked.
+    category: time
+    request:
+      method: PATCH
+      path: /V1.0/TimeEntries
+      body:
+        id: "${id}"
+        dateWorked: "${date_worked}"
+        startDateTime: "${start_date_time}"
+        endDateTime: "${end_date_time}"
+        hoursWorked: "${hours_worked}"
+        hoursToBill: "${hours_to_bill}"
+        summaryNotes: "${summary_notes}"
+        internalNotes: "${internal_notes}"
+        billingCodeID: "${billing_code_id}"
+        roleID: "${role_id}"
+        isNonBillable: "${is_non_billable}"
+        showOnInvoice: "${show_on_invoice}"
+    input:
+      id:
+        type: integer
+        description: Time entry id to update.
+      date_worked:
+        type: string
+        description: New date worked, as an ISO 8601 timestamp.
+        optional: true
+      start_date_time:
+        type: string
+        description: New start time.
+        optional: true
+      end_date_time:
+        type: string
+        description: New end time.
+        optional: true
+      hours_worked:
+        type: number
+        description: New hours worked.
+        optional: true
+      hours_to_bill:
+        type: number
+        description: New hours to bill.
+        optional: true
+      summary_notes:
+        type: string
+        description: New customer-visible notes.
+        optional: true
+      internal_notes:
+        type: string
+        description: New internal-only notes.
+        optional: true
+      billing_code_id:
+        type: integer
+        description: New work type for the entry.
+        optional: true
+      role_id:
+        type: integer
+        description: New role for the entry.
+        optional: true
+      is_non_billable:
+        type: boolean
+        description: True to make the time non-billable.
+        optional: true
+      show_on_invoice:
+        type: boolean
+        description: True to print the notes on the invoice.
+        optional: true
+    output:
+      description: The id of the updated time entry.
+      type: object
+
+  delete_time_entry:
+    title: Delete a time entry
+    description: >-
+      Delete a logged time entry. Entries that have already been approved and
+      posted cannot be removed this way.
+    category: time
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1.0/TimeEntries/${id}
+    input:
+      id:
+        type: integer
+        description: Time entry id to delete.
+    output:
+      description: The id of the deleted time entry.
+      type: object
+
+  query_projects:
+    title: Query projects
+    description: >-
+      Search projects with a filter -- by company, status, project lead or
+      dates -- with their budgets, estimates and completion percentage.
+    category: projects
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/Projects/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+        includeFields: "${include_fields}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value, e.g. on companyID or status.
+        items: {type: object}
+      max_records:
+        type: integer
+        description: Projects to return, up to 500 per page.
+        optional: true
+        maximum: 500
+      include_fields:
+        type: array
+        description: Field names to return; omit for the whole record.
+        optional: true
+        items: {type: string}
+    output:
+      description: The matching projects, with a pageDetails block for paging.
+      type: object
+
+  get_project:
+    title: Get a project
+    description: >-
+      Read one project by id, with its dates, status, budget figures and
+      actual hours to date.
+    category: projects
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/Projects/${id}
+    input:
+      id:
+        type: integer
+        description: Project id.
+    output:
+      description: The project record.
+      type: object
+
+  create_project:
+    title: Create a project
+    description: >-
+      Create a project for a company. projectName, companyID, type, status and
+      the start and end dates are the fields Autotask requires; contractID ties
+      the work to a contract for billing.
+    category: projects
+    request:
+      method: POST
+      path: /V1.0/Projects
+      body:
+        projectName: "${project_name}"
+        companyID: "${company_id}"
+        projectType: "${project_type}"
+        status: "${status}"
+        startDateTime: "${start_date_time}"
+        endDateTime: "${end_date_time}"
+        description: "${description}"
+        projectLeadResourceID: "${project_lead_resource_id}"
+        contractID: "${contract_id}"
+        department: "${department}"
+        estimatedTime: "${estimated_time}"
+        projectCostsBudget: "${project_costs_budget}"
+        laborEstimatedRevenue: "${labor_estimated_revenue}"
+        purchaseOrderNumber: "${purchase_order_number}"
+        extProjectNumber: "${ext_project_number}"
+        userDefinedFields: "${user_defined_fields}"
+    input:
+      project_name:
+        type: string
+        description: Name of the project.
+      company_id:
+        type: integer
+        description: Company the project is for.
+      project_type:
+        type: integer
+        description: Project type picklist id.
+      status:
+        type: integer
+        description: Project status picklist id.
+      start_date_time:
+        type: string
+        description: Planned start, as an ISO 8601 timestamp.
+      end_date_time:
+        type: string
+        description: Planned end, as an ISO 8601 timestamp.
+      description:
+        type: string
+        description: What the project covers.
+        optional: true
+      project_lead_resource_id:
+        type: integer
+        description: Resource leading the project.
+        optional: true
+      contract_id:
+        type: integer
+        description: Contract the project bills against.
+        optional: true
+      department:
+        type: integer
+        description: Department picklist id owning the project.
+        optional: true
+      estimated_time:
+        type: number
+        description: Estimated hours for the whole project.
+        optional: true
+      project_costs_budget:
+        type: number
+        description: Budget for project costs.
+        optional: true
+      labor_estimated_revenue:
+        type: number
+        description: Estimated labour revenue.
+        optional: true
+      purchase_order_number:
+        type: string
+        description: Customer purchase order number.
+        optional: true
+      ext_project_number:
+        type: string
+        description: Your own project number.
+        optional: true
+      user_defined_fields:
+        type: array
+        description: Entries of name and value for user-defined fields.
+        optional: true
+        items: {type: object}
+    output:
+      description: The id of the created project.
+      type: object
+
+  update_project:
+    title: Update a project
+    description: >-
+      Change a project's status, dates, lead or budget figures. The id goes in
+      the body.
+    category: projects
+    request:
+      method: PATCH
+      path: /V1.0/Projects
+      body:
+        id: "${id}"
+        projectName: "${project_name}"
+        status: "${status}"
+        startDateTime: "${start_date_time}"
+        endDateTime: "${end_date_time}"
+        description: "${description}"
+        projectLeadResourceID: "${project_lead_resource_id}"
+        contractID: "${contract_id}"
+        completedPercentage: "${completed_percentage}"
+        completedDateTime: "${completed_date_time}"
+        statusDetail: "${status_detail}"
+        estimatedTime: "${estimated_time}"
+        userDefinedFields: "${user_defined_fields}"
+    input:
+      id:
+        type: integer
+        description: Project id to update.
+      project_name:
+        type: string
+        description: New name for the project.
+        optional: true
+      status:
+        type: integer
+        description: New status picklist id.
+        optional: true
+      start_date_time:
+        type: string
+        description: New planned start.
+        optional: true
+      end_date_time:
+        type: string
+        description: New planned end.
+        optional: true
+      description:
+        type: string
+        description: New description.
+        optional: true
+      project_lead_resource_id:
+        type: integer
+        description: New project lead.
+        optional: true
+      contract_id:
+        type: integer
+        description: New contract to bill against.
+        optional: true
+      completed_percentage:
+        type: integer
+        description: Percentage of the project complete.
+        optional: true
+      completed_date_time:
+        type: string
+        description: When the project completed, as an ISO 8601 timestamp.
+        optional: true
+      status_detail:
+        type: string
+        description: Narrative status update.
+        optional: true
+      estimated_time:
+        type: number
+        description: New hours estimate.
+        optional: true
+      user_defined_fields:
+        type: array
+        description: Entries of name and value for user-defined fields.
+        optional: true
+        items: {type: object}
+    output:
+      description: The id of the updated project.
+      type: object
+
+  list_project_phases:
+    title: List a project's phases
+    description: >-
+      Read the phases of one project, which is the structure its tasks hang
+      off.
+    category: projects
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/Projects/${parent_id}/Phases
+    input:
+      parent_id:
+        type: integer
+        description: Project id whose phases to list.
+    output:
+      description: The project's phases.
+      type: object
+
+  create_project_phase:
+    title: Add a phase to a project
+    description: >-
+      Create a phase inside a project, optionally nested under another phase,
+      to group the tasks that belong together.
+    category: projects
+    request:
+      method: POST
+      path: /V1.0/Projects/${parent_id}/Phases
+      body:
+        projectID: "${project_id}"
+        title: "${title}"
+        description: "${description}"
+        startDate: "${start_date}"
+        dueDate: "${due_date}"
+        parentPhaseID: "${parent_phase_id}"
+        externalID: "${external_id}"
+        isScheduled: "${is_scheduled}"
+    input:
+      parent_id:
+        type: integer
+        description: Project id the phase belongs to.
+      project_id:
+        type: integer
+        description: Project id, repeated in the body as Autotask expects.
+      title:
+        type: string
+        description: Name of the phase.
+      description:
+        type: string
+        description: What the phase covers.
+        optional: true
+      start_date:
+        type: string
+        description: Phase start, as an ISO 8601 timestamp.
+        optional: true
+      due_date:
+        type: string
+        description: Phase due date, as an ISO 8601 timestamp.
+        optional: true
+      parent_phase_id:
+        type: integer
+        description: Phase this one nests under.
+        optional: true
+      external_id:
+        type: string
+        description: Your own identifier for the phase.
+        optional: true
+      is_scheduled:
+        type: boolean
+        description: True if the phase is scheduled rather than a container.
+        optional: true
+    output:
+      description: The id of the created phase.
+      type: object
+
+  query_tasks:
+    title: Query project tasks
+    description: >-
+      Search project tasks with a filter -- by project, phase, assigned
+      resource, status or dates -- with their estimated and remaining hours.
+    category: projects
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/Tasks/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+        includeFields: "${include_fields}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value, e.g. on projectID.
+        items: {type: object}
+      max_records:
+        type: integer
+        description: Tasks to return, up to 500 per page.
+        optional: true
+        maximum: 500
+      include_fields:
+        type: array
+        description: Field names to return; omit for the whole record.
+        optional: true
+        items: {type: string}
+    output:
+      description: The matching tasks, with a pageDetails block for paging.
+      type: object
+
+  get_task:
+    title: Get a project task
+    description: >-
+      Read one project task by id, with its phase, assignment, status, dates
+      and hours.
+    category: projects
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/Tasks/${id}
+    input:
+      id:
+        type: integer
+        description: Task id.
+    output:
+      description: The task record.
+      type: object
+
+  create_task:
+    title: Create a project task
+    description: >-
+      Add a task to a project. Autotask treats tasks as children of a project,
+      so the project id appears in the path as well as the body.
+    category: projects
+    request:
+      method: POST
+      path: /V1.0/Projects/${parent_id}/Tasks
+      body:
+        projectID: "${project_id}"
+        title: "${title}"
+        description: "${description}"
+        status: "${status}"
+        phaseID: "${phase_id}"
+        assignedResourceID: "${assigned_resource_id}"
+        assignedResourceRoleID: "${assigned_resource_role_id}"
+        startDateTime: "${start_date_time}"
+        endDateTime: "${end_date_time}"
+        estimatedHours: "${estimated_hours}"
+        remainingHours: "${remaining_hours}"
+        priority: "${priority}"
+        taskType: "${task_type}"
+        taskCategoryID: "${task_category_id}"
+        billingCodeID: "${billing_code_id}"
+        departmentID: "${department_id}"
+        isVisibleInClientPortal: "${is_visible_in_client_portal}"
+        isTaskBillable: "${is_task_billable}"
+        externalID: "${external_id}"
+        userDefinedFields: "${user_defined_fields}"
+    input:
+      parent_id:
+        type: integer
+        description: Project id the task belongs to.
+      project_id:
+        type: integer
+        description: Project id, repeated in the body as Autotask expects.
+      title:
+        type: string
+        description: Name of the task.
+      description:
+        type: string
+        description: What the task involves.
+        optional: true
+      status:
+        type: integer
+        description: Task status picklist id.
+      phase_id:
+        type: integer
+        description: Phase the task sits in.
+        optional: true
+      assigned_resource_id:
+        type: integer
+        description: Resource the task is assigned to.
+        optional: true
+      assigned_resource_role_id:
+        type: integer
+        description: Role the assigned resource works under.
+        optional: true
+      start_date_time:
+        type: string
+        description: Planned start, as an ISO 8601 timestamp.
+        optional: true
+      end_date_time:
+        type: string
+        description: Planned end, as an ISO 8601 timestamp.
+        optional: true
+      estimated_hours:
+        type: number
+        description: Estimated hours of work.
+        optional: true
+      remaining_hours:
+        type: number
+        description: Hours still to do.
+        optional: true
+      priority:
+        type: integer
+        description: Priority number for the task.
+        optional: true
+      task_type:
+        type: integer
+        description: Task type picklist id.
+        optional: true
+      task_category_id:
+        type: integer
+        description: Task category, which controls the form layout.
+        optional: true
+      billing_code_id:
+        type: integer
+        description: Work type the task bills under.
+        optional: true
+      department_id:
+        type: integer
+        description: Department responsible for the task.
+        optional: true
+      is_visible_in_client_portal:
+        type: boolean
+        description: True to show the task to the customer.
+        optional: true
+      is_task_billable:
+        type: boolean
+        description: True if work on the task is billable.
+        optional: true
+      external_id:
+        type: string
+        description: Your own identifier for the task.
+        optional: true
+      user_defined_fields:
+        type: array
+        description: Entries of name and value for user-defined fields.
+        optional: true
+        items: {type: object}
+    output:
+      description: The id of the created task.
+      type: object
+
+  update_task:
+    title: Update a project task
+    description: >-
+      Change a task's status, assignment, dates or hours. Like creation this
+      goes through the project path, with the task's id in the body.
+    category: projects
+    request:
+      method: PATCH
+      path: /V1.0/Projects/${parent_id}/Tasks
+      body:
+        id: "${id}"
+        title: "${title}"
+        description: "${description}"
+        status: "${status}"
+        phaseID: "${phase_id}"
+        assignedResourceID: "${assigned_resource_id}"
+        assignedResourceRoleID: "${assigned_resource_role_id}"
+        startDateTime: "${start_date_time}"
+        endDateTime: "${end_date_time}"
+        estimatedHours: "${estimated_hours}"
+        remainingHours: "${remaining_hours}"
+        priority: "${priority}"
+        completedDateTime: "${completed_date_time}"
+        userDefinedFields: "${user_defined_fields}"
+    input:
+      parent_id:
+        type: integer
+        description: Project id the task belongs to.
+      id:
+        type: integer
+        description: Task id to update.
+      title:
+        type: string
+        description: New name for the task.
+        optional: true
+      description:
+        type: string
+        description: New description.
+        optional: true
+      status:
+        type: integer
+        description: New status picklist id.
+        optional: true
+      phase_id:
+        type: integer
+        description: Phase to move the task to.
+        optional: true
+      assigned_resource_id:
+        type: integer
+        description: Resource to assign the task to.
+        optional: true
+      assigned_resource_role_id:
+        type: integer
+        description: Role the assigned resource works under.
+        optional: true
+      start_date_time:
+        type: string
+        description: New planned start.
+        optional: true
+      end_date_time:
+        type: string
+        description: New planned end.
+        optional: true
+      estimated_hours:
+        type: number
+        description: New estimate of hours.
+        optional: true
+      remaining_hours:
+        type: number
+        description: New remaining hours.
+        optional: true
+      priority:
+        type: integer
+        description: New priority number.
+        optional: true
+      completed_date_time:
+        type: string
+        description: When the task completed, as an ISO 8601 timestamp.
+        optional: true
+      user_defined_fields:
+        type: array
+        description: Entries of name and value for user-defined fields.
+        optional: true
+        items: {type: object}
+    output:
+      description: The id of the updated task.
+      type: object
+
+  list_project_notes:
+    title: List a project's notes
+    description: >-
+      Read the notes on one project, with their author, type and publish
+      setting.
+    category: projects
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/Projects/${parent_id}/Notes
+    input:
+      parent_id:
+        type: integer
+        description: Project id whose notes to list.
+    output:
+      description: The project's notes.
+      type: object
+
+  create_project_note:
+    title: Add a note to a project
+    description: >-
+      Write a note against a project. publish controls whether the customer
+      sees it in the client portal.
+    category: projects
+    request:
+      method: POST
+      path: /V1.0/Projects/${parent_id}/Notes
+      body:
+        projectID: "${project_id}"
+        title: "${title}"
+        description: "${description}"
+        noteType: "${note_type}"
+        publish: "${publish}"
+    input:
+      parent_id:
+        type: integer
+        description: Project id the note belongs to.
+      project_id:
+        type: integer
+        description: Project id, repeated in the body as Autotask expects.
+      title:
+        type: string
+        description: Title of the note.
+      description:
+        type: string
+        description: Body text of the note.
+      note_type:
+        type: integer
+        description: Note type picklist id.
+      publish:
+        type: integer
+        description: Publish picklist id deciding who can see the note.
+    output:
+      description: The id of the created note.
+      type: object
+
+  query_contracts:
+    title: Query contracts
+    description: >-
+      Search contracts with a filter -- by company, type, status or dates. The
+      contract type decides how work bills: block hours, retainer, recurring
+      service, fixed price or time and materials.
+    category: contracts
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/Contracts/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+        includeFields: "${include_fields}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value, e.g. on companyID or status.
+        items: {type: object}
+      max_records:
+        type: integer
+        description: Contracts to return, up to 500 per page.
+        optional: true
+        maximum: 500
+      include_fields:
+        type: array
+        description: Field names to return; omit for the whole record.
+        optional: true
+        items: {type: string}
+    output:
+      description: The matching contracts, with a pageDetails block for paging.
+      type: object
+
+  get_contract:
+    title: Get a contract
+    description: >-
+      Read one contract by id, with its type, period, dates, billing
+      preference and estimated values.
+    category: contracts
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/Contracts/${id}
+    input:
+      id:
+        type: integer
+        description: Contract id.
+    output:
+      description: The contract record.
+      type: object
+
+  create_contract:
+    title: Create a contract
+    description: >-
+      Create a contract for a company. contractName, companyID, contractType,
+      startDate and endDate are required; contractPeriodType matters for
+      recurring service contracts.
+    category: contracts
+    request:
+      method: POST
+      path: /V1.0/Contracts
+      body:
+        contractName: "${contract_name}"
+        companyID: "${company_id}"
+        contractType: "${contract_type}"
+        startDate: "${start_date}"
+        endDate: "${end_date}"
+        status: "${status}"
+        description: "${description}"
+        contractCategory: "${contract_category}"
+        contractPeriodType: "${contract_period_type}"
+        billingPreference: "${billing_preference}"
+        contactID: "${contact_id}"
+        billToCompanyID: "${bill_to_company_id}"
+        billToCompanyContactID: "${bill_to_company_contact_id}"
+        estimatedHours: "${estimated_hours}"
+        estimatedRevenue: "${estimated_revenue}"
+        estimatedCost: "${estimated_cost}"
+        setupFee: "${setup_fee}"
+        overageBillingRate: "${overage_billing_rate}"
+        serviceLevelAgreementID: "${service_level_agreement_id}"
+        contractNumber: "${contract_number}"
+        purchaseOrderNumber: "${purchase_order_number}"
+        isDefaultContract: "${is_default_contract}"
+        userDefinedFields: "${user_defined_fields}"
+    input:
+      contract_name:
+        type: string
+        description: Name of the contract.
+      company_id:
+        type: integer
+        description: Company the contract is with.
+      contract_type:
+        type: integer
+        description: Contract type picklist id, e.g. block hours or recurring service.
+      start_date:
+        type: string
+        description: Contract start, as an ISO 8601 timestamp.
+      end_date:
+        type: string
+        description: Contract end, as an ISO 8601 timestamp.
+      status:
+        type: integer
+        description: Contract status picklist id.
+        optional: true
+      description:
+        type: string
+        description: What the contract covers.
+        optional: true
+      contract_category:
+        type: integer
+        description: Contract category picklist id.
+        optional: true
+      contract_period_type:
+        type: integer
+        description: Billing period for a recurring service contract.
+        optional: true
+      billing_preference:
+        type: integer
+        description: How work on the contract is billed.
+        optional: true
+      contact_id:
+        type: integer
+        description: Contact who owns the contract at the customer.
+        optional: true
+      bill_to_company_id:
+        type: integer
+        description: Company to invoice, when it differs from the contract company.
+        optional: true
+      bill_to_company_contact_id:
+        type: integer
+        description: Billing contact at the company being invoiced.
+        optional: true
+      estimated_hours:
+        type: number
+        description: Estimated hours over the contract's life.
+        optional: true
+      estimated_revenue:
+        type: number
+        description: Estimated revenue from the contract.
+        optional: true
+      estimated_cost:
+        type: number
+        description: Estimated cost of delivering the contract.
+        optional: true
+      setup_fee:
+        type: number
+        description: One-off setup fee.
+        optional: true
+      overage_billing_rate:
+        type: number
+        description: Hourly rate charged once the contract is exhausted.
+        optional: true
+      service_level_agreement_id:
+        type: integer
+        description: SLA that applies to work under the contract.
+        optional: true
+      contract_number:
+        type: string
+        description: Your own contract number.
+        optional: true
+      purchase_order_number:
+        type: string
+        description: Customer purchase order number.
+        optional: true
+      is_default_contract:
+        type: boolean
+        description: True to make this the company's default contract.
+        optional: true
+      user_defined_fields:
+        type: array
+        description: Entries of name and value for user-defined fields.
+        optional: true
+        items: {type: object}
+    output:
+      description: The id of the created contract.
+      type: object
+
+  update_contract:
+    title: Update a contract
+    description: >-
+      Change a contract's dates, status, estimates or billing settings. The id
+      goes in the body.
+    category: contracts
+    request:
+      method: PATCH
+      path: /V1.0/Contracts
+      body:
+        id: "${id}"
+        contractName: "${contract_name}"
+        status: "${status}"
+        startDate: "${start_date}"
+        endDate: "${end_date}"
+        description: "${description}"
+        estimatedHours: "${estimated_hours}"
+        estimatedRevenue: "${estimated_revenue}"
+        overageBillingRate: "${overage_billing_rate}"
+        serviceLevelAgreementID: "${service_level_agreement_id}"
+        purchaseOrderNumber: "${purchase_order_number}"
+        userDefinedFields: "${user_defined_fields}"
+    input:
+      id:
+        type: integer
+        description: Contract id to update.
+      contract_name:
+        type: string
+        description: New name for the contract.
+        optional: true
+      status:
+        type: integer
+        description: New status picklist id.
+        optional: true
+      start_date:
+        type: string
+        description: New start date.
+        optional: true
+      end_date:
+        type: string
+        description: New end date.
+        optional: true
+      description:
+        type: string
+        description: New description.
+        optional: true
+      estimated_hours:
+        type: number
+        description: New hours estimate.
+        optional: true
+      estimated_revenue:
+        type: number
+        description: New revenue estimate.
+        optional: true
+      overage_billing_rate:
+        type: number
+        description: New overage hourly rate.
+        optional: true
+      service_level_agreement_id:
+        type: integer
+        description: New SLA for the contract.
+        optional: true
+      purchase_order_number:
+        type: string
+        description: New customer purchase order number.
+        optional: true
+      user_defined_fields:
+        type: array
+        description: Entries of name and value for user-defined fields.
+        optional: true
+        items: {type: object}
+    output:
+      description: The id of the updated contract.
+      type: object
+
+  list_contract_services:
+    title: List a contract's services
+    description: >-
+      Read the recurring services attached to a contract, with the adjusted
+      unit price and cost each carries.
+    category: contracts
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/Contracts/${parent_id}/Services
+    input:
+      parent_id:
+        type: integer
+        description: Contract id whose services to list.
+    output:
+      description: The services on the contract.
+      type: object
+
+  add_contract_service:
+    title: Add a service to a contract
+    description: >-
+      Attach a catalogue service to a recurring service contract, overriding
+      its unit price or cost for this customer if you need to.
+    category: contracts
+    request:
+      method: POST
+      path: /V1.0/Contracts/${parent_id}/Services
+      body:
+        contractID: "${contract_id}"
+        serviceID: "${service_id}"
+        unitPrice: "${unit_price}"
+        unitCost: "${unit_cost}"
+        invoiceDescription: "${invoice_description}"
+        internalDescription: "${internal_description}"
+        quoteItemID: "${quote_item_id}"
+    input:
+      parent_id:
+        type: integer
+        description: Contract id to add the service to.
+      contract_id:
+        type: integer
+        description: Contract id, repeated in the body as Autotask expects.
+      service_id:
+        type: integer
+        description: Catalogue service to attach.
+      unit_price:
+        type: number
+        description: Price per unit for this contract.
+        optional: true
+      unit_cost:
+        type: number
+        description: Cost per unit for this contract.
+        optional: true
+      invoice_description:
+        type: string
+        description: Text shown for the service on invoices.
+        optional: true
+      internal_description:
+        type: string
+        description: Internal-only description of the service line.
+        optional: true
+      quote_item_id:
+        type: integer
+        description: Quote item the service came from.
+        optional: true
+    output:
+      description: The id of the created contract service.
+      type: object
+
+  list_contract_blocks:
+    title: List a contract's hour blocks
+    description: >-
+      Read the purchased hour blocks on a block-hours contract, with hours
+      bought, hours approved, rate and payment status.
+    category: contracts
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/Contracts/${parent_id}/Blocks
+    input:
+      parent_id:
+        type: integer
+        description: Contract id whose blocks to list.
+    output:
+      description: The hour blocks on the contract.
+      type: object
+
+  add_contract_block:
+    title: Add an hour block to a contract
+    description: >-
+      Sell a block of hours against a block-hours contract, with the rate and
+      the period the hours are valid for.
+    category: contracts
+    request:
+      method: POST
+      path: /V1.0/Contracts/${parent_id}/Blocks
+      body:
+        contractID: "${contract_id}"
+        hours: "${hours}"
+        hourlyRate: "${hourly_rate}"
+        startDate: "${start_date}"
+        endDate: "${end_date}"
+        status: "${status}"
+        datePurchased: "${date_purchased}"
+        paymentType: "${payment_type}"
+        paymentNumber: "${payment_number}"
+        invoiceNumber: "${invoice_number}"
+        isPaid: "${is_paid}"
+    input:
+      parent_id:
+        type: integer
+        description: Contract id to add the block to.
+      contract_id:
+        type: integer
+        description: Contract id, repeated in the body as Autotask expects.
+      hours:
+        type: number
+        description: Hours purchased in the block.
+      hourly_rate:
+        type: number
+        description: Rate charged per hour in the block.
+      start_date:
+        type: string
+        description: When the block becomes usable, as an ISO 8601 timestamp.
+      end_date:
+        type: string
+        description: When the block expires, as an ISO 8601 timestamp.
+      status:
+        type: integer
+        description: Block status picklist id.
+        optional: true
+      date_purchased:
+        type: string
+        description: Purchase date, as an ISO 8601 timestamp.
+        optional: true
+      payment_type:
+        type: integer
+        description: Payment type picklist id.
+        optional: true
+      payment_number:
+        type: string
+        description: Cheque or transaction number for the payment.
+        optional: true
+      invoice_number:
+        type: string
+        description: Invoice number the block was billed on.
+        optional: true
+      is_paid:
+        type: boolean
+        description: True if the block has been paid for.
+        optional: true
+    output:
+      description: The id of the created block.
+      type: object
+
+  list_contract_rates:
+    title: List a contract's role rates
+    description: >-
+      Read the per-role hourly rates set on a contract, which is what overrides
+      the standard role rate for this customer.
+    category: contracts
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/Contracts/${parent_id}/Rates
+    input:
+      parent_id:
+        type: integer
+        description: Contract id whose rates to list.
+    output:
+      description: The contract's per-role rates.
+      type: object
+
+  add_contract_rate:
+    title: Set a role rate on a contract
+    description: >-
+      Set the hourly rate a role bills at under one contract, overriding the
+      role's default rate.
+    category: contracts
+    request:
+      method: POST
+      path: /V1.0/Contracts/${parent_id}/Rates
+      body:
+        contractID: "${contract_id}"
+        roleID: "${role_id}"
+        contractHourlyRate: "${contract_hourly_rate}"
+    input:
+      parent_id:
+        type: integer
+        description: Contract id to set the rate on.
+      contract_id:
+        type: integer
+        description: Contract id, repeated in the body as Autotask expects.
+      role_id:
+        type: integer
+        description: Role the rate applies to.
+      contract_hourly_rate:
+        type: number
+        description: Hourly rate for that role on this contract.
+    output:
+      description: The id of the created contract rate.
+      type: object
+
+  list_contract_notes:
+    title: List a contract's notes
+    description: >-
+      Read the notes recorded against a contract, with their titles, authors
+      and activity dates.
+    category: contracts
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/Contracts/${parent_id}/Notes
+    input:
+      parent_id:
+        type: integer
+        description: Contract id whose notes to list.
+    output:
+      description: The contract's notes.
+      type: object
+
+  create_contract_note:
+    title: Add a note to a contract
+    description: >-
+      Write a note against a contract, for recording renewal conversations and
+      scope decisions where they will be found again.
+    category: contracts
+    request:
+      method: POST
+      path: /V1.0/Contracts/${parent_id}/Notes
+      body:
+        contractID: "${contract_id}"
+        title: "${title}"
+        description: "${description}"
+    input:
+      parent_id:
+        type: integer
+        description: Contract id the note belongs to.
+      contract_id:
+        type: integer
+        description: Contract id, repeated in the body as Autotask expects.
+      title:
+        type: string
+        description: Title of the note.
+      description:
+        type: string
+        description: Body text of the note.
+    output:
+      description: The id of the created note.
+      type: object
+
+  query_configuration_items:
+    title: Query configuration items
+    description: >-
+      Search configuration items (installed products) with a filter -- by
+      company, product, type, serial number or RMM device fields. This is the
+      asset inventory.
+    category: assets
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/ConfigurationItems/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+        includeFields: "${include_fields}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value, e.g. on companyID or serialNumber.
+        items: {type: object}
+      max_records:
+        type: integer
+        description: Items to return, up to 500 per page.
+        optional: true
+        maximum: 500
+      include_fields:
+        type: array
+        description: Field names to return; omit for the whole record, which is large.
+        optional: true
+        items: {type: string}
+    output:
+      description: The matching configuration items, with a pageDetails block.
+      type: object
+
+  get_configuration_item:
+    title: Get a configuration item
+    description: >-
+      Read one configuration item by id, with its product, company, contract,
+      warranty dates and any RMM or Datto audit fields.
+    category: assets
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/ConfigurationItems/${id}
+    input:
+      id:
+        type: integer
+        description: Configuration item id.
+    output:
+      description: The configuration item record.
+      type: object
+
+  create_configuration_item:
+    title: Create a configuration item
+    description: >-
+      Register an asset against a company. companyID, configurationItemType and
+      productID are the usual requirements; serialNumber and referenceTitle are
+      what make it findable later.
+    category: assets
+    request:
+      method: POST
+      path: /V1.0/ConfigurationItems
+      body:
+        companyID: "${company_id}"
+        configurationItemType: "${configuration_item_type}"
+        productID: "${product_id}"
+        referenceTitle: "${reference_title}"
+        referenceNumber: "${reference_number}"
+        serialNumber: "${serial_number}"
+        location: "${location}"
+        notes: "${notes}"
+        contactID: "${contact_id}"
+        contractID: "${contract_id}"
+        companyLocationID: "${company_location_id}"
+        configurationItemCategoryID: "${configuration_item_category_id}"
+        parentConfigurationItemID: "${parent_configuration_item_id}"
+        installDate: "${install_date}"
+        warrantyExpirationDate: "${warranty_expiration_date}"
+        numberOfUsers: "${number_of_users}"
+        dailyCost: "${daily_cost}"
+        monthlyCost: "${monthly_cost}"
+        hourlyCost: "${hourly_cost}"
+        perUseCost: "${per_use_cost}"
+        setupFee: "${setup_fee}"
+        vendorID: "${vendor_id}"
+        isActive: "${is_active}"
+        userDefinedFields: "${user_defined_fields}"
+    input:
+      company_id:
+        type: integer
+        description: Company the asset belongs to.
+      configuration_item_type:
+        type: integer
+        description: Configuration item type picklist id.
+      product_id:
+        type: integer
+        description: Catalogue product the asset is an instance of.
+        optional: true
+      reference_title:
+        type: string
+        description: Friendly name for the asset.
+        optional: true
+      reference_number:
+        type: string
+        description: Your own reference number for the asset.
+        optional: true
+      serial_number:
+        type: string
+        description: Serial number of the device.
+        optional: true
+      location:
+        type: string
+        description: Where the asset physically is.
+        optional: true
+      notes:
+        type: string
+        description: Free-text notes about the asset.
+        optional: true
+      contact_id:
+        type: integer
+        description: Contact who uses the asset.
+        optional: true
+      contract_id:
+        type: integer
+        description: Contract that covers the asset.
+        optional: true
+      company_location_id:
+        type: integer
+        description: Company location the asset sits at.
+        optional: true
+      configuration_item_category_id:
+        type: integer
+        description: Category, which controls the form layout.
+        optional: true
+      parent_configuration_item_id:
+        type: integer
+        description: Parent asset, for a component of another item.
+        optional: true
+      install_date:
+        type: string
+        description: Install date, as an ISO 8601 timestamp.
+        optional: true
+      warranty_expiration_date:
+        type: string
+        description: Warranty expiry, as an ISO 8601 timestamp.
+        optional: true
+      number_of_users:
+        type: number
+        description: How many users the asset serves.
+        optional: true
+      daily_cost:
+        type: number
+        description: Daily cost of the asset.
+        optional: true
+      monthly_cost:
+        type: number
+        description: Monthly cost of the asset.
+        optional: true
+      hourly_cost:
+        type: number
+        description: Hourly cost of the asset.
+        optional: true
+      per_use_cost:
+        type: number
+        description: Per-use cost of the asset.
+        optional: true
+      setup_fee:
+        type: number
+        description: One-off setup fee for the asset.
+        optional: true
+      vendor_id:
+        type: integer
+        description: Vendor the asset was bought from.
+        optional: true
+      is_active:
+        type: boolean
+        description: False to register the asset inactive.
+        optional: true
+      user_defined_fields:
+        type: array
+        description: Entries of name and value for user-defined fields.
+        optional: true
+        items: {type: object}
+    output:
+      description: The id of the created configuration item.
+      type: object
+
+  update_configuration_item:
+    title: Update a configuration item
+    description: >-
+      Change an asset -- its contract, location, warranty dates, costs or
+      active flag. The id goes in the body.
+    category: assets
+    request:
+      method: PATCH
+      path: /V1.0/ConfigurationItems
+      body:
+        id: "${id}"
+        referenceTitle: "${reference_title}"
+        referenceNumber: "${reference_number}"
+        serialNumber: "${serial_number}"
+        location: "${location}"
+        notes: "${notes}"
+        contactID: "${contact_id}"
+        contractID: "${contract_id}"
+        companyLocationID: "${company_location_id}"
+        parentConfigurationItemID: "${parent_configuration_item_id}"
+        installDate: "${install_date}"
+        warrantyExpirationDate: "${warranty_expiration_date}"
+        numberOfUsers: "${number_of_users}"
+        monthlyCost: "${monthly_cost}"
+        isActive: "${is_active}"
+        userDefinedFields: "${user_defined_fields}"
+    input:
+      id:
+        type: integer
+        description: Configuration item id to update.
+      reference_title:
+        type: string
+        description: New friendly name.
+        optional: true
+      reference_number:
+        type: string
+        description: New reference number.
+        optional: true
+      serial_number:
+        type: string
+        description: New serial number.
+        optional: true
+      location:
+        type: string
+        description: New physical location.
+        optional: true
+      notes:
+        type: string
+        description: New notes about the asset.
+        optional: true
+      contact_id:
+        type: integer
+        description: New contact who uses the asset.
+        optional: true
+      contract_id:
+        type: integer
+        description: New contract covering the asset.
+        optional: true
+      company_location_id:
+        type: integer
+        description: New company location for the asset.
+        optional: true
+      parent_configuration_item_id:
+        type: integer
+        description: New parent asset.
+        optional: true
+      install_date:
+        type: string
+        description: New install date.
+        optional: true
+      warranty_expiration_date:
+        type: string
+        description: New warranty expiry.
+        optional: true
+      number_of_users:
+        type: number
+        description: New user count.
+        optional: true
+      monthly_cost:
+        type: number
+        description: New monthly cost.
+        optional: true
+      is_active:
+        type: boolean
+        description: False to deactivate the asset.
+        optional: true
+      user_defined_fields:
+        type: array
+        description: Entries of name and value for user-defined fields.
+        optional: true
+        items: {type: object}
+    output:
+      description: The id of the updated configuration item.
+      type: object
+
+  list_configuration_item_notes:
+    title: List an asset's notes
+    description: >-
+      Read the notes recorded against one configuration item, with their type
+      and author.
+    category: assets
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/ConfigurationItems/${parent_id}/Notes
+    input:
+      parent_id:
+        type: integer
+        description: Configuration item id whose notes to list.
+    output:
+      description: The asset's notes.
+      type: object
+
+  create_configuration_item_note:
+    title: Add a note to an asset
+    description: >-
+      Write a note against a configuration item, for recording maintenance and
+      configuration history on the device itself.
+    category: assets
+    request:
+      method: POST
+      path: /V1.0/ConfigurationItems/${parent_id}/Notes
+      body:
+        configurationItemID: "${configuration_item_id}"
+        title: "${title}"
+        description: "${description}"
+        noteType: "${note_type}"
+    input:
+      parent_id:
+        type: integer
+        description: Configuration item id the note belongs to.
+      configuration_item_id:
+        type: integer
+        description: Configuration item id, repeated in the body as Autotask expects.
+      title:
+        type: string
+        description: Title of the note.
+      description:
+        type: string
+        description: Body text of the note.
+      note_type:
+        type: integer
+        description: Note type picklist id.
+    output:
+      description: The id of the created note.
+      type: object
+
+  query_subscriptions:
+    title: Query asset subscriptions
+    description: >-
+      Search the recurring subscriptions billed against configuration items,
+      with their period cost, price and effective dates.
+    category: assets
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/Subscriptions/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value, e.g. on configurationItemID.
+        items: {type: object}
+      max_records:
+        type: integer
+        description: Subscriptions to return, up to 500 per page.
+        optional: true
+        maximum: 500
+    output:
+      description: The matching subscriptions.
+      type: object
+
+  create_subscription:
+    title: Create an asset subscription
+    description: >-
+      Bill a recurring charge against a configuration item over a period --
+      the usual way per-device monthly fees reach the invoice.
+    category: assets
+    request:
+      method: POST
+      path: /V1.0/Subscriptions
+      body:
+        configurationItemID: "${configuration_item_id}"
+        subscriptionName: "${subscription_name}"
+        description: "${description}"
+        materialCodeID: "${material_code_id}"
+        periodType: "${period_type}"
+        periodCost: "${period_cost}"
+        periodPrice: "${period_price}"
+        effectiveDate: "${effective_date}"
+        expirationDate: "${expiration_date}"
+        status: "${status}"
+        purchaseOrderNumber: "${purchase_order_number}"
+        vendorID: "${vendor_id}"
+    input:
+      configuration_item_id:
+        type: integer
+        description: Configuration item the subscription bills against.
+      subscription_name:
+        type: string
+        description: Name of the subscription.
+      description:
+        type: string
+        description: What the subscription covers.
+        optional: true
+      material_code_id:
+        type: integer
+        description: Material or billing code the charge posts under.
+      period_type:
+        type: integer
+        description: Billing period picklist id, e.g. monthly or annual.
+      period_cost:
+        type: number
+        description: Your cost per period.
+        optional: true
+      period_price:
+        type: number
+        description: Price charged per period.
+        optional: true
+      effective_date:
+        type: string
+        description: When billing starts, as an ISO 8601 timestamp.
+      expiration_date:
+        type: string
+        description: When billing stops, as an ISO 8601 timestamp.
+      status:
+        type: integer
+        description: Subscription status picklist id.
+        optional: true
+      purchase_order_number:
+        type: string
+        description: Customer purchase order number.
+        optional: true
+      vendor_id:
+        type: integer
+        description: Vendor supplying the subscription.
+        optional: true
+    output:
+      description: The id of the created subscription.
+      type: object
+
+  delete_subscription:
+    title: Delete an asset subscription
+    description: >-
+      Delete a subscription, which stops its recurring charges. Periods already
+      billed stay on their invoices.
+    category: assets
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1.0/Subscriptions/${id}
+    input:
+      id:
+        type: integer
+        description: Subscription id to delete.
+    output:
+      description: The id of the deleted subscription.
+      type: object
+
+  query_opportunities:
+    title: Query opportunities
+    description: >-
+      Search sales opportunities with a filter -- by company, owner, stage,
+      status or projected close date -- with their amounts and probability.
+    category: sales
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/Opportunities/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+        includeFields: "${include_fields}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value, e.g. on ownerResourceID.
+        items: {type: object}
+      max_records:
+        type: integer
+        description: Opportunities to return, up to 500 per page.
+        optional: true
+        maximum: 500
+      include_fields:
+        type: array
+        description: Field names to return; omit for the whole record.
+        optional: true
+        items: {type: string}
+    output:
+      description: The matching opportunities, with a pageDetails block.
+      type: object
+
+  get_opportunity:
+    title: Get an opportunity
+    description: >-
+      Read one opportunity by id, with its amount, stage, probability, dates
+      and revenue breakdown.
+    category: sales
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/Opportunities/${id}
+    input:
+      id:
+        type: integer
+        description: Opportunity id.
+    output:
+      description: The opportunity record.
+      type: object
+
+  create_opportunity:
+    title: Create an opportunity
+    description: >-
+      Open a sales opportunity. title, companyID, ownerResourceID, amount,
+      stage, status, probability and projectedCloseDate are the fields Autotask
+      requires for a forecastable opportunity.
+    category: sales
+    request:
+      method: POST
+      path: /V1.0/Opportunities
+      body:
+        title: "${title}"
+        companyID: "${company_id}"
+        ownerResourceID: "${owner_resource_id}"
+        amount: "${amount}"
+        stage: "${stage}"
+        status: "${status}"
+        probability: "${probability}"
+        projectedCloseDate: "${projected_close_date}"
+        startDate: "${start_date}"
+        contactID: "${contact_id}"
+        productID: "${product_id}"
+        cost: "${cost}"
+        leadSource: "${lead_source}"
+        description: "${description}"
+        nextStep: "${next_step}"
+        barriers: "${barriers}"
+        helpNeeded: "${help_needed}"
+        market: "${market}"
+        monthlyRevenue: "${monthly_revenue}"
+        onetimeRevenue: "${onetime_revenue}"
+        yearlyRevenue: "${yearly_revenue}"
+        useQuoteTotals: "${use_quote_totals}"
+        userDefinedFields: "${user_defined_fields}"
+    input:
+      title:
+        type: string
+        description: Name of the opportunity.
+      company_id:
+        type: integer
+        description: Company the opportunity is with.
+      owner_resource_id:
+        type: integer
+        description: Resource who owns the opportunity.
+      amount:
+        type: number
+        description: Total value of the opportunity.
+      stage:
+        type: integer
+        description: Sales stage picklist id.
+      status:
+        type: integer
+        description: Opportunity status picklist id.
+      probability:
+        type: integer
+        description: Win probability as a percentage.
+      projected_close_date:
+        type: string
+        description: Expected close date, as an ISO 8601 timestamp.
+      start_date:
+        type: string
+        description: When the opportunity started, as an ISO 8601 timestamp.
+        optional: true
+      contact_id:
+        type: integer
+        description: Contact driving the opportunity.
+        optional: true
+      product_id:
+        type: integer
+        description: Main product being sold.
+        optional: true
+      cost:
+        type: number
+        description: Cost of delivering the opportunity.
+        optional: true
+      lead_source:
+        type: integer
+        description: Lead source picklist id.
+        optional: true
+      description:
+        type: string
+        description: What the opportunity covers.
+        optional: true
+      next_step:
+        type: string
+        description: The next action to move the deal forward.
+        optional: true
+      barriers:
+        type: string
+        description: What stands in the way of winning.
+        optional: true
+      help_needed:
+        type: string
+        description: What help the owner needs to close it.
+        optional: true
+      market:
+        type: string
+        description: Market the opportunity sits in.
+        optional: true
+      monthly_revenue:
+        type: number
+        description: Recurring monthly revenue if won.
+        optional: true
+      onetime_revenue:
+        type: number
+        description: One-off revenue if won.
+        optional: true
+      yearly_revenue:
+        type: number
+        description: Recurring yearly revenue if won.
+        optional: true
+      use_quote_totals:
+        type: boolean
+        description: True to take the amount from the primary quote instead.
+        optional: true
+      user_defined_fields:
+        type: array
+        description: Entries of name and value for user-defined fields.
+        optional: true
+        items: {type: object}
+    output:
+      description: The id of the created opportunity.
+      type: object
+
+  update_opportunity:
+    title: Update an opportunity
+    description: >-
+      Move an opportunity along -- change its stage, amount, probability or
+      close date, or record why it was won or lost. The id goes in the body.
+    category: sales
+    request:
+      method: PATCH
+      path: /V1.0/Opportunities
+      body:
+        id: "${id}"
+        title: "${title}"
+        amount: "${amount}"
+        stage: "${stage}"
+        status: "${status}"
+        probability: "${probability}"
+        projectedCloseDate: "${projected_close_date}"
+        closedDate: "${closed_date}"
+        lostDate: "${lost_date}"
+        winReason: "${win_reason}"
+        winReasonDetail: "${win_reason_detail}"
+        lossReason: "${loss_reason}"
+        lossReasonDetail: "${loss_reason_detail}"
+        nextStep: "${next_step}"
+        description: "${description}"
+        userDefinedFields: "${user_defined_fields}"
+    input:
+      id:
+        type: integer
+        description: Opportunity id to update.
+      title:
+        type: string
+        description: New name for the opportunity.
+        optional: true
+      amount:
+        type: number
+        description: New total value.
+        optional: true
+      stage:
+        type: integer
+        description: New sales stage picklist id.
+        optional: true
+      status:
+        type: integer
+        description: New status picklist id.
+        optional: true
+      probability:
+        type: integer
+        description: New win probability percentage.
+        optional: true
+      projected_close_date:
+        type: string
+        description: New expected close date.
+        optional: true
+      closed_date:
+        type: string
+        description: When the opportunity was won, as an ISO 8601 timestamp.
+        optional: true
+      lost_date:
+        type: string
+        description: When the opportunity was lost, as an ISO 8601 timestamp.
+        optional: true
+      win_reason:
+        type: integer
+        description: Win reason picklist id.
+        optional: true
+      win_reason_detail:
+        type: string
+        description: Narrative on why it was won.
+        optional: true
+      loss_reason:
+        type: integer
+        description: Loss reason picklist id.
+        optional: true
+      loss_reason_detail:
+        type: string
+        description: Narrative on why it was lost.
+        optional: true
+      next_step:
+        type: string
+        description: New next action.
+        optional: true
+      description:
+        type: string
+        description: New description.
+        optional: true
+      user_defined_fields:
+        type: array
+        description: Entries of name and value for user-defined fields.
+        optional: true
+        items: {type: object}
+    output:
+      description: The id of the updated opportunity.
+      type: object
+
+  query_quotes:
+    title: Query quotes
+    description: >-
+      Search quotes with a filter -- by company, opportunity, approval status
+      or effective date -- with their templates and payment terms.
+    category: sales
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/Quotes/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value, e.g. on opportunityID.
+        items: {type: object}
+      max_records:
+        type: integer
+        description: Quotes to return, up to 500 per page.
+        optional: true
+        maximum: 500
+    output:
+      description: The matching quotes.
+      type: object
+
+  get_quote:
+    title: Get a quote
+    description: >-
+      Read one quote by id, with its dates, approval state, locations and
+      payment terms.
+    category: sales
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/Quotes/${id}
+    input:
+      id:
+        type: integer
+        description: Quote id.
+    output:
+      description: The quote record.
+      type: object
+
+  create_quote:
+    title: Create a quote
+    description: >-
+      Create a quote against an opportunity. The bill-to, ship-to and sold-to
+      location ids all point at company locations, and effectiveDate plus
+      expirationDate bound its validity.
+    category: sales
+    request:
+      method: POST
+      path: /V1.0/Quotes
+      body:
+        name: "${name}"
+        opportunityID: "${opportunity_id}"
+        companyID: "${company_id}"
+        contactID: "${contact_id}"
+        effectiveDate: "${effective_date}"
+        expirationDate: "${expiration_date}"
+        billToLocationID: "${bill_to_location_id}"
+        shipToLocationID: "${ship_to_location_id}"
+        soldToLocationID: "${sold_to_location_id}"
+        quoteTemplateID: "${quote_template_id}"
+        paymentTerm: "${payment_term}"
+        paymentType: "${payment_type}"
+        shippingType: "${shipping_type}"
+        taxRegionID: "${tax_region_id}"
+        description: "${description}"
+        comment: "${comment}"
+        purchaseOrderNumber: "${purchase_order_number}"
+        externalQuoteNumber: "${external_quote_number}"
+        primaryQuote: "${primary_quote}"
+        calculateTaxSeparately: "${calculate_tax_separately}"
+        isActive: "${is_active}"
+    input:
+      name:
+        type: string
+        description: Name of the quote.
+      opportunity_id:
+        type: integer
+        description: Opportunity the quote belongs to.
+      company_id:
+        type: integer
+        description: Company being quoted.
+        optional: true
+      contact_id:
+        type: integer
+        description: Contact the quote is addressed to.
+        optional: true
+      effective_date:
+        type: string
+        description: When the quote takes effect, as an ISO 8601 timestamp.
+      expiration_date:
+        type: string
+        description: When the quote expires, as an ISO 8601 timestamp.
+      bill_to_location_id:
+        type: integer
+        description: Company location to bill.
+        optional: true
+      ship_to_location_id:
+        type: integer
+        description: Company location to ship to.
+        optional: true
+      sold_to_location_id:
+        type: integer
+        description: Company location being sold to.
+        optional: true
+      quote_template_id:
+        type: integer
+        description: Template used when the quote is published.
+        optional: true
+      payment_term:
+        type: integer
+        description: Payment term picklist id.
+        optional: true
+      payment_type:
+        type: integer
+        description: Payment type picklist id.
+        optional: true
+      shipping_type:
+        type: integer
+        description: Shipping type picklist id.
+        optional: true
+      tax_region_id:
+        type: integer
+        description: Tax region for the quote.
+        optional: true
+      description:
+        type: string
+        description: What the quote covers.
+        optional: true
+      comment:
+        type: string
+        description: Comment shown on the quote.
+        optional: true
+      purchase_order_number:
+        type: string
+        description: Customer purchase order number.
+        optional: true
+      external_quote_number:
+        type: string
+        description: Your own quote number.
+        optional: true
+      primary_quote:
+        type: boolean
+        description: True to make this the opportunity's primary quote.
+        optional: true
+      calculate_tax_separately:
+        type: boolean
+        description: True to show tax as its own line rather than in the totals.
+        optional: true
+      is_active:
+        type: boolean
+        description: False to create the quote inactive.
+        optional: true
+    output:
+      description: The id of the created quote.
+      type: object
+
+  query_quote_items:
+    title: Query quote items
+    description: >-
+      Search the line items on quotes -- products, services, labour and
+      shipping -- with quantities, unit prices, discounts and tax.
+    category: sales
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/QuoteItems/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value, e.g. on quoteID.
+        items: {type: object}
+      max_records:
+        type: integer
+        description: Items to return, up to 500 per page.
+        optional: true
+        maximum: 500
+    output:
+      description: The matching quote items.
+      type: object
+
+  query_service_calls:
+    title: Query service calls
+    description: >-
+      Search scheduled service calls with a filter -- by company, date range,
+      status or completion -- which is how dispatch boards are built.
+    category: service
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/ServiceCalls/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value, e.g. on startDateTime.
+        items: {type: object}
+      max_records:
+        type: integer
+        description: Calls to return, up to 500 per page.
+        optional: true
+        maximum: 500
+    output:
+      description: The matching service calls.
+      type: object
+
+  get_service_call:
+    title: Get a service call
+    description: >-
+      Read one service call by id, with its company, window, duration and
+      completion state.
+    category: service
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/ServiceCalls/${id}
+    input:
+      id:
+        type: integer
+        description: Service call id.
+    output:
+      description: The service call record.
+      type: object
+
+  create_service_call:
+    title: Create a service call
+    description: >-
+      Schedule a service call for a company between two times. Attach tickets
+      and resources to it afterwards through its child collections.
+    category: service
+    request:
+      method: POST
+      path: /V1.0/ServiceCalls
+      body:
+        companyID: "${company_id}"
+        startDateTime: "${start_date_time}"
+        endDateTime: "${end_date_time}"
+        description: "${description}"
+        status: "${status}"
+        duration: "${duration}"
+        companyLocationID: "${company_location_id}"
+        isComplete: "${is_complete}"
+        cancelationNoticeHours: "${cancelation_notice_hours}"
+    input:
+      company_id:
+        type: integer
+        description: Company the call is for.
+      start_date_time:
+        type: string
+        description: When the call starts, as an ISO 8601 timestamp.
+      end_date_time:
+        type: string
+        description: When the call ends, as an ISO 8601 timestamp.
+      description:
+        type: string
+        description: What the call is about.
+        optional: true
+      status:
+        type: integer
+        description: Service call status picklist id.
+        optional: true
+      duration:
+        type: number
+        description: Expected duration in hours.
+        optional: true
+      company_location_id:
+        type: integer
+        description: Company location to visit.
+        optional: true
+      is_complete:
+        type: integer
+        description: 1 to mark the call complete on creation.
+        optional: true
+      cancelation_notice_hours:
+        type: number
+        description: Notice required to cancel without charge.
+        optional: true
+    output:
+      description: The id of the created service call.
+      type: object
+
+  update_service_call:
+    title: Update a service call
+    description: >-
+      Reschedule or close a service call -- change its window, status,
+      duration or completion flag. The id goes in the body.
+    category: service
+    request:
+      method: PATCH
+      path: /V1.0/ServiceCalls
+      body:
+        id: "${id}"
+        startDateTime: "${start_date_time}"
+        endDateTime: "${end_date_time}"
+        description: "${description}"
+        status: "${status}"
+        duration: "${duration}"
+        isComplete: "${is_complete}"
+    input:
+      id:
+        type: integer
+        description: Service call id to update.
+      start_date_time:
+        type: string
+        description: New start time.
+        optional: true
+      end_date_time:
+        type: string
+        description: New end time.
+        optional: true
+      description:
+        type: string
+        description: New description.
+        optional: true
+      status:
+        type: integer
+        description: New status picklist id.
+        optional: true
+      duration:
+        type: number
+        description: New expected duration in hours.
+        optional: true
+      is_complete:
+        type: integer
+        description: 1 to mark the call complete.
+        optional: true
+    output:
+      description: The id of the updated service call.
+      type: object
+
+  delete_service_call:
+    title: Delete a service call
+    description: >-
+      Delete a scheduled service call, which removes it from the dispatch
+      calendar along with its ticket and resource associations.
+    category: service
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1.0/ServiceCalls/${id}
+    input:
+      id:
+        type: integer
+        description: Service call id to delete.
+    output:
+      description: The id of the deleted service call.
+      type: object
+
+  query_appointments:
+    title: Query appointments
+    description: >-
+      Search resource calendar appointments by date range or resource, the
+      non-ticket entries that still occupy someone's schedule.
+    category: service
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/Appointments/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value, e.g. on resourceID.
+        items: {type: object}
+      max_records:
+        type: integer
+        description: Appointments to return, up to 500 per page.
+        optional: true
+        maximum: 500
+    output:
+      description: The matching appointments.
+      type: object
+
+  create_appointment:
+    title: Create an appointment
+    description: >-
+      Book time on a resource's calendar between two times -- training, leave,
+      an internal meeting -- so the dispatcher sees them as busy.
+    category: service
+    request:
+      method: POST
+      path: /V1.0/Appointments
+      body:
+        resourceID: "${resource_id}"
+        title: "${title}"
+        description: "${description}"
+        startDateTime: "${start_date_time}"
+        endDateTime: "${end_date_time}"
+    input:
+      resource_id:
+        type: integer
+        description: Resource whose calendar to book.
+      title:
+        type: string
+        description: Title of the appointment.
+      description:
+        type: string
+        description: What the appointment is for.
+        optional: true
+      start_date_time:
+        type: string
+        description: Start time, as an ISO 8601 timestamp.
+      end_date_time:
+        type: string
+        description: End time, as an ISO 8601 timestamp.
+    output:
+      description: The id of the created appointment.
+      type: object
+
+  delete_appointment:
+    title: Delete an appointment
+    description: >-
+      Remove an appointment from a resource's calendar, freeing the time for
+      dispatch.
+    category: service
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1.0/Appointments/${id}
+    input:
+      id:
+        type: integer
+        description: Appointment id to delete.
+    output:
+      description: The id of the deleted appointment.
+      type: object
+
+  query_resources:
+    title: Query resources
+    description: >-
+      Search Autotask users (resources) with a filter -- by name, email, active
+      flag or licence type -- which is how you resolve the resource ids every
+      other entity refers to.
+    category: resources
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/Resources/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+        includeFields: "${include_fields}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value, e.g. on isActive or email.
+        items: {type: object}
+      max_records:
+        type: integer
+        description: Resources to return, up to 500 per page.
+        optional: true
+        maximum: 500
+      include_fields:
+        type: array
+        description: Field names to return; omit for the whole record.
+        optional: true
+        items: {type: string}
+    output:
+      description: The matching resources.
+      type: object
+
+  get_resource:
+    title: Get a resource
+    description: >-
+      Read one resource by id, with their name, email, licence type, default
+      role and active flag.
+    category: resources
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/Resources/${id}
+    input:
+      id:
+        type: integer
+        description: Resource id.
+    output:
+      description: The resource record.
+      type: object
+
+  query_roles:
+    title: Query roles
+    description: >-
+      Search the roles resources work under, with their hourly rates and cost
+      rates. Roles are what set the billing rate on a time entry.
+    category: resources
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/Roles/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value, e.g. on isActive.
+        items: {type: object}
+      max_records:
+        type: integer
+        description: Roles to return, up to 500 per page.
+        optional: true
+        maximum: 500
+    output:
+      description: The matching roles with their rates.
+      type: object
+
+  query_resource_roles:
+    title: Query resource role assignments
+    description: >-
+      Search which resources hold which roles, in which departments and
+      queues. This is the mapping dispatch and billing both depend on.
+    category: resources
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/ResourceRoles/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value, e.g. on resourceID.
+        items: {type: object}
+      max_records:
+        type: integer
+        description: Assignments to return, up to 500 per page.
+        optional: true
+        maximum: 500
+    output:
+      description: The matching resource role assignments.
+      type: object
+
+  query_departments:
+    title: Query departments
+    description: >-
+      List the departments configured in the instance, which projects, tasks
+      and resources are organised by.
+    category: resources
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/Departments/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value.
+        items: {type: object}
+      max_records:
+        type: integer
+        description: Departments to return, up to 500 per page.
+        optional: true
+        maximum: 500
+    output:
+      description: The matching departments.
+      type: object
+
+  query_products:
+    title: Query products
+    description: >-
+      Search the product catalogue with a filter -- by name, SKU,
+      manufacturer, category or active flag -- with unit cost, price and MSRP.
+    category: catalogue
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/Products/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value, e.g. on sku or isActive.
+        items: {type: object}
+      max_records:
+        type: integer
+        description: Products to return, up to 500 per page.
+        optional: true
+        maximum: 500
+    output:
+      description: The matching products with their prices.
+      type: object
+
+  create_product:
+    title: Create a product
+    description: >-
+      Add a product to the catalogue. name, productBillingCodeID and
+      billingType are required; unitCost and unitPrice drive the margin
+      Autotask reports on.
+    category: catalogue
+    request:
+      method: POST
+      path: /V1.0/Products
+      body:
+        name: "${name}"
+        description: "${description}"
+        productBillingCodeID: "${product_billing_code_id}"
+        billingType: "${billing_type}"
+        sku: "${sku}"
+        unitCost: "${unit_cost}"
+        unitPrice: "${unit_price}"
+        msrp: "${msrp}"
+        markupRate: "${markup_rate}"
+        periodType: "${period_type}"
+        productCategory: "${product_category}"
+        manufacturerName: "${manufacturer_name}"
+        manufacturerProductName: "${manufacturer_product_name}"
+        vendorProductNumber: "${vendor_product_number}"
+        defaultVendorID: "${default_vendor_id}"
+        internalProductID: "${internal_product_id}"
+        externalProductID: "${external_product_id}"
+        link: "${link}"
+        isSerialized: "${is_serialized}"
+        isActive: "${is_active}"
+        userDefinedFields: "${user_defined_fields}"
+    input:
+      name:
+        type: string
+        description: Name of the product.
+      description:
+        type: string
+        description: Description of the product.
+        optional: true
+      product_billing_code_id:
+        type: integer
+        description: Material code the product bills under.
+      billing_type:
+        type: integer
+        description: Billing type picklist id, e.g. one-off or recurring.
+      sku:
+        type: string
+        description: Stock keeping unit code.
+        optional: true
+      unit_cost:
+        type: number
+        description: Your cost per unit.
+        optional: true
+      unit_price:
+        type: number
+        description: Price charged per unit.
+        optional: true
+      msrp:
+        type: number
+        description: Manufacturer's suggested retail price.
+        optional: true
+      markup_rate:
+        type: number
+        description: Markup applied over cost.
+        optional: true
+      period_type:
+        type: integer
+        description: Billing period for a recurring product.
+        optional: true
+      product_category:
+        type: integer
+        description: Product category picklist id.
+        optional: true
+      manufacturer_name:
+        type: string
+        description: Manufacturer of the product.
+        optional: true
+      manufacturer_product_name:
+        type: string
+        description: Manufacturer's own name for the product.
+        optional: true
+      vendor_product_number:
+        type: string
+        description: Vendor's part number.
+        optional: true
+      default_vendor_id:
+        type: integer
+        description: Vendor the product is normally bought from.
+        optional: true
+      internal_product_id:
+        type: string
+        description: Your own internal product id.
+        optional: true
+      external_product_id:
+        type: string
+        description: Product id in an external system.
+        optional: true
+      link:
+        type: string
+        description: URL with more information about the product.
+        optional: true
+      is_serialized:
+        type: boolean
+        description: True if each unit carries a serial number.
+        optional: true
+      is_active:
+        type: boolean
+        description: False to add the product inactive.
+        optional: true
+      user_defined_fields:
+        type: array
+        description: Entries of name and value for user-defined fields.
+        optional: true
+        items: {type: object}
+    output:
+      description: The id of the created product.
+      type: object
+
+  query_services:
+    title: Query services
+    description: >-
+      Search the recurring service catalogue, with each service's unit price,
+      cost, billing period and SLA.
+    category: catalogue
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/Services/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value, e.g. on isActive.
+        items: {type: object}
+      max_records:
+        type: integer
+        description: Services to return, up to 500 per page.
+        optional: true
+        maximum: 500
+    output:
+      description: The matching services with their prices.
+      type: object
+
+  create_service:
+    title: Create a service
+    description: >-
+      Add a recurring service to the catalogue, ready to be attached to
+      recurring service contracts.
+    category: catalogue
+    request:
+      method: POST
+      path: /V1.0/Services
+      body:
+        name: "${name}"
+        description: "${description}"
+        billingCodeID: "${billing_code_id}"
+        periodType: "${period_type}"
+        unitCost: "${unit_cost}"
+        unitPrice: "${unit_price}"
+        markupRate: "${markup_rate}"
+        invoiceDescription: "${invoice_description}"
+        serviceLevelAgreementID: "${service_level_agreement_id}"
+        vendorCompanyID: "${vendor_company_id}"
+        sku: "${sku}"
+        url: "${url}"
+        isActive: "${is_active}"
+        userDefinedFields: "${user_defined_fields}"
+    input:
+      name:
+        type: string
+        description: Name of the service.
+      description:
+        type: string
+        description: Description of the service.
+        optional: true
+      billing_code_id:
+        type: integer
+        description: Material code the service bills under.
+      period_type:
+        type: integer
+        description: Billing period picklist id, e.g. monthly or annual.
+      unit_cost:
+        type: number
+        description: Your cost per unit per period.
+        optional: true
+      unit_price:
+        type: number
+        description: Price charged per unit per period.
+        optional: true
+      markup_rate:
+        type: number
+        description: Markup applied over cost.
+        optional: true
+      invoice_description:
+        type: string
+        description: Text shown for the service on invoices.
+        optional: true
+      service_level_agreement_id:
+        type: integer
+        description: SLA that comes with the service.
+        optional: true
+      vendor_company_id:
+        type: integer
+        description: Vendor supplying the service.
+        optional: true
+      sku:
+        type: string
+        description: Stock keeping unit code.
+        optional: true
+      url:
+        type: string
+        description: URL with more information about the service.
+        optional: true
+      is_active:
+        type: boolean
+        description: False to add the service inactive.
+        optional: true
+      user_defined_fields:
+        type: array
+        description: Entries of name and value for user-defined fields.
+        optional: true
+        items: {type: object}
+    output:
+      description: The id of the created service.
+      type: object
+
+  query_billing_items:
+    title: Query billing items
+    description: >-
+      Search the billing items Autotask has generated -- the approved time,
+      charges and recurring fees waiting to be invoiced or already invoiced.
+    category: billing
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/BillingItems/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+        includeFields: "${include_fields}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value, e.g. on companyID or invoiceID.
+        items: {type: object}
+      max_records:
+        type: integer
+        description: Items to return, up to 500 per page.
+        optional: true
+        maximum: 500
+      include_fields:
+        type: array
+        description: Field names to return; omit for the whole record.
+        optional: true
+        items: {type: string}
+    output:
+      description: The matching billing items.
+      type: object
+
+  query_invoices:
+    title: Query invoices
+    description: >-
+      Search invoices with a filter -- by company, date, batch or paid status
+      -- with their totals, tax and due dates.
+    category: billing
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/Invoices/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value, e.g. on companyID.
+        items: {type: object}
+      max_records:
+        type: integer
+        description: Invoices to return, up to 500 per page.
+        optional: true
+        maximum: 500
+    output:
+      description: The matching invoices with their totals.
+      type: object
+
+  get_invoice:
+    title: Get an invoice
+    description: >-
+      Read one invoice by id, with its totals, tax, batch and payment terms.
+    category: billing
+    read_only: true
+    request:
+      method: GET
+      path: /V1.0/Invoices/${id}
+    input:
+      id:
+        type: integer
+        description: Invoice id.
+    output:
+      description: The invoice record.
+      type: object
+
+  query_expense_reports:
+    title: Query expense reports
+    description: >-
+      Search expense reports with a filter -- by submitter, approver, status or
+      week ending -- with their totals and amounts due.
+    category: billing
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/ExpenseReports/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value, e.g. on submitterID.
+        items: {type: object}
+      max_records:
+        type: integer
+        description: Reports to return, up to 500 per page.
+        optional: true
+        maximum: 500
+    output:
+      description: The matching expense reports.
+      type: object
+
+  create_expense_report:
+    title: Create an expense report
+    description: >-
+      Open an expense report for a submitter and week, ready for expense items
+      to be added to it.
+    category: billing
+    request:
+      method: POST
+      path: /V1.0/ExpenseReports
+      body:
+        name: "${name}"
+        submitterID: "${submitter_id}"
+        weekEnding: "${week_ending}"
+        status: "${status}"
+        approverID: "${approver_id}"
+        departmentNumber: "${department_number}"
+        reimbursementCurrencyID: "${reimbursement_currency_id}"
+        submit: "${submit}"
+    input:
+      name:
+        type: string
+        description: Name of the expense report.
+      submitter_id:
+        type: integer
+        description: Resource submitting the expenses.
+      week_ending:
+        type: string
+        description: Week ending date, as an ISO 8601 timestamp.
+      status:
+        type: integer
+        description: Expense report status picklist id.
+        optional: true
+      approver_id:
+        type: integer
+        description: Resource who approves the report.
+        optional: true
+      department_number:
+        type: string
+        description: Department the expenses belong to.
+        optional: true
+      reimbursement_currency_id:
+        type: integer
+        description: Currency the submitter is reimbursed in.
+        optional: true
+      submit:
+        type: boolean
+        description: True to submit the report for approval immediately.
+        optional: true
+    output:
+      description: The id of the created expense report.
+      type: object
+
+  query_expense_items:
+    title: Query expense items
+    description: >-
+      Search the individual lines on expense reports, with their expense
+      category, amount, project or ticket and billable flag.
+    category: billing
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/ExpenseItems/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value, e.g. on expenseReportID.
+        items: {type: object}
+      max_records:
+        type: integer
+        description: Items to return, up to 500 per page.
+        optional: true
+        maximum: 500
+    output:
+      description: The matching expense items.
+      type: object
+
+  query_ticket_webhooks:
+    title: Query ticket webhooks
+    description: >-
+      List the webhooks registered for ticket events, with their URL, which
+      events they subscribe to and whether they are active and ready.
+    category: webhooks
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/TicketWebhooks/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value, e.g. on isActive.
+        items: {type: object}
+      max_records:
+        type: integer
+        description: Webhooks to return, up to 500 per page.
+        optional: true
+        maximum: 500
+    output:
+      description: The matching ticket webhooks.
+      type: object
+
+  create_ticket_webhook:
+    title: Create a ticket webhook
+    description: >-
+      Register a webhook for ticket events. Autotask signs each delivery with
+      the secretKey, and you choose which of create, update and delete to
+      receive; add field subscriptions afterwards to decide the payload.
+    category: webhooks
+    request:
+      method: POST
+      path: /V1.0/TicketWebhooks
+      body:
+        name: "${name}"
+        webhookUrl: "${webhook_url}"
+        secretKey: "${secret_key}"
+        ownerResourceID: "${owner_resource_id}"
+        notificationEmailAddress: "${notification_email_address}"
+        isSubscribedToCreateEvents: "${is_subscribed_to_create_events}"
+        isSubscribedToUpdateEvents: "${is_subscribed_to_update_events}"
+        isSubscribedToDeleteEvents: "${is_subscribed_to_delete_events}"
+        sendThresholdExceededNotification: "${send_threshold_exceeded_notification}"
+        deactivationUrl: "${deactivation_url}"
+        isActive: "${is_active}"
+    input:
+      name:
+        type: string
+        description: Name of the webhook.
+      webhook_url:
+        type: string
+        description: HTTPS URL Autotask posts events to.
+      secret_key:
+        type: string
+        description: Shared secret Autotask signs deliveries with.
+      owner_resource_id:
+        type: integer
+        description: Resource who owns the webhook.
+      notification_email_address:
+        type: string
+        description: Address told about delivery failures.
+      is_subscribed_to_create_events:
+        type: boolean
+        description: True to receive ticket creations.
+        optional: true
+      is_subscribed_to_update_events:
+        type: boolean
+        description: True to receive ticket updates.
+        optional: true
+      is_subscribed_to_delete_events:
+        type: boolean
+        description: True to receive ticket deletions.
+        optional: true
+      send_threshold_exceeded_notification:
+        type: boolean
+        description: True to be emailed when the delivery threshold is exceeded.
+        optional: true
+      deactivation_url:
+        type: string
+        description: URL Autotask calls if it deactivates the webhook.
+        optional: true
+      is_active:
+        type: boolean
+        description: False to register the webhook inactive.
+        optional: true
+    output:
+      description: The id of the created webhook.
+      type: object
+
+  delete_ticket_webhook:
+    title: Delete a ticket webhook
+    description: >-
+      Remove a ticket webhook, which stops Autotask delivering ticket events to
+      that URL.
+    category: webhooks
+    destructive: true
+    request:
+      method: DELETE
+      path: /V1.0/TicketWebhooks/${id}
+    input:
+      id:
+        type: integer
+        description: Webhook id to delete.
+    output:
+      description: The id of the deleted webhook.
+      type: object
+
+  query_attachment_info:
+    title: Query attachment metadata
+    description: >-
+      Search attachment records across the instance -- their parent entity,
+      file name, type, size and who attached them -- without pulling any file
+      data.
+    category: attachments
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/AttachmentInfo/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value, e.g. on parentID or parentType.
+        items: {type: object}
+      max_records:
+        type: integer
+        description: Records to return, up to 500 per page.
+        optional: true
+        maximum: 500
+    output:
+      description: The matching attachment metadata records.
+      type: object
+
+  query_notification_history:
+    title: Query notification history
+    description: >-
+      Search the record of notification emails Autotask has sent -- who was
+      notified about which entity, when, and from which template.
+    category: meta
+    read_only: true
+    request:
+      method: POST
+      path: /V1.0/NotificationHistory/query
+      body:
+        filter: "${filter}"
+        maxRecords: "${max_records}"
+    input:
+      filter:
+        type: array
+        description: Conditions of op, field and value, e.g. on entityNumber.
+        items: {type: object}
+      max_records:
+        type: integer
+        description: Records to return, up to 500 per page.
+        optional: true
+        maximum: 500
+    output:
+      description: The matching notification history rows.
+      type: object

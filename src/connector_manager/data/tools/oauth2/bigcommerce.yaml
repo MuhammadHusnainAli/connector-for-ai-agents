@@ -1,0 +1,2645 @@
+# BigCommerce tools -- catalog, orders, customers and price lists.
+#
+# The connection's base url is `https://api.bigcommerce.com/stores/<hash>`, so
+# every path here carries its own API version: `/v3/catalog/products`,
+# `/v2/orders`. That split is not cosmetic --
+#
+#   * **v3 is the modern API** and is where the catalog, customers, price
+#     lists and carts live. It answers `{"data": ..., "meta": ...}`, pages with
+#     `page`/`limit`, and filters with query parameters that take suffixes:
+#     `id:in`, `date_modified:min`, `name:like`;
+#   * **v2 is where orders still live** (plus coupons, gift certificates and
+#     store info). It answers a bare array, has no `meta`, and returns **204
+#     with no body** when a collection is empty -- which is the single most
+#     common surprise when reading orders.
+#
+# Things worth knowing before writing:
+#
+#   * **a product's variants are the sellable units.** Price and inventory on
+#     the product are defaults; a product with options carries variants, and
+#     stock usually belongs there. `include=variants` on a product read saves
+#     a second call;
+#   * **updating an order's `status_id` is what moves it**, and doing so can
+#     trigger customer emails, stock changes and refund eligibility -- it is
+#     not a silent field write. `list_order_statuses` gives the ids;
+#   * **v3 customer writes are batch-shaped.** `create_customers` and
+#     `update_customers` take *arrays*, and update entries must each carry an
+#     `id`. Deleting takes `id:in`, not a path id;
+#   * **`delete_products` and `delete_customers` with a filter can empty a
+#     catalogue.** Both are flagged destructive here for that reason.
+#
+# Docs: https://developer.bigcommerce.com/docs/rest-management
+
+connector_id: bigcommerce
+display_name: BigCommerce
+docs_url: https://developer.bigcommerce.com/docs/rest-management
+
+# A write scope covers the matching read-only one, so read tools ask only for
+# the read scope and a store granting the write scope still passes.
+scope_rules:
+  implies:
+    store_v2_products: [store_v2_products_read_only]
+    store_v2_orders: [store_v2_orders_read_only]
+    store_v2_customers: [store_v2_customers_read_only]
+    store_v2_information: [store_v2_information_read_only]
+
+tools:
+
+  # -- store ---------------------------------------------------------------
+
+  get_store_information:
+    title: Get store information
+    description: >-
+      Read the store's name, domain, currency, timezone and plan. The cheapest
+      call that proves the token and store hash line up.
+    category: store
+    scopes: [store_v2_information_read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/store
+    input: {}
+    output:
+      description: The store's settings.
+      type: object
+
+  get_catalog_summary:
+    title: Get a catalog summary
+    description: >-
+      Read headline catalogue counts -- how many products and variants, the
+      price range, the newest product. A quick health check on the catalogue
+      without paging it.
+    category: catalog
+    scopes: [store_v2_products_read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/catalog/summary
+    input: {}
+    output:
+      description: The catalogue summary, under `data`.
+      type: object
+      properties:
+        data: {type: object}
+
+  # -- products ------------------------------------------------------------
+
+  list_products:
+    title: List products
+    description: >-
+      Read a page of products. Filters take suffixes -- pass them in `query`,
+      e.g. {"is_visible": true, "date_modified:min": "2026-01-01",
+      "categories:in": 23} -- and `include` pulls sub-resources in the same
+      call, which is far cheaper than a request per product.
+    category: catalog
+    scopes: [store_v2_products_read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/catalog/products
+      query: "${query}"
+    input:
+      query:
+        type: object
+        description: >-
+          Query parameters as a flat object. Common keys: `page`, `limit` (max
+          250), `keyword`, `sku`, `name`, `brand_id`, `categories`,
+          `is_visible`, `availability`, `inventory_level`, `out_of_stock`,
+          `type` ("physical" or "digital"), `sort`, `direction`, `include`
+          (comma-separated: variants, images, custom_fields, modifiers,
+          bulk_pricing_rules, options, videos), `include_fields`,
+          `exclude_fields`, and suffixed filters such as `id:in`,
+          `date_modified:min` and `sku:in`.
+        optional: true
+        properties:
+          page: {type: integer}
+          limit: {type: integer, description: "Products per page, up to 250."}
+          include: {type: string}
+          keyword: {type: string}
+    output:
+      description: A page of products, with paging under `meta`.
+      type: object
+      properties:
+        data: {type: array}
+        meta: {type: object, description: "Holds pagination.total and .total_pages."}
+
+  get_product:
+    title: Get a product
+    description: >-
+      Read one product by id. `include` adds sub-resources -- "variants" is
+      almost always what you want, since that is where per-variant price and
+      stock live.
+    category: catalog
+    scopes: [store_v2_products_read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/catalog/products/${product_id}
+      query:
+        include: "${include}"
+        include_fields: "${include_fields}"
+        exclude_fields: "${exclude_fields}"
+    input:
+      product_id:
+        type: integer
+        description: The product's id.
+      include:
+        type: string
+        description: >-
+          Comma-separated sub-resources to include: variants, images,
+          custom_fields, modifiers, bulk_pricing_rules, options, videos.
+        optional: true
+        example: variants,images
+      include_fields:
+        type: string
+        description: Comma-separated fields to return, to keep the response small.
+        optional: true
+      exclude_fields:
+        type: string
+        description: Comma-separated fields to leave out.
+        optional: true
+    output:
+      description: The product, under `data`.
+      type: object
+      properties:
+        data: {type: object}
+
+  create_product:
+    title: Create a product
+    description: >-
+      Create a product. `name`, `type`, `weight` and `price` are the minimum
+      BigCommerce accepts. A product with options needs its variants created
+      afterwards; `categories` takes category ids from list_categories.
+    category: catalog
+    scopes: [store_v2_products]
+    request:
+      method: POST
+      path: /v3/catalog/products
+      body:
+        name: "${name}"
+        type: "${type}"
+        weight: "${weight}"
+        price: "${price}"
+        sku: "${sku}"
+        description: "${description}"
+        categories: "${categories}"
+        brand_id: "${brand_id}"
+        inventory_level: "${inventory_level}"
+        inventory_tracking: "${inventory_tracking}"
+        is_visible: "${is_visible}"
+        cost_price: "${cost_price}"
+        retail_price: "${retail_price}"
+        sale_price: "${sale_price}"
+        availability: "${availability}"
+        custom_fields: "${custom_fields}"
+        images: "${images}"
+        page_title: "${page_title}"
+        search_keywords: "${search_keywords}"
+    input:
+      name:
+        type: string
+        description: The product's name; must be unique in the catalogue.
+      type:
+        type: string
+        description: Whether the product ships or is downloaded.
+        enum: [physical, digital]
+      weight:
+        type: number
+        description: Shipping weight in the store's unit. Required even for digital products.
+        minimum: 0
+      price:
+        type: number
+        description: The product's price, excluding tax unless the store is tax-inclusive.
+        minimum: 0
+      sku:
+        type: string
+        description: Your own stock keeping unit; must be unique.
+        optional: true
+      description:
+        type: string
+        description: Product description, which may contain HTML.
+        optional: true
+      categories:
+        type: array
+        description: Category ids the product belongs to, from list_categories.
+        optional: true
+        items: {type: integer}
+      brand_id:
+        type: integer
+        description: Brand id, from list_brands.
+        optional: true
+      inventory_level:
+        type: integer
+        description: Stock on hand. Only used when `inventory_tracking` is not "none".
+        optional: true
+        minimum: 0
+      inventory_tracking:
+        type: string
+        description: Whether stock is tracked at product level, per variant, or not at all.
+        optional: true
+        enum: [none, product, variant]
+      is_visible:
+        type: boolean
+        description: Whether the product shows on the storefront.
+        optional: true
+      cost_price:
+        type: number
+        description: What the product costs you; never shown to shoppers.
+        optional: true
+        minimum: 0
+      retail_price:
+        type: number
+        description: The RRP, shown struck through when higher than `price`.
+        optional: true
+        minimum: 0
+      sale_price:
+        type: number
+        description: Sale price, which overrides `price` on the storefront when set.
+        optional: true
+        minimum: 0
+      availability:
+        type: string
+        description: Whether the product can be bought.
+        optional: true
+        enum: [available, disabled, preorder]
+      custom_fields:
+        type: array
+        description: 'Custom fields, each {"name": ..., "value": ...}.'
+        optional: true
+        items: {type: object}
+      images:
+        type: array
+        description: 'Product images, each {"image_url": ..., "is_thumbnail": true}.'
+        optional: true
+        items: {type: object}
+      page_title:
+        type: string
+        description: SEO page title.
+        optional: true
+      search_keywords:
+        type: string
+        description: Comma-separated keywords for the storefront search.
+        optional: true
+    output:
+      description: The created product, under `data`.
+      type: object
+
+  update_product:
+    title: Update a product
+    description: >-
+      Change a product's fields. Only what you send is touched, but `categories`
+      and `custom_fields` are replaced wholesale rather than merged, so send
+      the complete list for those.
+    category: catalog
+    scopes: [store_v2_products]
+    request:
+      method: PUT
+      path: /v3/catalog/products/${product_id}
+      body:
+        name: "${name}"
+        price: "${price}"
+        sale_price: "${sale_price}"
+        retail_price: "${retail_price}"
+        cost_price: "${cost_price}"
+        sku: "${sku}"
+        description: "${description}"
+        weight: "${weight}"
+        categories: "${categories}"
+        brand_id: "${brand_id}"
+        inventory_level: "${inventory_level}"
+        inventory_tracking: "${inventory_tracking}"
+        is_visible: "${is_visible}"
+        availability: "${availability}"
+    input:
+      product_id:
+        type: integer
+        description: The product's id.
+      name:
+        type: string
+        description: New name.
+        optional: true
+      price:
+        type: number
+        description: New price.
+        optional: true
+        minimum: 0
+      sale_price:
+        type: number
+        description: New sale price. Set 0 to clear it.
+        optional: true
+        minimum: 0
+      retail_price:
+        type: number
+        description: New RRP.
+        optional: true
+        minimum: 0
+      cost_price:
+        type: number
+        description: New cost price.
+        optional: true
+        minimum: 0
+      sku:
+        type: string
+        description: New SKU.
+        optional: true
+      description:
+        type: string
+        description: New description.
+        optional: true
+      weight:
+        type: number
+        description: New shipping weight.
+        optional: true
+        minimum: 0
+      categories:
+        type: array
+        description: The complete list of category ids after the update.
+        optional: true
+        items: {type: integer}
+      brand_id:
+        type: integer
+        description: New brand id.
+        optional: true
+      inventory_level:
+        type: integer
+        description: New stock level. Ignored when tracking is per variant.
+        optional: true
+        minimum: 0
+      inventory_tracking:
+        type: string
+        description: Where stock is tracked.
+        optional: true
+        enum: [none, product, variant]
+      is_visible:
+        type: boolean
+        description: Show or hide the product on the storefront.
+        optional: true
+      availability:
+        type: string
+        description: New purchasability.
+        optional: true
+        enum: [available, disabled, preorder]
+    output:
+      description: The updated product, under `data`.
+      type: object
+
+  update_products_batch:
+    title: Update many products at once
+    description: >-
+      Update a batch of products in one call -- the way to reprice or restock
+      at scale. Each entry must carry the product's `id` plus the fields to
+      change.
+    category: catalog
+    scopes: [store_v2_products]
+    request:
+      method: PUT
+      path: /v3/catalog/products
+      body: "${products}"
+    input:
+      products:
+        type: array
+        description: The products to update, each with an `id` and the fields to change.
+        items: {type: object}
+    output:
+      description: The updated products, under `data`.
+      type: object
+
+  delete_product:
+    title: Delete a product
+    description: >-
+      Delete one product with its variants, images and reviews. Past orders
+      keep their line items, but the product is gone from the catalogue for
+      good.
+    category: catalog
+    scopes: [store_v2_products]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v3/catalog/products/${product_id}
+    input:
+      product_id:
+        type: integer
+        description: The product's id.
+    output:
+      description: Empty on success -- BigCommerce answers 204.
+      type: object
+
+  delete_products:
+    title: Delete products matching a filter
+    description: >-
+      Delete every product matching the filter given. Dangerous by design: an
+      over-broad filter empties the catalogue, and there is no undo. Run the
+      same filter through list_products first and check the count.
+    category: catalog
+    scopes: [store_v2_products]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v3/catalog/products
+      query: "${query}"
+    input:
+      query:
+        type: object
+        description: >-
+          The filter deciding what is deleted -- the same keys list_products
+          accepts, e.g. {"brand_id": 12} or {"keyword": "discontinued"}. Never
+          send an empty object.
+    output:
+      description: Empty on success.
+      type: object
+
+  list_product_variants:
+    title: List a product's variants
+    description: >-
+      Read a product's variants -- the sellable combinations of its options,
+      each with its own SKU, price and stock. Where inventory actually lives
+      for a product with options.
+    category: catalog
+    scopes: [store_v2_products_read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/catalog/products/${product_id}/variants
+      query:
+        page: "${page}"
+        limit: "${limit}"
+    input:
+      product_id:
+        type: integer
+        description: The product's id.
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+      limit:
+        type: integer
+        description: Variants per page, up to 250.
+        optional: true
+        minimum: 1
+        maximum: 250
+    output:
+      description: A page of variants, with paging under `meta`.
+      type: object
+      properties:
+        data: {type: array}
+        meta: {type: object}
+
+  create_product_variant:
+    title: Create a product variant
+    description: >-
+      Add a variant to a product. `option_values` names which option
+      combination it is, each entry pairing an option id with a value id from
+      the product's options.
+    category: catalog
+    scopes: [store_v2_products]
+    request:
+      method: POST
+      path: /v3/catalog/products/${product_id}/variants
+      body:
+        sku: "${sku}"
+        price: "${price}"
+        cost_price: "${cost_price}"
+        sale_price: "${sale_price}"
+        weight: "${weight}"
+        inventory_level: "${inventory_level}"
+        option_values: "${option_values}"
+        is_free_shipping: "${is_free_shipping}"
+        purchasing_disabled: "${purchasing_disabled}"
+    input:
+      product_id:
+        type: integer
+        description: The product's id.
+      sku:
+        type: string
+        description: The variant's SKU; must be unique across the store.
+        optional: true
+      price:
+        type: number
+        description: Variant price, overriding the product's.
+        optional: true
+        minimum: 0
+      cost_price:
+        type: number
+        description: What this variant costs you.
+        optional: true
+        minimum: 0
+      sale_price:
+        type: number
+        description: Variant sale price.
+        optional: true
+        minimum: 0
+      weight:
+        type: number
+        description: Variant shipping weight, overriding the product's.
+        optional: true
+        minimum: 0
+      inventory_level:
+        type: integer
+        description: Stock on hand for this variant.
+        optional: true
+        minimum: 0
+      option_values:
+        type: array
+        description: >-
+          Which option combination this variant is, each
+          {"option_id": ..., "id": <value id>} from the product's options.
+        optional: true
+        items: {type: object}
+      is_free_shipping:
+        type: boolean
+        description: Ship this variant free.
+        optional: true
+      purchasing_disabled:
+        type: boolean
+        description: Show the variant but refuse purchases of it.
+        optional: true
+    output:
+      description: The created variant, under `data`.
+      type: object
+
+  update_product_variant:
+    title: Update a product variant
+    description: >-
+      Change one variant's price, stock or SKU. This is the right place to
+      adjust inventory for a product whose tracking is per variant.
+    category: catalog
+    scopes: [store_v2_products]
+    request:
+      method: PUT
+      path: /v3/catalog/products/${product_id}/variants/${variant_id}
+      body:
+        sku: "${sku}"
+        price: "${price}"
+        cost_price: "${cost_price}"
+        sale_price: "${sale_price}"
+        weight: "${weight}"
+        inventory_level: "${inventory_level}"
+        purchasing_disabled: "${purchasing_disabled}"
+    input:
+      product_id:
+        type: integer
+        description: The product's id.
+      variant_id:
+        type: integer
+        description: The variant's id.
+      sku:
+        type: string
+        description: New SKU.
+        optional: true
+      price:
+        type: number
+        description: New price.
+        optional: true
+        minimum: 0
+      cost_price:
+        type: number
+        description: New cost price.
+        optional: true
+        minimum: 0
+      sale_price:
+        type: number
+        description: New sale price.
+        optional: true
+        minimum: 0
+      weight:
+        type: number
+        description: New weight.
+        optional: true
+        minimum: 0
+      inventory_level:
+        type: integer
+        description: New stock level for this variant.
+        optional: true
+        minimum: 0
+      purchasing_disabled:
+        type: boolean
+        description: Whether purchases of this variant are refused.
+        optional: true
+    output:
+      description: The updated variant, under `data`.
+      type: object
+
+  list_all_variants:
+    title: List every variant in the store
+    description: >-
+      Read variants across all products -- the fastest way to pull a full
+      SKU-and-stock list without walking product by product.
+    category: catalog
+    scopes: [store_v2_products_read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/catalog/variants
+      query: "${query}"
+    input:
+      query:
+        type: object
+        description: >-
+          Query parameters as a flat object -- `page`, `limit` (max 250), `sku`,
+          `id:in`, `product_id:in`, `include_fields`.
+        optional: true
+        properties:
+          page: {type: integer}
+          limit: {type: integer}
+          sku: {type: string}
+    output:
+      description: A page of variants across the store.
+      type: object
+
+  update_variants_batch:
+    title: Update many variants at once
+    description: >-
+      Update a batch of variants in one call -- the bulk restock or reprice
+      path. Each entry needs its `id` and `product_id`.
+    category: catalog
+    scopes: [store_v2_products]
+    request:
+      method: PUT
+      path: /v3/catalog/variants
+      body: "${variants}"
+    input:
+      variants:
+        type: array
+        description: >-
+          The variants to update, each with `id`, `product_id` and the fields
+          to change.
+        items: {type: object}
+    output:
+      description: The updated variants, under `data`.
+      type: object
+
+  list_product_images:
+    title: List a product's images
+    description: Read a product's images with their urls, sort order and which is the thumbnail.
+    category: catalog
+    scopes: [store_v2_products_read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/catalog/products/${product_id}/images
+      query:
+        page: "${page}"
+        limit: "${limit}"
+    input:
+      product_id:
+        type: integer
+        description: The product's id.
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+      limit:
+        type: integer
+        description: Images per page.
+        optional: true
+        minimum: 1
+        maximum: 250
+    output:
+      description: A page of product images.
+      type: object
+
+  create_product_image:
+    title: Add an image to a product
+    description: >-
+      Attach an image to a product by url -- BigCommerce fetches it. Setting
+      `is_thumbnail` makes it the listing image, replacing whichever image held
+      that role.
+    category: catalog
+    scopes: [store_v2_products]
+    request:
+      method: POST
+      path: /v3/catalog/products/${product_id}/images
+      body:
+        image_url: "${image_url}"
+        is_thumbnail: "${is_thumbnail}"
+        sort_order: "${sort_order}"
+        description: "${description}"
+    input:
+      product_id:
+        type: integer
+        description: The product's id.
+      image_url:
+        type: string
+        description: Publicly reachable url BigCommerce should fetch the image from.
+      is_thumbnail:
+        type: boolean
+        description: Make this the product's listing image.
+        optional: true
+      sort_order:
+        type: integer
+        description: Position among the product's images.
+        optional: true
+      description:
+        type: string
+        description: Alt text for the image.
+        optional: true
+    output:
+      description: The created image, under `data`.
+      type: object
+
+  delete_product_image:
+    title: Delete a product image
+    description: Remove an image from a product. The storefront updates immediately.
+    category: catalog
+    scopes: [store_v2_products]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v3/catalog/products/${product_id}/images/${image_id}
+    input:
+      product_id:
+        type: integer
+        description: The product's id.
+      image_id:
+        type: integer
+        description: The image's id, from list_product_images.
+    output:
+      description: Empty on success.
+      type: object
+
+  list_product_custom_fields:
+    title: List a product's custom fields
+    description: >-
+      Read the name/value pairs attached to a product -- material, warranty,
+      whatever the store uses them for.
+    category: catalog
+    scopes: [store_v2_products_read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/catalog/products/${product_id}/custom-fields
+      query:
+        page: "${page}"
+        limit: "${limit}"
+    input:
+      product_id:
+        type: integer
+        description: The product's id.
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+      limit:
+        type: integer
+        description: Fields per page.
+        optional: true
+        minimum: 1
+        maximum: 250
+    output:
+      description: A page of custom fields.
+      type: object
+
+  create_product_custom_field:
+    title: Add a custom field to a product
+    description: >-
+      Attach a name/value pair to a product. Custom fields show on the
+      storefront, unlike metafields, which are for your own data.
+    category: catalog
+    scopes: [store_v2_products]
+    request:
+      method: POST
+      path: /v3/catalog/products/${product_id}/custom-fields
+      body:
+        name: "${name}"
+        value: "${value}"
+    input:
+      product_id:
+        type: integer
+        description: The product's id.
+      name:
+        type: string
+        description: The field's name, as shoppers see it.
+      value:
+        type: string
+        description: The field's value.
+    output:
+      description: The created custom field, under `data`.
+      type: object
+
+  list_product_metafields:
+    title: List a product's metafields
+    description: >-
+      Read the metafields on a product -- app-owned key/value data, namespaced
+      per integration and never shown to shoppers.
+    category: catalog
+    scopes: [store_v2_products_read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/catalog/products/${product_id}/metafields
+      query:
+        page: "${page}"
+        limit: "${limit}"
+    input:
+      product_id:
+        type: integer
+        description: The product's id.
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+      limit:
+        type: integer
+        description: Metafields per page.
+        optional: true
+        minimum: 1
+        maximum: 250
+    output:
+      description: A page of metafields.
+      type: object
+
+  create_product_metafield:
+    title: Add a metafield to a product
+    description: >-
+      Store your own key/value data against a product. `namespace` keeps your
+      keys from colliding with other apps', and `permission_set` decides who
+      else can read or write it.
+    category: catalog
+    scopes: [store_v2_products]
+    request:
+      method: POST
+      path: /v3/catalog/products/${product_id}/metafields
+      body:
+        namespace: "${namespace}"
+        key: "${key}"
+        value: "${value}"
+        permission_set: "${permission_set}"
+        description: "${description}"
+    input:
+      product_id:
+        type: integer
+        description: The product's id.
+      namespace:
+        type: string
+        description: Namespace for your keys, usually your integration's name.
+      key:
+        type: string
+        description: The metafield's key.
+      value:
+        type: string
+        description: The metafield's value.
+      permission_set:
+        type: string
+        description: Who may read or write the metafield.
+        optional: true
+        enum: [app_only, read, write, read_and_sf_access, write_and_sf_access]
+      description:
+        type: string
+        description: What the metafield holds.
+        optional: true
+    output:
+      description: The created metafield, under `data`.
+      type: object
+
+  list_product_reviews:
+    title: List a product's reviews
+    description: >-
+      Read the reviews on a product, including those still awaiting
+      moderation, with their rating and status.
+    category: catalog
+    scopes: [store_v2_products_read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/catalog/products/${product_id}/reviews
+      query:
+        page: "${page}"
+        limit: "${limit}"
+        status: "${status}"
+    input:
+      product_id:
+        type: integer
+        description: The product's id.
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+      limit:
+        type: integer
+        description: Reviews per page.
+        optional: true
+        minimum: 1
+        maximum: 250
+      status:
+        type: integer
+        description: Only reviews in this moderation state.
+        optional: true
+    output:
+      description: A page of product reviews.
+      type: object
+
+  list_bulk_pricing_rules:
+    title: List a product's bulk pricing rules
+    description: >-
+      Read the quantity-break pricing on a product -- buy five, pay less --
+      with each rule's range and discount.
+    category: catalog
+    scopes: [store_v2_products_read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/catalog/products/${product_id}/bulk-pricing-rules
+      query:
+        page: "${page}"
+        limit: "${limit}"
+    input:
+      product_id:
+        type: integer
+        description: The product's id.
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+      limit:
+        type: integer
+        description: Rules per page.
+        optional: true
+        minimum: 1
+        maximum: 250
+    output:
+      description: A page of bulk pricing rules.
+      type: object
+
+  create_bulk_pricing_rule:
+    title: Add a bulk pricing rule
+    description: >-
+      Add a quantity break to a product. `type` decides how `amount` is read --
+      "price" sets a flat price, "percent" a percentage off, "fixed" a fixed
+      discount -- between `quantity_min` and `quantity_max`.
+    category: catalog
+    scopes: [store_v2_products]
+    request:
+      method: POST
+      path: /v3/catalog/products/${product_id}/bulk-pricing-rules
+      body:
+        quantity_min: "${quantity_min}"
+        quantity_max: "${quantity_max}"
+        type: "${type}"
+        amount: "${amount}"
+    input:
+      product_id:
+        type: integer
+        description: The product's id.
+      quantity_min:
+        type: integer
+        description: Lowest quantity the rule applies to.
+        minimum: 1
+      quantity_max:
+        type: integer
+        description: Highest quantity the rule applies to. 0 means no upper bound.
+        minimum: 0
+      type:
+        type: string
+        description: How `amount` should be interpreted.
+        enum: [price, percent, fixed]
+      amount:
+        type: number
+        description: The price, percentage or fixed discount, per `type`.
+        minimum: 0
+    output:
+      description: The created rule, under `data`.
+      type: object
+
+  # -- categories and brands -----------------------------------------------
+
+  list_categories:
+    title: List categories
+    description: >-
+      Read the store's categories with their parents and visibility --
+      the ids a product's `categories` array holds.
+    category: catalog
+    scopes: [store_v2_products_read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/catalog/categories
+      query: "${query}"
+    input:
+      query:
+        type: object
+        description: >-
+          Query parameters as a flat object -- `page`, `limit`, `name`,
+          `name:like`, `parent_id`, `keyword`, `is_visible`, `id:in`.
+        optional: true
+        properties:
+          page: {type: integer}
+          limit: {type: integer}
+          parent_id: {type: integer}
+          is_visible: {type: boolean}
+    output:
+      description: A page of categories.
+      type: object
+
+  get_category:
+    title: Get a category
+    description: Read one category -- its name, parent, description and sort order.
+    category: catalog
+    scopes: [store_v2_products_read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/catalog/categories/${category_id}
+    input:
+      category_id:
+        type: integer
+        description: The category's id.
+    output:
+      description: The category, under `data`.
+      type: object
+
+  create_category:
+    title: Create a category
+    description: >-
+      Create a category. `parent_id` of 0 puts it at the top level; anything
+      else nests it. Products are attached by listing the category id on the
+      product, not the other way round.
+    category: catalog
+    scopes: [store_v2_products]
+    request:
+      method: POST
+      path: /v3/catalog/categories
+      body:
+        name: "${name}"
+        parent_id: "${parent_id}"
+        description: "${description}"
+        is_visible: "${is_visible}"
+        sort_order: "${sort_order}"
+        page_title: "${page_title}"
+        image_url: "${image_url}"
+    input:
+      name:
+        type: string
+        description: The category's name.
+      parent_id:
+        type: integer
+        description: Parent category id, or 0 for a top-level category.
+        minimum: 0
+      description:
+        type: string
+        description: Category description, which may contain HTML.
+        optional: true
+      is_visible:
+        type: boolean
+        description: Whether the category shows on the storefront.
+        optional: true
+      sort_order:
+        type: integer
+        description: Position among its siblings.
+        optional: true
+      page_title:
+        type: string
+        description: SEO page title.
+        optional: true
+      image_url:
+        type: string
+        description: Url of the category image for BigCommerce to fetch.
+        optional: true
+    output:
+      description: The created category, under `data`.
+      type: object
+
+  update_category:
+    title: Update a category
+    description: Change a category's name, parent, description or visibility.
+    category: catalog
+    scopes: [store_v2_products]
+    request:
+      method: PUT
+      path: /v3/catalog/categories/${category_id}
+      body:
+        name: "${name}"
+        parent_id: "${parent_id}"
+        description: "${description}"
+        is_visible: "${is_visible}"
+        sort_order: "${sort_order}"
+    input:
+      category_id:
+        type: integer
+        description: The category's id.
+      name:
+        type: string
+        description: New name.
+        optional: true
+      parent_id:
+        type: integer
+        description: Move the category under this parent, or 0 for top level.
+        optional: true
+        minimum: 0
+      description:
+        type: string
+        description: New description.
+        optional: true
+      is_visible:
+        type: boolean
+        description: Show or hide the category.
+        optional: true
+      sort_order:
+        type: integer
+        description: New position among its siblings.
+        optional: true
+    output:
+      description: The updated category, under `data`.
+      type: object
+
+  delete_category:
+    title: Delete a category
+    description: >-
+      Delete a category. Its products survive but lose this category, and
+      child categories go with it.
+    category: catalog
+    scopes: [store_v2_products]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v3/catalog/categories/${category_id}
+    input:
+      category_id:
+        type: integer
+        description: The category's id.
+    output:
+      description: Empty on success.
+      type: object
+
+  list_brands:
+    title: List brands
+    description: Read the store's brands with their ids, which a product's `brand_id` takes.
+    category: catalog
+    scopes: [store_v2_products_read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/catalog/brands
+      query:
+        page: "${page}"
+        limit: "${limit}"
+        name: "${name}"
+    input:
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+      limit:
+        type: integer
+        description: Brands per page, up to 250.
+        optional: true
+        minimum: 1
+        maximum: 250
+      name:
+        type: string
+        description: Only the brand with this exact name.
+        optional: true
+    output:
+      description: A page of brands.
+      type: object
+
+  create_brand:
+    title: Create a brand
+    description: Create a brand, whose id products can then reference through `brand_id`.
+    category: catalog
+    scopes: [store_v2_products]
+    request:
+      method: POST
+      path: /v3/catalog/brands
+      body:
+        name: "${name}"
+        page_title: "${page_title}"
+        image_url: "${image_url}"
+        search_keywords: "${search_keywords}"
+    input:
+      name:
+        type: string
+        description: The brand's name; must be unique.
+      page_title:
+        type: string
+        description: SEO page title for the brand page.
+        optional: true
+      image_url:
+        type: string
+        description: Url of the brand logo for BigCommerce to fetch.
+        optional: true
+      search_keywords:
+        type: string
+        description: Comma-separated keywords for storefront search.
+        optional: true
+    output:
+      description: The created brand, under `data`.
+      type: object
+
+  # -- orders --------------------------------------------------------------
+
+  list_orders:
+    title: List orders
+    description: >-
+      Read orders, newest last by default. This is v2: the response is a bare
+      array and an empty result comes back as **204 with no body**, not an
+      empty list. Filter with `status_id` for a work queue, or
+      `min_date_modified` for an incremental sync.
+    category: orders
+    scopes: [store_v2_orders_read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/orders
+      query:
+        status_id: "${status_id}"
+        customer_id: "${customer_id}"
+        email: "${email}"
+        min_id: "${min_id}"
+        max_id: "${max_id}"
+        min_total: "${min_total}"
+        max_total: "${max_total}"
+        min_date_created: "${min_date_created}"
+        max_date_created: "${max_date_created}"
+        min_date_modified: "${min_date_modified}"
+        max_date_modified: "${max_date_modified}"
+        is_deleted: "${is_deleted}"
+        channel_id: "${channel_id}"
+        sort: "${sort}"
+        page: "${page}"
+        limit: "${limit}"
+    input:
+      status_id:
+        type: integer
+        description: Only orders in this status. Ids come from list_order_statuses.
+        optional: true
+      customer_id:
+        type: integer
+        description: Only this customer's orders.
+        optional: true
+      email:
+        type: string
+        description: Only orders placed with this email address.
+        optional: true
+      min_id:
+        type: integer
+        description: Lowest order id to include.
+        optional: true
+      max_id:
+        type: integer
+        description: Highest order id to include.
+        optional: true
+      min_total:
+        type: number
+        description: Lowest order total to include.
+        optional: true
+      max_total:
+        type: number
+        description: Highest order total to include.
+        optional: true
+      min_date_created:
+        type: string
+        description: Only orders created at or after this RFC 2822 or ISO 8601 time.
+        optional: true
+      max_date_created:
+        type: string
+        description: Only orders created at or before this time.
+        optional: true
+      min_date_modified:
+        type: string
+        description: Only orders modified at or after this time -- the incremental sync filter.
+        optional: true
+      max_date_modified:
+        type: string
+        description: Only orders modified at or before this time.
+        optional: true
+      is_deleted:
+        type: boolean
+        description: Return archived (deleted) orders instead of live ones.
+        optional: true
+      channel_id:
+        type: integer
+        description: Only orders from this sales channel.
+        optional: true
+      sort:
+        type: string
+        description: Field and direction, e.g. "date_created:desc".
+        optional: true
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+      limit:
+        type: integer
+        description: Orders per page, up to 250.
+        optional: true
+        minimum: 1
+        maximum: 250
+    output:
+      description: The matching orders, as a bare array. Empty results answer 204 with no body.
+      type: array
+      items:
+        type: object
+        properties:
+          id: {type: integer}
+          status_id: {type: integer}
+          total_inc_tax: {type: string}
+
+  count_orders:
+    title: Count orders by status
+    description: >-
+      Read how many orders sit in each status -- the dashboard numbers, and a
+      cheap way to see whether anything is waiting to be shipped.
+    category: orders
+    scopes: [store_v2_orders_read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/orders/count
+    input: {}
+    output:
+      description: Order counts per status.
+      type: object
+
+  get_order:
+    title: Get an order
+    description: >-
+      Read one order -- totals, addresses, payment method and status. Line
+      items and shipments are separate calls.
+    category: orders
+    scopes: [store_v2_orders_read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/orders/${order_id}
+    input:
+      order_id:
+        type: integer
+        description: The order's id.
+    output:
+      description: The order.
+      type: object
+
+  list_order_products:
+    title: List an order's line items
+    description: >-
+      Read what was actually bought on an order -- product, variant, quantity
+      and price per line.
+    category: orders
+    scopes: [store_v2_orders_read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/orders/${order_id}/products
+      query:
+        page: "${page}"
+        limit: "${limit}"
+    input:
+      order_id:
+        type: integer
+        description: The order's id.
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+      limit:
+        type: integer
+        description: Line items per page.
+        optional: true
+        minimum: 1
+    output:
+      description: The order's line items.
+      type: array
+      items: {type: object}
+
+  create_order:
+    title: Create an order
+    description: >-
+      Create an order directly, bypassing the storefront checkout -- for phone
+      orders or a migration. `products` holds the line items and
+      `billing_address` is required; `status_id` decides whether it lands as
+      incomplete, awaiting payment or paid.
+    category: orders
+    scopes: [store_v2_orders]
+    request:
+      method: POST
+      path: /v2/orders
+      body:
+        customer_id: "${customer_id}"
+        status_id: "${status_id}"
+        billing_address: "${billing_address}"
+        shipping_addresses: "${shipping_addresses}"
+        products: "${products}"
+        customer_message: "${customer_message}"
+        staff_notes: "${staff_notes}"
+        discount_amount: "${discount_amount}"
+        shipping_cost_ex_tax: "${shipping_cost_ex_tax}"
+        external_source: "${external_source}"
+    input:
+      billing_address:
+        type: object
+        description: >-
+          Where to bill -- first_name, last_name, street_1, city,
+          state, zip, country_iso2 and email.
+      products:
+        type: array
+        description: >-
+          The line items, each {"product_id": ..., "quantity": ...} or, for a
+          one-off, {"name": ..., "quantity": ..., "price_inc_tax": ...,
+          "price_ex_tax": ...}.
+        items: {type: object}
+      customer_id:
+        type: integer
+        description: Existing customer to attach the order to, or 0 for a guest.
+        optional: true
+      status_id:
+        type: integer
+        description: Status to create the order in, from list_order_statuses.
+        optional: true
+      shipping_addresses:
+        type: array
+        description: Where to ship, in the same shape as `billing_address`.
+        optional: true
+        items: {type: object}
+      customer_message:
+        type: string
+        description: Message from the customer, shown on the order.
+        optional: true
+      staff_notes:
+        type: string
+        description: Internal notes, never shown to the customer.
+        optional: true
+      discount_amount:
+        type: number
+        description: Order-level discount.
+        optional: true
+        minimum: 0
+      shipping_cost_ex_tax:
+        type: number
+        description: Shipping charge excluding tax.
+        optional: true
+        minimum: 0
+      external_source:
+        type: string
+        description: Where the order came from, e.g. your POS or marketplace name.
+        optional: true
+    output:
+      description: The created order.
+      type: object
+
+  update_order:
+    title: Update an order
+    description: >-
+      Change an order -- most often its `status_id`, which is what actually
+      moves it through fulfilment and can trigger customer emails, stock
+      changes and refund eligibility. Not a silent field write.
+    category: orders
+    scopes: [store_v2_orders]
+    request:
+      method: PUT
+      path: /v2/orders/${order_id}
+      body:
+        status_id: "${status_id}"
+        staff_notes: "${staff_notes}"
+        customer_message: "${customer_message}"
+        billing_address: "${billing_address}"
+        discount_amount: "${discount_amount}"
+        shipping_cost_ex_tax: "${shipping_cost_ex_tax}"
+    input:
+      order_id:
+        type: integer
+        description: The order's id.
+      status_id:
+        type: integer
+        description: New status id, from list_order_statuses. This is what moves the order.
+        optional: true
+      staff_notes:
+        type: string
+        description: New internal notes.
+        optional: true
+      customer_message:
+        type: string
+        description: New customer message.
+        optional: true
+      billing_address:
+        type: object
+        description: Replacement billing address.
+        optional: true
+      discount_amount:
+        type: number
+        description: New order-level discount.
+        optional: true
+        minimum: 0
+      shipping_cost_ex_tax:
+        type: number
+        description: New shipping charge excluding tax.
+        optional: true
+        minimum: 0
+    output:
+      description: The updated order.
+      type: object
+
+  archive_order:
+    title: Archive an order
+    description: >-
+      Archive an order -- BigCommerce's soft delete. It leaves the default
+      listings but can still be read with `is_deleted` set.
+    category: orders
+    scopes: [store_v2_orders]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/orders/${order_id}
+    input:
+      order_id:
+        type: integer
+        description: The order's id.
+    output:
+      description: Empty on success.
+      type: object
+
+  list_order_statuses:
+    title: List order statuses
+    description: >-
+      Read the store's order statuses with their ids -- "Awaiting Payment",
+      "Shipped", "Refunded" and the rest. Needed before setting `status_id` on
+      an order.
+    category: orders
+    scopes: [store_v2_orders_read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/order_statuses
+    input: {}
+    output:
+      description: The store's order statuses.
+      type: array
+      items: {type: object}
+
+  list_order_shipments:
+    title: List an order's shipments
+    description: >-
+      Read the shipments recorded against an order, with their tracking
+      numbers and which line items each covered.
+    category: orders
+    scopes: [store_v2_orders_read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/orders/${order_id}/shipments
+      query:
+        page: "${page}"
+        limit: "${limit}"
+    input:
+      order_id:
+        type: integer
+        description: The order's id.
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+      limit:
+        type: integer
+        description: Shipments per page.
+        optional: true
+        minimum: 1
+    output:
+      description: The order's shipments.
+      type: array
+      items: {type: object}
+
+  create_order_shipment:
+    title: Ship an order
+    description: >-
+      Record a shipment against an order, which is what marks it shipped and
+      -- depending on store settings -- emails the customer their tracking
+      number. `items` names which line items went in the box.
+    category: orders
+    scopes: [store_v2_orders]
+    request:
+      method: POST
+      path: /v2/orders/${order_id}/shipments
+      body:
+        order_address_id: "${order_address_id}"
+        tracking_number: "${tracking_number}"
+        shipping_provider: "${shipping_provider}"
+        shipping_method: "${shipping_method}"
+        tracking_carrier: "${tracking_carrier}"
+        comments: "${comments}"
+        items: "${items}"
+    input:
+      order_id:
+        type: integer
+        description: The order's id.
+      order_address_id:
+        type: integer
+        description: Which of the order's shipping addresses this parcel went to.
+      items:
+        type: array
+        description: >-
+          What was shipped, each {"order_product_id": ..., "quantity": ...}
+          from list_order_products.
+        items: {type: object}
+      tracking_number:
+        type: string
+        description: The carrier's tracking number.
+        optional: true
+      shipping_provider:
+        type: string
+        description: Shipping provider key, when using a BigCommerce-integrated carrier.
+        optional: true
+      shipping_method:
+        type: string
+        description: Human-readable shipping method, e.g. "Next Day".
+        optional: true
+      tracking_carrier:
+        type: string
+        description: Carrier code used to build the tracking link.
+        optional: true
+      comments:
+        type: string
+        description: Notes on the shipment.
+        optional: true
+    output:
+      description: The created shipment.
+      type: object
+
+  list_order_shipping_addresses:
+    title: List an order's shipping addresses
+    description: >-
+      Read where an order is going. An order may have several shipping
+      addresses, and each shipment names the one it fulfilled.
+    category: orders
+    scopes: [store_v2_orders_read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/orders/${order_id}/shipping_addresses
+    input:
+      order_id:
+        type: integer
+        description: The order's id.
+    output:
+      description: The order's shipping addresses.
+      type: array
+      items: {type: object}
+
+  list_order_transactions:
+    title: List an order's transactions
+    description: >-
+      Read the payment transactions on an order -- authorisations, captures,
+      refunds and voids, with gateway references.
+    category: orders
+    scopes: [store_v2_orders_read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/orders/${order_id}/transactions
+    input:
+      order_id:
+        type: integer
+        description: The order's id.
+    output:
+      description: The order's transactions, under `data`.
+      type: object
+
+  create_order_refund:
+    title: Refund an order
+    description: >-
+      Refund money on an order through the gateway. This moves real money and
+      cannot be reversed -- get a quote from create_refund_quote first if you
+      need the tax breakdown. `items` decides what is being refunded and
+      `payments` how the money goes back.
+    category: orders
+    scopes: [store_v2_orders]
+    destructive: true
+    request:
+      method: POST
+      path: /v3/orders/${order_id}/payment_actions/refunds
+      body:
+        items: "${items}"
+        payments: "${payments}"
+        reason: "${reason}"
+    input:
+      order_id:
+        type: integer
+        description: The order's id.
+      items:
+        type: array
+        description: >-
+          What to refund, each {"item_type": "PRODUCT", "item_id": ...,
+          "quantity": ...} or an "ORDER"-type entry with an `amount`.
+        items: {type: object}
+      payments:
+        type: array
+        description: >-
+          How to return the money, each {"provider_id": ..., "amount": ...}.
+          Omit to let BigCommerce choose the original payment method.
+        optional: true
+        items: {type: object}
+      reason:
+        type: string
+        description: Why the refund was issued; kept on the order.
+        optional: true
+    output:
+      description: The created refund, under `data`.
+      type: object
+
+  create_refund_quote:
+    title: Quote a refund
+    description: >-
+      Ask what a refund would come to -- tax, shipping and totals -- without
+      moving any money. The rehearsal before create_order_refund.
+    category: orders
+    scopes: [store_v2_orders_read_only]
+    read_only: true
+    request:
+      method: POST
+      path: /v3/orders/${order_id}/payment_actions/refund_quotes
+      body:
+        items: "${items}"
+    input:
+      order_id:
+        type: integer
+        description: The order's id.
+      items:
+        type: array
+        description: What would be refunded, in the same shape create_order_refund takes.
+        items: {type: object}
+    output:
+      description: The quoted refund totals, under `data`.
+      type: object
+
+  list_order_refunds:
+    title: List an order's refunds
+    description: Read the refunds already issued against an order, with their amounts and reasons.
+    category: orders
+    scopes: [store_v2_orders_read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/orders/${order_id}/payment_actions/refunds
+    input:
+      order_id:
+        type: integer
+        description: The order's id.
+    output:
+      description: The order's refunds, under `data`.
+      type: object
+
+  capture_order_payment:
+    title: Capture an authorised payment
+    description: >-
+      Capture money on an order whose payment was only authorised. Real money
+      moves, and gateways generally do not allow a capture to be undone --
+      void it instead if you have not captured yet.
+    category: orders
+    scopes: [store_v2_orders]
+    destructive: true
+    request:
+      method: POST
+      path: /v3/orders/${order_id}/payment_actions/capture
+    input:
+      order_id:
+        type: integer
+        description: The order's id.
+    output:
+      description: The capture result, under `data`.
+      type: object
+
+  void_order_payment:
+    title: Void an authorised payment
+    description: >-
+      Void an authorisation that has not been captured, releasing the hold on
+      the customer's card. Not the same as a refund.
+    category: orders
+    scopes: [store_v2_orders]
+    destructive: true
+    request:
+      method: POST
+      path: /v3/orders/${order_id}/payment_actions/void
+    input:
+      order_id:
+        type: integer
+        description: The order's id.
+    output:
+      description: The void result, under `data`.
+      type: object
+
+  # -- customers -----------------------------------------------------------
+
+  list_customers:
+    title: List customers
+    description: >-
+      Read a page of customers. v3 filters take suffixes -- pass them in
+      `query`, e.g. {"email:in": "ada@example.com"} or
+      {"date_modified:min": "2026-01-01"} -- and `include` pulls addresses or
+      attributes in the same call.
+    category: customers
+    scopes: [store_v2_customers_read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/customers
+      query: "${query}"
+    input:
+      query:
+        type: object
+        description: >-
+          Query parameters as a flat object. Common keys: `page`, `limit`,
+          `id:in`, `email:in`, `name:like`, `company:in`,
+          `customer_group_id:in`, `date_created:min`, `date_modified:min`,
+          `include` (addresses, storecredit, attributes, formfields) and
+          `sort` (e.g. "date_created:desc").
+        optional: true
+        properties:
+          page: {type: integer}
+          limit: {type: integer}
+          include: {type: string}
+    output:
+      description: A page of customers, with paging under `meta`.
+      type: object
+      properties:
+        data: {type: array}
+        meta: {type: object}
+
+  create_customers:
+    title: Create customers
+    description: >-
+      Create one or more customers -- v3 takes an **array**, even for a single
+      customer. Email must be unique across the store; `addresses` may be
+      included inline to save a second call.
+    category: customers
+    scopes: [store_v2_customers]
+    request:
+      method: POST
+      path: /v3/customers
+      body: "${customers}"
+    input:
+      customers:
+        type: array
+        description: >-
+          The customers to create, each {"email": ..., "first_name": ...,
+          "last_name": ..., optionally "company", "phone",
+          "customer_group_id", "addresses": [...], "attributes": [...]}.
+        items: {type: object}
+    output:
+      description: The created customers, under `data`.
+      type: object
+
+  update_customers:
+    title: Update customers
+    description: >-
+      Update one or more customers. Each entry must carry the customer's `id`
+      alongside the fields to change -- there is no single-customer PUT in v3.
+    category: customers
+    scopes: [store_v2_customers]
+    request:
+      method: PUT
+      path: /v3/customers
+      body: "${customers}"
+    input:
+      customers:
+        type: array
+        description: The customers to update, each with an `id` and the fields to change.
+        items: {type: object}
+    output:
+      description: The updated customers, under `data`.
+      type: object
+
+  delete_customers:
+    title: Delete customers
+    description: >-
+      Delete the customers whose ids are listed. Their orders survive but stop
+      being linked to an account, and there is no undo -- so pass ids you have
+      read back, never a broad filter.
+    category: customers
+    scopes: [store_v2_customers]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v3/customers
+      query:
+        id:in: "${customer_ids}"
+    input:
+      customer_ids:
+        type: array
+        description: Ids of the customers to delete.
+        items: {type: integer}
+    output:
+      description: Empty on success.
+      type: object
+
+  list_customer_addresses:
+    title: List customer addresses
+    description: >-
+      Read customer addresses across the store, or one customer's by filtering
+      on `customer_id:in`.
+    category: customers
+    scopes: [store_v2_customers_read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/customers/addresses
+      query: "${query}"
+    input:
+      query:
+        type: object
+        description: >-
+          Query parameters as a flat object -- `page`, `limit`,
+          `customer_id:in`, `id:in`, `company:in`, `name:in`.
+        optional: true
+        properties:
+          page: {type: integer}
+          limit: {type: integer}
+    output:
+      description: A page of customer addresses, under `data`.
+      type: object
+
+  create_customer_addresses:
+    title: Create customer addresses
+    description: >-
+      Add addresses to customers. Like the customer endpoints, this takes an
+      array, and each entry needs its `customer_id`.
+    category: customers
+    scopes: [store_v2_customers]
+    request:
+      method: POST
+      path: /v3/customers/addresses
+      body: "${addresses}"
+    input:
+      addresses:
+        type: array
+        description: >-
+          The addresses to create, each {"customer_id": ..., "first_name": ...,
+          "last_name": ..., "address1": ..., "city": ..., "state_or_province":
+          ..., "postal_code": ..., "country_code": ...}.
+        items: {type: object}
+    output:
+      description: The created addresses, under `data`.
+      type: object
+
+  list_customer_attributes:
+    title: List customer attributes
+    description: >-
+      Read the custom customer attributes defined on the store, with their ids
+      and types -- the schema behind per-customer values.
+    category: customers
+    scopes: [store_v2_customers_read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/customers/attributes
+      query:
+        page: "${page}"
+        limit: "${limit}"
+    input:
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+      limit:
+        type: integer
+        description: Attributes per page.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of customer attributes, under `data`.
+      type: object
+
+  upsert_customer_attribute_values:
+    title: Set customer attribute values
+    description: >-
+      Write attribute values against customers -- one call sets many. Each
+      entry is {"attribute_id": ..., "customer_id": ..., "value": ...}, with
+      attribute ids from list_customer_attributes.
+    category: customers
+    scopes: [store_v2_customers]
+    request:
+      method: PUT
+      path: /v3/customers/attribute-values
+      body: "${attribute_values}"
+    input:
+      attribute_values:
+        type: array
+        description: The values to set, each with attribute_id, customer_id and value.
+        items: {type: object}
+    output:
+      description: The written attribute values, under `data`.
+      type: object
+
+  validate_customer_credentials:
+    title: Check a customer's password
+    description: >-
+      Verify a storefront customer's email and password without signing them
+      in -- for a headless login flow. Answers whether the credentials match,
+      not a session.
+    category: customers
+    scopes: [store_v2_customers]
+    request:
+      method: POST
+      path: /v3/customers/validate-credentials
+      body:
+        email: "${email}"
+        password: "${password}"
+        channel_id: "${channel_id}"
+    input:
+      email:
+        type: string
+        description: The customer's email address.
+        format: email
+      password:
+        type: string
+        description: The password to check.
+        secret: true
+      channel_id:
+        type: integer
+        description: Channel the login belongs to, for multi-storefront stores.
+        optional: true
+    output:
+      description: Whether the credentials are valid, and the customer id when they are.
+      type: object
+
+  list_subscribers:
+    title: List newsletter subscribers
+    description: >-
+      Read the store's newsletter subscribers -- people who opted in at
+      checkout or through a form, which is not the same set as customers.
+    category: customers
+    scopes: [store_v2_customers_read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/customers/subscribers
+      query: "${query}"
+    input:
+      query:
+        type: object
+        description: >-
+          Query parameters as a flat object -- `page`, `limit`, `email`,
+          `first_name`, `last_name`, `source`, `order_id`, `date_created:min`.
+        optional: true
+        properties:
+          page: {type: integer}
+          limit: {type: integer}
+          email: {type: string}
+    output:
+      description: A page of subscribers, under `data`.
+      type: object
+
+  create_subscriber:
+    title: Create a newsletter subscriber
+    description: >-
+      Add someone to the newsletter list. Only their email is required;
+      `source` records where the signup came from.
+    category: customers
+    scopes: [store_v2_customers]
+    request:
+      method: POST
+      path: /v3/customers/subscribers
+      body:
+        email: "${email}"
+        first_name: "${first_name}"
+        last_name: "${last_name}"
+        source: "${source}"
+        order_id: "${order_id}"
+    input:
+      email:
+        type: string
+        description: The subscriber's email address.
+        format: email
+      first_name:
+        type: string
+        description: First name.
+        optional: true
+      last_name:
+        type: string
+        description: Last name.
+        optional: true
+      source:
+        type: string
+        description: Where the signup came from, e.g. "storefront" or your form's name.
+        optional: true
+      order_id:
+        type: integer
+        description: Order the signup happened during, if any.
+        optional: true
+    output:
+      description: The created subscriber, under `data`.
+      type: object
+
+  # -- price lists ---------------------------------------------------------
+
+  list_price_lists:
+    title: List price lists
+    description: >-
+      Read the store's price lists -- the named price sets assigned to customer
+      groups or channels for B2B and wholesale pricing.
+    category: pricing
+    scopes: [store_v2_products_read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/pricelists
+      query:
+        page: "${page}"
+        limit: "${limit}"
+    input:
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+      limit:
+        type: integer
+        description: Price lists per page.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of price lists, under `data`.
+      type: object
+
+  create_price_list:
+    title: Create a price list
+    description: >-
+      Create a price list. It does nothing until records are added with
+      upsert_price_list_records and it is assigned to a customer group or
+      channel.
+    category: pricing
+    scopes: [store_v2_products]
+    request:
+      method: POST
+      path: /v3/pricelists
+      body:
+        name: "${name}"
+        active: "${active}"
+    input:
+      name:
+        type: string
+        description: The price list's name.
+      active:
+        type: boolean
+        description: Whether the list is in effect.
+        optional: true
+    output:
+      description: The created price list, under `data`.
+      type: object
+
+  list_price_list_records:
+    title: List a price list's records
+    description: >-
+      Read the per-variant prices in one price list, with currency and any
+      quantity breaks.
+    category: pricing
+    scopes: [store_v2_products_read_only]
+    read_only: true
+    request:
+      method: GET
+      path: /v3/pricelists/${price_list_id}/records
+      query:
+        page: "${page}"
+        limit: "${limit}"
+    input:
+      price_list_id:
+        type: integer
+        description: The price list's id.
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+      limit:
+        type: integer
+        description: Records per page.
+        optional: true
+        minimum: 1
+    output:
+      description: A page of price list records, under `data`.
+      type: object
+
+  upsert_price_list_records:
+    title: Set prices in a price list
+    description: >-
+      Write per-variant prices into a price list, creating or replacing each
+      record. Every entry needs `variant_id`, `currency` and `price`; this is
+      the bulk path for wholesale pricing.
+    category: pricing
+    scopes: [store_v2_products]
+    request:
+      method: PUT
+      path: /v3/pricelists/${price_list_id}/records
+      body: "${records}"
+    input:
+      price_list_id:
+        type: integer
+        description: The price list's id.
+      records:
+        type: array
+        description: >-
+          The prices to set, each {"variant_id": ..., "currency": "usd",
+          "price": ..., optionally "sale_price", "retail_price",
+          "bulk_pricing_tiers": [...]}.
+        items: {type: object}
+    output:
+      description: The written records, under `data`.
+      type: object
+
+  # -- marketing -----------------------------------------------------------
+
+  list_coupons:
+    title: List coupons
+    description: >-
+      Read the store's coupons with their codes, types and usage. This is a v2
+      endpoint, so an empty result answers 204 with no body.
+    category: marketing
+    scopes: [store_v2_marketing]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/coupons
+      query:
+        code: "${code}"
+        name: "${name}"
+        type: "${type}"
+        exclude_type: "${exclude_type}"
+        min_id: "${min_id}"
+        max_id: "${max_id}"
+        page: "${page}"
+        limit: "${limit}"
+    input:
+      code:
+        type: string
+        description: Only the coupon with this code.
+        optional: true
+      name:
+        type: string
+        description: Only coupons with this name.
+        optional: true
+      type:
+        type: string
+        description: >-
+          Only coupons of this type -- per_item_discount, percentage_discount,
+          per_total_discount, shipping_discount, free_shipping.
+        optional: true
+      exclude_type:
+        type: string
+        description: Leave out coupons of this type.
+        optional: true
+      min_id:
+        type: integer
+        description: Lowest coupon id to include.
+        optional: true
+      max_id:
+        type: integer
+        description: Highest coupon id to include.
+        optional: true
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+      limit:
+        type: integer
+        description: Coupons per page.
+        optional: true
+        minimum: 1
+    output:
+      description: The matching coupons.
+      type: array
+      items: {type: object}
+
+  create_coupon:
+    title: Create a coupon
+    description: >-
+      Create a discount coupon. `type` decides how `amount` is read, and
+      `code` is what the shopper types -- it must be unique. `max_uses` and
+      `expires` are the two limits worth setting on anything public.
+    category: marketing
+    scopes: [store_v2_marketing]
+    request:
+      method: POST
+      path: /v2/coupons
+      body:
+        name: "${name}"
+        type: "${type}"
+        amount: "${amount}"
+        code: "${code}"
+        min_purchase: "${min_purchase}"
+        expires: "${expires}"
+        enabled: "${enabled}"
+        applies_to: "${applies_to}"
+        max_uses: "${max_uses}"
+        max_uses_per_customer: "${max_uses_per_customer}"
+        restricted_to: "${restricted_to}"
+    input:
+      name:
+        type: string
+        description: Internal name for the coupon.
+      type:
+        type: string
+        description: What kind of discount this is.
+        enum: [per_item_discount, percentage_discount, per_total_discount,
+               shipping_discount, free_shipping]
+      amount:
+        type: string
+        description: The discount, as a string -- a percentage for percentage_discount.
+      code:
+        type: string
+        description: The code shoppers enter; must be unique.
+      min_purchase:
+        type: string
+        description: Minimum order subtotal for the coupon to apply.
+        optional: true
+      expires:
+        type: string
+        description: Expiry date, as an RFC 2822 or ISO 8601 timestamp.
+        optional: true
+      enabled:
+        type: boolean
+        description: Whether the coupon is usable now.
+        optional: true
+      applies_to:
+        type: object
+        description: >-
+          What the discount covers, e.g. {"entity": "categories", "ids": [23]}
+          or {"entity": "products", "ids": [77]}.
+        optional: true
+      max_uses:
+        type: integer
+        description: Total redemptions allowed across all shoppers.
+        optional: true
+        minimum: 0
+      max_uses_per_customer:
+        type: integer
+        description: Redemptions allowed per customer.
+        optional: true
+        minimum: 0
+      restricted_to:
+        type: object
+        description: 'Restrictions such as {"countries": ["GB"]} or shipping zones.'
+        optional: true
+    output:
+      description: The created coupon.
+      type: object
+
+  delete_coupon:
+    title: Delete a coupon
+    description: >-
+      Delete a coupon. Its code stops working at once; disable it with
+      `enabled: false` instead if you might want it back.
+    category: marketing
+    scopes: [store_v2_marketing]
+    destructive: true
+    request:
+      method: DELETE
+      path: /v2/coupons/${coupon_id}
+    input:
+      coupon_id:
+        type: integer
+        description: The coupon's id, from list_coupons.
+    output:
+      description: Empty on success.
+      type: object
+
+  list_gift_certificates:
+    title: List gift certificates
+    description: >-
+      Read the store's gift certificates with their codes, balances and
+      expiry. A v2 endpoint, so an empty result answers 204.
+    category: marketing
+    scopes: [store_v2_marketing]
+    read_only: true
+    request:
+      method: GET
+      path: /v2/gift_certificates
+      query:
+        code: "${code}"
+        order_id: "${order_id}"
+        page: "${page}"
+        limit: "${limit}"
+    input:
+      code:
+        type: string
+        description: Only the certificate with this code.
+        optional: true
+      order_id:
+        type: integer
+        description: Only certificates bought on this order.
+        optional: true
+      page:
+        type: integer
+        description: Page number.
+        optional: true
+        minimum: 1
+      limit:
+        type: integer
+        description: Certificates per page.
+        optional: true
+        minimum: 1
+    output:
+      description: The matching gift certificates.
+      type: array
+      items: {type: object}
+
+  create_gift_certificate:
+    title: Create a gift certificate
+    description: >-
+      Issue a gift certificate for an amount. It is spendable money in the
+      store, and BigCommerce emails it to `to_email` -- so treat this as
+      outward-facing.
+    category: marketing
+    scopes: [store_v2_marketing]
+    request:
+      method: POST
+      path: /v2/gift_certificates
+      body:
+        amount: "${amount}"
+        to_name: "${to_name}"
+        to_email: "${to_email}"
+        from_name: "${from_name}"
+        from_email: "${from_email}"
+        code: "${code}"
+        message: "${message}"
+        expiry_date: "${expiry_date}"
+        status: "${status}"
+    input:
+      amount:
+        type: string
+        description: Face value of the certificate, as a string.
+      to_name:
+        type: string
+        description: Recipient's name.
+      to_email:
+        type: string
+        description: Recipient's email address -- BigCommerce sends the certificate here.
+        format: email
+      from_name:
+        type: string
+        description: Sender's name, as shown on the certificate.
+      from_email:
+        type: string
+        description: Sender's email address.
+        format: email
+      code:
+        type: string
+        description: The redemption code. BigCommerce generates one when omitted.
+        optional: true
+      message:
+        type: string
+        description: Personal message shown with the certificate.
+        optional: true
+      expiry_date:
+        type: string
+        description: When the certificate stops working.
+        optional: true
+      status:
+        type: string
+        description: Certificate status, e.g. "active" or "pending".
+        optional: true
+    output:
+      description: The created gift certificate.
+      type: object
+
+  # -- carts ---------------------------------------------------------------
+
+  create_cart:
+    title: Create a cart
+    description: >-
+      Build a server-side cart, which is the first step of a headless or
+      agent-driven checkout. `line_items` holds what goes in it; the response
+      carries the cart id that create_cart_redirect_url turns into a real
+      checkout link.
+    category: carts
+    request:
+      method: POST
+      path: /v3/carts
+      body:
+        customer_id: "${customer_id}"
+        channel_id: "${channel_id}"
+        line_items: "${line_items}"
+        currency: "${currency}"
+        locale: "${locale}"
+    input:
+      line_items:
+        type: array
+        description: >-
+          What to put in the cart, each {"quantity": ..., "product_id": ...,
+          optionally "variant_id" and "list_price"}.
+        items: {type: object}
+      customer_id:
+        type: integer
+        description: Customer the cart belongs to. Omit for a guest cart.
+        optional: true
+      channel_id:
+        type: integer
+        description: Sales channel the cart belongs to.
+        optional: true
+      currency:
+        type: object
+        description: 'Currency for the cart, e.g. {"code": "USD"}.'
+        optional: true
+      locale:
+        type: string
+        description: Locale for the cart, e.g. "en".
+        optional: true
+    output:
+      description: The created cart, under `data`.
+      type: object
+
+  get_cart:
+    title: Get a cart
+    description: Read one cart -- its line items, totals, currency and customer.
+    category: carts
+    read_only: true
+    request:
+      method: GET
+      path: /v3/carts/${cart_id}
+      query:
+        include: "${include}"
+    input:
+      cart_id:
+        type: string
+        description: The cart's id.
+      include:
+        type: string
+        description: Comma-separated extras, e.g. "line_items.physical_items.options".
+        optional: true
+    output:
+      description: The cart, under `data`.
+      type: object
+
+  add_cart_line_items:
+    title: Add items to a cart
+    description: Add line items to an existing cart; totals are recalculated in the response.
+    category: carts
+    request:
+      method: POST
+      path: /v3/carts/${cart_id}/items
+      body:
+        line_items: "${line_items}"
+    input:
+      cart_id:
+        type: string
+        description: The cart's id.
+      line_items:
+        type: array
+        description: 'Items to add, each {"quantity": ..., "product_id": ..., optionally "variant_id"}.'
+        items: {type: object}
+    output:
+      description: The cart after the change, under `data`.
+      type: object
+
+  delete_cart_line_item:
+    title: Remove an item from a cart
+    description: >-
+      Remove one line item from a cart. Removing the last item deletes the
+      cart itself, which BigCommerce signals with a 204.
+    category: carts
+    destructive: true
+    request:
+      method: DELETE
+      path: /v3/carts/${cart_id}/items/${item_id}
+    input:
+      cart_id:
+        type: string
+        description: The cart's id.
+      item_id:
+        type: string
+        description: The line item's id, from get_cart.
+    output:
+      description: The cart after the change, or empty when the cart is now gone.
+      type: object
+
+  create_cart_redirect_url:
+    title: Get a checkout link for a cart
+    description: >-
+      Turn a cart into signed storefront urls -- a cart url and a checkout
+      url -- that a shopper can open to finish the purchase themselves. The
+      handoff from an API-built cart to a real checkout.
+    category: carts
+    request:
+      method: POST
+      path: /v3/carts/${cart_id}/redirect_urls
+    input:
+      cart_id:
+        type: string
+        description: The cart's id.
+    output:
+      description: The signed cart and checkout urls, under `data`.
+      type: object
+
+  delete_cart:
+    title: Delete a cart
+    description: Delete a cart and everything in it. Abandoned-cart reporting loses it too.
+    category: carts
+    destructive: true
+    request:
+      method: DELETE
+      path: /v3/carts/${cart_id}
+    input:
+      cart_id:
+        type: string
+        description: The cart's id.
+    output:
+      description: Empty on success.
+      type: object

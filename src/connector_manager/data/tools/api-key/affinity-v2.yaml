@@ -1,0 +1,1470 @@
+# Affinity API v2 tools -- companies, persons, opportunities, lists and list
+# entries, field values, saved views, notes, emails, meetings, and company and
+# person merges.
+#
+# Every path, parameter and body field below comes from Affinity's v2 OpenAPI
+# description (46 operations), as published at https://developer.affinity.co/
+# and mirrored in yaniv-golan/affinity-api-docs (docs/v2/openapi.json). All 46
+# are here. The connection's base url is https://api.affinity.co with the key as
+# a bearer token, so paths start at /v2.
+#
+# v2 is mostly a read API and not at parity with v1: creating companies, persons,
+# opportunities, notes and list entries still lives in the v1 API, which the
+# separate `affinity` connector covers. What v2 can write is field values on list
+# entries (update_list_entry_field, update_list_entry_fields) and profile merges.
+#
+# How to get data out:
+#
+#   * **field data is opt-in.** get_company, list_persons and the list-entry
+#     reads return basic information only, unless you name fields with
+#     field_ids or whole groups with field_types (enriched, global, list,
+#     relationship-intelligence). Find field ids with list_company_fields,
+#     list_person_fields or list_list_fields;
+#   * **pagination is by cursor**: pass the response's pagination.nextUrl
+#     cursor back as cursor, up to 100 items per page;
+#   * **saved views are the cheap filtered read.** list_saved_view_entries
+#     honours the filters and columns set on a saved view in the web app, which
+#     beats pulling a whole list;
+#   * notes, emails, meetings and merges are BETA. Note reads filter with a
+#     string such as createdAt>=2025-02-03T10:48:24Z, merge reads with
+#     status=failed.
+#
+# Array query arguments (ids, field_ids, field_types) are sent comma-separated,
+# while Affinity documents them as repeated parameters; pass a single value when
+# a multi-value call is rejected.
+#
+# Permissions follow the product: a key sees only what its user can see, and the
+# list-entry and opportunity reads need the "Export data from Lists" permission.
+# Calls count against the same per-user (900 a minute) and monthly pool as v1.
+#
+# Docs: https://developer.affinity.co/
+
+connector_id: affinity-v2
+display_name: Affinity (v2)
+docs_url: https://developer.affinity.co/
+tools:
+
+  whoami:
+    title: Get the current user
+    description: >-
+      Read the authenticated user, their organization and the key's API permissions. A cheap
+      way to confirm the connection and see what it may do.
+    category: auth
+    read_only: true
+    request:
+      method: GET
+      path: /v2/auth/whoami
+    input: {}
+    output:
+      description: The user, tenant and grant.
+      type: object
+
+  list_companies:
+    title: List companies
+    description: >-
+      Page through companies (organizations) with their name, domains and, when requested,
+      field data. Pass ids to fetch specific companies.
+    category: companies
+    read_only: true
+    request:
+      method: GET
+      path: /v2/companies
+      query:
+        cursor: ${cursor}
+        limit: ${limit}
+        ids: ${ids}
+        fieldIds: ${field_ids}
+        fieldTypes: ${field_types}
+    input:
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination, to fetch the next or previous
+          page.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page, 1-100 (default 100).
+        optional: true
+      ids:
+        type: array
+        description: Company ids to fetch.
+        optional: true
+        items:
+          type: integer
+      field_ids:
+        type: array
+        description: Field ids to return data for, e.g. field-1 or affinity-data-description.
+        optional: true
+        items:
+          type: string
+      field_types:
+        type: array
+        description: 'Field groups to return data for: enriched, global, list or relationship-intelligence.'
+        optional: true
+        items:
+          type: string
+    output:
+      description: A page of companies.
+      type: object
+
+  list_company_fields:
+    title: List company fields
+    description: >-
+      List the non-list-specific fields on companies -- ids, names, types and value types
+      -- to pick field_ids for the company reads.
+    category: companies
+    read_only: true
+    request:
+      method: GET
+      path: /v2/companies/fields
+      query:
+        cursor: ${cursor}
+        limit: ${limit}
+    input:
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination, to fetch the next or previous
+          page.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page, 1-100 (default 100).
+        optional: true
+    output:
+      description: A page of field definitions.
+      type: object
+
+  get_company:
+    title: Get a company
+    description: >-
+      Read one company and, with field_ids or field_types, its global, enriched and relationship-intelligence
+      field values.
+    category: companies
+    read_only: true
+    request:
+      method: GET
+      path: /v2/companies/${company_id}
+      query:
+        fieldIds: ${field_ids}
+        fieldTypes: ${field_types}
+    input:
+      company_id:
+        type: integer
+        description: Company id.
+      field_ids:
+        type: array
+        description: Field ids to return data for, e.g. field-1 or affinity-data-description.
+        optional: true
+        items:
+          type: string
+      field_types:
+        type: array
+        description: 'Field groups to return data for: enriched, global, list or relationship-intelligence.'
+        optional: true
+        items:
+          type: string
+    output:
+      description: The company.
+      type: object
+
+  list_company_lists:
+    title: List a company's lists
+    description: >-
+      List every list the company appears on that the caller can see.
+    category: companies
+    read_only: true
+    request:
+      method: GET
+      path: /v2/companies/${company_id}/lists
+      query:
+        cursor: ${cursor}
+        limit: ${limit}
+    input:
+      company_id:
+        type: integer
+        description: Company id.
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination, to fetch the next or previous
+          page.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page, 1-100 (default 100).
+        optional: true
+    output:
+      description: A page of lists.
+      type: object
+
+  list_company_list_entries:
+    title: List a company's list entries
+    description: >-
+      List the company's rows across every list, each with its list-specific field data and
+      who added it when.
+    category: companies
+    read_only: true
+    request:
+      method: GET
+      path: /v2/companies/${company_id}/list-entries
+      query:
+        cursor: ${cursor}
+        limit: ${limit}
+    input:
+      company_id:
+        type: integer
+        description: Company id.
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination, to fetch the next or previous
+          page.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page, 1-100 (default 100).
+        optional: true
+    output:
+      description: A page of list entries.
+      type: object
+
+  list_company_notes:
+    title: List a company's notes
+    description: >-
+      List the notes relevant to a company: notes attached to it and to the people at it.
+      BETA.
+    category: notes
+    read_only: true
+    request:
+      method: GET
+      path: /v2/companies/${company_id}/notes
+      query:
+        filter: ${filter}
+        cursor: ${cursor}
+        limit: ${limit}
+        totalCount: ${total_count}
+    input:
+      company_id:
+        type: integer
+        description: Company id.
+      filter:
+        type: string
+        description: Filter on creator.id (=), createdAt or updatedAt (>, <, >=, <=), e.g.
+          createdAt>=2025-02-03T10:48:24Z.
+        optional: true
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination, to fetch the next or previous
+          page.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page, 1-100 (default 100).
+        optional: true
+      total_count:
+        type: boolean
+        description: True to include the total count in the pagination block.
+        optional: true
+    output:
+      description: A page of notes.
+      type: object
+
+  list_persons:
+    title: List persons
+    description: >-
+      Page through people with their names, emails and, when requested, field data. Pass ids
+      to fetch specific people.
+    category: persons
+    read_only: true
+    request:
+      method: GET
+      path: /v2/persons
+      query:
+        cursor: ${cursor}
+        limit: ${limit}
+        ids: ${ids}
+        fieldIds: ${field_ids}
+        fieldTypes: ${field_types}
+    input:
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination, to fetch the next or previous
+          page.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page, 1-100 (default 100).
+        optional: true
+      ids:
+        type: array
+        description: Person ids to fetch.
+        optional: true
+        items:
+          type: integer
+      field_ids:
+        type: array
+        description: Field ids to return data for, e.g. field-1 or affinity-data-description.
+        optional: true
+        items:
+          type: string
+      field_types:
+        type: array
+        description: 'Field groups to return data for: enriched, global, list or relationship-intelligence.'
+        optional: true
+        items:
+          type: string
+    output:
+      description: A page of persons.
+      type: object
+
+  list_person_fields:
+    title: List person fields
+    description: >-
+      List the non-list-specific fields on persons, to pick field_ids for the person reads.
+    category: persons
+    read_only: true
+    request:
+      method: GET
+      path: /v2/persons/fields
+      query:
+        cursor: ${cursor}
+        limit: ${limit}
+    input:
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination, to fetch the next or previous
+          page.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page, 1-100 (default 100).
+        optional: true
+    output:
+      description: A page of field definitions.
+      type: object
+
+  get_person:
+    title: Get a person
+    description: >-
+      Read one person and, with field_ids or field_types, their field values.
+    category: persons
+    read_only: true
+    request:
+      method: GET
+      path: /v2/persons/${person_id}
+      query:
+        fieldIds: ${field_ids}
+        fieldTypes: ${field_types}
+    input:
+      person_id:
+        type: integer
+        description: Person id.
+      field_ids:
+        type: array
+        description: Field ids to return data for, e.g. field-1 or affinity-data-description.
+        optional: true
+        items:
+          type: string
+      field_types:
+        type: array
+        description: 'Field groups to return data for: enriched, global, list or relationship-intelligence.'
+        optional: true
+        items:
+          type: string
+    output:
+      description: The person.
+      type: object
+
+  list_person_lists:
+    title: List a person's lists
+    description: >-
+      List every list the person appears on that the caller can see.
+    category: persons
+    read_only: true
+    request:
+      method: GET
+      path: /v2/persons/${person_id}/lists
+      query:
+        cursor: ${cursor}
+        limit: ${limit}
+    input:
+      person_id:
+        type: integer
+        description: Person id.
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination, to fetch the next or previous
+          page.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page, 1-100 (default 100).
+        optional: true
+    output:
+      description: A page of lists.
+      type: object
+
+  list_person_list_entries:
+    title: List a person's list entries
+    description: >-
+      List the person's rows across every list, with list-specific field data and who added
+      them when.
+    category: persons
+    read_only: true
+    request:
+      method: GET
+      path: /v2/persons/${person_id}/list-entries
+      query:
+        cursor: ${cursor}
+        limit: ${limit}
+    input:
+      person_id:
+        type: integer
+        description: Person id.
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination, to fetch the next or previous
+          page.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page, 1-100 (default 100).
+        optional: true
+    output:
+      description: A page of list entries.
+      type: object
+
+  list_person_notes:
+    title: List a person's notes
+    description: >-
+      List the notes relevant to a person: attached to them, on meetings they attended, or
+      mentioning them. BETA.
+    category: notes
+    read_only: true
+    request:
+      method: GET
+      path: /v2/persons/${person_id}/notes
+      query:
+        filter: ${filter}
+        cursor: ${cursor}
+        limit: ${limit}
+        totalCount: ${total_count}
+    input:
+      person_id:
+        type: integer
+        description: Person id.
+      filter:
+        type: string
+        description: Filter on creator.id (=), createdAt or updatedAt (>, <, >=, <=), e.g.
+          createdAt>=2025-02-03T10:48:24Z.
+        optional: true
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination, to fetch the next or previous
+          page.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page, 1-100 (default 100).
+        optional: true
+      total_count:
+        type: boolean
+        description: True to include the total count in the pagination block.
+        optional: true
+    output:
+      description: A page of notes.
+      type: object
+
+  list_opportunities:
+    title: List opportunities
+    description: >-
+      Page through opportunities with basic information. Their field data lives on list entries
+      -- read it with list_list_entries or list_saved_view_entries.
+    category: opportunities
+    read_only: true
+    request:
+      method: GET
+      path: /v2/opportunities
+      query:
+        cursor: ${cursor}
+        limit: ${limit}
+        ids: ${ids}
+    input:
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination, to fetch the next or previous
+          page.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page, 1-100 (default 100).
+        optional: true
+      ids:
+        type: array
+        description: Opportunity ids to fetch.
+        optional: true
+        items:
+          type: integer
+    output:
+      description: A page of opportunities.
+      type: object
+
+  get_opportunity:
+    title: Get an opportunity
+    description: >-
+      Read one opportunity's basic information -- name and list. Field data comes from its
+      list entry.
+    category: opportunities
+    read_only: true
+    request:
+      method: GET
+      path: /v2/opportunities/${opportunity_id}
+    input:
+      opportunity_id:
+        type: integer
+        description: Opportunity id.
+    output:
+      description: The opportunity.
+      type: object
+
+  list_opportunity_notes:
+    title: List an opportunity's notes
+    description: >-
+      List notes on an opportunity, including notes attached to the people on it. BETA.
+    category: notes
+    read_only: true
+    request:
+      method: GET
+      path: /v2/opportunities/${opportunity_id}/notes
+      query:
+        filter: ${filter}
+        cursor: ${cursor}
+        limit: ${limit}
+        totalCount: ${total_count}
+    input:
+      opportunity_id:
+        type: integer
+        description: Opportunity id.
+      filter:
+        type: string
+        description: Filter on creator.id (=), createdAt or updatedAt (>, <, >=, <=), e.g.
+          createdAt>=2025-02-03T10:48:24Z.
+        optional: true
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination, to fetch the next or previous
+          page.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page, 1-100 (default 100).
+        optional: true
+      total_count:
+        type: boolean
+        description: True to include the total count in the pagination block.
+        optional: true
+    output:
+      description: A page of notes.
+      type: object
+
+  list_lists:
+    title: List lists
+    description: >-
+      List every list the caller can see, with its name, entity type (company, person or opportunity),
+      owner and privacy.
+    category: lists
+    read_only: true
+    request:
+      method: GET
+      path: /v2/lists
+      query:
+        cursor: ${cursor}
+        limit: ${limit}
+    input:
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination, to fetch the next or previous
+          page.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page, 1-100 (default 100).
+        optional: true
+    output:
+      description: A page of lists.
+      type: object
+
+  get_list:
+    title: Get a list
+    description: >-
+      Read one list's configuration: name, type, owner, privacy and creation details.
+    category: lists
+    read_only: true
+    request:
+      method: GET
+      path: /v2/lists/${list_id}
+    input:
+      list_id:
+        type: integer
+        description: List id.
+    output:
+      description: The list.
+      type: object
+
+  list_list_fields:
+    title: List a list's fields
+    description: >-
+      List the fields (columns) available on a list, list-specific ones included, with their
+      ids and value types.
+    category: lists
+    read_only: true
+    request:
+      method: GET
+      path: /v2/lists/${list_id}/fields
+      query:
+        cursor: ${cursor}
+        limit: ${limit}
+    input:
+      list_id:
+        type: integer
+        description: List id.
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination, to fetch the next or previous
+          page.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page, 1-100 (default 100).
+        optional: true
+    output:
+      description: A page of field definitions.
+      type: object
+
+  list_list_entries:
+    title: List a list's entries
+    description: >-
+      Page through a list's rows -- each company, person or opportunity on it -- with the
+      field data you request, list-specific fields included.
+    category: lists
+    read_only: true
+    request:
+      method: GET
+      path: /v2/lists/${list_id}/list-entries
+      query:
+        cursor: ${cursor}
+        limit: ${limit}
+        fieldIds: ${field_ids}
+        fieldTypes: ${field_types}
+    input:
+      list_id:
+        type: integer
+        description: List id.
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination, to fetch the next or previous
+          page.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page, 1-100 (default 100).
+        optional: true
+      field_ids:
+        type: array
+        description: Field ids to return data for, e.g. field-1 or affinity-data-description.
+        optional: true
+        items:
+          type: string
+      field_types:
+        type: array
+        description: 'Field groups to return data for: enriched, global, list or relationship-intelligence.'
+        optional: true
+        items:
+          type: string
+    output:
+      description: A page of list entries.
+      type: object
+
+  get_list_entry:
+    title: Get a list entry
+    description: >-
+      Read one row of a list with the field data you request.
+    category: lists
+    read_only: true
+    request:
+      method: GET
+      path: /v2/lists/${list_id}/list-entries/${list_entry_id}
+      query:
+        fieldIds: ${field_ids}
+        fieldTypes: ${field_types}
+    input:
+      list_id:
+        type: integer
+        description: List id.
+      list_entry_id:
+        type: integer
+        description: List entry id.
+      field_ids:
+        type: array
+        description: Field ids to return data for, e.g. field-1 or affinity-data-description.
+        optional: true
+        items:
+          type: string
+      field_types:
+        type: array
+        description: 'Field groups to return data for: enriched, global, list or relationship-intelligence.'
+        optional: true
+        items:
+          type: string
+    output:
+      description: The list entry.
+      type: object
+
+  list_saved_views:
+    title: List saved views
+    description: >-
+      List the saved views on a list the caller can see, with their names, sorting and columns.
+    category: lists
+    read_only: true
+    request:
+      method: GET
+      path: /v2/lists/${list_id}/saved-views
+      query:
+        cursor: ${cursor}
+        limit: ${limit}
+    input:
+      list_id:
+        type: integer
+        description: List id.
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination, to fetch the next or previous
+          page.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page, 1-100 (default 100).
+        optional: true
+    output:
+      description: A page of saved views.
+      type: object
+
+  get_saved_view:
+    title: Get a saved view
+    description: >-
+      Read one saved view's configuration: name, sorting and visible columns.
+    category: lists
+    read_only: true
+    request:
+      method: GET
+      path: /v2/lists/${list_id}/saved-views/${view_id}
+    input:
+      list_id:
+        type: integer
+        description: List id.
+      view_id:
+        type: integer
+        description: Saved view id.
+    output:
+      description: The saved view.
+      type: object
+
+  list_saved_view_entries:
+    title: List a saved view's entries
+    description: >-
+      Page through the rows a saved view shows, applying its filters and returning only its
+      columns' field data. The efficient way to read a filtered slice of a list.
+    category: lists
+    read_only: true
+    request:
+      method: GET
+      path: /v2/lists/${list_id}/saved-views/${view_id}/list-entries
+      query:
+        cursor: ${cursor}
+        limit: ${limit}
+    input:
+      list_id:
+        type: integer
+        description: List id.
+      view_id:
+        type: integer
+        description: Saved view id.
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination, to fetch the next or previous
+          page.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page, 1-100 (default 100).
+        optional: true
+    output:
+      description: A page of list entries.
+      type: object
+
+  list_list_entry_fields:
+    title: List a list entry's field values
+    description: >-
+      Page through every field value on a list entry, optionally only given field ids or types.
+    category: field_values
+    read_only: true
+    request:
+      method: GET
+      path: /v2/lists/${list_id}/list-entries/${list_entry_id}/fields
+      query:
+        ids: ${ids}
+        types: ${types}
+        cursor: ${cursor}
+        limit: ${limit}
+    input:
+      list_id:
+        type: integer
+        description: List id.
+      list_entry_id:
+        type: integer
+        description: List entry id.
+      ids:
+        type: array
+        description: Field ids to include.
+        optional: true
+        items:
+          type: string
+      types:
+        type: array
+        description: 'Field types to include: enriched, global, list or relationship-intelligence.'
+        optional: true
+        items:
+          type: string
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination, to fetch the next or previous
+          page.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page, 1-100 (default 100).
+        optional: true
+    output:
+      description: A page of field values.
+      type: object
+
+  get_list_entry_field:
+    title: Get a list entry field value
+    description: >-
+      Read one field value (a single cell) on a list entry, with its type and data.
+    category: field_values
+    read_only: true
+    request:
+      method: GET
+      path: /v2/lists/${list_id}/list-entries/${list_entry_id}/fields/${field_id}
+    input:
+      list_id:
+        type: integer
+        description: List id.
+      list_entry_id:
+        type: integer
+        description: List entry id.
+      field_id:
+        type: string
+        description: Field id, e.g. field-105.
+    output:
+      description: The field value.
+      type: object
+
+  update_list_entry_field:
+    title: Update a list entry field value
+    description: >-
+      Set one cell on a list entry. value is typed: {type: text, data: "..."}, {type: number,
+      data: 3}, {type: datetime, data: ISO date}, {type: dropdown, data: {dropdownOptionId}},
+      {type: ranked-dropdown, data: {dropdownOptionId}}, {type: person, data: {id}}, {type:
+      company, data: {id}}, {type: location, data: {...}} or their -multi forms with lists;
+      data null clears it.
+    category: field_values
+    request:
+      method: POST
+      path: /v2/lists/${list_id}/list-entries/${list_entry_id}/fields/${field_id}
+      body:
+        value: ${value}
+    input:
+      list_id:
+        type: integer
+        description: List id.
+      list_entry_id:
+        type: integer
+        description: List entry id.
+      field_id:
+        type: string
+        description: Field id, e.g. field-105.
+      value:
+        type: object
+        properties:
+          type:
+            type: string
+          data:
+            type: string
+        description: 'The typed value, {type, data}: type is text, filterable-text, number,
+          datetime, dropdown, ranked-dropdown, person, company, location or a -multi form;
+          data is the string, number, ISO datetime, {dropdownOptionId}, {id} or location object
+          (a list for -multi), or null to clear.'
+    output:
+      description: The updated field value.
+      type: object
+
+  update_list_entry_fields:
+    title: Update several list entry field values
+    description: >-
+      Set up to 100 cells on one list entry in a single request -- the same as calling update_list_entry_field
+      for each.
+    category: field_values
+    request:
+      method: PATCH
+      path: /v2/lists/${list_id}/list-entries/${list_entry_id}/fields
+      body:
+        operation: update-fields
+        updates: ${updates}
+    input:
+      list_id:
+        type: integer
+        description: List id.
+      list_entry_id:
+        type: integer
+        description: List entry id.
+      updates:
+        type: array
+        items:
+          type: object
+        min_length: 1
+        max_length: 100
+        description: 'Updates, each {id: field id, value: {type, data}} as for update_list_entry_field.'
+    output:
+      description: The result of the batch.
+      type: object
+
+  list_notes:
+    title: List notes
+    description: >-
+      Page through every note the caller can see, replies excepted, filtered by id, creator
+      or created and updated dates. BETA.
+    category: notes
+    read_only: true
+    request:
+      method: GET
+      path: /v2/notes
+      query:
+        totalCount: ${total_count}
+        cursor: ${cursor}
+        limit: ${limit}
+        filter: ${filter}
+        includes: ${includes}
+    input:
+      total_count:
+        type: boolean
+        description: True to include the total count in the pagination block.
+        optional: true
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination, to fetch the next or previous
+          page.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page, 1-100 (default 100).
+        optional: true
+      filter:
+        type: string
+        description: Filter on creator.id (=), createdAt or updatedAt (>, <, >=, <=), e.g.
+          createdAt>=2025-02-03T10:48:24Z.
+        optional: true
+      includes:
+        type: array
+        description: 'Extra properties to include: companiesPreview, personsPreview, opportunitiesPreview,
+          repliesCount.'
+        optional: true
+        items:
+          type: string
+    output:
+      description: A page of notes.
+      type: object
+
+  get_note:
+    title: Get a note
+    description: >-
+      Read one note with its content, creator and timestamps, optionally with mentions and
+      attachments. BETA.
+    category: notes
+    read_only: true
+    request:
+      method: GET
+      path: /v2/notes/${note_id}
+      query:
+        includes: ${includes}
+    input:
+      note_id:
+        type: integer
+        description: Note id.
+      includes:
+        type: array
+        description: 'Extra properties to include: companiesPreview, personsPreview, opportunitiesPreview,
+          repliesCount.'
+        optional: true
+        items:
+          type: string
+    output:
+      description: The note.
+      type: object
+
+  list_note_replies:
+    title: List note replies
+    description: >-
+      List the replies on a note, filterable by creator and dates. BETA.
+    category: notes
+    read_only: true
+    request:
+      method: GET
+      path: /v2/notes/${note_id}/replies
+      query:
+        filter: ${filter}
+        cursor: ${cursor}
+        limit: ${limit}
+        totalCount: ${total_count}
+    input:
+      note_id:
+        type: integer
+        description: Note id.
+      filter:
+        type: string
+        description: Filter on creator.id (=), createdAt or updatedAt (>, <, >=, <=), e.g.
+          createdAt>=2025-02-03T10:48:24Z.
+        optional: true
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination, to fetch the next or previous
+          page.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page, 1-100 (default 100).
+        optional: true
+      total_count:
+        type: boolean
+        description: True to include the total count in the pagination block.
+        optional: true
+    output:
+      description: A page of reply notes.
+      type: object
+
+  list_note_companies:
+    title: List a note's companies
+    description: >-
+      List the companies a note is directly attached to. BETA.
+    category: notes
+    read_only: true
+    request:
+      method: GET
+      path: /v2/notes/${note_id}/attached-companies
+      query:
+        totalCount: ${total_count}
+        cursor: ${cursor}
+        limit: ${limit}
+    input:
+      note_id:
+        type: integer
+        description: Note id.
+      total_count:
+        type: boolean
+        description: True to include the total count in the pagination block.
+        optional: true
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination, to fetch the next or previous
+          page.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page, 1-100 (default 100).
+        optional: true
+    output:
+      description: A page of companies.
+      type: object
+
+  list_note_persons:
+    title: List a note's persons
+    description: >-
+      List the persons a note is directly attached to. BETA.
+    category: notes
+    read_only: true
+    request:
+      method: GET
+      path: /v2/notes/${note_id}/attached-persons
+      query:
+        totalCount: ${total_count}
+        cursor: ${cursor}
+        limit: ${limit}
+    input:
+      note_id:
+        type: integer
+        description: Note id.
+      total_count:
+        type: boolean
+        description: True to include the total count in the pagination block.
+        optional: true
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination, to fetch the next or previous
+          page.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page, 1-100 (default 100).
+        optional: true
+    output:
+      description: A page of persons.
+      type: object
+
+  list_note_opportunities:
+    title: List a note's opportunities
+    description: >-
+      List the opportunities a note is directly attached to. BETA.
+    category: notes
+    read_only: true
+    request:
+      method: GET
+      path: /v2/notes/${note_id}/attached-opportunities
+      query:
+        totalCount: ${total_count}
+        cursor: ${cursor}
+        limit: ${limit}
+    input:
+      note_id:
+        type: integer
+        description: Note id.
+      total_count:
+        type: boolean
+        description: True to include the total count in the pagination block.
+        optional: true
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination, to fetch the next or previous
+          page.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page, 1-100 (default 100).
+        optional: true
+    output:
+      description: A page of opportunities.
+      type: object
+
+  list_emails:
+    title: List emails
+    description: >-
+      Page through email interactions the caller may see, with subject, sent time and participants.
+      BETA, in closed availability.
+    category: interactions
+    read_only: true
+    request:
+      method: GET
+      path: /v2/emails
+      query:
+        cursor: ${cursor}
+        limit: ${limit}
+        filter: ${filter}
+    input:
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination, to fetch the next or previous
+          page.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page, 1-100 (default 100).
+        optional: true
+      filter:
+        type: string
+        description: Filter string in Affinity's filtering syntax.
+        optional: true
+    output:
+      description: A page of emails.
+      type: object
+
+  list_meetings:
+    title: List meetings
+    description: >-
+      Page through meetings the caller may see, with title, start and end, organizer and attendee
+      previews. BETA, marked coming soon.
+    category: interactions
+    read_only: true
+    request:
+      method: GET
+      path: /v2/meetings
+      query:
+        cursor: ${cursor}
+        limit: ${limit}
+        filter: ${filter}
+    input:
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination, to fetch the next or previous
+          page.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page, 1-100 (default 100).
+        optional: true
+      filter:
+        type: string
+        description: Filter string in Affinity's filtering syntax.
+        optional: true
+    output:
+      description: A page of meetings.
+      type: object
+
+  merge_companies:
+    title: Merge two companies
+    description: >-
+      Merge a duplicate company into a primary one. Everything on the duplicate moves to the
+      primary, then the duplicate is deleted -- this cannot be undone. Runs asynchronously;
+      track it with get_company_merge. BETA.
+    category: merges
+    destructive: true
+    request:
+      method: POST
+      path: /v2/company-merges
+      body:
+        duplicateCompanyId: ${duplicate_company_id}
+        primaryCompanyId: ${primary_company_id}
+    input:
+      duplicate_company_id:
+        type: integer
+        description: The ID of the company profile that will be merged and then deleted. All
+          data from this company will be transferred to the primary company.
+      primary_company_id:
+        type: integer
+        description: The ID of the company profile that will be kept after the merge. All
+          data from the duplicate company will be merged into this company.
+    output:
+      description: The merge, with its id and task url.
+      type: object
+
+  list_company_merges:
+    title: List company merges
+    description: >-
+      List company merges started in the organization with their status and the companies
+      involved. BETA.
+    category: merges
+    read_only: true
+    request:
+      method: GET
+      path: /v2/company-merges
+      query:
+        cursor: ${cursor}
+        limit: ${limit}
+        filter: ${filter}
+    input:
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination, to fetch the next or previous
+          page.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page, 1-100 (default 100).
+        optional: true
+      filter:
+        type: string
+        description: Filter in Affinity Filtering Language, e.g. status=failed.
+        optional: true
+    output:
+      description: A page of company merges.
+      type: object
+
+  get_company_merge:
+    title: Get a company merge
+    description: >-
+      Read a company merge's status, companies, timestamps and any error. BETA.
+    category: merges
+    read_only: true
+    request:
+      method: GET
+      path: /v2/company-merges/${merge_id}
+    input:
+      merge_id:
+        type: integer
+        description: Company merge id.
+    output:
+      description: The company merge.
+      type: object
+
+  list_company_merge_tasks:
+    title: List company merge tasks
+    description: >-
+      List company merge tasks with their overall status and how many merges are in progress,
+      done or failed. BETA.
+    category: merges
+    read_only: true
+    request:
+      method: GET
+      path: /v2/tasks/company-merges
+      query:
+        cursor: ${cursor}
+        limit: ${limit}
+        filter: ${filter}
+    input:
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination, to fetch the next or previous
+          page.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page, 1-100 (default 100).
+        optional: true
+      filter:
+        type: string
+        description: Filter in Affinity Filtering Language, e.g. status=failed.
+        optional: true
+    output:
+      description: A page of merge tasks.
+      type: object
+
+  get_company_merge_task:
+    title: Get a company merge task
+    description: >-
+      Read one company merge task's status and counts of merges in progress, completed and
+      failed. BETA.
+    category: merges
+    read_only: true
+    request:
+      method: GET
+      path: /v2/tasks/company-merges/${task_id}
+    input:
+      task_id:
+        type: string
+        description: Merge task id.
+    output:
+      description: The merge task.
+      type: object
+
+  merge_persons:
+    title: Merge two persons
+    description: >-
+      Merge a duplicate person into a primary one. Everything on the duplicate moves to the
+      primary, then the duplicate is deleted -- this cannot be undone. Runs asynchronously;
+      track it with get_person_merge. BETA.
+    category: merges
+    destructive: true
+    request:
+      method: POST
+      path: /v2/person-merges
+      body:
+        duplicatePersonId: ${duplicate_person_id}
+        primaryPersonId: ${primary_person_id}
+    input:
+      duplicate_person_id:
+        type: integer
+        description: The ID of the person profile that will be merged and then deleted. All
+          data from this person will be transferred to the primary person.
+      primary_person_id:
+        type: integer
+        description: The ID of the person profile that will be kept after the merge. All data
+          from the duplicate person will be merged into this person.
+    output:
+      description: The merge, with its id and task url.
+      type: object
+
+  list_person_merges:
+    title: List person merges
+    description: >-
+      List person merges started in the organization with their status and the persons involved.
+      BETA.
+    category: merges
+    read_only: true
+    request:
+      method: GET
+      path: /v2/person-merges
+      query:
+        cursor: ${cursor}
+        limit: ${limit}
+        filter: ${filter}
+    input:
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination, to fetch the next or previous
+          page.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page, 1-100 (default 100).
+        optional: true
+      filter:
+        type: string
+        description: Filter in Affinity Filtering Language, e.g. status=failed.
+        optional: true
+    output:
+      description: A page of person merges.
+      type: object
+
+  get_person_merge:
+    title: Get a person merge
+    description: >-
+      Read a person merge's status, persons, timestamps and any error. BETA.
+    category: merges
+    read_only: true
+    request:
+      method: GET
+      path: /v2/person-merges/${merge_id}
+    input:
+      merge_id:
+        type: integer
+        description: Person merge id.
+    output:
+      description: The person merge.
+      type: object
+
+  list_person_merge_tasks:
+    title: List person merge tasks
+    description: >-
+      List person merge tasks with their overall status and how many merges are in progress,
+      done or failed. BETA.
+    category: merges
+    read_only: true
+    request:
+      method: GET
+      path: /v2/tasks/person-merges
+      query:
+        cursor: ${cursor}
+        limit: ${limit}
+        filter: ${filter}
+    input:
+      cursor:
+        type: string
+        description: Cursor from the previous page's pagination, to fetch the next or previous
+          page.
+        optional: true
+      limit:
+        type: integer
+        description: Items per page, 1-100 (default 100).
+        optional: true
+      filter:
+        type: string
+        description: Filter in Affinity Filtering Language, e.g. status=failed.
+        optional: true
+    output:
+      description: A page of merge tasks.
+      type: object
+
+  get_person_merge_task:
+    title: Get a person merge task
+    description: >-
+      Read one person merge task's status and counts of merges in progress, completed and
+      failed. BETA.
+    category: merges
+    read_only: true
+    request:
+      method: GET
+      path: /v2/tasks/person-merges/${task_id}
+    input:
+      task_id:
+        type: string
+        description: Merge task id.
+    output:
+      description: The merge task.
+      type: object

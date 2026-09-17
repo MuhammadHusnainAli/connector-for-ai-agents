@@ -102,6 +102,10 @@ SMALL_BY_NATURE = {
     # Abstract sells one API per hostname, and this connector is wired to the
     # email validation one: a single GET is its entire surface.
     "abstract": 1,
+    # Avian is an OpenAI-compatible inference endpoint. Its own reference
+    # documents exactly one route, POST /v1/chat/completions; the model
+    # catalogue is the second and last thing the host answers.
+    "avian": 2,
 }
 
 
