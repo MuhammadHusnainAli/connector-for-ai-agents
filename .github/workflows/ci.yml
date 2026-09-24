@@ -1,22 +1,43 @@
 name: CI
 
+# One workflow for everything: test on every supported Python, build the
+# distributions, scan the code (CodeQL and Bandit), and publish to PyPI when a
+# GitHub Release is published. Publishing only ever runs after the tests and
+# the build have passed in the same run.
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  # Publishing to real PyPI happens when you publish a GitHub Release.
+  release:
+    types: [published]
+  # Weekly security scan, so new CodeQL queries reach code that has not changed.
+  schedule:
+    - cron: "42 10 * * 5"
+  # Manual runs test and scan; pick an index to also smoke-test publishing.
   workflow_dispatch:
+    inputs:
+      target:
+        description: "Also publish to"
+        type: choice
+        options: [none, testpypi, pypi]
+        default: none
 
+# A newer push to a pull request supersedes the run in progress; anything else
+# -- main, a release, a manual publish -- is left to finish.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# CI only ever reads the repository, so drop every other scope from GITHUB_TOKEN.
+# Jobs that need more (security-events, id-token) ask for it themselves.
 permissions:
   contents: read
 
 jobs:
   test:
+    name: Test (Python ${{ matrix.python-version }})
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -51,9 +72,13 @@ jobs:
 
   build:
     name: Build distributions
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Tags are needed to prove a manual pypi run is publishing a tagged commit.
+          fetch-depth: 0
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
@@ -63,12 +88,155 @@ jobs:
       - name: Build sdist and wheel
         run: |
           python -m pip install --upgrade pip build twine
+          # verify_wheel.py fails the build if the catalogue or its index did
+          # not make it into the wheel, rather than let that reach PyPI.
           python scripts/build_index.py --check
           python -m build
           python -m twine check --strict dist/*
           python scripts/verify_wheel.py
 
+      # Anything reaching real PyPI must be traceable to a tag: a version can
+      # never be re-uploaded once taken, so an untagged publish is permanent and
+      # unattributable. This used to run on release events only, which is how
+      # 0.1.3 shipped from a manual run with no tag at all -- the tag was added
+      # afterwards by hand. Manual pypi runs are held to the same rule.
+      - name: Check the published version is tagged
+        if: github.event_name == 'release' || inputs.target == 'pypi'
+        run: |
+          project_version=$(python -c "import tomllib,pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+
+          if [ "${{ github.event_name }}" = "release" ]; then
+            # The tag is the ref being built, so compare the two directly.
+            tag_version="${GITHUB_REF_NAME#v}"
+            echo "pyproject: $project_version / tag: $tag_version"
+            if [ "$project_version" != "$tag_version" ]; then
+              echo "::error::Tag $GITHUB_REF_NAME does not match project version $project_version"
+              exit 1
+            fi
+          else
+            # A manual run builds a branch, so require the matching tag to exist
+            # and to name this exact commit.
+            tag="v$project_version"
+            if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+              echo "::error::No $tag tag. Tag the release commit before publishing $project_version to PyPI."
+              exit 1
+            fi
+            tagged_sha=$(git rev-parse "refs/tags/$tag^{commit}")
+            if [ "$tagged_sha" != "$GITHUB_SHA" ]; then
+              echo "::error::$tag points at $tagged_sha, but this run builds $GITHUB_SHA."
+              exit 1
+            fi
+            echo "pyproject: $project_version / $tag matches $GITHUB_SHA"
+          fi
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: dist-ci
+          name: dist
           path: dist/
+
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    # A release re-runs the tagged commit main already scanned.
+    if: github.event_name != 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload the results to code scanning
+      actions: read # read workflow run status on a private repository
+    strategy:
+      fail-fast: false
+      matrix:
+        # Python is interpreted and the workflows are YAML: neither needs a build.
+        language: [python, actions]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+
+      - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          # The category default setup used, so existing alerts carry over
+          # instead of being closed and reopened as new ones.
+          category: /language:${{ matrix.language }}
+
+  bandit:
+    name: Bandit
+    if: github.event_name != 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload the results to code scanning
+      actions: read # read workflow run status on a private repository
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+
+      # The test suite is excluded: pytest's whole assertion model is the bare
+      # `assert`, so B101 fires on every one of the 450-odd of them and buries
+      # the findings that matter under notes that describe pytest working as
+      # designed. Nothing under tests/ ships in the wheel.
+      #
+      # B105 (hardcoded password string) matches on dictionary keys, and this
+      # package's whole subject is credential schemas: every `{"secret": True}`
+      # field descriptor and every `{"client_secret": "required"}` validation
+      # detail trips it. All of them are field metadata, none of them a password.
+      #
+      # Findings are reported to code scanning rather than failing the run.
+      - name: Scan with Bandit
+        run: |
+          python -m pip install --upgrade pip "bandit[sarif]"
+          bandit -r . -x ./tests,./.venv -s B105 -f sarif -o bandit.sarif --exit-zero
+
+      - uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: bandit.sarif
+          category: bandit
+
+  testpypi:
+    name: Publish to TestPyPI
+    needs: [test, build]
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi'
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/connector-for-ai-agents
+    permissions:
+      id-token: write # required for PyPI trusted publishing (OIDC)
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+  pypi:
+    name: Publish to PyPI
+    needs: [test, build]
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.target == 'pypi')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/connector-for-ai-agents
+    permissions:
+      id-token: write # required for PyPI trusted publishing (OIDC)
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          # Backfilled releases (e.g. tagging 0.1.0 after the fact) would otherwise
+          # fail: PyPI never allows re-uploading a version that already exists.
+          skip-existing: true
