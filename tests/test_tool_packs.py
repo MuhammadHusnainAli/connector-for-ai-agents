@@ -102,6 +102,12 @@ SMALL_BY_NATURE = {
     # Abstract sells one API per hostname, and this connector is wired to the
     # email validation one: a single GET is its entire surface.
     "abstract": 1,
+    # AltTextLab's reference (llms.txt and the full docs) documents one route:
+    # POST /alt-text/generate. There is no history, usage or bulk endpoint.
+    "alttextlab": 1,
+    # Login with Amazon's only resource endpoint is GET /user/profile; the
+    # Selling Partner API is a separate connector with its own pack.
+    "amazon": 1,
     # Avian is an OpenAI-compatible inference endpoint. Its own reference
     # documents exactly one route, POST /v1/chat/completions; the model
     # catalogue is the second and last thing the host answers.
