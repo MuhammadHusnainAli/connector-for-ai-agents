@@ -4,6 +4,47 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.5] — 2026-09-24
+
+### Added
+
+- **37 hand-authored tool packs, taking the catalogue from 19,966 tools to
+  24,187.** Hand-authored tools go from 11,398 to 15,401, in 299 packs covering
+  315 connectors. The largest new packs are Blackbaud SKY API (376 tools),
+  APIVerve (359), Amazon Selling Partner (342), Apaleo (297), API Ninjas (233),
+  Ashby (201), Aspire (164), Bland AI (154), Bitdefender GravityZone (121),
+  Bitly and Bloomerang (110 each). Also new: Apollo (API key and OAuth),
+  Amplitude (Event Streaming and MCP), Asana (MCP and SCIM), Bokio, Billsby,
+  Bing Webmaster Tools, Apple Business Manager, Altrata, Ascora, AppFollow,
+  BlueCart, ASIN Data API, AskHandle, Appointedd, Bird, APITemplate.io,
+  Blackbaud CRM / Altru, Apiary, AltTextify, Bocha, Bliro, AltTextLab and
+  Login with Amazon.
+
+### Changed
+
+- **The 36 Azure connectors show the official Azure service icons** instead
+  of two-letter placeholder tiles, taken from Microsoft's Azure Public Service
+  Icons set: Kubernetes Services for `azure-aks`, Key Vaults for
+  `azure-key-vault`, Log Analytics Workspaces for `azure-monitor-logs`, and so
+  on. The Entra ID variants share their service's icon. All are vector, 62x62,
+  and 0.6-3.9 KB each.
+- Deeper packs for existing connectors: Asana goes from 15 tools to 249,
+  Bitbucket from 14 to 167, Apify from 8 to 119, Appstle Subscriptions from 8
+  to 108 and ApexVerify from 7 to 11. The Bill pack now also applies to
+  `bill-sandbox`.
+
+### Fixed
+
+- `appfollow` verified credentials against `/account/users`, which does not
+  exist; it now uses `/api/v2/account/users`.
+- `ask-handle` sent the bare API key; the API expects `Token <key>` and lives
+  under `/api/v1`.
+- `blackbaud` never sent the `Bb-Api-Subscription-Key` header every SKY API
+  call requires. The key is now a secret connection-config field.
+- `blackbaud-basic` asked for a full URL but interpolates a host name; it now
+  asks for the host alone, without `https://`.
+- `bing-webmasters` requested no scope; it now defaults to `webmaster.manage`.
+
 ## [0.2.4] — 2026-09-18
 
 ### Changed
@@ -1020,6 +1061,7 @@ particular credential is allowed to do.
   `TBA` and `OAUTH1`, request proxying with interpolation, pagination and retry
   metadata, and a `connectors` CLI.
 
+[0.2.5]: https://github.com/MuhammadHusnainAli/connector-for-ai-agents/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/MuhammadHusnainAli/connector-for-ai-agents/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/MuhammadHusnainAli/connector-for-ai-agents/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/MuhammadHusnainAli/connector-for-ai-agents/compare/v0.2.1...v0.2.2
