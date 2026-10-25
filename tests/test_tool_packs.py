@@ -112,6 +112,12 @@ SMALL_BY_NATURE = {
     # documents exactly one route, POST /v1/chat/completions; the model
     # catalogue is the second and last thing the host answers.
     "avian": 2,
+    # Brosix's only public API is the Notifications API: each key is a channel
+    # bound to one user or chat room, and POST /message/send/ is all it does.
+    "brosix": 1,
+    # Every Businesslogic web service exposes exactly GET /describe and
+    # POST /execute; a token is tied to one published model.
+    "businesslogic": 2,
 }
 
 

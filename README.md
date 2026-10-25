@@ -462,12 +462,12 @@ from the registry by `python scripts/scaffold_tools.py --catalogue`.
 ### Coverage
 
 <!-- tool-coverage-summary:start -->
-**Every one of the 1,638 connectors exposes tools — 24,187 in total.**
+**Every one of the 1,638 connectors exposes tools — 34,849 in total.**
 
-- **15,401 hand-authored** across 299 packs covering 315 connectors, written against the providers' own references, with typed inputs and real scope names.
+- **26,387 hand-authored** across 376 packs covering 393 connectors, written against the providers' own references, with typed inputs and real scope names.
 - **1,528 generated from providers' published OpenAPI specifications**, across 144 packs.
-- **554 connectors** get a `check_connection` tool built from the verification endpoint their catalogue entry declares.
-- **625 connectors** have only the raw authenticated request tools, which claim nothing about the provider's API.
+- **512 connectors** get a `check_connection` tool built from the verification endpoint their catalogue entry declares.
+- **589 connectors** have only the raw authenticated request tools, which claim nothing about the provider's API.
 
 [TOOLS.md](TOOLS.md) lists every connector and its tools.
 <!-- tool-coverage-summary:end -->
@@ -479,14 +479,28 @@ and destructive flags must match its HTTP verb.
 <!-- tool-coverage:start -->
 | Connector | Provider | Tools | Source |
 |---|---|---:|---|
+| `atlassian-service-account-oauth2` | Atlassian Service Account (OAuth 2.0) | 941 | hand-authored |
+| `atlassian-government-cloud` | Atlassian Government Cloud | 940 | hand-authored |
+| `atlassian-service-account-api-token` | Atlassian Service Account (API Token) | 939 | hand-authored |
+| `boondmanager` | BoondManager | 865 | hand-authored |
+| `zendesk-api-key` | Zendesk (API Token) | 842 | hand-authored |
+| `buildium` | Buildium | 462 | hand-authored |
+| `veeva-vault` | Veeva Vault | 425 | hand-authored |
+| `veeva-vault-oauth` | Veeva Vault (OAuth 2.0 / OIDC) | 425 | hand-authored |
 | `blackbaud` | Blackbaud SKY API (Raiser's Edge NXT) | 376 | hand-authored |
+| `cal-com-v2` | Cal.com (v2) | 375 | hand-authored |
+| `cal-com-oauth` | Cal.com (OAuth) | 369 | hand-authored |
 | `apiverve` | APIVerve | 359 | hand-authored |
+| `booking-experts` | Booking Experts | 345 | hand-authored |
 | `amazon-selling-partner`, `amazon-selling-partner-beta` | Amazon Selling Partner API | 342 | hand-authored |
 | `adyen` | Adyen | 339 | hand-authored |
 | `active-campaign` | ActiveCampaign | 320 | hand-authored |
 | `datadog` | Datadog | 310 | hand-authored |
 | `datadog-oauth` | Datadog (OAuth) | 310 | hand-authored |
+| `vanta` | Vanta | 310 | hand-authored |
 | `apaleo` | Apaleo | 297 | hand-authored |
+| `brevo-api-key` | Brevo | 286 | hand-authored |
+| `zoho-mail` | Zoho Mail | 272 | hand-authored |
 | `databricks-workspace` | Databricks (Workspace Level) | 271 | hand-authored |
 | `adp-workforce-now` | ADP Workforce Now | 267 | hand-authored |
 | `auth0-cc` | Auth0 (Client Credentials) | 250 | hand-authored |
@@ -498,6 +512,7 @@ and destructive flags must match its HTTP verb.
 | `crowdstrike` | CrowdStrike | 214 | hand-authored |
 | `ashby` | Ashby | 201 | hand-authored |
 | `adp-workforce-now-next-gen` | ADP Workforce Now Next Generation | 199 | hand-authored |
+| `btcpay-server` | BTCPay Server (Greenfield API) | 196 | hand-authored |
 | `hubstaff` | Hubstaff | 179 | hand-authored |
 | `google-ads` | Google Ads | 174 | hand-authored |
 | `bitbucket` | Bitbucket | 167 | hand-authored |
@@ -505,28 +520,43 @@ and destructive flags must match its HTTP verb.
 | `blandai` | Bland AI | 154 | hand-authored |
 | `ahrefs` | Ahrefs | 151 | hand-authored |
 | `google-play` | Google Play | 145 | hand-authored |
+| `braze` | Braze | 142 | hand-authored |
+| `vapi` | Vapi | 142 | hand-authored |
+| `braintree` | Braintree | 138 | hand-authored |
+| `braintree-sandbox` | Braintree (Sandbox) | 138 | hand-authored |
 | `google-workspace-admin` | Google Workspace Admin | 134 | hand-authored |
 | `airfocus` | Airfocus | 132 | hand-authored |
 | `databricks-account` | Databricks (Account Level) | 131 | hand-authored |
+| `booking-com` | Booking.com | 130 | hand-authored |
 | `agiliron` | Agiliron | 128 | hand-authored |
 | `autodesk` | Autodesk | 123 | hand-authored |
 | `bitdefender` | Bitdefender GravityZone | 121 | hand-authored |
 | `autotask` | AutoTask | 120 | hand-authored |
 | `apify` | Apify | 119 | hand-authored |
 | `altoviz` | Altoviz | 116 | hand-authored |
+| `algolia` | Algolia | 115 | hand-authored |
+| `bright-data` | Bright Data | 114 | hand-authored |
 | `adoxx-cc` | ADOXX (Client Credentials) | 111 | hand-authored |
 | `customgpt` | CustomGPT | 111 | hand-authored |
 | `bitly` | Bitly | 110 | hand-authored |
 | `bloomerang` | Bloomerang | 110 | hand-authored |
+| `brex`, `brex-staging` | Brex | 110 | hand-authored |
+| `brex-api-key` | Brex (API Key) | 110 | hand-authored |
 | `appstle-subscriptions` | Appstle Subscriptions | 108 | hand-authored |
 | `crunchbase` | Crunchbase | 108 | hand-authored |
+| `bullhorn` | Bullhorn | 104 | hand-authored |
 | `addepar` | Addepar (OAuth) | 102 | hand-authored |
 | `addepar-basic` | Addepar (Basic Auth) | 102 | hand-authored |
+| `bolna` | Bolna AI | 102 | hand-authored |
+| `callhub` | CallHub | 102 | hand-authored |
 | `ayrshare` | Ayrshare | 96 | hand-authored |
+| `atlassian-admin` | Atlassian Cloud Admin | 95 | hand-authored |
 | `aircall` | Aircall | 93 | hand-authored |
 | `aircall-basic` | Aircall (Basic Auth) | 90 | hand-authored |
 | `basecamp` | Basecamp | 87 | hand-authored |
+| `camb-ai` | Camb.AI | 87 | hand-authored |
 | `google-cloud-storage` | Google Cloud Storage | 87 | hand-authored |
+| `boxhero` | BoxHero | 85 | hand-authored |
 | `google-gemini` | Google Gemini | 85 | hand-authored |
 | `adp-run` | RUN Powered by ADP | 84 | hand-authored |
 | `bexio` | Bexio | 81 | hand-authored |
@@ -535,10 +565,13 @@ and destructive flags must match its HTTP verb.
 | `bokio` | Bokio | 80 | hand-authored |
 | `apollo-oauth` | Apollo (OAuth) | 79 | hand-authored |
 | `axiom` | Axiom | 79 | hand-authored |
+| `valley-api-key` | Valley (API Key) | 76 | hand-authored |
 | `avalara`, `avalara-sandbox` | Avalara | 75 | hand-authored |
 | `beebole` | Beebole | 75 | hand-authored |
 | `amplitude` | Amplitude (Event Streaming API) | 74 | hand-authored |
 | `bigcommerce` | BigCommerce | 74 | hand-authored |
+| `callrail` | CallRail | 73 | hand-authored |
+| `canva` | Canva | 73 | hand-authored |
 | `aimfox` | Aimfox | 69 | hand-authored |
 | `aiprise` | AiPrise | 69 | hand-authored |
 | `aws-iam` | AWS IAM | 69 | hand-authored |
@@ -547,16 +580,22 @@ and destructive flags must match its HTTP verb.
 | `adp-lyric` | ADP Lyric | 65 | hand-authored |
 | `bill`, `bill-sandbox` | Bill (Connect API) | 65 | hand-authored |
 | `beekeeper` | Beekeeper | 63 | hand-authored |
+| `browserbase` | Browserbase | 63 | hand-authored |
 | `aimfox-oauth` | Aimfox (OAuth) | 62 | hand-authored |
+| `breezy-hr` | Breezy HR | 62 | hand-authored |
 | `battlenet` | Battle.net | 61 | hand-authored |
+| `athenahealth` | athenahealth | 60 | hand-authored |
+| `breeze` | Breeze | 60 | hand-authored |
 | `adobe-workfront` | Adobe Workfront | 59 | hand-authored |
 | `auvik` | Auvik | 59 | hand-authored |
+| `browser-use` | Browser Use | 59 | hand-authored |
 | `accelo` | Accelo | 58 | hand-authored |
 | `affinity` | Affinity (v1) | 58 | hand-authored |
 | `billsby` | Billsby | 58 | hand-authored |
 | `bing-webmasters` | Bing Webmaster Tools | 58 | hand-authored |
 | `cryptolens` | Cryptolens | 58 | hand-authored |
 | `neo4j-aura` | Neo4j Aura (management API) | 58 | hand-authored |
+| `zapier` | Zapier | 58 | hand-authored |
 | `apple-business-manager` | Apple Business Manager | 57 | hand-authored |
 | `beehiiv` | Beehiiv | 57 | hand-authored |
 | `neo4j` | Neo4j (Query API v2) | 57 | hand-authored |
@@ -564,10 +603,13 @@ and destructive flags must match its HTTP verb.
 | `amplitude-mcp`, `amplitude-mcp-eu` | Amplitude (MCP) | 55 | hand-authored |
 | `avoma` | Avoma | 54 | hand-authored |
 | `microsoft`, `outlook`, `microsoft-tenant-specific` | Microsoft 365 (Graph) | 54 | hand-authored |
+| `canny` | Canny | 51 | hand-authored |
 | `cyberimpact` | Cyberimpact | 51 | hand-authored |
 | `add-to-calendar-pro` | Add to Calendar PRO | 50 | hand-authored |
 | `anthropic-admin` | Anthropic Administrator | 50 | hand-authored |
 | `aws-inspector2` | AWS Inspector2 | 50 | hand-authored |
+| `builder-io-private` | Builder.io (Private) | 50 | hand-authored |
+| `attio-mcp` | Attio (MCP) | 49 | hand-authored |
 | `azure-container-registry` | Azure Container Registry | 49 | hand-authored |
 | `altrata` | Altrata | 48 | hand-authored |
 | `acumatica` | Acumatica | 47 | hand-authored |
@@ -578,13 +620,16 @@ and destructive flags must match its HTTP verb.
 | `baremetrics` | Baremetrics | 46 | hand-authored |
 | `agencyzoom` | AgencyZoom | 44 | hand-authored |
 | `appfollow` | AppFollow | 44 | hand-authored |
+| `buffer` | Buffer | 44 | hand-authored |
 | `agentcard` | Agentcard | 43 | hand-authored |
 | `aidbase` | Aidbase | 43 | hand-authored |
+| `airtable-pat` | Airtable (Personal Access Token) | 42 | hand-authored |
 | `azure-app-service` | Azure App Service | 42 | hand-authored |
 | `autosana` | Autosana | 41 | hand-authored |
 | `azure-ai-search` | Azure AI Search | 41 | hand-authored |
 | `azure-ai-search-entra` | Azure AI Search (Entra ID) | 41 | hand-authored |
 | `air-ops` | AirOps | 40 | hand-authored |
+| `bridge-interactive-platform` | Bridge Interactive Platform | 40 | hand-authored |
 | `currents` | Currents | 39 | hand-authored |
 | `dart` | Dart | 39 | hand-authored |
 | `google-calendar` | Google Calendar | 39 | hand-authored |
@@ -603,6 +648,7 @@ and destructive flags must match its HTTP verb.
 | `acuity-scheduling` | Acuity Scheduling | 33 | hand-authored |
 | `google-chat` | Google Chat | 33 | hand-authored |
 | `adyntel` | Adyntel | 32 | hand-authored |
+| `alien-vault` | AlienVault | 32 | hand-authored |
 | `asin-data-api` | ASIN Data API | 32 | hand-authored |
 | `bigdatacorp` | Bigdatacorp | 32 | hand-authored |
 | `dailybot` | Dailybot | 32 | hand-authored |
@@ -610,11 +656,16 @@ and destructive flags must match its HTTP verb.
 | `azure-ai-language` | Azure AI Language | 31 | hand-authored |
 | `azure-ai-language-entra` | Azure AI Language (Entra ID) | 31 | hand-authored |
 | `azure-resource-manager` | Azure Resource Manager | 31 | hand-authored |
+| `aitable-ai` | AITable.ai | 30 | hand-authored |
 | `bamboohr-basic` | BambooHR (Basic Auth) | 30 | hand-authored |
 | `adobe-umapi` | UMAPI (Adobe User Management API) | 29 | hand-authored |
 | `basin` | Basin | 29 | hand-authored |
+| `callpage` | Callpage | 29 | hand-authored |
+| `valyu` | Valyu | 29 | hand-authored |
 | `agentset` | Agentset | 28 | hand-authored |
 | `aws` | AWS | 28 | hand-authored |
+| `callerapi` | CallerAPI | 27 | hand-authored |
+| `candis` | Candis | 27 | hand-authored |
 | `github` | GitHub | 27 | hand-authored |
 | `google-health` | Google Health | 27 | hand-authored |
 | `abyssale` | Abyssale | 26 | hand-authored |
@@ -624,12 +675,14 @@ and destructive flags must match its HTTP verb.
 | `cursor` | Cursor | 26 | hand-authored |
 | `appointedd` | Appointedd | 25 | hand-authored |
 | `autobound` | Autobound | 25 | hand-authored |
+| `botstar` | BotStar | 25 | hand-authored |
 | `google-contacts` | Google Contacts | 25 | hand-authored |
 | `slack` | Slack | 25 | hand-authored |
 | `cursor-admin` | Cursor Admin | 24 | hand-authored |
 | `stripe` | Stripe | 24 | hand-authored |
 | `alai` | Alai | 23 | hand-authored |
 | `anthropic` | Anthropic | 23 | hand-authored |
+| `assemblyai` | AssemblyAI | 23 | hand-authored |
 | `awardco` | Awardco | 23 | hand-authored |
 | `azure-ai-search-management` | Azure AI Search (Management) | 23 | hand-authored |
 | `azure-devops` | Azure DevOps | 23 | hand-authored |
@@ -646,11 +699,13 @@ and destructive flags must match its HTTP verb.
 | `3cx` | 3CX | 20 | hand-authored |
 | `anvil` | Anvil | 20 | hand-authored |
 | `availity` | Availity | 20 | hand-authored |
+| `zapier-scim` | Zapier (SCIM API) | 20 | hand-authored |
 | `agiloft` | Agiloft | 19 | hand-authored |
 | `agiloft-cc` | Agiloft (Client Credentials) | 19 | hand-authored |
 | `azure-cosmos-db` | Azure Cosmos DB (NoSQL) | 19 | hand-authored |
 | `azure-service-bus` | Azure Service Bus | 19 | hand-authored |
 | `bird` | Bird | 19 | hand-authored |
+| `browse-ai` | Browse AI | 19 | hand-authored |
 | `google-sheet` | Google Sheets | 19 | hand-authored |
 | `akkio` | Akkio | 18 | hand-authored |
 | `google-meet` | Google Meet | 18 | hand-authored |
@@ -661,7 +716,9 @@ and destructive flags must match its HTTP verb.
 | `google-maps` | Google Maps | 17 | hand-authored |
 | `microsoft-teams-bot` | Microsoft Teams Bot | 17 | hand-authored |
 | `aftership` | Aftership | 16 | hand-authored |
+| `all-images-ai` | All Images AI | 16 | hand-authored |
 | `autom` | Autom | 16 | hand-authored |
+| `brave-search` | Brave Search | 16 | hand-authored |
 | `microsoft-entra-id`, `microsoft-admin` | Microsoft Entra ID | 16 | hand-authored |
 | `1password-scim` | 1Password (SCIM) | 15 | hand-authored |
 | `aws-scim` | AWS (SCIM) | 15 | hand-authored |
@@ -673,12 +730,14 @@ and destructive flags must match its HTTP verb.
 | `notion` | Notion | 15 | hand-authored |
 | `pipedrive` | Pipedrive | 15 | hand-authored |
 | `shopify` | Shopify | 15 | hand-authored |
+| `veed` | VEED (via fal.ai) | 15 | hand-authored |
 | `attio` | Attio | 14 | hand-authored |
 | `capsule-crm` | Capsule CRM | 14 | hand-authored |
 | `google-tasks` | Google Tasks | 14 | hand-authored |
 | `intercom` | Intercom | 14 | hand-authored |
 | `mailchimp` | Mailchimp | 14 | hand-authored |
 | `zendesk` | Zendesk | 14 | hand-authored |
+| `alchemy` | Alchemy | 13 | hand-authored |
 | `auth0` | Auth0 | 13 | hand-authored |
 | `azure-maps` | Azure Maps | 13 | hand-authored |
 | `baserow` | Baserow | 13 | hand-authored |
@@ -730,6 +789,7 @@ and destructive flags must match its HTTP verb.
 | `sentry` | Sentry | 11 | hand-authored |
 | `smartsheet` | Smartsheet | 11 | hand-authored |
 | `typeform` | Typeform | 11 | hand-authored |
+| `yanado` | Yanado | 11 | hand-authored |
 | `adobe` | Adobe | 10 | hand-authored |
 | `azure-content-safety` | Azure AI Content Safety | 10 | hand-authored |
 | `calendly` | Calendly | 10 | hand-authored |
@@ -738,6 +798,8 @@ and destructive flags must match its HTTP verb.
 | `google-forms` | Google Forms | 10 | hand-authored |
 | `salesloft` | Salesloft | 10 | hand-authored |
 | `zoom` | Zoom | 10 | hand-authored |
+| `alt-text-ai` | AltText.ai | 9 | hand-authored |
+| `aws-sigv4` | AWS SigV4 Proxy | 9 | hand-authored |
 | `bamboohr` | BambooHR | 9 | hand-authored |
 | `google-docs` | Google Docs | 9 | hand-authored |
 | `gusto`, `gusto-demo` | Gusto | 9 | hand-authored |
@@ -745,12 +807,14 @@ and destructive flags must match its HTTP verb.
 | `twilio` | Twilio | 9 | hand-authored |
 | `adrapid` | AdRapid | 8 | hand-authored |
 | `mixpanel` | Mixpanel | 8 | hand-authored |
+| `y-gy` | y.gy | 8 | hand-authored |
 | `1password-events` | 1Password (Events API) | 7 | hand-authored |
 | `apiary` | Apiary | 7 | hand-authored |
 | `azure-ai-translator` | Azure AI Translator | 7 | hand-authored |
 | `azure-ai-translator-entra` | Azure AI Translator (Entra ID) | 7 | hand-authored |
 | `bettercontact` | BetterContact | 7 | hand-authored |
 | `blackbaud-basic` | Blackbaud CRM / Altru (AppFxWebService) | 7 | hand-authored |
+| `boloforms` | Boloforms | 7 | hand-authored |
 | `customer-io` | Customer.io | 7 | hand-authored |
 | `datacandy` | DataCandy | 7 | hand-authored |
 | `google-calendar-mcp` | Google Calendar (MCP) | 7 | hand-authored |
@@ -758,26 +822,39 @@ and destructive flags must match its HTTP verb.
 | `hubspot-mcp` | HubSpot (MCP) | 7 | hand-authored |
 | `hullo` | Hullo | 7 | hand-authored |
 | `microsoft-people` | Microsoft People | 7 | hand-authored |
+| `youform` | Youform | 7 | hand-authored |
 | `activecalculator` | ActiveCalculator | 6 | hand-authored |
 | `agify` | Agify | 6 | hand-authored |
 | `alttextify` | AltTextify | 6 | hand-authored |
+| `brightcrowd` | BrightCrowd | 6 | hand-authored |
+| `bumpups` | Bumpups | 6 | hand-authored |
 | `dappier` | API Key | 6 | hand-authored |
 | `8x8` | 8x8 | 5 | hand-authored |
 | `a-leads` | A-Leads | 5 | hand-authored |
+| `asters` | Asters | 5 | hand-authored |
 | `bocha-search` | Bocha | 5 | hand-authored |
+| `botcake` | Botcake | 5 | hand-authored |
+| `builder-io-public` | Builder.io (Public) | 5 | hand-authored |
 | `discord` | Discord | 5 | hand-authored |
 | `google` | Google | 5 | hand-authored |
 | `google-maps-platform` | Google Maps Platform | 5 | hand-authored |
 | `google-slides` | Google Slides | 5 | hand-authored |
 | `1password-users` | 1Password (Users API) | 4 | hand-authored |
+| `async-interview` | Async Interview | 4 | hand-authored |
 | `aws-multi-service` | AWS Multi-Service | 4 | hand-authored |
 | `azure-monitor-logs` | Azure Monitor Logs | 4 | hand-authored |
 | `bliro` | Bliro | 4 | hand-authored |
+| `buysellads` | BuySellAds | 4 | hand-authored |
+| `veedea` | Veedea | 4 | hand-authored |
+| `aivoov` | AiVOOV | 3 | hand-authored |
+| `byteforms` | ByteForms | 3 | hand-authored |
 | `google-service-account` | Google Service Account | 3 | hand-authored |
 | `avian` | Avian | 2 | hand-authored |
+| `businesslogic` | Businesslogic | 2 | hand-authored |
 | `abstract` | Abstract | 1 | hand-authored |
 | `alttextlab` | AltTextLab | 1 | hand-authored |
 | `amazon` | Amazon (Login with Amazon) | 1 | hand-authored |
+| `brosix` | Brosix | 1 | hand-authored |
 | `cisco-meraki` | Cisco Meraki | 14 | spec-generated |
 | `clicksend` | ClickSend | 14 | spec-generated |
 | `github-app` | GitHub (App) | 14 | spec-generated |
@@ -925,7 +1002,7 @@ and destructive flags must match its HTTP verb.
 <!-- tool-coverage:end -->
 
 <!-- tool-coverage-note:start -->
-A pack is always better than the fallbacks: it names real operations instead of handing the caller a raw request. 217 of the connectors without one are OAuth2. Adding a pack is a single file — see
+A pack is always better than the fallbacks: it names real operations instead of handing the caller a raw request. 204 of the connectors without one are OAuth2. Adding a pack is a single file — see
 [Adding tools for a connector](#adding-tools-for-a-connector), or let
 `scripts/generate_from_openapi.py` build one where the provider publishes a spec.
 <!-- tool-coverage-note:end -->

@@ -135,14 +135,18 @@ class ToolExecutor:
             "proxy": {**(self.provider.get("proxy") or {}), "base_url": base_url_override},
         }
         # A tool that overrides the base url means it, so the connection's own
-        # base_url must not shadow it (Google's per-service hosts, uploads, ...).
+        # base_url must not shadow it (Google's per-service hosts, uploads, ...)
+        # -- unless the override is built from it, as BTCPay's host-relative
+        # /misc routes are.
+        keep_base_url = "connectionConfig.base_url" in base_url_override
         connection = Connection(
             connection_id=self.connection.connection_id,
             connector_id=self.connection.connector_id,
             auth_mode=self.connection.auth_mode,
             credentials=self.connection.credentials,
             connection_config={
-                k: v for k, v in self.connection.connection_config.items() if k != "base_url"
+                k: v for k, v in self.connection.connection_config.items()
+                if keep_base_url or k != "base_url"
             },
             integration_config=self.connection.integration_config,
         )
