@@ -4,6 +4,52 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6] — 2026-10-25
+
+### Added
+
+- **77 hand-authored tool packs, taking the catalogue from 24,187 tools to
+  34,849.** Hand-authored tools go from 15,401 to 26,387, in 376 packs covering
+  393 connectors. The largest new packs are the three Atlassian Service Account
+  and Government Cloud connectors (939-941 tools each), BoondManager (865),
+  Zendesk (API Token) (842), Buildium (462), Veeva Vault (425, API key and
+  OAuth), Cal.com v2 (375 with an API key, 369 over OAuth), Booking Experts
+  (345), Vanta (310), Brevo (286) and Zoho Mail (272).
+- Also new: BTCPay Server, Braze, Vapi, Braintree (and its sandbox),
+  Booking.com, Algolia, Bright Data, Brex (API key and OAuth), Bullhorn,
+  CallHub, Bolna, Atlassian Cloud Admin, Camb.AI, BoxHero, Valley (API Key),
+  Canva, CallRail, Browserbase, Breezy HR, Breeze, athenahealth, Browser Use,
+  Zapier and Zapier SCIM, Canny, Builder.io, Attio (MCP), Buffer, Airtable
+  (PAT), Bridge Interactive, AlienVault, AITable.ai, Valyu, CallPage, Candis,
+  CallerAPI, BotStar, AssemblyAI, Browse AI, Brave Search, All Images AI, VEED,
+  Alchemy, Yanado, AltText.ai, y.gy, Youform, Boloforms, Bumpups, BrightCrowd,
+  Botcake, Asters, Veedea, BuySellAds, Async Interview, ByteForms, AiVOOV,
+  Businesslogic, Brosix and the AWS SigV4 Proxy.
+
+### Changed
+
+- A tool whose `base_url_override` is built from `connectionConfig.base_url`
+  keeps the connection's base url, so host-relative routes (BTCPay's `/misc`)
+  resolve against the user's own server.
+- `candis` now requests `offline_access core_data exports` by default, so its
+  tokens stay valid for months instead of expiring quickly.
+- `buffer` now requests the read and write scopes its tools need.
+
+### Fixed
+
+- `callerapi` pointed at the legacy `callerapi.com/api/phone` prefix, which
+  answers 404; it now uses `https://api.callerapi.com` and verifies against
+  `/api/me`.
+- `cal-com-v2` read its pagination cursor from `data.data.nextCursor`; v2
+  returns it at `pagination.nextCursor`.
+- `btcpay-server` asked for a url but interpolates a host; it now asks for the
+  host alone and verifies against `/api-keys/current`.
+- Verification endpoints corrected or added for `bridge-interactive-platform`
+  (`/datasets`), `browse-ai` (`/v2/robots`), `brosix`, `callpage`, `camb-ai`,
+  `candis` and `cal-com-oauth`.
+- `cal-com-v1` and `browserhub` are documented as blocked: Cal.com has
+  decommissioned API v1 (HTTP 410), and Browserhub's API is suspended.
+
 ## [0.2.5] — 2026-09-24
 
 ### Added
@@ -1061,6 +1107,7 @@ particular credential is allowed to do.
   `TBA` and `OAUTH1`, request proxying with interpolation, pagination and retry
   metadata, and a `connectors` CLI.
 
+[0.2.6]: https://github.com/MuhammadHusnainAli/connector-for-ai-agents/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/MuhammadHusnainAli/connector-for-ai-agents/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/MuhammadHusnainAli/connector-for-ai-agents/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/MuhammadHusnainAli/connector-for-ai-agents/compare/v0.2.2...v0.2.3
