@@ -463,11 +463,11 @@ from the registry by `python scripts/scaffold_tools.py --catalogue`.
 ### Coverage
 
 <!-- tool-coverage-summary:start -->
-**Every one of the 2,174 connectors exposes tools — 38,252 in total.**
+**Every one of the 2,174 connectors exposes tools — 38,265 in total.**
 
-- **26,697 hand-authored** across 388 packs covering 405 connectors, written against the providers' own references, with typed inputs and real scope names.
+- **26,716 hand-authored** across 389 packs covering 406 connectors, written against the providers' own references, with typed inputs and real scope names.
 - **1,528 generated from providers' published OpenAPI specifications**, across 144 packs.
-- **985 connectors** get a `check_connection` tool built from the verification endpoint their catalogue entry declares.
+- **984 connectors** get a `check_connection` tool built from the verification endpoint their catalogue entry declares.
 - **640 connectors** have only the raw authenticated request tools, which claim nothing about the provider's API.
 
 [TOOLS.md](TOOLS.md) lists every connector and its tools.
@@ -714,6 +714,7 @@ and destructive flags must match its HTTP verb.
 | `agiloft` | Agiloft | 19 | hand-authored |
 | `agiloft-cc` | Agiloft (Client Credentials) | 19 | hand-authored |
 | `alibaba-cloud-actiontrail` | Alibaba Cloud ActionTrail | 19 | hand-authored |
+| `alibaba-cloud-certificate-management` | Alibaba Cloud Certificate Management Service | 19 | hand-authored |
 | `azure-cosmos-db` | Azure Cosmos DB (NoSQL) | 19 | hand-authored |
 | `azure-service-bus` | Azure Service Bus | 19 | hand-authored |
 | `bird` | Bird | 19 | hand-authored |
