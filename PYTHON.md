@@ -645,9 +645,9 @@ control.
 | `tools/registry.py` | `ToolRegistry` | resolves `data/tools/index.json`, loads a pack on first use |
 | `tools/permissions.py` | `ScopeDiscoverer`, `build_report` | grant vs. required scopes, live discovery |
 | `tools/executor.py` | `ToolExecutor` | argument validation, template binding, result parsing |
-| `data/connectors/` | — | connector definitions, one JSON file per auth mode |
-| `data/tools/` | — | tool packs, one JSON file per connector, plus `index.json` |
-| `data/icons/` | — | one SVG logo per connector |
+| `src/data/connectors/` (shared) | — | connector definitions, one JSON file per auth mode |
+| `src/data/tools/` (shared) | — | tool packs, one JSON file per connector, plus `index.json` |
+| `src/data/icons/` (shared) | — | one SVG logo per connector |
 
 Run the suite with `uv run pytest -q`. Coverage includes the whole
 catalogue: every connector must expose a name, an icon, a buildable auth schema
@@ -749,7 +749,7 @@ definitions, base url, verification endpoint.
 ### Where the definitions live
 
 The catalogue is split by auth mode, one file per mode under
-`src/connector_manager/data/connectors/`:
+`src/data/connectors/`:
 
 ```
 data/connectors/api-key.json

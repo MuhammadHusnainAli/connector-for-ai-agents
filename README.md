@@ -79,8 +79,8 @@ through every connector and every tool in both libraries and compares them; CI
 fails if they ever differ.
 
 ```
+src/data/                       the shared catalogue: connectors, tool packs, icons
 src/connector_manager/          Python package (imported as connector_manager)
-src/connector_manager/data/     the shared catalogue: connectors, tool packs, icons
 src/connector_manager_rs/       Rust crate (imported as connector_manager)
 scripts/                        catalogue, tool-pack and parity tooling
 ```

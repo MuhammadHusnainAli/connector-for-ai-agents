@@ -34,7 +34,7 @@ import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-ICONS_DIR = REPO_ROOT / "src" / "connector_manager" / "data" / "icons"
+ICONS_DIR = REPO_ROOT / "src" / "data" / "icons"
 
 #: Every icon in the set declares itself 62x62; that is the size they render at.
 ICON_SIZE = 62

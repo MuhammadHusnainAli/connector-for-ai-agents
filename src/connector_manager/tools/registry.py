@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from ..errors import UnknownToolError
+from ..registry import DATA_DIR
 from .models import (
     ScopeDiscoverySpec,
     ScopeRules,
@@ -50,17 +51,9 @@ RAW_TOOLS: tuple[tuple[str, str, str], ...] = (
 )
 
 
-def _data_dir() -> Path:
-    try:
-        from importlib.resources import files
-
-        return Path(str(files("connector_manager") / "data"))
-    except Exception:  # pragma: no cover - fallback for exotic loaders
-        return Path(__file__).parent.parent / "data"
-
-
-#: Root of the bundled tool packs, one JSON file per connector.
-TOOLS_DIR = _data_dir() / "tools"
+#: Root of the bundled tool packs, one JSON file per connector. Same data
+#: directory the connector registry resolves, installed or in a checkout.
+TOOLS_DIR = DATA_DIR / "tools"
 #: Name of the index living beside them: connector id -> the one pack file that
 #: serves it, plus each pack's tool count. With it, opening a connector's tools
 #: reads a single small file; without it the only way to find the pack claiming

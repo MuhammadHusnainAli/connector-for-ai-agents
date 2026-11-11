@@ -21,13 +21,22 @@ from .models import (
 )
 
 def _data_dir() -> Path:
-    """Locate the bundled data, whether running from a checkout or site-packages."""
+    """Locate the catalogue data, installed or in a checkout.
+
+    The repository keeps one data directory, ``src/data``, shared by the Python
+    package and the Rust crate. A built wheel carries it inside the package as
+    ``connector_manager/data``; a checkout (or an editable install) reads the
+    shared directory beside the package.
+    """
     try:
         from importlib.resources import files
 
-        return Path(str(files(__package__) / "data"))
+        bundled = Path(str(files(__package__) / "data"))
     except Exception:  # pragma: no cover - fallback for exotic loaders
-        return Path(__file__).parent / "data"
+        bundled = Path(__file__).parent / "data"
+    if (bundled / "connectors").is_dir():
+        return bundled
+    return Path(__file__).resolve().parent.parent / "data"
 
 
 DATA_DIR = _data_dir()

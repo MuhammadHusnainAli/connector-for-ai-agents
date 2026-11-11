@@ -37,7 +37,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from connector_manager import ConnectorRegistry  # noqa: E402
 
-TOOLS_DIR = REPO_ROOT / "src" / "connector_manager" / "data" / "tools"
+TOOLS_DIR = REPO_ROOT / "src" / "data" / "tools"
 
 #: Google scope URLs all share this root; the packs store the short form.
 SCOPE_ROOT = "https://www.googleapis.com/auth/"

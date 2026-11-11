@@ -36,7 +36,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from connector_manager import ConnectorRegistry, UnknownConnectorError  # noqa: E402
 
-TOOLS_DIR = REPO_ROOT / "src" / "connector_manager" / "data" / "tools"
+TOOLS_DIR = REPO_ROOT / "src" / "data" / "tools"
 GURU_LIST = "https://api.apis.guru/v2/list.json"
 
 #: HTTP verbs worth turning into tools.

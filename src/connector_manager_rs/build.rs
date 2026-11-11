@@ -1,7 +1,7 @@
 //! Point the crate at its data and documentation.
 //!
 //! In the repository both live outside the crate, shared with the Python
-//! package: `../connector_manager/data` and `../../RUST.md`. A published crate
+//! package: `../data` (that is, `src/data`) and `../../RUST.md`. A published crate
 //! can only carry files inside its own folder, so `scripts/stage_crate.py`
 //! copies them in (`data/`, `RUST.md`) before `cargo publish`. Whichever copy
 //! exists is the one compiled in.
@@ -15,7 +15,7 @@ fn pick(manifest: &Path, staged: &str, shared: &str) -> PathBuf {
 
 fn main() {
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"));
-    let data = pick(&manifest, "data", "../connector_manager/data");
+    let data = pick(&manifest, "data", "../data");
     let docs = pick(&manifest, "RUST.md", "../../RUST.md");
     for path in [&data, &docs] {
         assert!(path.exists(), "missing {} -- run scripts/stage_crate.py, or build from the repository", path.display());

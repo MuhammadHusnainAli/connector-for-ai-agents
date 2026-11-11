@@ -4,7 +4,7 @@ The Rust crate: the same library as the Python package, for Rust. It lives in
 [`src/connector_manager_rs`](src/connector_manager_rs) and is imported as
 `connector_manager`, the same name as the Python import.
 
-Both libraries read one data directory, `src/connector_manager/data`, so the
+Both libraries read one data directory, `src/data`, so the
 connectors, auth schemas, tool packs and icons are identical, and a
 `Connection` saved by one loads in the other. Back to the [README](README.md);
 the Python documentation is [PYTHON.md](PYTHON.md).

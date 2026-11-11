@@ -63,6 +63,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **One data directory for both libraries: `src/data`.** The catalogue, tool
+  packs and icons moved out of the Python package to `src/data`, beside the
+  Python package and the Rust crate, which both read it. Nothing changes for
+  users: the wheel still carries it inside the package as
+  `connector_manager/data`, and the published crate carries its own copy.
 - **The README is short now.** The Python documentation moved to
   [PYTHON.md](PYTHON.md) (also the PyPI description) and the Rust
   documentation is in [RUST.md](RUST.md). The generated tool-coverage table

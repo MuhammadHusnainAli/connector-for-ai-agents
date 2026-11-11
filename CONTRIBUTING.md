@@ -17,7 +17,7 @@ network.
 
 ## Adding a connector
 
-Connectors live in `src/connector_manager/data/connectors/`, **one file per auth
+Connectors live in `src/data/connectors/`, **one file per auth
 mode** — an `API_KEY` connector goes in `api-key.json`, an `OAUTH2` one in
 `oauth2.json`, and so on. Within a file, one key per connector, sorted
 alphabetically. A minimal API-key entry:
@@ -59,7 +59,7 @@ What a good entry needs:
   endpoint. Leave the block out rather than guess.
 - **A per-tenant url** where the API lives on the customer's own host, written as
   `https://${connectionConfig.domain}` with a matching `connection_config` field.
-- **An icon**: `src/connector_manager/data/icons/<connector-id>.svg`, a 62×62
+- **An icon**: `src/data/icons/<connector-id>.svg`, a 62×62
   SVG matching the others. Use the vendor's own logo.
 - **Categories** drawn from the set already in use — run `connectors stats` to
   see them.

@@ -1,7 +1,7 @@
 //! Where the catalogue, tool packs and icons are read from.
 //!
 //! The Rust crate and the Python package share one data directory,
-//! `src/connector_manager/data`. With the default `bundled` feature it is
+//! `src/data`. With the default `bundled` feature it is
 //! compiled into the binary (the Rust counterpart of shipping it in the wheel);
 //! [`DataSource::Dir`] reads the same layout from disk instead, which is also how
 //! a caller points the crate at their own catalogue.

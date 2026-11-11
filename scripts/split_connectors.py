@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = REPO_ROOT / "src" / "connector_manager" / "data"
+DATA_DIR = REPO_ROOT / "src" / "data"
 LEGACY_FILE = DATA_DIR / "connectors.json"
 CONNECTORS_DIR = DATA_DIR / "connectors"
 

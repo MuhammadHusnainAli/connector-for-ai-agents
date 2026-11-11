@@ -35,7 +35,7 @@ from connector_manager.tools.executor import template_arguments  # noqa: E402
 from connector_manager.tools.models import PARAM_TYPES, TOOL_NAME_RE, Tool, ToolPack  # noqa: E402
 from connector_manager.tools.registry import ToolRegistry, load_pack  # noqa: E402
 
-TOOLS_DIR = REPO_ROOT / "src" / "connector_manager" / "data" / "tools"
+TOOLS_DIR = REPO_ROOT / "src" / "data" / "tools"
 
 WHOLE_PATH = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}")
 

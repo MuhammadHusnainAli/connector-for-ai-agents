@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-TOOLS_DIR = REPO_ROOT / "src" / "connector_manager" / "data" / "tools"
+TOOLS_DIR = REPO_ROOT / "src" / "data" / "tools"
 INDEX = TOOLS_DIR / "index.json"
 
 #: Bumped when the index grows a field the loader relies on.

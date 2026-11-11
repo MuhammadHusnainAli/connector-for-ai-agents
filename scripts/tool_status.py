@@ -118,7 +118,7 @@ def main() -> int:
         "Connectors still running on the default tools only: the five raw request tools",
         "(`get_from_api`, `post_to_api`, `put_to_api`, `patch_api`, `delete_from_api`), plus",
         "`check_connection` where the catalogue entry declares a verification endpoint.",
-        "Each one needs a pack under `src/connector_manager/data/tools/<auth-mode>/`. Finished",
+        "Each one needs a pack under `src/data/tools/<auth-mode>/`. Finished",
         "connectors are in [tools-completed.md](tools-completed.md).",
         "",
         f"**{len(left):,} of {total:,} connectors** — {len(raw):,} raw only, "

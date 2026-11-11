@@ -5,7 +5,7 @@
     python scripts/stage_crate.py --clean   # remove the staged copies again
 
 In the repository the crate compiles in the data and documentation it shares
-with the Python package (`src/connector_manager/data`, `RUST.md`, `LICENSE`).
+with the Python package (`src/data`, `RUST.md`, `LICENSE`).
 A crate on crates.io can only carry files inside its own folder, so this copies
 them into `src/connector_manager_rs/` first. The copies are git-ignored, and
 the crate's `build.rs` prefers them when they exist.
@@ -19,7 +19,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 CRATE = REPO / "src" / "connector_manager_rs"
-DATA = REPO / "src" / "connector_manager" / "data"
+DATA = REPO / "src" / "data"
 #: Only what the crate reads: the catalogue, the tool packs and the logos.
 DATA_PARTS = ("connectors", "tools", "icons")
 FILES = {"RUST.md": REPO / "RUST.md", "LICENSE": REPO / "LICENSE"}
