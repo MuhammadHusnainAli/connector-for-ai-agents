@@ -4,6 +4,48 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **536 cloud connectors, taking the catalogue from 1,638 to 2,174.** One
+  connector per service, each an alias of a parent that already authenticates,
+  carrying that service's own host, signing name and verification call:
+  - **AWS (180)**, `aws-*`: EC2, Lambda, S3, DynamoDB, RDS, Bedrock, SageMaker,
+    SQS, SNS, Step Functions, CloudWatch, KMS, Secrets Manager, Organizations,
+    Route 53, CloudFront and the rest of the console. Query APIs carry their
+    `Version`, JSON-protocol APIs their `application/x-amz-json-1.x` content
+    type, and global services sign for their home region.
+  - **Azure (135)**, `azure-*`: a Resource Manager connector for each resource
+    provider (verified against that provider's registration), plus 21 data-plane
+    connectors with their own Entra ID token audience: Blob, Queue, Table and
+    Data Lake storage, Event Hubs, Azure DevOps, Databricks, Synapse, Managed
+    HSM, IoT Hub, FHIR, Azure OpenAI and more. Also `azure-resource-graph`.
+  - **Google Cloud (115)**, `gcp-*`: aliases of `google-service-account` with
+    a project ID, from Compute Engine, GKE and Cloud Run to Vertex AI, Spanner,
+    Pub/Sub, Secret Manager and Firebase.
+  - **Cloudflare (51)**, `cloudflare-*`: account- and zone-scoped connectors for
+    Workers, KV, D1, R2, Queues, Workers AI, Vectorize, Zero Trust, DNS, WAF and
+    more, plus `cloudflare-r2-s3` for R2's S3-compatible API.
+  - **Alibaba Cloud (55)**: a new `alibaba-cloud` parent and `alibaba-cloud-*`
+    product connectors (ECS, VPC, ACK, RDS, PolarDB, RAM, KMS, MaxCompute and
+    more), plus `alibaba-cloud-model-studio` for Qwen over an API key.
+- **AWS SigV4 and Alibaba Cloud ACS3-HMAC-SHA256 request signing.** Declared as
+  data (`proxy.aws_sigv4`, `proxy.acs3`) and applied as the request is built.
+  The body and query string go out exactly as they were hashed. Tested against
+  AWS's published SigV4 vectors and cross-checked against botocore and the
+  Alibaba Cloud SDK.
+
+### Fixed
+
+- `aws-multi-service`, `aws-iam` and `aws-inspector2` templated an
+  `awsSigV4(...)` header that nothing evaluated. The header was dropped, so
+  every request went out with HTTP Basic credentials and AWS rejected it. They
+  now sign with SigV4, and `aws-iam` and `aws-inspector2` gained verification
+  endpoints.
+- A verification `data: {}` body is now sent as `{}` rather than dropped. A
+  verification body no longer overrides a content type the connector declares.
+
 ## [0.2.6] — 2026-10-25
 
 ### Added

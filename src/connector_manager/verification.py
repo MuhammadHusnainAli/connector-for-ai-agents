@@ -129,14 +129,19 @@ class CredentialVerifier:
                 body,
                 {**self.connection.connection_config, **self.connection.credentials},
             )
-            if body
+            if body is not None
             else None
         )
-        request = builder.build(method, endpoint, headers=extra_headers, body=payload)
+        headers = dict(extra_headers)
+        content = None
         if payload is not None:
-            request.headers.setdefault("content-type", "application/json")
-            request.content = json.dumps(payload)
-        return request
+            # Hand the body to the builder rather than attaching it afterwards:
+            # a signing connector (SigV4, ACS3) hashes the body while building.
+            declared = (self.provider.get("proxy") or {}).get("headers") or {}
+            if not any(key.lower() == "content-type" for key in declared):
+                headers.setdefault("content-type", "application/json")
+            content = json.dumps(payload)
+        return builder.build(method, endpoint, headers=headers, body=payload, content=content)
 
     def _override_builder(self, base_override: str) -> RequestBuilder:
         """A ``base_url_override`` must win over the connection's own base_url."""

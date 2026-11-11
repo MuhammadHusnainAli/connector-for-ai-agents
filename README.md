@@ -1,6 +1,6 @@
 # connector-for-ai-agents
 
-**1,638 API connectors for Python — every auth field each one needs, the code that turns filled-in fields into a working, verified connection, and tools on every single connector. Sync and async.**
+**2,174 API connectors for Python — every auth field each one needs, the code that turns filled-in fields into a working, verified connection, and tools on every single connector. Sync and async.**
 
 [![PyPI](https://img.shields.io/pypi/v/connector-for-ai-agents)](https://pypi.org/project/connector-for-ai-agents/)
 [![Python](https://img.shields.io/pypi/pyversions/connector-for-ai-agents)](https://pypi.org/project/connector-for-ai-agents/)
@@ -54,12 +54,13 @@ stored on your behalf.
 
 ## Why this exists
 
-- **1,638 connectors, bundled.** Auth mode, field definitions, base url and a
+- **2,174 connectors, bundled.** Auth mode, field definitions, base url and a
   verification endpoint for each. No API calls to browse them, no rate limits,
   no service to sign up for. Works offline and in air-gapped builds.
-- **1,239 connect end to end from user input alone.** API keys, basic auth,
-  client credentials, multi-step token exchanges, locally signed JWTs, WSSE and
-  OAuth 1.0a request signing all complete inside the library.
+- **1,775 connect end to end from user input alone.** API keys, basic auth,
+  client credentials, multi-step token exchanges, locally signed JWTs, WSSE,
+  OAuth 1.0a, AWS SigV4 and Alibaba Cloud ACS3 request signing all complete
+  inside the library.
 - **Verified, not assumed.** `connect()` calls the provider's own verification
   endpoint, so you learn the credentials are wrong at the moment they are
   entered, not on the first real request an hour later.
@@ -69,13 +70,13 @@ stored on your behalf.
 - **Built for forms and for tools.** Every connector describes its own fields —
   title, description, example, regex, enum, secret, order — so you can render a
   connection form, or hand an LLM a tool spec, straight from the catalogue.
-- **Tools on all 1,638 connectors.** 302 of them ship named
+- **Tools on all 2,174 connectors.** 302 of them ship named
   capabilities — `send_email_with_file_attachments`, `create_deal`,
   `merge_pull_request` — with typed inputs, described outputs, and the scopes the
   provider demands. Given a connection, you get back which of them that
   particular client id and secret may actually call, and which scope is missing
   from each one that it may not.
-- **Typed, tested, small.** Full type hints with `py.typed`, 238 tests covering
+- **Typed, tested, small.** Full type hints with `py.typed`, 253 tests covering
   every connector and every tool in the catalogue, and four runtime dependencies.
 - **Your security model stays yours.** Connections come back as plain objects.
   Where they live and how they are encrypted is your call.
@@ -185,10 +186,10 @@ Filters: `search`, `category`, `auth_mode`, `supported_only`,
 
 ### Pagination
 
-1,638 connectors is too many to hand a UI at once. Ask for a page by number or
+2,174 connectors is too many to hand a UI at once. Ask for a page by number or
 by raw `offset` and you get a `ConnectorPage` carrying the items **and** the
 numbers a picker needs — including `total`, counted before paging, so rendering
-"showing 21-40 of 1,638" never costs a second call.
+"showing 21-40 of 2,174" never costs a second call.
 
 ```python
 page = manager.paginate_connectors(page=2, page_size=20, category="crm")
@@ -462,12 +463,12 @@ from the registry by `python scripts/scaffold_tools.py --catalogue`.
 ### Coverage
 
 <!-- tool-coverage-summary:start -->
-**Every one of the 1,638 connectors exposes tools — 34,849 in total.**
+**Every one of the 2,174 connectors exposes tools — 38,013 in total.**
 
 - **26,387 hand-authored** across 376 packs covering 393 connectors, written against the providers' own references, with typed inputs and real scope names.
 - **1,528 generated from providers' published OpenAPI specifications**, across 144 packs.
-- **512 connectors** get a `check_connection` tool built from the verification endpoint their catalogue entry declares.
-- **589 connectors** have only the raw authenticated request tools, which claim nothing about the provider's API.
+- **996 connectors** get a `check_connection` tool built from the verification endpoint their catalogue entry declares.
+- **641 connectors** have only the raw authenticated request tools, which claim nothing about the provider's API.
 
 [TOOLS.md](TOOLS.md) lists every connector and its tools.
 <!-- tool-coverage-summary:end -->

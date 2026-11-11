@@ -26,6 +26,7 @@ from .interpolation import (
     stable_replacers,
 )
 from .models import AuthMode, Connection
+from .signing import canonical_query, serialise_body, sign_acs3, sign_aws_sigv4
 
 #: Headers a caller may not silently lose when provider headers are merged in.
 _CALLER_PRESERVED = ("user-agent",)
@@ -54,13 +55,91 @@ class RequestBuilder:
         url = self.url(endpoint)
         json_body = self.body(json_body)
         payload = body if body is not None else json_body
-        return Request(
+        request = Request(
             method=method,
             url=url,
             headers=self.headers(method, url, headers, payload),
             params=self.params(params),
             json_body=json_body,
             content=content,
+        )
+        return self._sign(request)
+
+    # -- request signing ----------------------------------------------------
+
+    def _sign(self, request: Request) -> Request:
+        """Apply a ``proxy.aws_sigv4`` or ``proxy.acs3`` signature, if declared.
+
+        Signing must see the request exactly as sent, so a signed request
+        carries its body as raw content and its query string inside the url.
+        """
+        proxy = self.provider.get("proxy") or {}
+        sigv4, acs3 = proxy.get("aws_sigv4"), proxy.get("acs3")
+        if not isinstance(sigv4, Mapping) and not isinstance(acs3, Mapping):
+            return request
+
+        creds = self.connection.credentials
+        access_key = str(creds.get("username") or creds.get("accessKeyId") or "")
+        secret_key = str(creds.get("password") or creds.get("secretAccessKey") or "")
+        if not access_key or not secret_key:
+            raise RequestError(
+                f"Connector '{self.connection.connector_id}' signs requests and needs an access key "
+                "id (username) and secret (password).",
+                connector_id=self.connection.connector_id,
+            )
+        session_token = creds.get("sessionToken") or None
+        namespace = self.namespace()
+        raw = serialise_body(request.json_body, request.content)
+        headers = dict(request.headers)
+        if request.json_body is not None and request.content is None:
+            headers.setdefault("content-type", "application/json")
+
+        if isinstance(sigv4, Mapping):
+            region = interpolate(str(sigv4.get("region") or "${connectionConfig.region}"), namespace)
+            service = interpolate(str(sigv4.get("service") or ""), namespace)
+            if is_unresolved(region) or is_unresolved(service) or not region or not service:
+                raise RequestError(
+                    f"Connector '{self.connection.connector_id}' could not resolve the SigV4 region/service.",
+                    connector_id=self.connection.connector_id,
+                )
+            url, signed = sign_aws_sigv4(
+                method=request.method,
+                url=request.url,
+                headers=headers,
+                params=request.params,
+                body=raw,
+                access_key=access_key,
+                secret_key=secret_key,
+                region=region,
+                service=service,
+                session_token=session_token,
+            )
+        else:
+            assert isinstance(acs3, Mapping)
+            for header, key in (("x-acs-version", "version"), ("x-acs-action", "action")):
+                if acs3.get(key):
+                    headers.setdefault(header, interpolate(str(acs3[key]), namespace))
+            url, signed = sign_acs3(
+                method=request.method,
+                url=request.url,
+                headers=headers,
+                params=request.params,
+                body=raw,
+                access_key=access_key,
+                secret_key=secret_key,
+                security_token=session_token,
+            )
+
+        query = _signed_query(request.url, request.params)
+        if query:
+            url = url.split("?", 1)[0] + "?" + query
+        return Request(
+            method=request.method,
+            url=url,
+            headers=signed,
+            params={},
+            json_body=request.json_body,
+            content=raw if (raw or request.content is not None) else None,
         )
 
     def body(self, json_body: Any = None) -> Any:
@@ -267,6 +346,11 @@ class RequestBuilder:
             token_secret=creds.get("oauth_token_secret", ""),
             signature_method=self.provider.get("signature_method") or "HMAC-SHA1",
         )
+
+
+def _signed_query(url: str, params: Mapping[str, str]) -> str:
+    """The canonical (sorted, RFC 3986) query both signers hash, for the wire."""
+    return canonical_query(urlparse(url).query, params)
 
 
 def _raw_body(method: str, body: Any) -> str:
