@@ -463,12 +463,12 @@ from the registry by `python scripts/scaffold_tools.py --catalogue`.
 ### Coverage
 
 <!-- tool-coverage-summary:start -->
-**Every one of the 2,174 connectors exposes tools — 38,288 in total.**
+**Every one of the 2,174 connectors exposes tools — 38,304 in total.**
 
-- **26,745 hand-authored** across 390 packs covering 407 connectors, written against the providers' own references, with typed inputs and real scope names.
+- **26,766 hand-authored** across 391 packs covering 408 connectors, written against the providers' own references, with typed inputs and real scope names.
 - **1,528 generated from providers' published OpenAPI specifications**, across 144 packs.
 - **983 connectors** get a `check_connection` tool built from the verification endpoint their catalogue entry declares.
-- **640 connectors** have only the raw authenticated request tools, which claim nothing about the provider's API.
+- **639 connectors** have only the raw authenticated request tools, which claim nothing about the provider's API.
 
 [TOOLS.md](TOOLS.md) lists every connector and its tools.
 <!-- tool-coverage-summary:end -->
@@ -705,6 +705,7 @@ and destructive flags must match its HTTP verb.
 | `azure-storage-accounts` | Azure Storage (Accounts) | 22 | hand-authored |
 | `whatsapp-business` | WhatsApp Business | 22 | hand-authored |
 | `alibaba-cloud-billing` | Alibaba Cloud Billing (BSS OpenAPI) | 21 | hand-authored |
+| `alibaba-cloud-cloud-firewall` | Alibaba Cloud Firewall | 21 | hand-authored |
 | `azure-ai-services` | Azure AI Services | 21 | hand-authored |
 | `azure-ai-services-entra` | Azure AI Services (Entra ID) | 21 | hand-authored |
 | `azure-mysql` | Azure Database for MySQL | 21 | hand-authored |
