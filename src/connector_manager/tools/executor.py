@@ -14,6 +14,7 @@ resolved and header-templated exactly like a hand-written call.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Mapping
 from urllib.parse import quote, urlencode
@@ -559,7 +560,9 @@ def _bind_path(template: str, values: Mapping[str, Any]) -> str:
         value = _lookup(match.group(1), values)
         if value is None:
             return match.group(0)
-        return quote(str(value), safe="")
+        # A list or object in a path segment goes as JSON, not a Python repr.
+        text = json.dumps(value, separators=(",", ":"), ensure_ascii=False) if isinstance(value, (dict, list)) else str(value)
+        return quote(text, safe="")
 
     return PLACEHOLDER_RE.sub(substitute, template)
 
@@ -592,11 +595,17 @@ def form_pairs(value: Any, prefix: str = "") -> list[tuple[str, str]]:
 
 
 def _as_query_value(value: Any) -> str:
-    """Query strings are text: lists join with commas, booleans lower-case."""
+    """Query strings are text: lists join with commas, booleans lower-case.
+
+    An object goes as compact JSON -- the only text form an API can read back.
+    ``str()`` would send a Python repr, ``{'a': 1}``, which none can.
+    """
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, (list, tuple)):
         return ",".join(_as_query_value(v) for v in value)
+    if isinstance(value, dict):
+        return json.dumps(value, separators=(",", ":"), ensure_ascii=False)
     return str(value)
 
 
