@@ -463,11 +463,11 @@ from the registry by `python scripts/scaffold_tools.py --catalogue`.
 ### Coverage
 
 <!-- tool-coverage-summary:start -->
-**Every one of the 2,174 connectors exposes tools — 38,077 in total.**
+**Every one of the 2,174 connectors exposes tools — 38,102 in total.**
 
-- **26,474 hand-authored** across 380 packs covering 397 connectors, written against the providers' own references, with typed inputs and real scope names.
+- **26,505 hand-authored** across 381 packs covering 398 connectors, written against the providers' own references, with typed inputs and real scope names.
 - **1,528 generated from providers' published OpenAPI specifications**, across 144 packs.
-- **993 connectors** get a `check_connection` tool built from the verification endpoint their catalogue entry declares.
+- **992 connectors** get a `check_connection` tool built from the verification endpoint their catalogue entry declares.
 - **640 connectors** have only the raw authenticated request tools, which claim nothing about the provider's API.
 
 [TOOLS.md](TOOLS.md) lists every connector and its tools.
@@ -655,6 +655,7 @@ and destructive flags must match its HTTP verb.
 | `bigdatacorp` | Bigdatacorp | 32 | hand-authored |
 | `dailybot` | Dailybot | 32 | hand-authored |
 | `hubspot` | HubSpot | 32 | hand-authored |
+| `alibaba-cloud-alidns` | Alibaba Cloud DNS | 31 | hand-authored |
 | `azure-ai-language` | Azure AI Language | 31 | hand-authored |
 | `azure-ai-language-entra` | Azure AI Language (Entra ID) | 31 | hand-authored |
 | `azure-resource-manager` | Azure Resource Manager | 31 | hand-authored |
