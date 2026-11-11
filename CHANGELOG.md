@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-11-12
+
 ### Added
 
 - **A Rust crate: the same library for Rust**, in `src/connector_manager_rs`,
@@ -1191,6 +1193,7 @@ particular credential is allowed to do.
   `TBA` and `OAUTH1`, request proxying with interpolation, pagination and retry
   metadata, and a `connectors` CLI.
 
+[0.3.0]: https://github.com/MuhammadHusnainAli/connector-for-ai-agents/compare/v0.2.6...v0.3.0
 [0.2.6]: https://github.com/MuhammadHusnainAli/connector-for-ai-agents/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/MuhammadHusnainAli/connector-for-ai-agents/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/MuhammadHusnainAli/connector-for-ai-agents/compare/v0.2.3...v0.2.4
