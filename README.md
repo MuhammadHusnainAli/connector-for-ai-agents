@@ -463,11 +463,11 @@ from the registry by `python scripts/scaffold_tools.py --catalogue`.
 ### Coverage
 
 <!-- tool-coverage-summary:start -->
-**Every one of the 2,174 connectors exposes tools — 38,146 in total.**
+**Every one of the 2,174 connectors exposes tools — 38,172 in total.**
 
-- **26,561 hand-authored** across 383 packs covering 400 connectors, written against the providers' own references, with typed inputs and real scope names.
+- **26,593 hand-authored** across 384 packs covering 401 connectors, written against the providers' own references, with typed inputs and real scope names.
 - **1,528 generated from providers' published OpenAPI specifications**, across 144 packs.
-- **990 connectors** get a `check_connection` tool built from the verification endpoint their catalogue entry declares.
+- **989 connectors** get a `check_connection` tool built from the verification endpoint their catalogue entry declares.
 - **640 connectors** have only the raw authenticated request tools, which claim nothing about the provider's API.
 
 [TOOLS.md](TOOLS.md) lists every connector and its tools.
@@ -650,6 +650,7 @@ and destructive flags must match its HTTP verb.
 | `acuity-scheduling` | Acuity Scheduling | 33 | hand-authored |
 | `google-chat` | Google Chat | 33 | hand-authored |
 | `adyntel` | Adyntel | 32 | hand-authored |
+| `alibaba-cloud-api-gateway` | Alibaba Cloud API Gateway | 32 | hand-authored |
 | `alien-vault` | AlienVault | 32 | hand-authored |
 | `asin-data-api` | ASIN Data API | 32 | hand-authored |
 | `bigdatacorp` | Bigdatacorp | 32 | hand-authored |
