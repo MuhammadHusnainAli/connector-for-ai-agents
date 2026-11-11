@@ -463,11 +463,11 @@ from the registry by `python scripts/scaffold_tools.py --catalogue`.
 ### Coverage
 
 <!-- tool-coverage-summary:start -->
-**Every one of the 2,174 connectors exposes tools — 38,329 in total.**
+**Every one of the 2,174 connectors exposes tools — 38,353 in total.**
 
-- **26,797 hand-authored** across 392 packs covering 409 connectors, written against the providers' own references, with typed inputs and real scope names.
+- **26,827 hand-authored** across 393 packs covering 410 connectors, written against the providers' own references, with typed inputs and real scope names.
 - **1,528 generated from providers' published OpenAPI specifications**, across 144 packs.
-- **982 connectors** get a `check_connection` tool built from the verification endpoint their catalogue entry declares.
+- **981 connectors** get a `check_connection` tool built from the verification endpoint their catalogue entry declares.
 - **639 connectors** have only the raw authenticated request tools, which claim nothing about the provider's API.
 
 [TOOLS.md](TOOLS.md) lists every connector and its tools.
@@ -664,6 +664,7 @@ and destructive flags must match its HTTP verb.
 | `aitable-ai` | AITable.ai | 30 | hand-authored |
 | `alibaba-cloud-analyticdb-mysql` | AnalyticDB for MySQL | 30 | hand-authored |
 | `alibaba-cloud-cdn` | Alibaba Cloud CDN | 30 | hand-authored |
+| `alibaba-cloud-container-registry` | Alibaba Cloud Container Registry | 30 | hand-authored |
 | `bamboohr-basic` | BambooHR (Basic Auth) | 30 | hand-authored |
 | `adobe-umapi` | UMAPI (Adobe User Management API) | 29 | hand-authored |
 | `alibaba-cloud-clickhouse` | ApsaraDB for ClickHouse | 29 | hand-authored |
