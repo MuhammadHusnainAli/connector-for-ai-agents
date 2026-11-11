@@ -463,12 +463,12 @@ from the registry by `python scripts/scaffold_tools.py --catalogue`.
 ### Coverage
 
 <!-- tool-coverage-summary:start -->
-**Every one of the 2,174 connectors exposes tools — 38,013 in total.**
+**Every one of the 2,174 connectors exposes tools — 38,014 in total.**
 
-- **26,387 hand-authored** across 376 packs covering 393 connectors, written against the providers' own references, with typed inputs and real scope names.
+- **26,393 hand-authored** across 377 packs covering 394 connectors, written against the providers' own references, with typed inputs and real scope names.
 - **1,528 generated from providers' published OpenAPI specifications**, across 144 packs.
 - **996 connectors** get a `check_connection` tool built from the verification endpoint their catalogue entry declares.
-- **641 connectors** have only the raw authenticated request tools, which claim nothing about the provider's API.
+- **640 connectors** have only the raw authenticated request tools, which claim nothing about the provider's API.
 
 [TOOLS.md](TOOLS.md) lists every connector and its tools.
 <!-- tool-coverage-summary:end -->
@@ -826,6 +826,7 @@ and destructive flags must match its HTTP verb.
 | `youform` | Youform | 7 | hand-authored |
 | `activecalculator` | ActiveCalculator | 6 | hand-authored |
 | `agify` | Agify | 6 | hand-authored |
+| `alibaba-cloud` | Alibaba Cloud | 6 | hand-authored |
 | `alttextify` | AltTextify | 6 | hand-authored |
 | `brightcrowd` | BrightCrowd | 6 | hand-authored |
 | `bumpups` | Bumpups | 6 | hand-authored |
