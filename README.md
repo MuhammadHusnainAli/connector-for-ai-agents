@@ -6,6 +6,7 @@ can call on every connector.**
 
 [![PyPI](https://img.shields.io/pypi/v/connector-for-ai-agents)](https://pypi.org/project/connector-for-ai-agents/)
 [![Python](https://img.shields.io/pypi/pyversions/connector-for-ai-agents)](https://pypi.org/project/connector-for-ai-agents/)
+[![crates.io](https://img.shields.io/crates/v/connector-for-ai-agents)](https://crates.io/crates/connector-for-ai-agents)
 [![CI](https://github.com/MuhammadHusnainAli/connector-for-ai-agents/actions/workflows/ci.yml/badge.svg)](https://github.com/MuhammadHusnainAli/connector-for-ai-agents/actions/workflows/ci.yml)
 [![Licence](https://img.shields.io/badge/licence-Elastic%202.0-blue)](LICENSE)
 
@@ -34,9 +35,8 @@ Full documentation: **[PYTHON.md](PYTHON.md)**.
 
 ## Rust
 
-```toml
-[dependencies]
-connector-for-ai-agents = { git = "https://github.com/MuhammadHusnainAli/connector-for-ai-agents" }
+```bash
+cargo add connector-for-ai-agents serde_json
 ```
 
 ```rust
@@ -72,6 +72,8 @@ Full documentation: **[RUST.md](RUST.md)**.
 
 The Python package and the Rust crate read the same data, so they agree on every
 connector, field and tool, and a connection saved by one loads in the other.
+They share one version number too: each release tag publishes the same version
+to PyPI and crates.io.
 `scripts/check_rust_parity.py` builds every connector's schema, a request
 through every connector and every tool in both libraries and compares them; CI
 fails if they ever differ.

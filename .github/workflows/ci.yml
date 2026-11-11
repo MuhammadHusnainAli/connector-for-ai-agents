@@ -1,15 +1,16 @@
 name: CI
 
-# One workflow for everything: test on every supported Python, build the
-# distributions, scan the code (CodeQL and Bandit), and publish to PyPI when a
-# GitHub Release is published. Publishing only ever runs after the tests and
-# the build have passed in the same run.
+# One workflow for everything: test on every supported Python and the Rust
+# crate, check the two libraries agree, build the distributions, scan the code
+# (CodeQL and Bandit), and publish to PyPI and crates.io when a GitHub Release
+# is published. Publishing only ever runs after every test, the parity check and
+# the build have passed in the same run, and only for the version the tag names.
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-  # Publishing to real PyPI happens when you publish a GitHub Release.
+  # Publishing to PyPI and crates.io happens when you publish a GitHub Release.
   release:
     types: [published]
   # Weekly security scan, so new CodeQL queries reach code that has not changed.
@@ -21,7 +22,7 @@ on:
       target:
         description: "Also publish to"
         type: choice
-        options: [none, testpypi, pypi]
+        options: [none, testpypi, pypi, crates, pypi-and-crates]
         default: none
 
 # A newer push to a pull request supersedes the run in progress; anything else
@@ -55,6 +56,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
+
+      - name: Check the Python and Rust versions agree
+        run: python scripts/sync_version.py --check
 
       - name: Check the tool index is current
         # Lookups resolve through data/tools/index.json; a pack added without
@@ -93,6 +97,17 @@ jobs:
       # Unit tests, the whole-catalogue integration tests, and every example in RUST.md.
       - name: Run tests
         run: cargo test
+
+      # Build the crate exactly as crates.io would receive it: the shared data
+      # copied in, packaged, then compiled from the package alone. Catches a
+      # crate that only builds inside the repository, or one over the 10 MiB limit.
+      - name: Package the crate
+        run: |
+          python3 ../../scripts/stage_crate.py
+          cargo package --allow-dirty
+          size=$(stat -c %s target/package/*.crate)
+          echo "packaged crate: $size bytes"
+          test "$size" -lt 10485760 || { echo "::error::crate is over the crates.io 10 MiB limit"; exit 1; }
 
   parity:
     name: Rust and Python agree
@@ -148,7 +163,7 @@ jobs:
       # 0.1.3 shipped from a manual run with no tag at all -- the tag was added
       # afterwards by hand. Manual pypi runs are held to the same rule.
       - name: Check the published version is tagged
-        if: github.event_name == 'release' || inputs.target == 'pypi'
+        if: github.event_name == 'release' || inputs.target == 'pypi' || inputs.target == 'pypi-and-crates'
         run: |
           project_version=$(python -c "import tomllib,pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
 
@@ -268,8 +283,10 @@ jobs:
 
   pypi:
     name: Publish to PyPI
-    needs: [test, build]
-    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.target == 'pypi')
+    # Gated on the Rust tests and the parity check as well, so PyPI and
+    # crates.io either both get this version or neither does.
+    needs: [test, rust, parity, build]
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && (inputs.target == 'pypi' || inputs.target == 'pypi-and-crates'))
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -287,3 +304,53 @@ jobs:
           # Backfilled releases (e.g. tagging 0.1.0 after the fact) would otherwise
           # fail: PyPI never allows re-uploading a version that already exists.
           skip-existing: true
+
+  crates:
+    name: Publish to crates.io
+    # The same gate as PyPI, plus the Rust tests and the parity check: the crate
+    # only ships when both libraries pass and agree.
+    needs: [test, rust, parity, build]
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && (inputs.target == 'crates' || inputs.target == 'pypi-and-crates'))
+    runs-on: ubuntu-latest
+    environment:
+      name: rust
+      url: https://crates.io/crates/connector-for-ai-agents
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Install the stable toolchain
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+
+      # Same rule as PyPI: what ships must be the version a tag names, and the
+      # crate and the Python package must carry that same version.
+      - name: Check the version matches the tag
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            tag="$GITHUB_REF_NAME"
+          else
+            tag="v$(python3 scripts/sync_version.py | awk 'NR==1{print $1}')"
+            git rev-parse -q --verify "refs/tags/$tag" >/dev/null || { echo "::error::No $tag tag."; exit 1; }
+            [ "$(git rev-parse "refs/tags/$tag^{commit}")" = "$GITHUB_SHA" ] || { echo "::error::$tag does not point at this commit."; exit 1; }
+          fi
+          python3 scripts/sync_version.py --check --tag "$tag"
+
+      - name: Stage the shared data into the crate
+        run: python3 scripts/stage_crate.py
+
+      # crates.io never accepts a version twice, so a re-run of an already
+      # published release is skipped rather than failed.
+      - name: Publish
+        working-directory: src/connector_manager_rs
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          version=$(python3 ../../scripts/sync_version.py | awk 'NR==1{print $1}')
+          status=$(curl -s -o /dev/null -w '%{http_code}' -A "connector-for-ai-agents-ci" \
+            "https://crates.io/api/v1/crates/connector-for-ai-agents/$version")
+          if [ "$status" = "200" ]; then
+            echo "connector-for-ai-agents $version is already on crates.io; nothing to publish."
+            exit 0
+          fi
+          cargo publish --allow-dirty

@@ -10,7 +10,7 @@ use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 #[cfg(feature = "bundled")]
-static BUNDLED: include_dir::Dir<'static> = include_dir::include_dir!("$CARGO_MANIFEST_DIR/../connector_manager/data");
+static BUNDLED: include_dir::Dir<'static> = include_dir::include_dir!("$CONNECTOR_DATA_DIR");
 
 /// A tree laid out like the bundled data: `connectors/`, `tools/`, `icons/`.
 #[derive(Debug, Clone)]

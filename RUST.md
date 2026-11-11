@@ -31,16 +31,23 @@ the Python documentation is [PYTHON.md](PYTHON.md).
 
 ## Install
 
-The crate is not on crates.io yet. Depend on it from git; Cargo finds the
-package inside the repository:
+```bash
+cargo add connector-for-ai-agents serde_json
+cargo add tokio --features macros,rt-multi-thread   # only for AsyncConnectorManager
+```
+
+or in `Cargo.toml`:
 
 ```toml
 [dependencies]
-connector-for-ai-agents = { git = "https://github.com/MuhammadHusnainAli/connector-for-ai-agents" }
+connector-for-ai-agents = "0.3"
 serde_json = "1"
-# only for AsyncConnectorManager:
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
+
+The crate is published under the same name as the Python package,
+`connector-for-ai-agents`, and always at the same version: both are released
+together from one tag. To track `main` instead, depend on the repository:
+`connector-for-ai-agents = { git = "https://github.com/MuhammadHusnainAli/connector-for-ai-agents" }`.
 
 Rust 1.85+. HTTP goes through `reqwest` with rustls. The catalogue, every tool
 pack and every logo are compiled into the binary by the default `bundled`
@@ -486,7 +493,7 @@ The crate builds a `connectors` binary with the same commands as
 `python -m connector_manager`:
 
 ```bash
-cargo install --git https://github.com/MuhammadHusnainAli/connector-for-ai-agents connector-for-ai-agents
+cargo install connector-for-ai-agents
 
 connectors list --search slack
 connectors list --category crm --page 2 --page-size 20

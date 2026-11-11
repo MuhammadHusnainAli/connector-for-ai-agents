@@ -22,6 +22,11 @@ All notable changes to this project are documented here. The format follows
   schema, a request through every connector and every hand-authored tool in
   both libraries and fails on any difference (34,867 cases, all matching). CI
   runs it, together with `cargo fmt`, `clippy` and `cargo test` for the crate.
+- **The Rust crate is published to crates.io** as `connector-for-ai-agents`,
+  the Python package's name, at the Python package's version. A GitHub Release
+  publishes both, and only after the Python tests, the Rust tests and the parity
+  check pass. `scripts/sync_version.py` keeps `pyproject.toml`, `Cargo.toml`,
+  `Cargo.lock` and `__version__` on one number, and CI fails if they drift.
 - **Tool packs for 17 Alibaba Cloud connectors** (440 tools): ACK, ALB, API
   Gateway, ActionTrail, Auto Scaling, Billing, CDN, CEN, Certificate
   Management, ClickHouse, Cloud Firewall, CloudMonitor, Container Registry,

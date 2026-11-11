@@ -1,4 +1,4 @@
-#![doc = include_str!("../../../RUST.md")]
+#![doc = include_str!(env!("CONNECTOR_DOCS"))]
 
 pub mod auth;
 pub mod credentials;
