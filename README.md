@@ -463,11 +463,11 @@ from the registry by `python scripts/scaffold_tools.py --catalogue`.
 ### Coverage
 
 <!-- tool-coverage-summary:start -->
-**Every one of the 2,174 connectors exposes tools — 38,209 in total.**
+**Every one of the 2,174 connectors exposes tools — 38,233 in total.**
 
-- **26,642 hand-authored** across 386 packs covering 403 connectors, written against the providers' own references, with typed inputs and real scope names.
+- **26,672 hand-authored** across 387 packs covering 404 connectors, written against the providers' own references, with typed inputs and real scope names.
 - **1,528 generated from providers' published OpenAPI specifications**, across 144 packs.
-- **987 connectors** get a `check_connection` tool built from the verification endpoint their catalogue entry declares.
+- **986 connectors** get a `check_connection` tool built from the verification endpoint their catalogue entry declares.
 - **640 connectors** have only the raw authenticated request tools, which claim nothing about the provider's API.
 
 [TOOLS.md](TOOLS.md) lists every connector and its tools.
@@ -662,6 +662,7 @@ and destructive flags must match its HTTP verb.
 | `azure-resource-manager` | Azure Resource Manager | 31 | hand-authored |
 | `aitable-ai` | AITable.ai | 30 | hand-authored |
 | `alibaba-cloud-analyticdb-mysql` | AnalyticDB for MySQL | 30 | hand-authored |
+| `alibaba-cloud-cdn` | Alibaba Cloud CDN | 30 | hand-authored |
 | `bamboohr-basic` | BambooHR (Basic Auth) | 30 | hand-authored |
 | `adobe-umapi` | UMAPI (Adobe User Management API) | 29 | hand-authored |
 | `basin` | Basin | 29 | hand-authored |
