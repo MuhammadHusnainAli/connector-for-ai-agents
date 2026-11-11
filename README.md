@@ -463,11 +463,11 @@ from the registry by `python scripts/scaffold_tools.py --catalogue`.
 ### Coverage
 
 <!-- tool-coverage-summary:start -->
-**Every one of the 2,174 connectors exposes tools — 38,014 in total.**
+**Every one of the 2,174 connectors exposes tools — 38,033 in total.**
 
-- **26,393 hand-authored** across 377 packs covering 394 connectors, written against the providers' own references, with typed inputs and real scope names.
+- **26,418 hand-authored** across 378 packs covering 395 connectors, written against the providers' own references, with typed inputs and real scope names.
 - **1,528 generated from providers' published OpenAPI specifications**, across 144 packs.
-- **996 connectors** get a `check_connection` tool built from the verification endpoint their catalogue entry declares.
+- **995 connectors** get a `check_connection` tool built from the verification endpoint their catalogue entry declares.
 - **640 connectors** have only the raw authenticated request tools, which claim nothing about the provider's API.
 
 [TOOLS.md](TOOLS.md) lists every connector and its tools.
@@ -674,6 +674,7 @@ and destructive flags must match its HTTP verb.
 | `ask-handle` | AskHandle | 26 | hand-authored |
 | `azure-blob-storage` | Azure Blob Storage | 26 | hand-authored |
 | `cursor` | Cursor | 26 | hand-authored |
+| `alibaba-cloud-ack` | Alibaba Cloud Container Service for Kubernetes | 25 | hand-authored |
 | `appointedd` | Appointedd | 25 | hand-authored |
 | `autobound` | Autobound | 25 | hand-authored |
 | `botstar` | BotStar | 25 | hand-authored |
