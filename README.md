@@ -463,11 +463,11 @@ from the registry by `python scripts/scaffold_tools.py --catalogue`.
 ### Coverage
 
 <!-- tool-coverage-summary:start -->
-**Every one of the 2,174 connectors exposes tools — 38,126 in total.**
+**Every one of the 2,174 connectors exposes tools — 38,146 in total.**
 
-- **26,535 hand-authored** across 382 packs covering 399 connectors, written against the providers' own references, with typed inputs and real scope names.
+- **26,561 hand-authored** across 383 packs covering 400 connectors, written against the providers' own references, with typed inputs and real scope names.
 - **1,528 generated from providers' published OpenAPI specifications**, across 144 packs.
-- **991 connectors** get a `check_connection` tool built from the verification endpoint their catalogue entry declares.
+- **990 connectors** get a `check_connection` tool built from the verification endpoint their catalogue entry declares.
 - **640 connectors** have only the raw authenticated request tools, which claim nothing about the provider's API.
 
 [TOOLS.md](TOOLS.md) lists every connector and its tools.
@@ -673,6 +673,7 @@ and destructive flags must match its HTTP verb.
 | `github` | GitHub | 27 | hand-authored |
 | `google-health` | Google Health | 27 | hand-authored |
 | `abyssale` | Abyssale | 26 | hand-authored |
+| `alibaba-cloud-analyticdb-postgresql` | AnalyticDB for PostgreSQL | 26 | hand-authored |
 | `anrok` | Anrok | 26 | hand-authored |
 | `ask-handle` | AskHandle | 26 | hand-authored |
 | `azure-blob-storage` | Azure Blob Storage | 26 | hand-authored |
