@@ -8,6 +8,26 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **A Rust crate: the same library for Rust**, in `src/connector_manager_rs`,
+  imported as `connector_manager`. It reads the same data directory as the
+  Python package, so the catalogue, auth schemas, tool packs and icons are
+  identical, and a `Connection` saved by one loads in the other. It covers the
+  whole Python surface: catalogue and paging, auth schemas and validation,
+  every auth mode's connect and refresh flow, verification, request building
+  with OAuth 1.0a, TBA, SigV4 and ACS3 signing, tools, scope reports and live
+  scope discovery, and a `connectors` CLI with the Python CLI's commands. A
+  blocking `ConnectorManager` and an async `AsyncConnectorManager` run one
+  implementation of each flow. See [RUST.md](RUST.md).
+- **`scripts/check_rust_parity.py`**, which builds every connector's auth
+  schema, a request through every connector and every hand-authored tool in
+  both libraries and fails on any difference (34,867 cases, all matching). CI
+  runs it, together with `cargo fmt`, `clippy` and `cargo test` for the crate.
+- **Tool packs for 17 Alibaba Cloud connectors** (440 tools): ACK, ALB, API
+  Gateway, ActionTrail, Auto Scaling, Billing, CDN, CEN, Certificate
+  Management, ClickHouse, Cloud Firewall, CloudMonitor, Container Registry,
+  DNS, AnalyticDB for MySQL and for PostgreSQL, and generic RPC/ROA calls on
+  `alibaba-cloud`.
+
 - **536 cloud connectors, taking the catalogue from 1,638 to 2,174.** One
   connector per service, each an alias of a parent that already authenticates,
   carrying that service's own host, signing name and verification call:
@@ -36,8 +56,20 @@ All notable changes to this project are documented here. The format follows
   AWS's published SigV4 vectors and cross-checked against botocore and the
   Alibaba Cloud SDK.
 
+### Changed
+
+- **The README is short now.** The Python documentation moved to
+  [PYTHON.md](PYTHON.md) (also the PyPI description) and the Rust
+  documentation is in [RUST.md](RUST.md). The generated tool-coverage table
+  left the README; [TOOLS.md](TOOLS.md) already lists every connector and its
+  tools, so `scaffold_tools.py --readme` is gone and `--check` no longer
+  inspects the README.
+
 ### Fixed
 
+- A tool argument holding an object or a list, bound into a query parameter or
+  a path segment, was sent as a Python repr (`{'a': 1}`), which no API parses.
+  It is now sent as compact JSON (`{"a":1}`).
 - `aws-multi-service`, `aws-iam` and `aws-inspector2` templated an
   `awsSigV4(...)` header that nothing evaluated. The header was dropped, so
   every request went out with HTTP Basic credentials and AWS rejected it. They

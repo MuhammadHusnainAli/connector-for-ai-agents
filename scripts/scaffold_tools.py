@@ -10,7 +10,6 @@ what is there.
     python scripts/scaffold_tools.py --new stripe     # write the skeleton
     python scripts/scaffold_tools.py --check          # CI: lint every pack
     python scripts/scaffold_tools.py --list           # what is covered so far
-    python scripts/scaffold_tools.py --readme         # refresh README's coverage table
     python scripts/scaffold_tools.py --backlog        # what still needs a pack, worst first
     python scripts/scaffold_tools.py --catalogue      # write TOOLS.md: every connector and its tools
 
@@ -275,107 +274,6 @@ def _check_tool(tool: Tool, where: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-#: The README section this script owns, so the coverage table cannot go stale.
-MARKERS = ("tool-coverage", "tool-coverage-summary", "tool-coverage-note")
-README = REPO_ROOT / "README.md"
-
-
-def coverage_sections() -> dict[str, str]:
-    """The three generated README blocks, built from the bundled packs."""
-    from connector_manager import AuthMode, ConnectorRegistry as _Registry
-
-    registry = _Registry()
-    tools = ToolRegistry(TOOLS_DIR)
-
-    rows = ["| Connector | Provider | Tools | Source |", "|---|---|---:|---|"]
-    for pack in sorted(tools.packs, key=lambda p: (bool(p.generated), -len(p), p.connector_id)):
-        ids = ", ".join(f"`{c}`" for c in pack.connector_ids)
-        origin = "spec-generated" if pack.generated else "hand-authored"
-        rows.append(f"| {ids} | {pack.display_name} | {len(pack)} | {origin} |")
-
-    from connector_manager.tools import baseline_pack
-
-    covered = len(tools.connector_ids())
-    generated = [
-        c.id for c in registry
-        if not tools.has(c.id) and baseline_pack(c.id, c.display_name, c.raw) is not None
-    ]
-    bare = len(registry) - covered - len(generated)
-    oauth2 = [c for c in registry if c.auth_mode is AuthMode.OAUTH2]
-    oauth2_left = len([c for c in oauth2 if not tools.has(c.id)])
-
-    authored_packs = [p for p in tools.packs if not p.generated]
-    spec_packs = [p for p in tools.packs if p.generated]
-    authored_tools = sum(len(p) for p in authored_packs)
-    spec_tools = sum(len(p) for p in spec_packs)
-    from connector_manager import ConnectorManager as _Manager
-
-    manager = _Manager()
-    with_check = sum(
-        1 for c in registry
-        if not tools.has(c.id)
-        and any(t.name == "check_connection" for t in manager.list_tools(c.id))
-    )
-    raw_only = len(registry) - covered - with_check
-    all_tools = sum(len(manager.list_tools(c.id)) for c in registry)
-    summary = (
-        f"**Every one of the {len(registry):,} connectors exposes tools — {all_tools:,} in total.**\n\n"
-        f"- **{authored_tools:,} hand-authored** across {len(authored_packs)} packs covering "
-        f"{sum(len(p.connector_ids) for p in authored_packs)} connectors, written against the "
-        f"providers' own references, with typed inputs and real scope names.\n"
-        f"- **{spec_tools:,} generated from providers' published OpenAPI specifications**, across "
-        f"{len(spec_packs)} packs.\n"
-        f"- **{with_check:,} connectors** get a `check_connection` tool built from the "
-        f"verification endpoint their catalogue entry declares.\n"
-        f"- **{raw_only:,} connectors** have only the raw authenticated request tools, which "
-        f"claim nothing about the provider's API.\n\n"
-        f"[TOOLS.md](TOOLS.md) lists every connector and its tools."
-    )
-    note = (
-        f"A pack is always better than the fallbacks: it names real operations instead of "
-        f"handing the caller a raw request. {oauth2_left} of the connectors without one are "
-        f"OAuth2. Adding a pack is a single file — see\n"
-        f"[Adding tools for a connector](#adding-tools-for-a-connector), or let\n"
-        f"`scripts/generate_from_openapi.py` build one where the provider publishes a spec."
-    )
-    return {
-        "tool-coverage": "\n".join(rows),
-        "tool-coverage-summary": summary,
-        "tool-coverage-note": note,
-    }
-
-
-def render_readme(check_only: bool) -> int:
-    """Write, or verify, the generated blocks in README.md."""
-    text = README.read_text(encoding="utf-8")
-    updated = text
-    for name, body in coverage_sections().items():
-        start, end = f"<!-- {name}:start -->", f"<!-- {name}:end -->"
-        if start not in updated or end not in updated:
-            print(f"README is missing the {name} markers", file=sys.stderr)
-            return 1
-        head, _, rest = updated.partition(start)
-        _, _, tail = rest.partition(end)
-        updated = f"{head}{start}\n{body}\n{end}{tail}"
-
-    if check_only:
-        if updated != text:
-            print(
-                "README's tool coverage is out of date -- run "
-                "`python scripts/scaffold_tools.py --readme`.",
-                file=sys.stderr,
-            )
-            return 1
-        return 0
-
-    if updated != text:
-        README.write_text(updated, encoding="utf-8")
-        print(f"updated {display(README)}")
-    else:
-        print(f"{display(README)} is already up to date")
-    return 0
-
-
 def listing() -> int:
     tools = ToolRegistry(TOOLS_DIR)
     stats = tools.stats()
@@ -553,7 +451,6 @@ def main() -> int:
     group.add_argument("--new", metavar="CONNECTOR_ID", help="write a tool pack skeleton")
     group.add_argument("--check", action="store_true", help="validate the bundled packs")
     group.add_argument("--list", action="store_true", help="show what is covered so far")
-    group.add_argument("--readme", action="store_true", help="refresh README's coverage table")
     group.add_argument("--backlog", action="store_true", help="list the connectors still needing a pack")
     group.add_argument("--catalogue", action="store_true", help="write TOOLS.md, every connector and its tools")
     parser.add_argument("--force", action="store_true", help="overwrite an existing pack with --new")
@@ -567,9 +464,7 @@ def main() -> int:
     if args.new:
         return scaffold(args.new, ConnectorRegistry(), args.force)
     if args.check:
-        return check(args.path) or render_readme(check_only=True) or catalogue(check_only=True)
-    if args.readme:
-        return render_readme(check_only=False)
+        return check(args.path) or catalogue(check_only=True)
     if args.backlog:
         return backlog(limit=args.limit, category=args.category)
     if args.catalogue:

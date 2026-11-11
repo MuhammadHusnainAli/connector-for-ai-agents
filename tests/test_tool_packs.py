@@ -575,26 +575,6 @@ def test_scaffold_check_rejects_a_broken_pack(tmp_path: Path) -> None:
     assert "must start with /" in result.stderr
 
 
-def test_readme_coverage_table_is_current() -> None:
-    """The README's coverage table is generated, so it cannot drift."""
-    import subprocess
-    import sys
-
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(Path(__file__).resolve().parent.parent / "scripts" / "scaffold_tools.py"),
-            "--readme",
-        ],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, result.stderr
-    assert "already up to date" in result.stdout, (
-        "README's tool coverage was stale -- it has now been regenerated, commit the change"
-    )
-
-
 def test_tools_catalogue_is_current() -> None:
     """TOOLS.md is generated from the registry, so it cannot drift."""
     import subprocess

@@ -99,8 +99,7 @@ python scripts/discover_openapi.py --out plan.json          # find specs
 python scripts/generate_from_openapi.py --plan plan.json    # build packs from them
 
 python scripts/scaffold_tools.py --new stripe   # writes data/tools/oauth2/stripe.json
-python scripts/scaffold_tools.py --check        # lints every pack, and README's coverage table
-python scripts/scaffold_tools.py --readme       # refreshes that table after adding a pack
+python scripts/scaffold_tools.py --check        # lints every pack, and checks TOOLS.md is current
 python scripts/scaffold_tools.py --backlog      # what still needs a pack, most-connected categories first
 python scripts/scaffold_tools.py --catalogue    # regenerate TOOLS.md after adding a pack
 python scripts/scaffold_tools.py --backlog --category crm --limit 20
