@@ -463,11 +463,11 @@ from the registry by `python scripts/scaffold_tools.py --catalogue`.
 ### Coverage
 
 <!-- tool-coverage-summary:start -->
-**Every one of the 2,174 connectors exposes tools — 38,172 in total.**
+**Every one of the 2,174 connectors exposes tools — 38,194 in total.**
 
-- **26,593 hand-authored** across 384 packs covering 401 connectors, written against the providers' own references, with typed inputs and real scope names.
+- **26,621 hand-authored** across 385 packs covering 402 connectors, written against the providers' own references, with typed inputs and real scope names.
 - **1,528 generated from providers' published OpenAPI specifications**, across 144 packs.
-- **989 connectors** get a `check_connection` tool built from the verification endpoint their catalogue entry declares.
+- **988 connectors** get a `check_connection` tool built from the verification endpoint their catalogue entry declares.
 - **640 connectors** have only the raw authenticated request tools, which claim nothing about the provider's API.
 
 [TOOLS.md](TOOLS.md) lists every connector and its tools.
@@ -668,6 +668,7 @@ and destructive flags must match its HTTP verb.
 | `callpage` | Callpage | 29 | hand-authored |
 | `valyu` | Valyu | 29 | hand-authored |
 | `agentset` | Agentset | 28 | hand-authored |
+| `alibaba-cloud-auto-scaling` | Alibaba Cloud Auto Scaling | 28 | hand-authored |
 | `aws` | AWS | 28 | hand-authored |
 | `callerapi` | CallerAPI | 27 | hand-authored |
 | `candis` | Candis | 27 | hand-authored |
